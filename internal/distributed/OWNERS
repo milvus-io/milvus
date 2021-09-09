@@ -2,7 +2,6 @@
 reviewers:
   - godchen0212
   - czs007
-  - neza2017
   - xige-16
   - cydrain
   - bigsheeper
@@ -10,6 +9,4 @@ reviewers:
   - DragonDriver
 
 approvers:
-  - czs007
-  - neza2017
-  - scsven
+  - pr-inspection

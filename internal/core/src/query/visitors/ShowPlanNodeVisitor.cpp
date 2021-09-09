@@ -93,4 +93,8 @@ ShowPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     ret_ = json_body;
 }
 
+void
+ShowPlanNodeVisitor::visit(RetrievePlanNode& node) {
+}
+
 }  // namespace milvus::query

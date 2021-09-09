@@ -16,7 +16,6 @@ import (
 	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"go.etcd.io/etcd/clientv3"
 )
 
 const (
@@ -51,10 +50,6 @@ func Mod24H(ts uint64) uint64 {
 	return (physical << logicalBits) | logical
 }
 
-func NewTSOKVBase(etcdEndpoints []string, tsoRoot, subPath string) *etcdkv.EtcdKV {
-	client, _ := clientv3.New(clientv3.Config{
-		Endpoints:   etcdEndpoints,
-		DialTimeout: 5 * time.Second,
-	})
-	return etcdkv.NewEtcdKV(client, path.Join(tsoRoot, subPath))
+func NewTSOKVBase(etcdEndpoints []string, tsoRoot, subPath string) (*etcdkv.EtcdKV, error) {
+	return etcdkv.NewEtcdKV(etcdEndpoints, path.Join(tsoRoot, subPath))
 }

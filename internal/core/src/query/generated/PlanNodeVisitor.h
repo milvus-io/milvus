@@ -24,5 +24,8 @@ class PlanNodeVisitor {
 
     virtual void
     visit(BinaryVectorANNS&) = 0;
+
+    virtual void
+    visit(RetrievePlanNode&) = 0;
 };
 }  // namespace milvus::query

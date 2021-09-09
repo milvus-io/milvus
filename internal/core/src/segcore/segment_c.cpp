@@ -88,20 +88,6 @@ Search(CSegmentInterface c_segment,
     }
 }
 
-CStatus
-FillTargetEntry(CSegmentInterface c_segment, CSearchPlan c_plan, CSearchResult c_result) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-    auto plan = (milvus::query::Plan*)c_plan;
-    auto result = (milvus::SearchResult*)c_result;
-
-    try {
-        segment->FillTargetEntry(plan, *result);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
-    }
-}
-
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
@@ -239,11 +225,11 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
 }
 
 CProtoResult
-GetEntityByIds(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp) {
+Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp) {
     try {
         auto segment = (const milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (const milvus::query::RetrievePlan*)c_plan;
-        auto result = segment->GetEntityById(plan->field_offsets_, *plan->ids_, timestamp);
+        auto result = segment->Retrieve(plan, timestamp);
         return milvus::AllocCProtoResult(*result);
     } catch (std::exception& e) {
         return CProtoResult{milvus::FailureCStatus(UnexpectedError, e.what())};

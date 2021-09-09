@@ -209,3 +209,31 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	err = node.Stop()
 	assert.NoError(t, err)
 }
+
+func TestQueryService_addQueryCollection(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	his, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
+
+	str, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
+
+	fac, err := genFactory()
+	assert.NoError(t, err)
+
+	// start search service
+	qs := newQueryService(ctx, his, str, fac)
+	assert.NotNil(t, qs)
+
+	qs.addQueryCollection(defaultCollectionID)
+	assert.Len(t, qs.queryCollections, 1)
+
+	qs.addQueryCollection(defaultCollectionID)
+	assert.Len(t, qs.queryCollections, 1)
+
+	const invalidCollectionID = 10000
+	qs.addQueryCollection(invalidCollectionID)
+	assert.Len(t, qs.queryCollections, 2)
+}

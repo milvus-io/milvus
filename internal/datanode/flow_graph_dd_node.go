@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 )
@@ -32,33 +31,26 @@ type ddNode struct {
 	clearSignal  chan<- UniqueID
 	collectionID UniqueID
 
-	mu          sync.RWMutex
-	seg2SegInfo map[UniqueID]*datapb.SegmentInfo // Segment ID to UnFlushed Segment
-	vchanInfo   *datapb.VchannelInfo
+	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
+	flushedSegments []UniqueID
 }
 
 func (ddn *ddNode) Name() string {
 	return "ddNode"
 }
 
-func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-
+func (ddn *ddNode) Operate(in []Msg) []Msg {
 	// log.Debug("DDNode Operating")
 
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
-		// TODO: add error handling
-	}
-
-	if len(in) == 0 {
-		return []flowgraph.Msg{}
+		log.Warn("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
+		return []Msg{}
 	}
 
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Error("type assertion failed for MsgStreamMsg")
-		return []flowgraph.Msg{}
-		// TODO: add error handling
+		log.Warn("Type assertion failed for MsgStreamMsg")
+		return []Msg{}
 	}
 
 	var spans []opentracing.Span
@@ -66,10 +58,6 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
-	}
-
-	if msMsg == nil {
-		return []Msg{}
 	}
 
 	var iMsg = insertMsg{
@@ -92,12 +80,19 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 		case commonpb.MsgType_Insert:
 			log.Debug("DDNode with insert messages")
+			imsg := msg.(*msgstream.InsertMsg)
+			if imsg.CollectionID != ddn.collectionID {
+				//log.Debug("filter invalid InsertMsg, collection mis-match",
+				//	zap.Int64("Get msg collID", imsg.CollectionID),
+				//	zap.Int64("Expected collID", ddn.collectionID))
+				continue
+			}
 			if msg.EndTs() < FilterThreshold {
 				log.Info("Filtering Insert Messages",
 					zap.Uint64("Message endts", msg.EndTs()),
 					zap.Uint64("FilterThreshold", FilterThreshold),
 				)
-				if ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg)) {
+				if ddn.filterFlushedSegmentInsertMessages(imsg) {
 					continue
 				}
 			}
@@ -122,23 +117,18 @@ func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) 
 		return true
 	}
 
-	ddn.mu.Lock()
-	if si, ok := ddn.seg2SegInfo[msg.GetSegmentID()]; ok {
-		if msg.EndTs() <= si.GetDmlPosition().GetTimestamp() {
+	if si, ok := ddn.segID2SegInfo.Load(msg.GetSegmentID()); ok {
+		if msg.EndTs() <= si.(*datapb.SegmentInfo).GetDmlPosition().GetTimestamp() {
 			return true
 		}
-		delete(ddn.seg2SegInfo, msg.GetSegmentID())
-	}
 
-	ddn.mu.Unlock()
+		ddn.segID2SegInfo.Delete(msg.GetSegmentID())
+	}
 	return false
 }
 
 func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
-	ddn.mu.Lock()
-	defer ddn.mu.Unlock()
-
-	for _, id := range ddn.vchanInfo.GetFlushedSegments() {
+	for _, id := range ddn.flushedSegments {
 		if id == segmentID {
 			return true
 		}
@@ -150,16 +140,28 @@ func newDDNode(clearSignal chan<- UniqueID, collID UniqueID, vchanInfo *datapb.V
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
 
-	si := make(map[UniqueID]*datapb.SegmentInfo)
-	for _, us := range vchanInfo.GetUnflushedSegments() {
-		si[us.GetID()] = us
+	fs := make([]UniqueID, 0, len(vchanInfo.GetFlushedSegments()))
+	fs = append(fs, vchanInfo.GetFlushedSegments()...)
+	log.Debug("ddNode add flushed segment",
+		zap.Int64("collectionID", vchanInfo.GetCollectionID()),
+		zap.Int("No. Segment", len(vchanInfo.GetFlushedSegments())),
+	)
+
+	dd := &ddNode{
+		BaseNode:        baseNode,
+		clearSignal:     clearSignal,
+		collectionID:    collID,
+		flushedSegments: fs,
 	}
 
-	return &ddNode{
-		BaseNode:     baseNode,
-		clearSignal:  clearSignal,
-		collectionID: collID,
-		seg2SegInfo:  si,
-		vchanInfo:    vchanInfo,
+	for _, us := range vchanInfo.GetUnflushedSegments() {
+		dd.segID2SegInfo.Store(us.GetID(), us)
 	}
+
+	log.Debug("ddNode add unflushed segment",
+		zap.Int64("collectionID", collID),
+		zap.Int("No. Segment", len(vchanInfo.GetUnflushedSegments())),
+	)
+
+	return dd
 }

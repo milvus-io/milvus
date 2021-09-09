@@ -140,60 +140,8 @@ func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return insertMsg, nil
 }
 
-/////////////////////////////////////////FlushCompletedMsg//////////////////////////////////////////
-type FlushCompletedMsg struct {
-	BaseMsg
-	datapb.SegmentFlushCompletedMsg
-}
-
-func (fl *FlushCompletedMsg) TraceCtx() context.Context {
-	return fl.BaseMsg.Ctx
-}
-
-func (fl *FlushCompletedMsg) SetTraceCtx(ctx context.Context) {
-	fl.BaseMsg.Ctx = ctx
-}
-
-func (fl *FlushCompletedMsg) ID() UniqueID {
-	return fl.Base.MsgID
-}
-
-func (fl *FlushCompletedMsg) Type() MsgType {
-	return fl.Base.MsgType
-}
-
-func (fl *FlushCompletedMsg) SourceID() int64 {
-	return fl.Base.SourceID
-}
-
-func (fl *FlushCompletedMsg) Marshal(input TsMsg) (MarshalType, error) {
-	flushCompletedMsgTask := input.(*FlushCompletedMsg)
-	flushCompletedMsg := &flushCompletedMsgTask.SegmentFlushCompletedMsg
-	mb, err := proto.Marshal(flushCompletedMsg)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (fl *FlushCompletedMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	flushCompletedMsg := datapb.SegmentFlushCompletedMsg{}
-	in, err := ConvertToByteArray(input)
-	if err != nil {
-		return nil, err
-	}
-	err = proto.Unmarshal(in, &flushCompletedMsg)
-	if err != nil {
-		return nil, err
-	}
-	flushCompletedMsgTask := &FlushCompletedMsg{SegmentFlushCompletedMsg: flushCompletedMsg}
-	flushCompletedMsgTask.BeginTimestamp = flushCompletedMsgTask.Base.Timestamp
-	flushCompletedMsgTask.EndTimestamp = flushCompletedMsgTask.Base.Timestamp
-
-	return flushCompletedMsgTask, nil
-}
-
 /////////////////////////////////////////Delete//////////////////////////////////////////
+// TODO(wxyu): comment it until really needed
 type DeleteMsg struct {
 	BaseMsg
 	internalpb.DeleteRequest
@@ -855,6 +803,7 @@ func (dp *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 /////////////////////////////////////////LoadIndex//////////////////////////////////////////
+// TODO(wxyu): comment it until really needed
 type LoadIndexMsg struct {
 	BaseMsg
 	internalpb.LoadIndex
@@ -903,56 +852,6 @@ func (lim *LoadIndexMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	loadIndexMsg := &LoadIndexMsg{LoadIndex: loadIndexRequest}
 
 	return loadIndexMsg, nil
-}
-
-/////////////////////////////////////////SegmentInfoMsg//////////////////////////////////////////
-type SegmentInfoMsg struct {
-	BaseMsg
-	datapb.SegmentMsg
-}
-
-func (sim *SegmentInfoMsg) TraceCtx() context.Context {
-	return sim.BaseMsg.Ctx
-}
-
-func (sim *SegmentInfoMsg) SetTraceCtx(ctx context.Context) {
-	sim.BaseMsg.Ctx = ctx
-}
-
-func (sim *SegmentInfoMsg) ID() UniqueID {
-	return sim.Base.MsgID
-}
-
-func (sim *SegmentInfoMsg) Type() MsgType {
-	return sim.Base.MsgType
-}
-
-func (sim *SegmentInfoMsg) SourceID() int64 {
-	return sim.Base.SourceID
-}
-
-func (sim *SegmentInfoMsg) Marshal(input TsMsg) (MarshalType, error) {
-	segInfoMsg := input.(*SegmentInfoMsg)
-	mb, err := proto.Marshal(&segInfoMsg.SegmentMsg)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (sim *SegmentInfoMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	segMsg := datapb.SegmentMsg{}
-	in, err := ConvertToByteArray(input)
-	if err != nil {
-		return nil, err
-	}
-	err = proto.Unmarshal(in, &segMsg)
-	if err != nil {
-		return nil, err
-	}
-	return &SegmentInfoMsg{
-		SegmentMsg: segMsg,
-	}, nil
 }
 
 /////////////////////////////////////////LoadBalanceSegments//////////////////////////////////////////

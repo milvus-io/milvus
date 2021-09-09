@@ -10,6 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 rootcoord:
+  dmlChannelNum: 256
   maxPartitionNum: 4096
   minSegmentSizeToEnableIndex: 1024
   timeout: 3600 # time out, 5 seconds

@@ -5,8 +5,8 @@
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
-int total_timeout_minutes = 90
-int e2e_timeout_seconds = 60 * 60
+int total_timeout_minutes = 660
+int e2e_timeout_seconds = 4 * 60 * 60
 
 pipeline {
     agent none
@@ -30,7 +30,8 @@ pipeline {
                     }
                     axis {
                         name 'MILVUS_CLIENT'
-                        values 'pymilvus', 'pymilvus-orm'
+                        values 'pymilvus'
+//                         'pymilvus-orm'
                     }
                 }
                 agent {
@@ -66,6 +67,7 @@ pipeline {
                                         def clusterEnabled = "false"
                                         if ("${MILVUS_SERVER_TYPE}" == "distributed") {
                                             clusterEnabled = "true"
+                                            e2e_timeout_seconds = 10 * 60 * 60
                                         }
 
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
@@ -77,20 +79,21 @@ pipeline {
                                             --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
                                             --skip-export-logs \
                                             --skip-cleanup \
-                                            --test-timeout ${e2e_timeout_seconds}
-                                            """
-                                        } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
-                                            sh """
-                                            MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            ./e2e-k8s.sh \
-                                            --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
-                                            --node-image registry.zilliz.com/kindest/node:v1.20.2 \
-                                            --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
-                                            --skip-export-logs \
-                                            --skip-cleanup \
                                             --test-extra-arg "--tags L0 L1 L2" \
                                             --test-timeout ${e2e_timeout_seconds}
                                             """
+//                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
+//                                             sh """
+//                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+//                                             ./e2e-k8s.sh \
+//                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
+//                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+//                                             --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
+//                                             --skip-export-logs \
+//                                             --skip-cleanup \
+//                                             --test-extra-arg "--tags L0 L1 L2" \
+//                                             --test-timeout ${e2e_timeout_seconds}
+//                                             """
                                         } else {
                                             error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
                                         }
@@ -137,7 +140,7 @@ pipeline {
                                 sh "./tests/scripts/export_logs.sh"
                                 dir("${env.ARTIFACTS}") {
                                     sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
-                                    if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
+                                    if ("${MILVUS_CLIENT}" == "pymilvus") {
                                         sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ./tests/pytest_logs --remove-files || true"
                                     }
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true

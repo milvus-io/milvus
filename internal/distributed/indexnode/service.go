@@ -19,32 +19,31 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/types"
+
 	"go.uber.org/zap"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	grpcindexcoordclient "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"google.golang.org/grpc"
 )
 
 type Server struct {
-	indexnode *indexnode.IndexNode
+	indexnode types.IndexNode
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
-	indexCoordClient types.IndexCoord
-	loopCtx          context.Context
-	loopCancel       func()
-	loopWg           sync.WaitGroup
+	loopCtx    context.Context
+	loopCancel func()
+	loopWg     sync.WaitGroup
 
 	closer io.Closer
 }
@@ -52,7 +51,7 @@ type Server struct {
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
-		return nil
+		return err
 	}
 
 	if err := s.start(); err != nil {
@@ -65,7 +64,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
 
-	log.Debug("IndexNode", zap.Int("network port: ", grpcPort))
+	log.Debug("IndexNode", zap.String("network address", Params.Address), zap.Int("network port: ", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("IndexNode", zap.String("GrpcServer:failed to listen", err.Error()))
@@ -114,14 +113,14 @@ func (s *Server) init() error {
 		if err != nil {
 			err = s.Stop()
 			if err != nil {
-				log.Debug("IndexNode Init failed, and Stop failed")
+				log.Error("IndexNode Init failed, and Stop failed")
 			}
 		}
 	}()
 
 	err = s.indexnode.Register()
 	if err != nil {
-		log.Debug("IndexNode Register etcd failed", zap.Error(err))
+		log.Error("IndexNode Register etcd failed", zap.Error(err))
 		return err
 	}
 	log.Debug("IndexNode Register etcd success")
@@ -131,26 +130,13 @@ func (s *Server) init() error {
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
+		log.Error("IndexNode", zap.Any("grpc error", err))
 		return err
 	}
 
-	s.indexCoordClient, err = grpcindexcoordclient.NewClient(s.loopCtx, indexnode.Params.MetaRootPath, indexnode.Params.EtcdEndpoints)
-	if err != nil {
-		log.Debug("New indexCoordeClient failed", zap.Error(err))
-		return err
-	}
-	err = s.indexCoordClient.Init()
-	if err != nil {
-		log.Debug("IndexNode indexCoordeClient init failed", zap.Error(err))
-		return err
-	}
-	s.indexnode.SetIndexCoordClient(s.indexCoordClient)
-
-	s.indexnode.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
 	err = s.indexnode.Init()
 	if err != nil {
-		log.Debug("IndexNode Init failed", zap.Error(err))
+		log.Error("IndexNode Init failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -182,6 +168,11 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+func (s *Server) SetClient(indexNodeClient types.IndexNode) error {
+	s.indexnode = indexNodeClient
+	return nil
+}
+
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.indexnode.GetComponentStates(ctx)
 }
@@ -196,6 +187,10 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	return s.indexnode.CreateIndex(ctx, req)
+}
+
+func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.indexnode.GetMetrics(ctx, request)
 }
 
 func NewServer(ctx context.Context) (*Server, error) {

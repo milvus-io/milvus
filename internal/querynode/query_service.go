@@ -14,6 +14,7 @@ package querynode
 import "C"
 import (
 	"context"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -34,8 +35,9 @@ type queryService struct {
 
 	factory msgstream.Factory
 
-	lcm storage.ChunkManager
-	rcm storage.ChunkManager
+	localChunkManager  storage.ChunkManager
+	remoteChunkManager storage.ChunkManager
+	localCacheEnabled  bool
 }
 
 func newQueryService(ctx context.Context,
@@ -45,11 +47,15 @@ func newQueryService(ctx context.Context,
 
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
 
-	path, err := Params.Load("storage.path")
+	//TODO godchen: change this to configuration
+	path, err := Params.Load("localStorage.Path")
 	if err != nil {
-		panic(err)
+		path = "/tmp/milvus/data"
 	}
-	lcm := storage.NewLocalChunkManager(path)
+	enabled, _ := Params.Load("localStorage.enabled")
+	localCacheEnabled, _ := strconv.ParseBool(enabled)
+
+	localChunkManager := storage.NewLocalChunkManager(path)
 
 	option := &miniokv.Option{
 		Address:           Params.MinioEndPoint,
@@ -64,7 +70,7 @@ func newQueryService(ctx context.Context,
 	if err != nil {
 		panic(err)
 	}
-	rcm := storage.NewMinioChunkManager(client)
+	remoteChunkManager := storage.NewMinioChunkManager(client)
 
 	return &queryService{
 		ctx:    queryServiceCtx,
@@ -77,8 +83,9 @@ func newQueryService(ctx context.Context,
 
 		factory: factory,
 
-		lcm: lcm,
-		rcm: rcm,
+		localChunkManager:  localChunkManager,
+		remoteChunkManager: remoteChunkManager,
+		localCacheEnabled:  localCacheEnabled,
 	}
 }
 
@@ -96,7 +103,6 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) {
 		log.Warn("query collection already exists", zap.Any("collectionID", collectionID))
 		return
 	}
-
 	ctx1, cancel := context.WithCancel(q.ctx)
 	qc := newQueryCollection(ctx1,
 		cancel,
@@ -104,8 +110,10 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) {
 		q.historical,
 		q.streaming,
 		q.factory,
-		q.lcm,
-		q.rcm)
+		q.localChunkManager,
+		q.remoteChunkManager,
+		q.localCacheEnabled,
+	)
 	q.queryCollections[collectionID] = qc
 }
 

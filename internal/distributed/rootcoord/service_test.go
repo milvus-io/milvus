@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/golang/protobuf/proto"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -40,54 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
 )
-
-func GenSegInfoMsgPack(seg *datapb.SegmentInfo) *msgstream.MsgPack {
-	msgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{0},
-	}
-	segMsg := &msgstream.SegmentInfoMsg{
-		BaseMsg: baseMsg,
-		SegmentMsg: datapb.SegmentMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_SegmentInfo,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			Segment: seg,
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, segMsg)
-	return &msgPack
-}
-
-func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
-	msgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{0},
-	}
-	segMsg := &msgstream.FlushCompletedMsg{
-		BaseMsg: baseMsg,
-		SegmentFlushCompletedMsg: datapb.SegmentFlushCompletedMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_SegmentFlushDone,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			Segment: &datapb.SegmentInfo{ID: segID},
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, segMsg)
-	return &msgPack
-}
 
 type proxyMock struct {
 	types.Proxy
@@ -167,7 +122,7 @@ func TestGrpcService(t *testing.T) {
 
 	timeTickArray := make([]typeutil.Timestamp, 0, 16)
 	timeTickLock := sync.Mutex{}
-	core.SendTimeTick = func(ts typeutil.Timestamp) error {
+	core.SendTimeTick = func(ts typeutil.Timestamp, reason string) error {
 		timeTickLock.Lock()
 		defer timeTickLock.Unlock()
 		t.Logf("send time tick %d", ts)
@@ -310,6 +265,29 @@ func TestGrpcService(t *testing.T) {
 		rsp, err := svr.AllocID(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
+	t.Run("update channel timetick", func(t *testing.T) {
+		req := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_TimeTick,
+			},
+		}
+		status, err := svr.UpdateChannelTimeTick(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
+
+	t.Run("release DQL msg stream", func(t *testing.T) {
+		req := &proxypb.ReleaseDQLMessageStreamRequest{}
+		assert.Panics(t, func() { svr.ReleaseDQLMessageStream(ctx, req) })
+	})
+
+	t.Run("get metrics", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		rsp, err := svr.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 	})
 
 	t.Run("create collection", func(t *testing.T) {

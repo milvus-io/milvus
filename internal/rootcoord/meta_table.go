@@ -174,6 +174,7 @@ func (mt *metaTable) reloadFromKV() error {
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
 
+	log.Debug("reload meta table from KV successfully")
 	return nil
 }
 
@@ -191,50 +192,52 @@ func (mt *metaTable) getAdditionKV(op func(ts typeutil.Timestamp) (string, error
 	}
 }
 
-func (mt *metaTable) AddTenant(te *pb.TenantMeta) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddTenant(te *pb.TenantMeta, ts typeutil.Timestamp) error {
 	mt.tenantLock.Lock()
 	defer mt.tenantLock.Unlock()
 
 	k := fmt.Sprintf("%s/%d", TenantMetaPrefix, te.ID)
 	v := proto.MarshalTextString(te)
 
-	ts, err := mt.client.Save(k, v)
+	err := mt.client.Save(k, v, ts)
 	if err != nil {
-		return 0, err
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 	mt.tenantID2Meta[te.ID] = *te
-	return ts, nil
+	return nil
 }
 
-func (mt *metaTable) AddProxy(po *pb.ProxyMeta) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddProxy(po *pb.ProxyMeta, ts typeutil.Timestamp) error {
 	mt.proxyLock.Lock()
 	defer mt.proxyLock.Unlock()
 
 	k := fmt.Sprintf("%s/%d", ProxyMetaPrefix, po.ID)
 	v := proto.MarshalTextString(po)
 
-	ts, err := mt.client.Save(k, v)
+	err := mt.client.Save(k, v, ts)
 	if err != nil {
-		return 0, err
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 	mt.proxyID2Meta[po.ID] = *po
-	return ts, nil
+	return nil
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestamp, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	if len(coll.PartitionIDs) != len(coll.PartitionNames) ||
 		len(coll.PartitionIDs) != len(coll.PartitionCreatedTimestamps) ||
 		(len(coll.PartitionIDs) != 1 && len(coll.PartitionIDs) != 0) {
-		return 0, fmt.Errorf("PartitionIDs, PartitionNames and PartitionCreatedTimestmaps' length mis-match when creating collection")
+		return fmt.Errorf("PartitionIDs, PartitionNames and PartitionCreatedTimestmaps' length mis-match when creating collection")
 	}
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
-		return 0, fmt.Errorf("collection %s exist", coll.Schema.Name)
+		return fmt.Errorf("collection %s exist", coll.Schema.Name)
 	}
 	if len(coll.FieldIndexes) != len(idx) {
-		return 0, fmt.Errorf("incorrect index id when creating collection")
+		return fmt.Errorf("incorrect index id when creating collection")
 	}
 
 	for _, i := range idx {
@@ -264,22 +267,22 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 		return k1, v1, nil
 	}
 
-	ts, err := mt.client.MultiSave(meta, addition, saveColl)
+	err := mt.client.MultiSave(meta, ts, addition, saveColl)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, err
+		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+		panic("SnapShotKV MultiSave fail")
 	}
 
-	return ts, nil
+	return nil
 }
 
-func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return 0, fmt.Errorf("can't find collection. id = %d", collID)
+		return fmt.Errorf("can't find collection. id = %d", collID)
 	}
 
 	delete(mt.collID2Meta, collID)
@@ -317,13 +320,13 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts 
 	// save ddOpStr into etcd
 	var saveMeta = map[string]string{}
 	addition := mt.getAdditionKV(ddOpStr, saveMeta)
-	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys, addition)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys, ts, addition)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, err
+		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
+		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
 	}
 
-	return ts, nil
+	return nil
 }
 
 func (mt *metaTable) HasCollection(collID typeutil.UniqueID, ts typeutil.Timestamp) bool {
@@ -450,37 +453,37 @@ func (mt *metaTable) ListCollectionPhysicalChannels() []string {
 	return plist
 }
 
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
 	if !ok {
-		return 0, fmt.Errorf("can't find collection. id = %d", collID)
+		return fmt.Errorf("can't find collection. id = %d", collID)
 	}
 
 	// number of partition tags (except _default) should be limited to 4096 by default
 	if int64(len(coll.PartitionIDs)) >= Params.MaxPartitionNum {
-		return 0, fmt.Errorf("maximum partition's number should be limit to %d", Params.MaxPartitionNum)
+		return fmt.Errorf("maximum partition's number should be limit to %d", Params.MaxPartitionNum)
 	}
 
 	if len(coll.PartitionIDs) != len(coll.PartitionNames) {
-		return 0, fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionNames)=%d", len(coll.PartitionIDs), len(coll.PartitionNames))
+		return fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionNames)=%d", len(coll.PartitionIDs), len(coll.PartitionNames))
 	}
 
 	if len(coll.PartitionIDs) != len(coll.PartitionCreatedTimestamps) {
-		return 0, fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionCreatedTimestamps)=%d", len(coll.PartitionIDs), len(coll.PartitionCreatedTimestamps))
+		return fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionCreatedTimestamps)=%d", len(coll.PartitionIDs), len(coll.PartitionCreatedTimestamps))
 	}
 
 	if len(coll.PartitionNames) != len(coll.PartitionCreatedTimestamps) {
-		return 0, fmt.Errorf("len(coll.PartitionNames)=%d, len(coll.PartitionCreatedTimestamps)=%d", len(coll.PartitionNames), len(coll.PartitionCreatedTimestamps))
+		return fmt.Errorf("len(coll.PartitionNames)=%d, len(coll.PartitionCreatedTimestamps)=%d", len(coll.PartitionNames), len(coll.PartitionCreatedTimestamps))
 	}
 
 	for idx := range coll.PartitionIDs {
 		if coll.PartitionIDs[idx] == partitionID {
-			return 0, fmt.Errorf("partition id = %d already exists", partitionID)
+			return fmt.Errorf("partition id = %d already exists", partitionID)
 		}
 		if coll.PartitionNames[idx] == partitionName {
-			return 0, fmt.Errorf("partition name = %s already exists", partitionName)
+			return fmt.Errorf("partition name = %s already exists", partitionName)
 		}
 		// no necessary to check created timestamp
 	}
@@ -502,12 +505,12 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		return k1, v1, nil
 	}
 
-	ts, err := mt.client.MultiSave(meta, addition, saveColl)
+	err := mt.client.MultiSave(meta, ts, addition, saveColl)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, err
+		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+		panic("SnapShotKV MultiSave fail")
 	}
-	return ts, nil
+	return nil
 }
 
 func (mt *metaTable) GetPartitionNameByID(collID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) (string, error) {
@@ -587,18 +590,17 @@ func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 	return err == nil
 }
 
-//return timestamp, partitionid, error
-func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, typeutil.UniqueID, error) {
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	if partitionName == Params.DefaultPartitionName {
-		return 0, 0, fmt.Errorf("default partition cannot be deleted")
+		return 0, fmt.Errorf("default partition cannot be deleted")
 	}
 
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return 0, 0, fmt.Errorf("can't find collection id = %d", collID)
+		return 0, fmt.Errorf("can't find collection id = %d", collID)
 	}
 
 	// check tag exists
@@ -619,7 +621,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		}
 	}
 	if !exist {
-		return 0, 0, fmt.Errorf("partition %s does not exist", partitionName)
+		return 0, fmt.Errorf("partition %s does not exist", partitionName)
 	}
 	collMeta.PartitionIDs = pd
 	collMeta.PartitionNames = pn
@@ -644,21 +646,21 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	// save ddOpStr into etcd
 	addition := mt.getAdditionKV(ddOpStr, meta)
 
-	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys, addition)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys, ts, addition)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, 0, err
+		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
+		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
 	}
-	return ts, partID, nil
+	return partID, nil
 }
 
-func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	collMeta, ok := mt.collID2Meta[segIdxInfo.CollectionID]
 	if !ok {
-		return 0, fmt.Errorf("collection id = %d not found", segIdxInfo.CollectionID)
+		return fmt.Errorf("collection id = %d not found", segIdxInfo.CollectionID)
 	}
 	exist := false
 	for _, fidx := range collMeta.FieldIndexes {
@@ -668,7 +670,7 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) (typeutil.Timesta
 		}
 	}
 	if !exist {
-		return 0, fmt.Errorf("index id = %d not found", segIdxInfo.IndexID)
+		return fmt.Errorf("index id = %d not found", segIdxInfo.IndexID)
 	}
 
 	segIdxMap, ok := mt.segID2IndexMeta[segIdxInfo.SegmentID]
@@ -684,9 +686,9 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) (typeutil.Timesta
 			if SegmentIndexInfoEqual(segIdxInfo, &tmpInfo) {
 				if segIdxInfo.BuildID == tmpInfo.BuildID {
 					log.Debug("Identical SegmentIndexInfo already exist", zap.Int64("IndexID", segIdxInfo.IndexID))
-					return 0, nil
+					return nil
 				}
-				return 0, fmt.Errorf("index id = %d exist", segIdxInfo.IndexID)
+				return fmt.Errorf("index id = %d exist", segIdxInfo.IndexID)
 			}
 		}
 	}
@@ -697,31 +699,31 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) (typeutil.Timesta
 	k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, segIdxInfo.CollectionID, segIdxInfo.IndexID, segIdxInfo.PartitionID, segIdxInfo.SegmentID)
 	v := proto.MarshalTextString(segIdxInfo)
 
-	ts, err := mt.client.Save(k, v)
+	err := mt.client.Save(k, v, ts)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, err
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 
-	return ts, nil
+	return nil
 }
 
 //return timestamp, index id, is dropped, error
-func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.Timestamp, typeutil.UniqueID, bool, error) {
+func (mt *metaTable) DropIndex(collName, fieldName, indexName string, ts typeutil.Timestamp) (typeutil.UniqueID, bool, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return 0, 0, false, fmt.Errorf("collection name = %s not exist", collName)
+		return 0, false, fmt.Errorf("collection name = %s not exist", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return 0, 0, false, fmt.Errorf("collection name  = %s not has meta", collName)
+		return 0, false, fmt.Errorf("collection name  = %s not has meta", collName)
 	}
 	fieldSch, err := mt.unlockGetFieldSchema(collName, fieldName)
 	if err != nil {
-		return 0, 0, false, err
+		return 0, false, err
 	}
 	fieldIdxInfo := make([]*pb.FieldIndexInfo, 0, len(collMeta.FieldIndexes))
 	var dropIdxID typeutil.UniqueID
@@ -746,7 +748,7 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	}
 	if len(fieldIdxInfo) == len(collMeta.FieldIndexes) {
 		log.Warn("drop index,index not found", zap.String("collection name", collName), zap.String("filed name", fieldName), zap.String("index name", indexName))
-		return 0, 0, false, nil
+		return 0, false, nil
 	}
 	collMeta.FieldIndexes = fieldIdxInfo
 	mt.collID2Meta[collID] = collMeta
@@ -770,13 +772,13 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 		fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collMeta.ID, dropIdxID),
 	}
 
-	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta)
+	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta, ts)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, 0, false, err
+		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
+		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
 	}
 
-	return ts, dropIdxID, true, nil
+	return dropIdxID, true, nil
 }
 
 func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID int64, idxName string) (pb.SegmentIndexInfo, error) {
@@ -876,7 +878,7 @@ func (mt *metaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema
 }
 
 // return segment ids, type params, error
-func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *pb.IndexInfo, segIDs []typeutil.UniqueID) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
+func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *pb.IndexInfo, segIDs []typeutil.UniqueID, ts typeutil.Timestamp) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -943,13 +945,11 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			v := proto.MarshalTextString(&dupInfo)
 			meta[k] = v
 		}
-
-		_, err = mt.client.MultiSave(meta)
+		err = mt.client.MultiSave(meta, ts)
 		if err != nil {
-			_ = mt.reloadFromKV()
-			return nil, schemapb.FieldSchema{}, err
+			log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+			panic("SnapShotKV MultiSave fail")
 		}
-
 	} else {
 		idxInfo.IndexID = existInfo.IndexID
 		if existInfo.IndexName != idxInfo.IndexName { //replace index name
@@ -967,10 +967,10 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 				meta[k] = v
 			}
 
-			_, err = mt.client.MultiSave(meta)
+			err = mt.client.MultiSave(meta, ts)
 			if err != nil {
-				_ = mt.reloadFromKV()
-				return nil, schemapb.FieldSchema{}, err
+				log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+				panic("SnapShotKV MultiSave fail")
 			}
 		}
 	}

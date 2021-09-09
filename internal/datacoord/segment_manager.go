@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
@@ -28,6 +27,39 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
+
+var (
+	allocPool = sync.Pool{
+		New: func() interface{} {
+			return &Allocation{}
+		},
+	}
+)
+
+// getAllocation unified way to retrieve allocation struct
+func getAllocation(numOfRows int64) *Allocation {
+	v := allocPool.Get()
+	a, ok := v.(*Allocation)
+	if !ok {
+		a = &Allocation{}
+	}
+	if a == nil {
+		return &Allocation{
+			NumOfRows: numOfRows,
+		}
+	}
+	a.NumOfRows = numOfRows
+	a.ExpireTime = 0
+	a.SegmentID = 0
+	return a
+}
+
+// putAllocation put allocation for recycling
+func putAllocation(a *Allocation) {
+	allocPool.Put(a)
+}
+
+const segmentMaxLifetime = 24 * time.Hour
 
 // Manager manage segment related operations.
 type Manager interface {
@@ -62,7 +94,6 @@ type SegmentManager struct {
 	segmentSealPolicies []segmentSealPolicy
 	channelSealPolicies []channelSealPolicy
 	flushPolicy         flushPolicy
-	allocPool           sync.Pool
 }
 
 type allocHelper struct {
@@ -133,12 +164,11 @@ func defaultAlocatePolicy() AllocatePolicy {
 	return AllocatePolicyV1
 }
 
-func defaultSealPolicy() sealPolicy {
-	return sealPolicyV1
-}
-
-func defaultSegmentSealPolicy() segmentSealPolicy {
-	return getSegmentCapacityPolicy(Params.SegmentSealProportion)
+func defaultSegmentSealPolicy() []segmentSealPolicy {
+	return []segmentSealPolicy{
+		sealByLifetimePolicy(segmentMaxLifetime),
+		getSegmentCapacityPolicy(Params.SegmentSealProportion),
+	}
 }
 
 func defaultFlushPolicy() flushPolicy {
@@ -154,14 +184,9 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *Se
 		segments:            make([]UniqueID, 0),
 		estimatePolicy:      defaultCalUpperLimitPolicy(),
 		allocPolicy:         defaultAlocatePolicy(),
-		segmentSealPolicies: []segmentSealPolicy{defaultSegmentSealPolicy()}, // default only segment size policy
-		channelSealPolicies: []channelSealPolicy{},                           // no default channel seal policy
+		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
+		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
 		flushPolicy:         defaultFlushPolicy(),
-		allocPool: sync.Pool{
-			New: func() interface{} {
-				return &Allocation{}
-			},
-		},
 	}
 	for _, opt := range opts {
 		opt.apply(manager)
@@ -178,27 +203,6 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 		segmentsID = append(segmentsID, segment.GetID())
 	}
 	s.segments = segmentsID
-}
-
-// getAllocation unified way to retrieve allocation struct
-func (s *SegmentManager) getAllocation(numOfRows int64) *Allocation {
-	v := s.allocPool.Get()
-	if v == nil {
-		return &Allocation{
-			NumOfRows: numOfRows,
-		}
-	}
-	a, ok := v.(*Allocation)
-	if !ok {
-		a = &Allocation{}
-	}
-	a.NumOfRows = numOfRows
-	return a
-}
-
-// putAllocation put allocation for recycling
-func (s *SegmentManager) putAllocation(a *Allocation) {
-	s.allocPool.Put(a)
 }
 
 // AllocSegment allocate segment per request collcation, partication, channel and rows
@@ -233,7 +237,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		requestRows, int64(maxCountPerSegment))
 
 	// create new segments and add allocations
-	expireTs, err := s.genExpireTs()
+	expireTs, err := s.genExpireTs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +264,8 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	return allocations, nil
 }
 
-func (s *SegmentManager) genExpireTs() (Timestamp, error) {
-	ts, err := s.allocator.allocTimestamp()
+func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
+	ts, err := s.allocator.allocTimestamp(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -274,7 +278,7 @@ func (s *SegmentManager) genExpireTs() (Timestamp, error) {
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	id, err := s.allocator.allocID()
+	id, err := s.allocator.allocID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +343,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	}
 	s.meta.SetAllocations(segmentID, []*Allocation{})
 	for _, allocation := range segment.allocations {
-		s.putAllocation(allocation)
+		putAllocation(allocation)
 	}
 }
 
@@ -403,14 +407,16 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 		if segment == nil || segment.InsertChannel != channel {
 			continue
 		}
+		allocations := make([]*Allocation, 0, len(segment.allocations))
 		for i := 0; i < len(segment.allocations); i++ {
 			if segment.allocations[i].ExpireTime <= ts {
 				a := segment.allocations[i]
-				segment.allocations = append(segment.allocations[:i], segment.allocations[i+1:]...)
-				s.putAllocation(a)
+				putAllocation(a)
+			} else {
+				allocations = append(allocations, segment.allocations[i])
 			}
 		}
-		s.meta.SetAllocations(segment.GetID(), segment.allocations)
+		s.meta.SetAllocations(segment.GetID(), allocations)
 	}
 	return nil
 }
@@ -451,44 +457,4 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		}
 	}
 	return nil
-}
-
-// only for test
-func (s *SegmentManager) SealSegment(ctx context.Context, segmentID UniqueID) error {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.meta.SetState(segmentID, commonpb.SegmentState_Sealed); err != nil {
-		return err
-	}
-	return nil
-}
-
-func createNewSegmentHelper(stream msgstream.MsgStream) allocHelper {
-	h := allocHelper{}
-	h.afterCreateSegment = func(segment *datapb.SegmentInfo) error {
-		infoMsg := &msgstream.SegmentInfoMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{0},
-			},
-			SegmentMsg: datapb.SegmentMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_SegmentInfo,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  Params.NodeID,
-				},
-				Segment: segment,
-			},
-		}
-		msgPack := &msgstream.MsgPack{
-			Msgs: []msgstream.TsMsg{infoMsg},
-		}
-		if err := stream.Produce(msgPack); err != nil {
-			return err
-		}
-		return nil
-	}
-	return h
 }

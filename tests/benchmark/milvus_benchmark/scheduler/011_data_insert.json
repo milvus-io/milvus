@@ -1,0 +1,11 @@
+[
+    {
+        "server": "eros",
+        "suite_params": [
+            {
+                "suite": "011_insert_data.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+  ]

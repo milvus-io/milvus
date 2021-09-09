@@ -11,9 +11,11 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
@@ -24,6 +26,7 @@ func TestMeta_Basic(t *testing.T) {
 	const partID0 = UniqueID(100)
 	const partID1 = UniqueID(101)
 	const channelName = "c1"
+	ctx := context.Background()
 
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
@@ -58,13 +61,13 @@ func TestMeta_Basic(t *testing.T) {
 	t.Run("Test Segment", func(t *testing.T) {
 		meta.AddCollection(collInfoWoPartition)
 		// create seg0 for partition0, seg0/seg1 for partition1
-		segID0_0, err := mockAllocator.allocID()
+		segID0_0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName)
-		segID1_0, err := mockAllocator.allocID()
+		segID1_0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName)
-		segID1_1, err := mockAllocator.allocID()
+		segID1_1, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName)
 
@@ -117,17 +120,40 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, info0_0.State)
 	})
 
+	t.Run("Test segment with kv fails", func(t *testing.T) {
+		// inject error for `Save`
+		memoryKV := memkv.NewMemoryKV()
+		fkv := &saveFailKV{TxnKV: memoryKV}
+		meta, err := NewMeta(fkv)
+		assert.Nil(t, err)
+
+		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
+		assert.NotNil(t, err)
+
+		fkv2 := &removeFailKV{TxnKV: memoryKV}
+		meta, err = NewMeta(fkv2)
+		assert.Nil(t, err)
+		// nil, since no segment yet
+		err = meta.DropSegment(0)
+		assert.Nil(t, err)
+		// nil, since Save error not injected
+		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
+		assert.Nil(t, err)
+		// error injected
+		err = meta.DropSegment(0)
+		assert.NotNil(t, err)
+	})
+
 	t.Run("Test GetCount", func(t *testing.T) {
 		const rowCount0 = 100
 		const rowCount1 = 300
-		const dim = 1024
 
 		// no segment
 		nums := meta.GetNumRowsOfCollection(collID)
 		assert.EqualValues(t, 0, nums)
 
 		// add seg1 with 100 rows
-		segID0, err := mockAllocator.allocID()
+		segID0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.NumOfRows = rowCount0
@@ -135,7 +161,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Nil(t, err)
 
 		// add seg2 with 300 rows
-		segID1, err := mockAllocator.allocID()
+		segID1, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.NumOfRows = rowCount1

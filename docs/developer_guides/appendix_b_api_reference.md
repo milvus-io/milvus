@@ -21,10 +21,10 @@ In this section, we introduce the RPCs of milvus service. A brief description of
 | ReleasePartition        | release the memory the collection memory                     |
 | GetPartitionStatistics  | show a collection's statistics                               |
 | ShowPartitions          | list a collection's all partitions                           |
-| CreateIndex             | create index for a field in collection                       |
-| DescribeIndex           | get index details for a field in a collection                |
+| CreateIndex             | create index for a field in the collection                       |
+| DescribeIndex           | get index details for a field in the collection                |
 | GetIndexStates          | get build index state                                        |
-| DropIndex               | drop a specific index for a field in a collection            |
+| DropIndex               | drop a specific index for a field in the collection            |
 | Insert                  | insert a batch of rows into a collection or a partition      |
 | Search                  | query the columns of a collection or a partition with ANNS statements and boolean expressions |
 | Flush                   | Perform persistent storage of data in memory                 |
@@ -40,7 +40,7 @@ message MsgBase {
 }
 ```
 
-**MsgType** is a enum to distingush diffrent message type in message queue, such as insert msg, search msg, etc. **msgID** is a unique id identifier of message. **timestamp** is the time when this message was generated. **sourceID** is a unique id identifier of the source.
+**MsgType** is the enum to distingush diffrent message types in message queue, such as insert msg, search msg, etc. **msgID** is the unique id identifier of message. **timestamp** is the time when this message was generated. **sourceID** is the unique id identifier of the source.
 
 
 

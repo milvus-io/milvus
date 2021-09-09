@@ -13,17 +13,26 @@ package datanode
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 
 	"go.uber.org/zap"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+)
+
+const (
+	// TODO silverxia maybe need set from config
+	bloomFilterSize       uint    = 100000
+	maxBloomFalsePositive float64 = 0.005
 )
 
 type Replica interface {
@@ -37,7 +46,8 @@ type Replica interface {
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
 	updateSegmentCheckPoint(segID UniqueID)
-	hasSegment(segID UniqueID) bool
+	updateSegmentPKRange(segID UniqueID, rowIDs []int64)
+	hasSegment(segID UniqueID, countFlushed bool) bool
 
 	updateStatistics(segID UniqueID, numRows int64) error
 	getSegmentStatisticsUpdates(segID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
@@ -58,6 +68,11 @@ type Segment struct {
 	checkPoint segmentCheckPoint
 	startPos   *internalpb.MsgPosition // TODO readonly
 	endPos     *internalpb.MsgPosition
+
+	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
+	// TODO silverxia, needs to change to interface to support `string` type PK
+	minPK int64 //	minimal pk value, shortcut for checking whether a pk is inside this segment
+	maxPK int64 //  maximal pk value, same above
 }
 
 // SegmentReplica is the data replication of persistent data in datanode.
@@ -72,6 +87,20 @@ type SegmentReplica struct {
 	flushedSegments map[UniqueID]*Segment
 
 	metaService *metaService
+}
+
+func (s *Segment) updatePKRange(rowIDs []int64) {
+	buf := make([]byte, 8)
+	for _, rowID := range rowIDs {
+		binary.BigEndian.PutUint64(buf, uint64(rowID))
+		s.pkFilter.Add(buf)
+		if rowID > s.maxPK {
+			s.maxPK = rowID
+		}
+		if rowID < s.minPK {
+			s.minPK = rowID
+		}
+	}
 }
 
 var _ Replica = &SegmentReplica{}
@@ -148,7 +177,8 @@ func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (coll
 	return 0, 0, fmt.Errorf("Cannot find segment, id = %v", segID)
 }
 
-// addNewSegment adds a *New* and *NotFlushed* new segment
+// addNewSegment adds a *New* and *NotFlushed* new segment. Before add, please make sure there's no
+// such segment by `hasSegment`
 func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID, channelName string,
 	startPos, endPos *internalpb.MsgPosition) error {
 
@@ -156,7 +186,9 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	defer replica.segMu.Unlock()
 
 	if collID != replica.collectionID {
-		log.Warn("Mismatch collection", zap.Int64("ID", collID))
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
 		return fmt.Errorf("Mismatch collection, ID=%d", collID)
 	}
 
@@ -176,6 +208,10 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 		checkPoint: segmentCheckPoint{0, *startPos},
 		startPos:   startPos,
 		endPos:     endPos,
+
+		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+		minPK:    math.MaxInt64, // use max value, represents no value
+		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
 	seg.isNew.Store(true)
@@ -185,13 +221,16 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	return nil
 }
 
-// addNormalSegment adds a *NotNew* and *NotFlushed* segment
+// addNormalSegment adds a *NotNew* and *NotFlushed* segment. Before add, please make sure there's no
+// such segment by `hasSegment`
 func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 
 	if collID != replica.collectionID {
-		log.Warn("Mismatch collection", zap.Int64("ID", collID))
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
 		return fmt.Errorf("Mismatch collection, ID=%d", collID)
 	}
 
@@ -211,6 +250,11 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 
 		checkPoint: *cp,
 		endPos:     &cp.pos,
+
+		//TODO silverxia, normal segments bloom filter and pk range should be loaded from serialized files
+		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+		minPK:    math.MaxInt64, // use max value, represents no value
+		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
 	seg.isNew.Store(false)
@@ -278,18 +322,41 @@ func (replica *SegmentReplica) updateSegmentEndPosition(segID UniqueID, endPos *
 	log.Warn("No match segment", zap.Int64("ID", segID))
 }
 
+func (replica *SegmentReplica) updateSegmentPKRange(segID UniqueID, rowIDs []int64) {
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
+
+	seg, ok := replica.newSegments[segID]
+	if ok {
+		seg.updatePKRange(rowIDs)
+		return
+	}
+
+	seg, ok = replica.normalSegments[segID]
+	if ok {
+		seg.updatePKRange(rowIDs)
+		return
+	}
+
+	log.Warn("No match segment to update PK range", zap.Int64("ID", segID))
+}
+
 func (replica *SegmentReplica) removeSegment(segID UniqueID) error {
 	return nil
 }
 
 // hasSegment checks whether this replica has a segment according to segment ID.
-func (replica *SegmentReplica) hasSegment(segID UniqueID) bool {
+func (replica *SegmentReplica) hasSegment(segID UniqueID, countFlushed bool) bool {
 	replica.segMu.RLock()
 	defer replica.segMu.RUnlock()
 
 	_, inNew := replica.newSegments[segID]
 	_, inNormal := replica.normalSegments[segID]
-	_, inFlush := replica.flushedSegments[segID]
+
+	inFlush := false
+	if countFlushed {
+		_, inFlush = replica.flushedSegments[segID]
+	}
 
 	return inNew || inNormal || inFlush
 }
@@ -348,7 +415,7 @@ func (replica *SegmentReplica) getCollectionSchema(collID UniqueID, ts Timestamp
 	defer replica.segMu.Unlock()
 
 	if !replica.validCollection(collID) {
-		log.Error("Mismatch collection for the replica",
+		log.Warn("Mismatch collection for the replica",
 			zap.Int64("Want", replica.collectionID),
 			zap.Int64("Actual", collID),
 		)

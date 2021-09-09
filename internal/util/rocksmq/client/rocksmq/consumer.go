@@ -63,4 +63,7 @@ type Consumer interface {
 
 	// Seek to the uniqueID position
 	Seek(UniqueID) error //nolint:govet
+
+	// Close consumer
+	Close()
 }

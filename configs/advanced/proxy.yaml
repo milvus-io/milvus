@@ -29,3 +29,4 @@ proxy:
   maxNameLength: 255
   maxFieldNum: 64
   maxDimension: 32768
+  maxShardNum: 256

@@ -13,13 +13,15 @@ package indexnode
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math/rand"
 	"strconv"
 	"sync/atomic"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -30,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -50,8 +51,6 @@ type IndexNode struct {
 
 	kv      kv.BaseKV
 	session *sessionutil.Session
-
-	serviceClient types.IndexCoord // method factory
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -83,15 +82,20 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 // Register register index node at etcd
 func (i *IndexNode) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if i.session == nil {
+		return errors.New("failed to initialize session")
+	}
 	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = i.session.ServerID
 	return nil
 }
 
 func (i *IndexNode) Init() error {
+	i.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
-		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		i.etcdKV = etcdKV
 		return err
 	}
 	err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
@@ -116,15 +120,14 @@ func (i *IndexNode) Init() error {
 	}
 	log.Debug("IndexNode NewMinIOKV success")
 	i.closer = trace.InitTracing("index_node")
-
-	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
 	return nil
 }
 
 func (i *IndexNode) Start() error {
 	i.sched.Start()
 
+	i.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
@@ -149,8 +152,9 @@ func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
 }
 
-func (i *IndexNode) SetIndexCoordClient(serviceClient types.IndexCoord) {
-	i.serviceClient = serviceClient
+func (i *IndexNode) isHealthy() bool {
+	code := i.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
 }
 
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
@@ -200,14 +204,14 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 }
 
 // AddStartCallback adds a callback in the startServer phase.
-func (i *IndexNode) AddStartCallback(callbacks ...func()) {
-	i.startCallbacks = append(i.startCallbacks, callbacks...)
-}
+//func (i *IndexNode) AddStartCallback(callbacks ...func()) {
+//	i.startCallbacks = append(i.startCallbacks, callbacks...)
+//}
 
 // AddCloseCallback adds a callback in the Close phase.
-func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
-	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
-}
+//func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
+//	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
+//}
 
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexNode components states ...")
@@ -248,5 +252,72 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
+	}, nil
+}
+
+// TODO(dragondriver): cache the Metrics and set a retention to the cache
+func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("IndexNode.GetMetrics",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request))
+
+	if !i.isHealthy() {
+		log.Warn("IndexNode.GetMetrics failed",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.Error(errIndexNodeIsUnhealthy(Params.NodeID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgIndexNodeIsUnhealthy(Params.NodeID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("IndexNode.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("IndexNode.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		metrics, err := getSystemInfoMetrics(ctx, req, i)
+
+		log.Debug("IndexNode.GetMetrics",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return metrics, err
+	}
+
+	log.Debug("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }

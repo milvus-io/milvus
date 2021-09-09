@@ -11,37 +11,22 @@
 
 package proxy
 
-/*
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNaiveUniqueIntGenerator_get(t *testing.T) {
-	exists := make(map[int]bool)
-	num := 10
-
-	generator := newNaiveUniqueIntGenerator()
-
-	for i := 0; i < num; i++ {
-		g := generator.get()
-		_, ok := exists[g]
-		assert.False(t, ok)
-		exists[g] = true
-	}
-}
-
 func TestChannelsMgrImpl_getChannels(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
-	collID := UniqueID(getUniqueIntGeneratorIns().get())
+	collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	_, err := mgr.getChannels(collID)
 	assert.NotEqual(t, nil, err)
 
@@ -55,11 +40,11 @@ func TestChannelsMgrImpl_getChannels(t *testing.T) {
 func TestChannelsMgrImpl_getVChannels(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
-	collID := UniqueID(getUniqueIntGeneratorIns().get())
+	collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	_, err := mgr.getVChannels(collID)
 	assert.NotEqual(t, nil, err)
 
@@ -73,11 +58,11 @@ func TestChannelsMgrImpl_getVChannels(t *testing.T) {
 func TestChannelsMgrImpl_createDMLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
-	collID := UniqueID(getUniqueIntGeneratorIns().get())
+	collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	_, err := mgr.getChannels(collID)
 	assert.NotEqual(t, nil, err)
 	_, err = mgr.getVChannels(collID)
@@ -95,11 +80,11 @@ func TestChannelsMgrImpl_createDMLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_getDMLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
-	collID := UniqueID(getUniqueIntGeneratorIns().get())
+	collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	_, err := mgr.getDMLStream(collID)
 	assert.NotEqual(t, nil, err)
 
@@ -113,11 +98,11 @@ func TestChannelsMgrImpl_getDMLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_removeDMLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
-	collID := UniqueID(getUniqueIntGeneratorIns().get())
+	collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	_, err := mgr.getDMLStream(collID)
 	assert.NotEqual(t, nil, err)
 
@@ -140,13 +125,13 @@ func TestChannelsMgrImpl_removeDMLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_removeAllDMLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
 	num := 10
 	for i := 0; i < num; i++ {
-		collID := UniqueID(getUniqueIntGeneratorIns().get())
+		collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 		err := mgr.createDMLMsgStream(collID)
 		assert.Equal(t, nil, err)
 	}
@@ -155,33 +140,24 @@ func TestChannelsMgrImpl_removeAllDMLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_createDQLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
-	collID := UniqueID(getUniqueIntGeneratorIns().get())
-	_, err := mgr.getChannels(collID)
-	assert.NotEqual(t, nil, err)
-	_, err = mgr.getVChannels(collID)
-	assert.NotEqual(t, nil, err)
+	collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
-	err = mgr.createDQLStream(collID)
-	assert.Equal(t, nil, err)
-
-	_, err = mgr.getChannels(collID)
-	assert.Equal(t, nil, err)
-	_, err = mgr.getVChannels(collID)
+	err := mgr.createDQLStream(collID)
 	assert.Equal(t, nil, err)
 }
 
 func TestChannelsMgrImpl_getDQLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
-	collID := UniqueID(getUniqueIntGeneratorIns().get())
+	collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	_, err := mgr.getDQLStream(collID)
 	assert.NotEqual(t, nil, err)
 
@@ -195,11 +171,11 @@ func TestChannelsMgrImpl_getDQLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_removeDQLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
-	collID := UniqueID(getUniqueIntGeneratorIns().get())
+	collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	_, err := mgr.getDQLStream(collID)
 	assert.NotEqual(t, nil, err)
 
@@ -222,15 +198,14 @@ func TestChannelsMgrImpl_removeDQLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_removeAllDQLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := msgstream.NewSimpleMsgStreamFactory()
-	mgr := newChannelsMgr(master.GetChannels, nil, query.GetChannels, nil, factory)
+	factory := newSimpleMockMsgStreamFactory()
+	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
 	num := 10
 	for i := 0; i < num; i++ {
-		collID := UniqueID(getUniqueIntGeneratorIns().get())
+		collID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 		err := mgr.createDQLStream(collID)
 		assert.Equal(t, nil, err)
 	}
 }
-*/

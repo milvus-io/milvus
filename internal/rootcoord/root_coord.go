@@ -17,9 +17,12 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -44,7 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -62,6 +65,8 @@ const (
 
 	// MetricRequestsSuccess used to count the num of successful requests
 	MetricRequestsSuccess = "success"
+
+	DefaultShardsNum = int32(2)
 )
 
 func metricProxy(v int64) string {
@@ -85,8 +90,11 @@ type Core struct {
 	etcdCli *clientv3.Client
 	kvBase  *etcdkv.EtcdKV
 
+	//DDL lock
+	ddlLock sync.Mutex
+
 	//setMsgStreams, send time tick into dd channel and time tick channel
-	SendTimeTick func(t typeutil.Timestamp) error
+	SendTimeTick func(t typeutil.Timestamp, reason string) error
 
 	//setMsgStreams, send create collection into dd channel
 	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error
@@ -124,6 +132,9 @@ type Core struct {
 	// proxy clients
 	proxyClientManager *proxyClientManager
 
+	// metrics cache manager
+	metricsCacheManager *metricsinfo.MetricsCacheManager
+
 	// channel timetick
 	chanTimeTick *timetickSync
 
@@ -152,6 +163,7 @@ func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	core := &Core{
 		ctx:       ctx,
 		cancel:    cancel,
+		ddlLock:   sync.Mutex{},
 		msFactory: factory,
 	}
 	core.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -160,6 +172,11 @@ func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 
 func (c *Core) UpdateStateCode(code internalpb.StateCode) {
 	c.stateCode.Store(code)
+}
+
+func (c *Core) isHealthy() bool {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
 }
 
 func (c *Core) checkInit() error {
@@ -232,9 +249,11 @@ func (c *Core) startTimeTickLoop() {
 			log.Debug("rootcoord context closed", zap.Error(c.ctx.Err()))
 			return
 		case <-ticker.C:
+			c.ddlLock.Lock()
 			if ts, err := c.TSOAllocator(1); err == nil {
-				c.SendTimeTick(ts)
+				c.SendTimeTick(ts, "timetick loop")
 			}
+			c.ddlLock.Unlock()
 		}
 	}
 }
@@ -290,77 +309,86 @@ func (c *Core) checkFlushedSegmentsLoop() {
 			return
 		case <-ticker.C:
 			log.Debug("check flushed segments")
-			collID2Meta, segID2IndexMeta, indexID2Meta := c.MetaTable.dupMeta()
-			for _, collMeta := range collID2Meta {
-				if len(collMeta.FieldIndexes) == 0 {
-					continue
-				}
-				for _, partID := range collMeta.PartitionIDs {
-					ctx2, cancel2 := context.WithTimeout(c.ctx, 3*time.Minute)
-					segIDs, err := c.CallGetFlushedSegmentsService(ctx2, collMeta.ID, partID)
-					if err != nil {
-						log.Debug("get flushed segments from data coord failed",
-							zap.Int64("collection id", collMeta.ID),
-							zap.Int64("partition id", partID),
-							zap.Error(err))
+			c.checkFlushedSegments(c.ctx)
+		}
+	}
+}
+
+func (c *Core) checkFlushedSegments(ctx context.Context) {
+	collID2Meta, segID2IndexMeta, indexID2Meta := c.MetaTable.dupMeta()
+	for _, collMeta := range collID2Meta {
+		if len(collMeta.FieldIndexes) == 0 {
+			continue
+		}
+		for _, partID := range collMeta.PartitionIDs {
+			ctx2, cancel2 := context.WithTimeout(ctx, 3*time.Minute)
+			segIDs, err := c.CallGetFlushedSegmentsService(ctx2, collMeta.ID, partID)
+			if err != nil {
+				log.Debug("get flushed segments from data coord failed",
+					zap.Int64("collection id", collMeta.ID),
+					zap.Int64("partition id", partID),
+					zap.Error(err))
+			} else {
+				for _, segID := range segIDs {
+					indexInfos := []*etcdpb.FieldIndexInfo{}
+					indexMeta, ok := segID2IndexMeta[segID]
+					if !ok {
+						indexInfos = append(indexInfos, collMeta.FieldIndexes...)
 					} else {
-						for _, segID := range segIDs {
-							indexInfos := []*etcdpb.FieldIndexInfo{}
-							indexMeta, ok := segID2IndexMeta[segID]
-							if !ok {
-								indexInfos = append(indexInfos, collMeta.FieldIndexes...)
-							} else {
-								for _, idx := range collMeta.FieldIndexes {
-									if _, ok := indexMeta[idx.IndexID]; !ok {
-										indexInfos = append(indexInfos, idx)
-									}
-								}
-							}
-							for _, idxInfo := range indexInfos {
-								field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
-								if err != nil {
-									log.Debug("GetFieldSchemaByID",
-										zap.Any("collection_meta", collMeta),
-										zap.Int64("field id", idxInfo.FiledID))
-									continue
-								}
-								indexMeta, ok := indexID2Meta[idxInfo.IndexID]
-								if !ok {
-									log.Debug("index meta not exist", zap.Int64("index_id", idxInfo.IndexID))
-									continue
-								}
-								info := etcdpb.SegmentIndexInfo{
-									CollectionID: collMeta.ID,
-									PartitionID:  partID,
-									SegmentID:    segID,
-									FieldID:      idxInfo.FiledID,
-									IndexID:      idxInfo.IndexID,
-									EnableIndex:  false,
-								}
-								log.Debug("build index by background checker",
-									zap.Int64("segment_id", segID),
-									zap.Int64("index_id", indexMeta.IndexID),
-									zap.Int64("collection_id", collMeta.ID))
-								info.BuildID, err = c.BuildIndex(ctx2, segID, field, &indexMeta, false)
-								if err != nil {
-									log.Debug("build index failed",
-										zap.Int64("segment_id", segID),
-										zap.Int64("field_id", field.FieldID),
-										zap.Int64("index_id", indexMeta.IndexID))
-									continue
-								}
-								if info.BuildID != 0 {
-									info.EnableIndex = true
-								}
-								if _, err := c.MetaTable.AddIndex(&info); err != nil {
-									log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
-								}
+						for _, idx := range collMeta.FieldIndexes {
+							if _, ok := indexMeta[idx.IndexID]; !ok {
+								indexInfos = append(indexInfos, idx)
 							}
 						}
 					}
-					cancel2()
+					for _, idxInfo := range indexInfos {
+						field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
+						if err != nil {
+							log.Debug("GetFieldSchemaByID",
+								zap.Any("collection_meta", collMeta),
+								zap.Int64("field id", idxInfo.FiledID))
+							continue
+						}
+						indexMeta, ok := indexID2Meta[idxInfo.IndexID]
+						if !ok {
+							log.Debug("index meta not exist", zap.Int64("index_id", idxInfo.IndexID))
+							continue
+						}
+						info := etcdpb.SegmentIndexInfo{
+							CollectionID: collMeta.ID,
+							PartitionID:  partID,
+							SegmentID:    segID,
+							FieldID:      idxInfo.FiledID,
+							IndexID:      idxInfo.IndexID,
+							EnableIndex:  false,
+						}
+						log.Debug("build index by background checker",
+							zap.Int64("segment_id", segID),
+							zap.Int64("index_id", indexMeta.IndexID),
+							zap.Int64("collection_id", collMeta.ID))
+						info.BuildID, err = c.BuildIndex(ctx2, segID, field, &indexMeta, false)
+						if err != nil {
+							log.Debug("build index failed",
+								zap.Int64("segment_id", segID),
+								zap.Int64("field_id", field.FieldID),
+								zap.Int64("index_id", indexMeta.IndexID))
+							continue
+						}
+						if info.BuildID != 0 {
+							info.EnableIndex = true
+						}
+						ts, _ := c.TSOAllocator(1)
+						if err := c.MetaTable.AddIndex(&info, ts); err != nil {
+							log.Debug("Add index into meta table failed",
+								zap.Int64("collection_id", collMeta.ID),
+								zap.Int64("index_id", info.IndexID),
+								zap.Int64("build_id", info.BuildID),
+								zap.Error(err))
+						}
+					}
 				}
 			}
+			cancel2()
 		}
 	}
 }
@@ -396,11 +424,8 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 		return nil
 	}
 
-	if b {
-		_, err = c.MetaTable.client.Save(DDMsgSendPrefix, "true")
-		return err
-	}
-	_, err = c.MetaTable.client.Save(DDMsgSendPrefix, "false")
+	ts, _ := c.TSOAllocator(1)
+	err = c.MetaTable.client.Save(DDMsgSendPrefix, strconv.FormatBool(b), ts)
 	return err
 }
 
@@ -420,7 +445,7 @@ func (c *Core) setMsgStreams() error {
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
 	log.Debug("rootcoord AsProducer: " + Params.TimeTickChannel)
 
-	c.SendTimeTick = func(t typeutil.Timestamp) error {
+	c.SendTimeTick = func(t typeutil.Timestamp, reason string) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: t,
@@ -462,7 +487,11 @@ func (c *Core) setMsgStreams() error {
 			Timestamps:       pt,
 			DefaultTimestamp: t,
 		}
-		return c.chanTimeTick.UpdateTimeTick(&ttMsg)
+		//log.Debug("update timetick",
+		//	zap.Any("DefaultTs", t),
+		//	zap.Any("sourceID", c.session.ServerID),
+		//	zap.Any("reason", reason))
+		return c.chanTimeTick.UpdateTimeTick(&ttMsg, reason)
 	}
 
 	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error {
@@ -478,7 +507,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
+		return c.dmlChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
@@ -494,7 +523,7 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
+		return c.dmlChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error {
@@ -510,7 +539,7 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
+		return c.dmlChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error {
@@ -526,7 +555,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
+		return c.dmlChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	return nil
@@ -558,16 +587,13 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 	c.CallGetBinlogFilePathsService = func(ctx context.Context, segID typeutil.UniqueID, fieldID typeutil.UniqueID) (retFiles []string, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
-				retFiles = nil
 				retErr = fmt.Errorf("get bin log file paths panic, msg = %v", err)
 			}
 		}()
 		<-initCh //wait connect to data coord
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
-			retFiles = nil
-			retErr = err
-			return
+			return nil, err
 		}
 		binlog, err := s.GetInsertBinlogPaths(ctx, &datapb.GetInsertBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
@@ -579,41 +605,29 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 			SegmentID: segID,
 		})
 		if err != nil {
-			retFiles = nil
-			retErr = err
-			return
+			return nil, err
 		}
 		if binlog.Status.ErrorCode != commonpb.ErrorCode_Success {
-			retFiles = nil
-			retErr = fmt.Errorf("GetInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
-			return
+			return nil, fmt.Errorf("GetInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
 		}
 		for i := range binlog.FieldIDs {
 			if binlog.FieldIDs[i] == fieldID {
-				retFiles = binlog.Paths[i].Values
-				retErr = nil
-				return
+				return binlog.Paths[i].Values, nil
 			}
 		}
-		retFiles = nil
-		retErr = fmt.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
-		return
+		return nil, fmt.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
 	}
 
 	c.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (retRows int64, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
-				retRows = 0
 				retErr = fmt.Errorf("get num rows panic, msg = %v", err)
-				return
 			}
 		}()
 		<-initCh
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
-			retRows = 0
-			retErr = err
-			return
+			return retRows, err
 		}
 		segInfo, err := s.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 			Base: &commonpb.MsgBase{
@@ -625,36 +639,26 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 			SegmentIDs: []typeutil.UniqueID{segID},
 		})
 		if err != nil {
-			retRows = 0
-			retErr = err
-			return
+			return retRows, err
 		}
 		if segInfo.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return 0, fmt.Errorf("GetSegmentInfo from data service failed, error = %s", segInfo.Status.Reason)
+			return retRows, fmt.Errorf("GetSegmentInfo from data service failed, error = %s", segInfo.Status.Reason)
 		}
 		if len(segInfo.Infos) != 1 {
 			log.Debug("get segment info empty")
-			retRows = 0
-			retErr = nil
-			return
+			return retRows, nil
 		}
 		if !isFromFlushedChan && segInfo.Infos[0].State != commonpb.SegmentState_Flushed {
 			log.Debug("segment id not flushed", zap.Int64("segment id", segID))
-			retRows = 0
-			retErr = nil
-			return
+			return retRows, nil
 		}
-		retRows = segInfo.Infos[0].NumOfRows
-		retErr = nil
-		return
+		return segInfo.Infos[0].NumOfRows, nil
 	}
 
 	c.CallGetFlushedSegmentsService = func(ctx context.Context, collID, partID typeutil.UniqueID) (retSegIDs []typeutil.UniqueID, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
-				retSegIDs = []typeutil.UniqueID{}
 				retErr = fmt.Errorf("get flushed segments from data coord panic, msg = %v", err)
-				return
 			}
 		}()
 		<-initCh
@@ -670,18 +674,12 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		}
 		rsp, err := s.GetFlushedSegments(ctx, req)
 		if err != nil {
-			retSegIDs = []typeutil.UniqueID{}
-			retErr = err
-			return
+			return retSegIDs, err
 		}
 		if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			retSegIDs = []typeutil.UniqueID{}
-			retErr = fmt.Errorf("get flushed segments from data coord failed, reason = %s", rsp.Status.Reason)
-			return
+			return retSegIDs, fmt.Errorf("get flushed segments from data coord failed, reason = %s", rsp.Status.Reason)
 		}
-		retSegIDs = rsp.Segments
-		retErr = nil
-		return
+		return rsp.Segments, nil
 	}
 
 	return nil
@@ -705,9 +703,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (retID typeutil.UniqueID, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
-				retID = 0
 				retErr = fmt.Errorf("build index panic, msg = %v", err)
-				return
 			}
 		}()
 		<-initCh
@@ -719,25 +715,18 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 			IndexName:   idxInfo.IndexName,
 		})
 		if err != nil {
-			retID = 0
-			retErr = err
-			return
+			return retID, err
 		}
 		if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			retID = 0
-			retErr = fmt.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
-			return
+			return retID, fmt.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
 		}
-		retID = rsp.IndexBuildID
-		retErr = nil
-		return
+		return rsp.IndexBuildID, nil
 	}
 
 	c.CallDropIndexService = func(ctx context.Context, indexID typeutil.UniqueID) (retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retErr = fmt.Errorf("drop index from index service panic, msg = %v", err)
-				return
 			}
 		}()
 		<-initCh
@@ -745,15 +734,12 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 			IndexID: indexID,
 		})
 		if err != nil {
-			retErr = err
-			return
+			return err
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			retErr = fmt.Errorf(rsp.Reason)
-			return
+			return fmt.Errorf(rsp.Reason)
 		}
-		retErr = nil
-		return
+		return nil
 	}
 
 	return nil
@@ -777,7 +763,6 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 		defer func() {
 			if err := recover(); err != nil {
 				retErr = fmt.Errorf("release collection from query service panic, msg = %v", err)
-				return
 			}
 		}()
 		<-initCh
@@ -793,15 +778,12 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 		}
 		rsp, err := s.ReleaseCollection(ctx, req)
 		if err != nil {
-			retErr = err
-			return
+			return err
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			retErr = fmt.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
-			return
+			return fmt.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
 		}
-		retErr = nil
-		return
+		return nil
 	}
 	c.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) (retErr error) {
 		defer func() {
@@ -823,15 +805,12 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 		}
 		rsp, err := s.ReleasePartitions(ctx, req)
 		if err != nil {
-			retErr = err
-			return
+			return err
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			retErr = fmt.Errorf("ReleasePartitions from query service failed, error = %s", rsp.Reason)
-			return
+			return fmt.Errorf("ReleasePartitions from query service failed, error = %s", rsp.Reason)
 		}
-		retErr = nil
-		return
+		return nil
 	}
 	return nil
 }
@@ -881,28 +860,24 @@ func (c *Core) Init() error {
 	c.initOnce.Do(func() {
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second}); initError != nil {
+				log.Error("RootCoord, Failed to new Etcd client", zap.Any("reason", initError))
 				return initError
 			}
-			tsAlloc := func() typeutil.Timestamp {
-				for {
-					var ts typeutil.Timestamp
-					var err error
-					if ts, err = c.TSOAllocator(1); err == nil {
-						return ts
-					}
-					time.Sleep(100 * time.Millisecond)
-					log.Debug("alloc time stamp error", zap.Error(err))
-				}
-			}
 			var ms *metaSnapshot
-			ms, initError = newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024, tsAlloc)
+			ms, initError = newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024)
 			if initError != nil {
+				log.Error("RootCoord, Failed to new MetaSnapshot", zap.Any("reason", initError))
 				return initError
 			}
 			if c.MetaTable, initError = NewMetaTable(ms); initError != nil {
+				log.Error("RootCoord, Failed to new MetaTable", zap.Any("reason", initError))
 				return initError
 			}
-			c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
+			if c.kvBase, initError = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.KvRootPath); initError != nil {
+				log.Error("RootCoord, Failed to new EtcdKV", zap.Any("reason", initError))
+				return initError
+			}
+
 			return nil
 		}
 		log.Debug("RootCoord, Connect to Etcd")
@@ -912,7 +887,11 @@ func (c *Core) Init() error {
 		}
 
 		log.Debug("RootCoord, Set TSO and ID Allocator")
-		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid"))
+		kv, initError := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid")
+		if initError != nil {
+			return
+		}
+		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", kv)
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
 		}
@@ -923,7 +902,11 @@ func (c *Core) Init() error {
 			return idAllocator.UpdateID()
 		}
 
-		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "tso"))
+		kv, initError = tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "tso")
+		if initError != nil {
+			return
+		}
+		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", kv)
 		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
 		}
@@ -942,9 +925,12 @@ func (c *Core) Init() error {
 			return
 		}
 
-		c.dmlChannels = newDMLChannels(c)
+		c.dmlChannels = newDmlChannels(c, Params.DmlChannelName, Params.DmlChannelNum)
+
+		// recover physical channels for all collections
 		pc := c.MetaTable.ListCollectionPhysicalChannels()
 		c.dmlChannels.AddProducerChannels(pc...)
+		log.Debug("recover all physical channels", zap.Any("chanNames", pc))
 
 		c.chanTimeTick = newTimeTickSync(c)
 		c.chanTimeTick.AddProxy(c.session)
@@ -957,10 +943,18 @@ func (c *Core) Init() error {
 			c.chanTimeTick.GetProxy,
 			c.proxyClientManager.GetProxyClients,
 		)
+		if initError != nil {
+			return
+		}
 		c.proxyManager.AddSession(c.chanTimeTick.AddProxy, c.proxyClientManager.AddProxyClient)
 		c.proxyManager.DelSession(c.chanTimeTick.DelProxy, c.proxyClientManager.DelProxyClient)
 
+		c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
+
 		initError = c.setMsgStreams()
+		if initError != nil {
+			return
+		}
 	})
 	if initError == nil {
 		log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Initializing)]))
@@ -970,11 +964,13 @@ func (c *Core) Init() error {
 	return initError
 }
 
-func (c *Core) reSendDdMsg(ctx context.Context) error {
-	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix, 0)
-	if err != nil || flag == "true" {
-		log.Debug("No un-successful DdMsg")
-		return nil
+func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
+	if !force {
+		flag, err := c.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		if err != nil || flag == "true" {
+			log.Debug("No un-successful DdMsg")
+			return nil
+		}
 	}
 
 	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix, 0)
@@ -986,6 +982,10 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 	if err = json.Unmarshal([]byte(ddOpStr), &ddOp); err != nil {
 		return err
 	}
+
+	var invalidateCache bool
+	var ts typeutil.Timestamp
+	var dbName, collName string
 
 	switch ddOp.Type {
 	case CreateCollectionDDType:
@@ -1000,11 +1000,14 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		if err = c.SendDdCreateCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
+		invalidateCache = false
 	case DropCollectionDDType:
 		var ddReq = internalpb.DropCollectionRequest{}
 		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
+		ts = ddReq.Base.Timestamp
+		dbName, collName = ddReq.DbName, ddReq.CollectionName
 		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
 		if err != nil {
 			return err
@@ -1012,66 +1015,59 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		if err = c.SendDdDropCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
-		req := proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO, msg type
-				MsgID:     0, //TODO, msg id
-				Timestamp: ddReq.Base.Timestamp,
-				SourceID:  c.session.ServerID,
-			},
-			DbName:         ddReq.DbName,
-			CollectionName: ddReq.CollectionName,
-		}
-		c.proxyClientManager.InvalidateCollectionMetaCache(c.ctx, &req)
-
+		invalidateCache = true
 	case CreatePartitionDDType:
 		var ddReq = internalpb.CreatePartitionRequest{}
 		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
+		ts = ddReq.Base.Timestamp
+		dbName, collName = ddReq.DbName, ddReq.CollectionName
 		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
 		if err != nil {
 			return err
 		}
+		if _, err = c.MetaTable.GetPartitionByName(collInfo.ID, ddReq.PartitionName, 0); err == nil {
+			return fmt.Errorf("partition %s already created", ddReq.PartitionName)
+		}
 		if err = c.SendDdCreatePartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
-		req := proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO, msg type
-				MsgID:     0, //TODO, msg id
-				Timestamp: ddReq.Base.Timestamp,
-				SourceID:  c.session.ServerID,
-			},
-			DbName:         ddReq.DbName,
-			CollectionName: ddReq.CollectionName,
-		}
-		c.proxyClientManager.InvalidateCollectionMetaCache(c.ctx, &req)
+		invalidateCache = true
 	case DropPartitionDDType:
 		var ddReq = internalpb.DropPartitionRequest{}
 		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
+		ts = ddReq.Base.Timestamp
+		dbName, collName = ddReq.DbName, ddReq.CollectionName
 		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
 		if err != nil {
+			return err
+		}
+		if _, err = c.MetaTable.GetPartitionByName(collInfo.ID, ddReq.PartitionName, 0); err != nil {
 			return err
 		}
 		if err = c.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
+		invalidateCache = true
+	default:
+		return fmt.Errorf("Invalid DdOperation %s", ddOp.Type)
+	}
+
+	if invalidateCache {
 		req := proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO, msg type
 				MsgID:     0, //TODO, msg id
-				Timestamp: ddReq.Base.Timestamp,
+				Timestamp: ts,
 				SourceID:  c.session.ServerID,
 			},
-			DbName:         ddReq.DbName,
-			CollectionName: ddReq.CollectionName,
+			DbName:         dbName,
+			CollectionName: collName,
 		}
 		c.proxyClientManager.InvalidateCollectionMetaCache(c.ctx, &req)
-	default:
-		return fmt.Errorf("Invalid DdOperation %s", ddOp.Type)
 	}
 
 	// Update DDOperation in etcd
@@ -1092,7 +1088,7 @@ func (c *Core) Start() error {
 			log.Debug("RootCoord Start WatchProxy failed", zap.Error(err))
 			return
 		}
-		if err := c.reSendDdMsg(c.ctx); err != nil {
+		if err := c.reSendDdMsg(c.ctx, false); err != nil {
 			log.Debug("RootCoord Start reSendDdMsg failed", zap.Error(err))
 			return
 		}
@@ -1815,7 +1811,7 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
 		return status, nil
 	}
-	err := c.chanTimeTick.UpdateTimeTick(in)
+	err := c.chanTimeTick.UpdateTimeTick(in, "gRPC")
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -1896,7 +1892,8 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 			log.Error("build index fail", zap.Int64("buildid", info.BuildID), zap.Error(err))
 			continue
 		}
-		_, err = c.MetaTable.AddIndex(&info)
+		ts, _ := c.TSOAllocator(1)
+		err = c.MetaTable.AddIndex(&info, ts)
 		if err != nil {
 			log.Error("AddIndex fail", zap.String("err", err.Error()))
 		}
@@ -1905,5 +1902,80 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
+	}, nil
+}
+
+func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("RootCoord.GetMetrics",
+		zap.Int64("node_id", c.session.ServerID),
+		zap.String("req", req.Request))
+
+	if !c.isHealthy() {
+		log.Warn("RootCoord.GetMetrics failed",
+			zap.Int64("node_id", c.session.ServerID),
+			zap.String("req", req.Request),
+			zap.Error(errRootCoordIsUnhealthy(c.session.ServerID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgRootCoordIsUnhealthy(c.session.ServerID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("RootCoord.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", c.session.ServerID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("RootCoord.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		ret, err := c.metricsCacheManager.GetSystemInfoMetrics()
+		if err == nil && ret != nil {
+			return ret, nil
+		}
+		log.Debug("failed to get system info metrics from cache, recompute instead",
+			zap.Error(err))
+
+		systemInfoMetrics, err := c.getSystemInfoMetrics(ctx, req)
+
+		log.Debug("RootCoord.GetMetrics",
+			zap.Int64("node_id", c.session.ServerID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		c.metricsCacheManager.UpdateSystemInfoMetrics(systemInfoMetrics)
+
+		return systemInfoMetrics, err
+	}
+
+	log.Debug("RootCoord.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", c.session.ServerID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }

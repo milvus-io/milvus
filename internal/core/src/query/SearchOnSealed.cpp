@@ -15,6 +15,8 @@
 
 #include "query/SearchOnSealed.h"
 #include <knowhere/index/vector_index/VecIndex.h>
+#include "knowhere/index/vector_index/ConfAdapter.h"
+#include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include <boost_ext/dynamic_bitset_ext.hpp>
@@ -56,17 +58,6 @@ AssembleNegBitset(const BitsetSimple& bitset_simple) {
     return result;
 }
 
-// TODO: temporary fix
-// remove this when internal destructor bug is fix
-static void
-ReleaseQueryResult(const knowhere::DatasetPtr& result) {
-    float* res_dist = result->Get<float*>(knowhere::meta::DISTANCE);
-    free(res_dist);
-
-    int64_t* res_ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    free(res_ids);
-}
-
 void
 SearchOnSealed(const Schema& schema,
                const segcore::SealedIndexingRecord& record,
@@ -92,6 +83,9 @@ SearchOnSealed(const Schema& schema,
         auto conf = search_info.search_params_;
         conf[milvus::knowhere::meta::TOPK] = search_info.topk_;
         conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
+        auto index_type = field_indexing->indexing_->index_type();
+        auto adapter = milvus::knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
+        Assert(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()));
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
 
@@ -106,9 +100,5 @@ SearchOnSealed(const Schema& schema,
 
     std::copy_n(ids, total_num, result.internal_seg_offsets_.data());
     std::copy_n(distances, total_num, result.result_distances_.data());
-
-    // TODO: temporary fix
-    // remove this when internal destructor bug is fix
-    ReleaseQueryResult(final);
 }
 }  // namespace milvus::query

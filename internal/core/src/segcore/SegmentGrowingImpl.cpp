@@ -306,35 +306,29 @@ SegmentGrowingImpl::bulk_subscript(FieldOffset field_offset,
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int8_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int16_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int32_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::FLOAT: {
-            bulk_subscript_impl<float>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<float>(*vec_ptr, seg_offsets, count, -1.0, output);
             break;
         }
-
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<double>(*vec_ptr, seg_offsets, count, -1.0, output);
             break;
         }
-
         default: {
             PanicInfo("unsupported type");
         }
@@ -441,6 +435,27 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         columns_data.emplace_back(std::move(column));
     }
     do_insert(reserved_offset, size, row_ids.data(), timestamps.data(), columns_data);
+}
+
+std::vector<SegOffset>
+SegmentGrowingImpl::search_ids(const boost::dynamic_bitset<>& bitset, Timestamp timestamp) const {
+    std::vector<SegOffset> res_offsets;
+
+    for (int i = 0; i < bitset.size(); i++) {
+        if (bitset[i]) {
+            SegOffset the_offset(-1);
+            auto offset = SegOffset(i);
+            if (record_.timestamps_[offset.get()] < timestamp) {
+                the_offset = std::max(the_offset, offset);
+            }
+
+            if (the_offset == SegOffset(-1)) {
+                continue;
+            }
+            res_offsets.push_back(the_offset);
+        }
+    }
+    return res_offsets;
 }
 
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>

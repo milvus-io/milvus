@@ -2072,6 +2072,7 @@ class PlanNode :
 
   enum NodeCase {
     kVectorAnns = 1,
+    kPredicates = 2,
     NODE_NOT_SET = 0,
   };
 
@@ -2152,10 +2153,11 @@ class PlanNode :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kOutputFieldIdsFieldNumber = 2,
+    kOutputFieldIdsFieldNumber = 3,
     kVectorAnnsFieldNumber = 1,
+    kPredicatesFieldNumber = 2,
   };
-  // repeated int64 output_field_ids = 2;
+  // repeated int64 output_field_ids = 3;
   int output_field_ids_size() const;
   void clear_output_field_ids();
   ::PROTOBUF_NAMESPACE_ID::int64 output_field_ids(int index) const;
@@ -2174,12 +2176,21 @@ class PlanNode :
   ::milvus::proto::plan::VectorANNS* mutable_vector_anns();
   void set_allocated_vector_anns(::milvus::proto::plan::VectorANNS* vector_anns);
 
+  // .milvus.proto.plan.Expr predicates = 2;
+  bool has_predicates() const;
+  void clear_predicates();
+  const ::milvus::proto::plan::Expr& predicates() const;
+  ::milvus::proto::plan::Expr* release_predicates();
+  ::milvus::proto::plan::Expr* mutable_predicates();
+  void set_allocated_predicates(::milvus::proto::plan::Expr* predicates);
+
   void clear_node();
   NodeCase node_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.PlanNode)
  private:
   class _Internal;
   void set_has_vector_anns();
+  void set_has_predicates();
 
   inline bool has_node() const;
   inline void clear_has_node();
@@ -2190,6 +2201,7 @@ class PlanNode :
   union NodeUnion {
     NodeUnion() {}
     ::milvus::proto::plan::VectorANNS* vector_anns_;
+    ::milvus::proto::plan::Expr* predicates_;
   } node_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   ::PROTOBUF_NAMESPACE_ID::uint32 _oneof_case_[1];
@@ -3671,7 +3683,48 @@ inline ::milvus::proto::plan::VectorANNS* PlanNode::mutable_vector_anns() {
   return node_.vector_anns_;
 }
 
-// repeated int64 output_field_ids = 2;
+// .milvus.proto.plan.Expr predicates = 2;
+inline bool PlanNode::has_predicates() const {
+  return node_case() == kPredicates;
+}
+inline void PlanNode::set_has_predicates() {
+  _oneof_case_[0] = kPredicates;
+}
+inline void PlanNode::clear_predicates() {
+  if (has_predicates()) {
+    delete node_.predicates_;
+    clear_has_node();
+  }
+}
+inline ::milvus::proto::plan::Expr* PlanNode::release_predicates() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.PlanNode.predicates)
+  if (has_predicates()) {
+    clear_has_node();
+      ::milvus::proto::plan::Expr* temp = node_.predicates_;
+    node_.predicates_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::milvus::proto::plan::Expr& PlanNode::predicates() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.PlanNode.predicates)
+  return has_predicates()
+      ? *node_.predicates_
+      : *reinterpret_cast< ::milvus::proto::plan::Expr*>(&::milvus::proto::plan::_Expr_default_instance_);
+}
+inline ::milvus::proto::plan::Expr* PlanNode::mutable_predicates() {
+  if (!has_predicates()) {
+    clear_node();
+    set_has_predicates();
+    node_.predicates_ = CreateMaybeMessage< ::milvus::proto::plan::Expr >(
+        GetArenaNoVirtual());
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.PlanNode.predicates)
+  return node_.predicates_;
+}
+
+// repeated int64 output_field_ids = 3;
 inline int PlanNode::output_field_ids_size() const {
   return output_field_ids_.size();
 }

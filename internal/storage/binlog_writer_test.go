@@ -22,6 +22,9 @@ import (
 
 func TestBinlogWriterReader(t *testing.T) {
 	binlogWriter := NewInsertBinlogWriter(schemapb.DataType_Int32, 10, 20, 30, 40)
+	tp := binlogWriter.GetBinlogType()
+	assert.Equal(t, tp, InsertBinlog)
+
 	binlogWriter.SetEventTimeStamp(1000, 2000)
 	defer binlogWriter.Close()
 	eventWriter, err := binlogWriter.NextInsertEventWriter()

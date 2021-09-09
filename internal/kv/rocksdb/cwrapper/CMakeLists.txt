@@ -45,6 +45,7 @@ macro( build_rocksdb )
             URL                 ${ROCKSDB_SOURCE_URL}
             URL_MD5             "67f9e04fda62af551dd039c37b1808ac"
             CMAKE_ARGS          ${ROCKSDB_CMAKE_ARGS}
+            INSTALL_COMMAND     make install
             )
 
     ExternalProject_Get_Property( rocksdb-ep INSTALL_DIR )

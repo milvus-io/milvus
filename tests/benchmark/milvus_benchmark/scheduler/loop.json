@@ -1,0 +1,10 @@
+[
+    {
+        "suite_params": [
+            {
+                "suite": "2_locust_insert_5h.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

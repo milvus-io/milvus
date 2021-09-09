@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include "test_utils/DataGen.h"
 #include "segcore/ScalarIndex.h"
+#include "query/ExprImpl.h"
 using namespace milvus;
 using namespace milvus::segcore;
 
@@ -68,17 +69,79 @@ TEST(GetEntityByIds, AUTOID) {
     req_ids_arr->add_data(-1);
 
     std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    auto retrieve_results = segment->GetEntityById(target_offsets, *req_ids, 0);
-    auto ids = retrieve_results->ids().int_id();
+    //    auto retrieve_results = segment->GetEntityById(target_offsets, *req_ids, 0);
+    //    auto ids = retrieve_results->ids().int_id();
+    //    Assert(retrieve_results->fields_data_size() == target_offsets.size());
+    //    FieldOffset field_offset(0);
+    //    auto field0 = retrieve_results->fields_data(0);
+    //    Assert(field0.has_scalars());
+    //    auto field0_data = field0.scalars().long_data();
+    //    for (int i = 0; i < req_size; ++i) {
+    //        auto id = ids.data(i);
+    //        auto index = choose(i);
+    //        ASSERT_EQ(id, dataset.row_ids_[index]);
+    //        auto data = field0_data.data(i);
+    //        ASSERT_EQ(data, i64_col[index]);
+    //    }
+    //
+    //    auto field1 = retrieve_results->fields_data(1);
+    //    Assert(field1.has_vectors());
+    //    auto field1_data = field1.vectors().float_vector();
+    //    ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+    //
+    //    for (int i = 0; i < req_size; ++i) {
+    //        for (int d = 0; d < DIM; ++d) {
+    //            auto index = choose(i);
+    //            auto data = field1_data.data(i * DIM + d);
+    //            auto ref = vf_col[index * DIM + d];
+    //            ASSERT_EQ(data, ref);
+    //        }
+    //    }
+}
+
+TEST(Retrieve, AUTOID) {
+    auto schema = std::make_shared<Schema>();
+    auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
+    auto DIM = 16;
+    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
+    schema->set_primary_key(FieldOffset(0));
+
+    int64_t N = 100;
+    int64_t req_size = 10;
+    auto choose = [=](int i) { return i * 3 % N; };
+
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+    SealedLoader(dataset, *segment);
+    auto i64_col = dataset.get_col<int64_t>(0);
+
+    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>();
+    term_expr->field_offset_ = FieldOffset(0);
+    term_expr->data_type_ = DataType::INT64;
+    for (int i = 0; i < req_size; ++i) {
+        term_expr->terms_.emplace_back(i64_col[choose(i)]);
+    }
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->predicate_ = std::move(term_expr);
+    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
+    plan->field_offsets_ = target_offsets;
+
+    auto retrieve_results = segment->Retrieve(plan.get(), 100);
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
     FieldOffset field_offset(0);
     auto field0 = retrieve_results->fields_data(0);
     Assert(field0.has_scalars());
     auto field0_data = field0.scalars().long_data();
+
     for (int i = 0; i < req_size; ++i) {
-        auto id = ids.data(i);
         auto index = choose(i);
-        ASSERT_EQ(id, dataset.row_ids_[index]);
+        auto data = field0_data.data(i);
+    }
+
+    for (int i = 0; i < req_size; ++i) {
+        auto index = choose(i);
         auto data = field0_data.data(i);
         ASSERT_EQ(data, i64_col[index]);
     }
@@ -87,15 +150,6 @@ TEST(GetEntityByIds, AUTOID) {
     Assert(field1.has_vectors());
     auto field1_data = field1.vectors().float_vector();
     ASSERT_EQ(field1_data.data_size(), DIM * req_size);
-
-    for (int i = 0; i < req_size; ++i) {
-        for (int d = 0; d < DIM; ++d) {
-            auto index = choose(i);
-            auto data = field1_data.data(i * DIM + d);
-            auto ref = vf_col[index * DIM + d];
-            ASSERT_EQ(data, ref);
-        }
-    }
 }
 
 TEST(GetEntityByIds, PrimaryKey) {
@@ -126,32 +180,32 @@ TEST(GetEntityByIds, PrimaryKey) {
     req_ids_arr->add_data(-1);
 
     std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    auto retrieve_results = segment->GetEntityById(target_offsets, *req_ids, 0);
-    auto ids = retrieve_results->ids().int_id();
-    Assert(retrieve_results->fields_data_size() == target_offsets.size());
-    FieldOffset field_offset(0);
-    auto field0 = retrieve_results->fields_data(0);
-    Assert(field0.has_scalars());
-    auto field0_data = field0.scalars().long_data();
-    for (int i = 0; i < req_size; ++i) {
-        auto id = ids.data(i);
-        auto index = choose(i);
-        ASSERT_EQ(id, i64_col[index]);
-        auto data = field0_data.data(i);
-        ASSERT_EQ(data, i64_col[index]);
-    }
-
-    auto field1 = retrieve_results->fields_data(1);
-    Assert(field1.has_vectors());
-    auto field1_data = field1.vectors().float_vector();
-    ASSERT_EQ(field1_data.data_size(), DIM * req_size);
-
-    for (int i = 0; i < req_size; ++i) {
-        for (int d = 0; d < DIM; ++d) {
-            auto index = choose(i);
-            auto data = field1_data.data(i * DIM + d);
-            auto ref = vf_col[index * DIM + d];
-            ASSERT_EQ(data, ref);
-        }
-    }
+    //    auto retrieve_results = segment->GetEntityById(target_offsets, *req_ids, 0);
+    //    auto ids = retrieve_results->ids().int_id();
+    //    Assert(retrieve_results->fields_data_size() == target_offsets.size());
+    //    FieldOffset field_offset(0);
+    //    auto field0 = retrieve_results->fields_data(0);
+    //    Assert(field0.has_scalars());
+    //    auto field0_data = field0.scalars().long_data();
+    //    for (int i = 0; i < req_size; ++i) {
+    //        auto id = ids.data(i);
+    //        auto index = choose(i);
+    //        ASSERT_EQ(id, i64_col[index]);
+    //        auto data = field0_data.data(i);
+    //        ASSERT_EQ(data, i64_col[index]);
+    //    }
+    //
+    //    auto field1 = retrieve_results->fields_data(1);
+    //    Assert(field1.has_vectors());
+    //    auto field1_data = field1.vectors().float_vector();
+    //    ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+    //
+    //    for (int i = 0; i < req_size; ++i) {
+    //        for (int d = 0; d < DIM; ++d) {
+    //            auto index = choose(i);
+    //            auto data = field1_data.data(i * DIM + d);
+    //            auto ref = vf_col[index * DIM + d];
+    //            ASSERT_EQ(data, ref);
+    //        }
+    //    }
 }

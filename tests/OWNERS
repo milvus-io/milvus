@@ -1,13 +1,12 @@
 reviewers:
   - binbinlv
-  - del-zhenwu
   - ThreadDao
   - wangting0128
   - yanliang567
+  - zhuwenxing
 
 approvers:
-  - del-zhenwu
-  - yanliang567
+  - pr-inspection
 
 labels:
 - area/test

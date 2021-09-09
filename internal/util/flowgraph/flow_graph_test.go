@@ -203,7 +203,83 @@ func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64,
 	return fg, inputChan, outputChan, cancel
 }
 
-func TestTimeTickedFlowGraph_Example(t *testing.T) {
+func TestTimeTickedFlowGraphAddNode(t *testing.T) {
+	const MaxQueueLength = 1024
+	inputChan := make(chan float64, MaxQueueLength)
+
+	fg := NewTimeTickedFlowGraph(context.TODO())
+
+	var a Node = &nodeA{
+		BaseNode: BaseNode{
+			maxQueueLength: MaxQueueLength,
+		},
+		inputChan: inputChan,
+	}
+	var b Node = &nodeB{
+		BaseNode: BaseNode{
+			maxQueueLength: MaxQueueLength,
+		},
+	}
+
+	fg.AddNode(a)
+	assert.Equal(t, len(fg.nodeCtx), 1)
+	fg.AddNode(b)
+	assert.Equal(t, len(fg.nodeCtx), 2)
+}
+
+func TestTimeTickedFlowGraphSetEdges(t *testing.T) {
+	const MaxQueueLength = 1024
+	inputChan := make(chan float64, MaxQueueLength)
+
+	fg := NewTimeTickedFlowGraph(context.TODO())
+
+	var a Node = &nodeA{
+		BaseNode: BaseNode{
+			maxQueueLength: MaxQueueLength,
+		},
+		inputChan: inputChan,
+	}
+	var b Node = &nodeB{
+		BaseNode: BaseNode{
+			maxQueueLength: MaxQueueLength,
+		},
+	}
+	var c Node = &nodeC{
+		BaseNode: BaseNode{
+			maxQueueLength: MaxQueueLength,
+		},
+	}
+
+	fg.AddNode(a)
+	fg.AddNode(b)
+	fg.AddNode(c)
+
+	var err = fg.SetEdges(a.Name(),
+		[]string{b.Name()},
+		[]string{c.Name()},
+	)
+	assert.Nil(t, err)
+
+	err = fg.SetEdges("Invalid",
+		[]string{b.Name()},
+		[]string{c.Name()},
+	)
+	assert.Error(t, err)
+
+	err = fg.SetEdges(a.Name(),
+		[]string{"Invalid"},
+		[]string{c.Name()},
+	)
+	assert.Error(t, err)
+
+	err = fg.SetEdges(a.Name(),
+		[]string{b.Name()},
+		[]string{"Invalid"},
+	)
+	assert.Error(t, err)
+}
+
+func TestTimeTickedFlowGraphStart(t *testing.T) {
 	fg, inputChan, outputChan, cancel := createExampleFlowGraph()
 	defer cancel()
 	go fg.Start()
@@ -222,4 +298,10 @@ func TestTimeTickedFlowGraph_Example(t *testing.T) {
 		}
 	}()
 	time.Sleep(50 * time.Millisecond)
+}
+
+func TestTimeTickedFlowGraphClose(t *testing.T) {
+	fg, _, _, cancel := createExampleFlowGraph()
+	defer cancel()
+	fg.Close()
 }

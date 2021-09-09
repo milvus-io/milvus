@@ -12,8 +12,13 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -29,23 +34,54 @@ import (
 
 func newMemoryMeta(allocator allocator) (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
-	return newMeta(memoryKV)
+	return NewMeta(memoryKV)
 }
+
+var _ allocator = (*MockAllocator)(nil)
 
 type MockAllocator struct {
 	cnt int64
 }
 
-func (m *MockAllocator) allocTimestamp() (Timestamp, error) {
+func (m *MockAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
 	val := atomic.AddInt64(&m.cnt, 1)
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
 	return ts, nil
 }
 
-func (m *MockAllocator) allocID() (UniqueID, error) {
+func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	val := atomic.AddInt64(&m.cnt, 1)
 	return val, nil
+}
+
+var _ allocator = (*FailsAllocator)(nil)
+
+// FailsAllocator allocator that fails
+type FailsAllocator struct{}
+
+func (a *FailsAllocator) allocTimestamp(_ context.Context) (Timestamp, error) {
+	return 0, errors.New("always fail")
+}
+
+func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
+	return 0, errors.New("always fail")
+}
+
+// a mock kv that always fail when do `Save`
+type saveFailKV struct{ kv.TxnKV }
+
+// Save override behavior
+func (kv *saveFailKV) Save(key, value string) error {
+	return errors.New("mocked fail")
+}
+
+// a mock kv that always fail when do `Remove`
+type removeFailKV struct{ kv.TxnKV }
+
+// Remove override behavior, inject error
+func (kv *removeFailKV) Remove(key string) error {
+	return errors.New("mocked fail")
 }
 
 func newMockAllocator() *MockAllocator {
@@ -115,17 +151,49 @@ func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.Flush
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	// TODO(dragondriver): change the id, though it's not important in ut
+	nodeID := UniqueID(c.id)
+
+	nodeInfos := metricsinfo.DataNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+		},
+	}
+	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response:      "",
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+		}, nil
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+	}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = internalpb.StateCode_Abnormal
 	return nil
 }
 
 type mockRootCoordService struct {
-	cnt int64
+	state internalpb.StateCode
+	cnt   int64
 }
 
 func newMockRootCoordService() *mockRootCoordService {
-	return &mockRootCoordService{}
+	return &mockRootCoordService{state: internalpb.StateCode_Healthy}
 }
 
 func (m *mockRootCoordService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -141,6 +209,7 @@ func (m *mockRootCoordService) Start() error {
 }
 
 func (m *mockRootCoordService) Stop() error {
+	m.state = internalpb.StateCode_Abnormal
 	return nil
 }
 
@@ -153,7 +222,7 @@ func (m *mockRootCoordService) GetComponentStates(ctx context.Context) (*interna
 		State: &internalpb.ComponentInfo{
 			NodeID:    0,
 			Role:      "",
-			StateCode: internalpb.StateCode_Healthy,
+			StateCode: m.state,
 			ExtraInfo: []*commonpb.KeyValuePair{},
 		},
 		SubcomponentStates: []*internalpb.ComponentInfo{},
@@ -243,6 +312,10 @@ func (m *mockRootCoordService) DropIndex(ctx context.Context, req *milvuspb.Drop
 
 //global timestamp allocator
 func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+	if m.state != internalpb.StateCode_Healthy {
+		return &rootcoordpb.AllocTimestampResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
+	}
+
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
@@ -257,6 +330,9 @@ func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *rootcoor
 }
 
 func (m *mockRootCoordService) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+	if m.state != internalpb.StateCode_Healthy {
+		return &rootcoordpb.AllocIDResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
+	}
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	return &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
@@ -299,4 +375,43 @@ func (m *mockRootCoordService) SegmentFlushCompleted(ctx context.Context, in *da
 }
 func (m *mockRootCoordService) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	// TODO(dragondriver): change the id, though it's not important in ut
+	nodeID := UniqueID(20210901)
+
+	rootCoordTopology := metricsinfo.RootCoordTopology{
+		Self: metricsinfo.RootCoordInfos{
+			BaseComponentInfos: metricsinfo.BaseComponentInfos{
+				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
+			},
+		},
+		Connections: metricsinfo.ConnTopology{
+			Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
+			// TODO(dragondriver): fill ConnectedComponents if necessary
+			ConnectedComponents: []metricsinfo.ConnectionInfo{},
+		},
+	}
+
+	resp, err := metricsinfo.MarshalTopology(rootCoordTopology)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response:      "",
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
+		}, nil
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
+	}, nil
 }

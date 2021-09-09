@@ -1,0 +1,232 @@
+metadata:
+  name: benchmark
+  namespace: qa
+  uid: e8a51212-9b27-441d-b357-e73c63854ccf
+  resourceVersion: '63697833'
+  generation: 41
+  creationTimestamp: '2021-05-25T11:04:40Z'
+  labels:
+    workflows.argoproj.io/creator: system-serviceaccount-argo-argo-server
+  managedFields:
+    - manager: argo
+      operation: Update
+      apiVersion: argoproj.io/v1alpha1
+      fieldsType: FieldsV1
+      fieldsV1:
+        'f:metadata':
+          'f:labels':
+            .: {}
+            'f:workflows.argoproj.io/creator': {}
+        'f:spec':
+          .: {}
+          'f:arguments':
+            .: {}
+            'f:parameters': {}
+          'f:entrypoint': {}
+          'f:nodeSelector':
+            .: {}
+            'f:node-role.kubernetes.io/benchmark': {}
+          'f:onExit': {}
+          'f:serviceAccountName': {}
+          'f:templates': {}
+          'f:tolerations': {}
+          'f:volumes': {}
+spec:
+  templates:
+    - name: benchmark-loop
+      inputs: {}
+      outputs: {}
+      metadata: {}
+      steps:
+        - - name: call-benchmark-test
+            template: benchmark
+            arguments:
+              parameters:
+                - name: server-instance
+                  value: '{{workflow.name}}-{{item.instanceId}}'
+                - name: server-configmap
+                  value: '{{item.server-configmap}}'
+                - name: client-configmap
+                  value: '{{item.client-configmap}}'
+            withParam: '{{workflow.parameters.configmaps}}'
+    - name: uninstall-all
+      inputs: {}
+      outputs: {}
+      metadata: {}
+      steps:
+        - - name: uninstall-milvus
+            template: uninstall-milvus
+            arguments:
+              parameters:
+                - name: server-instance
+                  value: '{{workflow.name}}-{{item.instanceId}}'
+            withParam: '{{workflow.parameters.configmaps}}'
+    - name: benchmark
+      inputs:
+        parameters:
+          - name: server-instance
+          - name: server-configmap
+          - name: client-configmap
+      outputs: {}
+      metadata: {}
+      steps:
+        - - name: install-milvus
+            template: install-milvus
+            arguments:
+              parameters:
+                - name: server-instance
+                  value: '{{inputs.parameters.server-instance}}'
+                - name: server-configmap
+                  value: '{{inputs.parameters.server-configmap}}'
+        - - name: client-test
+            template: client-test
+            arguments:
+              parameters:
+                - name: server-instance
+                  value: '{{inputs.parameters.server-instance}}'
+                - name: server-configmap
+                  value: '{{inputs.parameters.server-configmap}}'
+                - name: client-configmap
+                  value: '{{inputs.parameters.client-configmap}}'
+    - name: uninstall-milvus
+      inputs:
+        parameters:
+          - name: server-instance
+      outputs: {}
+      metadata: {}
+      container:
+        name: ''
+        image: 'registry.zilliz.com/milvus/milvus-test-env:v0.5'
+        command:
+          - /bin/sh
+          - '-c'
+        args:
+          - ' helm uninstall -n qa-milvus {{inputs.parameters.server-instance}} && kubectl delete pvc -l app.kubernetes.io/instance={{inputs.parameters.server-instance}} -n qa-milvus '
+        resources: {}
+        volumeMounts:
+          - name: kube-config
+            mountPath: /root/.kube
+    - name: install-milvus
+      inputs:
+        parameters:
+          - name: server-instance
+          - name: server-configmap
+        artifacts:
+          - name: charts
+            path: /src/helm
+            git:
+              repo: 'git@github.com:milvus-io/milvus-helm.git'
+              revision: master
+              sshPrivateKeySecret:
+                name: github-key
+                key: ssh-private-key
+          - name: benchmark-src
+            path: /src/benchmark
+            git:
+              repo: 'git@github.com:zilliztech/milvus_benchmark.git'
+              revision: '{{workflow.parameters.test-client-branch}}'
+              sshPrivateKeySecret:
+                name: github-key
+                key: ssh-private-key
+      outputs: {}
+      metadata: {}
+      container:
+        name: ''
+        image: 'registry.zilliz.com/milvus/milvus-test-env:v0.5'
+        command:
+          - /bin/sh
+          - '-c'
+        args:
+          - ' cd /src/helm/charts/milvus && cp -r /src/benchmark/milvus_benchmark/* . && cp /configmap-server/config.yaml . && python update.py --src-values=values.yaml --deploy-params=config.yaml && cat values.yaml && helm install -n qa-milvus --set image.all.repository={{workflow.parameters.milvus-image-repository}} --set image.all.tag={{workflow.parameters.milvus-image-tag}} --set image.all.pullPolicy=Always --set etcd.persistence.enabled=false  --set servicemonitor.enabled=true --wait --timeout 15m {{inputs.parameters.server-instance}} . && kubectl get pods -n qa-milvus -l app.kubernetes.io/instance={{inputs.parameters.server-instance}} '
+        resources: {}
+        volumeMounts:
+          - name: kube-config
+            readOnly: true
+            mountPath: /root/.kube
+          - name: benchmark-server-configmap
+            mountPath: /configmap-server
+      volumes:
+        - name: benchmark-server-configmap
+          configMap:
+            name: '{{inputs.parameters.server-configmap}}'
+    - name: client-test
+      inputs:
+        parameters:
+          - name: server-instance
+          - name: server-configmap
+          - name: client-configmap
+        artifacts:
+          - name: source
+            path: /src
+            git:
+              repo: 'git@github.com:zilliztech/milvus_benchmark.git'
+              revision: '{{workflow.parameters.test-client-branch}}'
+              sshPrivateKeySecret:
+                name: github-key
+                key: ssh-private-key
+      outputs: {}
+      metadata: {}
+      container:
+        name: ''
+        image: 'registry.zilliz.com/milvus/milvus-test-env:v0.5'
+        command:
+          - /bin/sh
+          - '-c'
+        args:
+          - ' cd /src && pip install -r requirements.txt -i https://pypi.doubanio.com/simple/ --trusted-host pypi.doubanio.com && pip install -i https://test.pypi.org/simple/ pymilvus=={{workflow.parameters.test-sdk-version}} && cd milvus_benchmark && export PYTHONPATH=/src && python main.py --host={{inputs.parameters.server-instance}}-milvus.qa-milvus.svc.cluster.local --local --suite=/configmap-client/config.yaml --server-config=/configmap-server/config.yaml'
+        resources:
+          limits:
+            cpu: '4'
+            memory: 4Gi
+        volumeMounts:
+          - name: kube-config
+            readOnly: true
+            mountPath: /root/.kube
+          - name: benchmark-server-configmap
+            mountPath: /configmap-server
+          - name: benchmark-client-configmap
+            mountPath: /configmap-client
+          - name: db-data-path
+            mountPath: /test
+      volumes:
+        - name: benchmark-server-configmap
+          configMap:
+            name: '{{inputs.parameters.server-configmap}}'
+        - name: benchmark-client-configmap
+          configMap:
+            name: '{{inputs.parameters.client-configmap}}'
+        - name: db-data-path
+          flexVolume:
+            driver: fstab/cifs
+            fsType: cifs
+            secretRef:
+              name: cifs-test-secret
+            options:
+              mountOptions: vers=1.0
+              networkPath: //172.16.70.249/test
+      activeDeadlineSeconds: 21600
+  entrypoint: benchmark-loop
+  arguments:
+    parameters:
+      - name: milvus-image-repository
+        value: harbor.zilliz.cc/dockerhub/milvusdb/milvus-dev
+      - name: milvus-image-tag
+        value: master-latest
+      - name: test-client-branch
+        value: master
+      - name: test-sdk-version
+        value: 2.0.0rc4.dev1
+      - name: configmaps
+        value: ' [ {"instanceId":"1", "server-configmap": "server-single-8c16m", "client-configmap": "client-acc-sift-ivf-flat" } ]'
+  serviceAccountName: qa-admin
+  volumes:
+    - name: kube-config
+      secret:
+        secretName: qa-admin-config
+  nodeSelector:
+    node-role.kubernetes.io/benchmark: ''
+  tolerations:
+    - key: node-role.kubernetes.io/benchmark
+      operator: Exists
+      effect: NoSchedule
+  onExit: uninstall-all

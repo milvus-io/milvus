@@ -18,8 +18,8 @@ import (
 	"reflect"
 )
 
-// Float32ToByte converts a float to byte slice.
-func Float32ToByte(float float32) []byte {
+// Float32ToBytes converts a float to byte slice.
+func Float32ToBytes(float float32) []byte {
 	bits := math.Float32bits(float)
 	bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(bytes, bits)
@@ -28,7 +28,7 @@ func Float32ToByte(float float32) []byte {
 }
 
 // BytesToFloat32 converts a byte slice to float32.
-func ByteToFloat32(bytes []byte) float32 {
+func BytesToFloat32(bytes []byte) float32 {
 	bits := binary.LittleEndian.Uint32(bytes)
 
 	return math.Float32frombits(bits)

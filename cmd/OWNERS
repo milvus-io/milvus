@@ -3,10 +3,7 @@ reviewers:
   - cydrain
   - groot
   - xiaocai2333
-  - neza2017
   - sunby
 
 approvers:
-  - czs007
-  - neza2017
-  - scsven
+  - pr-inspection

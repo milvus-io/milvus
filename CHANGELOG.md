@@ -2,31 +2,25 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 1.1.0 (TBD)
+# Milvus 1.1.0 (2021-06-16)
 ## Bug
--   \#4778 Fix failure to open vector index in mishards
--   \#4797 Fix wrong results of merged different 'topk' queries
--   \#4838 When an index created on the empty collection, the server will respond immediately
--   \#4858 Fix the crash when query for a large topk on GPU Flat
--   \#4862 Read-only nodes not to merge segments
--   \#4894 The capacity of bloom filter should be determined by the row count of its segment
--   \#4908 GPU cache will not be cleaned up in time after the collection is dropped
--   \#4933 Milvus waste time during building index for small segment
+-   \#4897 Query results contain some deleted ids.
+-   \#5164 Exception should be raised if insert or delete entity on the none-existed partition.
+-   \#5191 Mishards throw "index out of range" error after continually search/insert for a period of time.
+-   \#5398 Random crash after request is executed.
+-   \#5537 Failed to load bloom filter after suddenly power off.
+-   \#5574 IVF_SQ8 and IVF_PQ cannot be built on multiple GPUs.
+-   \#5747 Search with big nq and topk crash milvus.
+  
+## Features
+-   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight).
+-   \#5142 Support keeping index in GPU memory.
 
-## Feature
--   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
+## Improvements
+-   \#5115 Relax the topk limit from 16384 to 1M for CPU search.
+-   \#5204 Improve IVF query on GPU when no entity deleted.
+-   \#5544 Relax the index_file_size limit from 4GB to 128Gb.
 
-## Improvement
--   \#4756 Improve the performance of get_vectors_by_id
--   \#4856 Upgrade hnswlib to v0.5.0
-
-# Milvus 1.0.0 (2021-03-09)
-## Bug
--   \#4739 Fix mishards probe test problem
--   \#4749 Fix minor memory leak when building IVF_SQ8 on GPU
--   \#4757 Fix minor memory leak when querying by IVF_SQ8H
--   \#4765 Fix minor memory leak when building NSG
--   \#4766 Fix minor memory leak when querying by BinaryFlat
 
 ## Feature
 -   \#3977 Support logging to stdout

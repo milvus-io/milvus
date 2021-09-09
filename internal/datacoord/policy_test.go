@@ -78,3 +78,94 @@ func TestRandomReassign(t *testing.T) {
 		}
 	}
 }
+
+func TestBalancedAssign(t *testing.T) {
+	clusters := make([]*NodeInfo, 0, 3)
+	info1 := &datapb.DataNodeInfo{
+		Address:  "addr1",
+		Channels: make([]*datapb.ChannelStatus, 0, 10),
+	}
+	info2 := &datapb.DataNodeInfo{
+		Address:  "addr2",
+		Channels: make([]*datapb.ChannelStatus, 0, 10),
+	}
+	info3 := &datapb.DataNodeInfo{
+		Address:  "addr3",
+		Channels: make([]*datapb.ChannelStatus, 0, 10),
+	}
+
+	node1 := NewNodeInfo(context.TODO(), info1)
+	node2 := NewNodeInfo(context.TODO(), info2)
+	node3 := NewNodeInfo(context.TODO(), info3)
+	clusters = append(clusters, node1, node2, node3)
+
+	emptyClusters := make([]*NodeInfo, 0)
+
+	type testCase struct {
+		cluster      []*NodeInfo
+		channel      string
+		collectionID UniqueID
+		validator    func(c testCase, result []*NodeInfo) bool
+	}
+	hits := make(map[string]struct{})
+	for _, info := range clusters {
+		hits[info.Info.Address] = struct{}{}
+	}
+
+	strategyValidator := func(c testCase, result []*NodeInfo) bool {
+		for _, info := range result {
+			for _, channel := range info.Info.Channels {
+				if channel.CollectionID == c.collectionID && channel.Name == c.channel {
+					if _, ok := hits[info.Info.Address]; !ok {
+						return false
+					}
+					delete(hits, info.Info.Address)
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	cases := []testCase{
+		{
+			cluster:      emptyClusters,
+			channel:      "ch-01",
+			collectionID: 1,
+			validator: func(t testCase, result []*NodeInfo) bool {
+				return len(result) == 0
+			},
+		},
+		{
+			cluster:      clusters,
+			channel:      "ch-01",
+			collectionID: 1,
+			validator:    strategyValidator,
+		},
+		{
+			cluster:      clusters,
+			channel:      "ch-02",
+			collectionID: 1,
+			validator:    strategyValidator,
+		},
+		{
+			cluster:      clusters,
+			channel:      "ch-03",
+			collectionID: 1,
+			validator:    strategyValidator,
+		},
+	}
+	for _, c := range cases {
+		result := balancedAssignFunc(c.cluster, c.channel, c.collectionID)
+		if c.validator != nil {
+			assert.True(t, c.validator(c, result))
+		}
+		for _, info := range result {
+			for i, cluster := range clusters {
+				if cluster.Info.Address == info.Info.Address {
+					clusters[i] = info
+				}
+			}
+		}
+	}
+}

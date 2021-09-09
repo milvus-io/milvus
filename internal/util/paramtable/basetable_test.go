@@ -15,6 +15,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -26,9 +27,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-//func TestMain
-
-func TestGlobalParamsTable_SaveAndLoad(t *testing.T) {
+func TestBaseTable_SaveAndLoad(t *testing.T) {
 	err1 := baseParams.Save("int", "10")
 	assert.Nil(t, err1)
 
@@ -57,7 +56,30 @@ func TestGlobalParamsTable_SaveAndLoad(t *testing.T) {
 	assert.Nil(t, err6)
 }
 
-func TestGlobalParamsTable_LoadRange(t *testing.T) {
+func TestBaseTable_LoadFromKVPair(t *testing.T) {
+	var kvPairs []*commonpb.KeyValuePair
+	kvPairs = append(kvPairs, &commonpb.KeyValuePair{
+		Key:   "k1",
+		Value: "v1",
+	})
+	kvPairs = append(kvPairs, &commonpb.KeyValuePair{
+		Key:   "k2",
+		Value: "v2",
+	})
+
+	err := baseParams.LoadFromKVPair(kvPairs)
+	assert.Nil(t, err)
+
+	v, err := baseParams.Load("k1")
+	assert.Nil(t, err)
+	assert.Equal(t, "v1", v)
+
+	v, err = baseParams.Load("k2")
+	assert.Nil(t, err)
+	assert.Equal(t, "v2", v)
+}
+
+func TestBaseTable_LoadRange(t *testing.T) {
 	_ = baseParams.Save("xxxaab", "10")
 	_ = baseParams.Save("xxxfghz", "20")
 	_ = baseParams.Save("xxxbcde", "1.1")
@@ -79,7 +101,7 @@ func TestGlobalParamsTable_LoadRange(t *testing.T) {
 	_ = baseParams.Remove("zhi")
 }
 
-func TestGlobalParamsTable_Remove(t *testing.T) {
+func TestBaseTable_Remove(t *testing.T) {
 	err1 := baseParams.Save("RemoveInt", "10")
 	assert.Nil(t, err1)
 
@@ -99,12 +121,12 @@ func TestGlobalParamsTable_Remove(t *testing.T) {
 	assert.Nil(t, err6)
 }
 
-func TestGlobalParamsTable_LoadYaml(t *testing.T) {
+func TestBaseTable_LoadYaml(t *testing.T) {
 	err := baseParams.LoadYaml("milvus.yaml")
 	assert.Nil(t, err)
-
 	err = baseParams.LoadYaml("advanced/channel.yaml")
 	assert.Nil(t, err)
+	assert.Panics(t, func() { baseParams.LoadYaml("advanced/not_exist.yaml") })
 
 	_, err = baseParams.Load("etcd.address")
 	assert.Nil(t, err)
@@ -112,19 +134,63 @@ func TestGlobalParamsTable_LoadYaml(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestBaseTable_ParseIntWithErr(t *testing.T) {
-	var err error
+func TestBaseTable_Parse(t *testing.T) {
+	t.Run("ParseBool", func(t *testing.T) {
+		assert.Nil(t, baseParams.Save("key", "true"))
+		assert.True(t, baseParams.ParseBool("key", false))
+		assert.False(t, baseParams.ParseBool("not_exist_key", false))
 
-	key1 := "ParseIntWithErrInt"
-	err = baseParams.Save(key1, "10")
-	assert.Nil(t, err)
-	ten, err := baseParams.ParseIntWithErr(key1)
-	assert.Nil(t, err)
-	assert.Equal(t, 10, ten)
+		assert.Nil(t, baseParams.Save("key", "rand"))
+		assert.Panics(t, func() { baseParams.ParseBool("key", false) })
+	})
 
-	key2 := "ParseIntWithErrInvalidInt"
-	err = baseParams.Save(key2, "invalid")
-	assert.Nil(t, err)
-	_, err = baseParams.ParseIntWithErr(key2)
-	assert.NotNil(t, err)
+	t.Run("ParseFloat", func(t *testing.T) {
+		assert.Nil(t, baseParams.Save("key", "0"))
+		assert.Equal(t, float64(0), baseParams.ParseFloat("key"))
+
+		assert.Nil(t, baseParams.Save("key", "3.14"))
+		assert.Equal(t, float64(3.14), baseParams.ParseFloat("key"))
+
+		assert.Panics(t, func() { baseParams.ParseFloat("not_exist_key") })
+		assert.Nil(t, baseParams.Save("key", "abc"))
+		assert.Panics(t, func() { baseParams.ParseFloat("key") })
+	})
+
+	t.Run("ParseInt32", func(t *testing.T) {
+		assert.Nil(t, baseParams.Save("key", "0"))
+		assert.Equal(t, int32(0), baseParams.ParseInt32("key"))
+
+		assert.Nil(t, baseParams.Save("key", "314"))
+		assert.Equal(t, int32(314), baseParams.ParseInt32("key"))
+
+		assert.Panics(t, func() { baseParams.ParseInt32("not_exist_key") })
+		assert.Nil(t, baseParams.Save("key", "abc"))
+		assert.Panics(t, func() { baseParams.ParseInt32("key") })
+	})
+
+	t.Run("ParseInt64", func(t *testing.T) {
+		assert.Nil(t, baseParams.Save("key", "0"))
+		assert.Equal(t, int64(0), baseParams.ParseInt64("key"))
+
+		assert.Nil(t, baseParams.Save("key", "314"))
+		assert.Equal(t, int64(314), baseParams.ParseInt64("key"))
+
+		assert.Panics(t, func() { baseParams.ParseInt64("not_exist_key") })
+		assert.Nil(t, baseParams.Save("key", "abc"))
+		assert.Panics(t, func() { baseParams.ParseInt64("key") })
+	})
+}
+
+func Test_ConvertRangeToIntSlice(t *testing.T) {
+	t.Run("ConvertRangeToIntSlice", func(t *testing.T) {
+		slice := ConvertRangeToIntSlice("0,10", ",")
+		assert.Equal(t, 10, len(slice))
+
+		assert.Panics(t, func() { ConvertRangeToIntSlice("0", ",") })
+		assert.Panics(t, func() { ConvertRangeToIntSlice("0, 10", ",") })
+		assert.Panics(t, func() { ConvertRangeToIntSlice("abc,10", ",") })
+		assert.Panics(t, func() { ConvertRangeToIntSlice("0,abc", ",") })
+		assert.Panics(t, func() { ConvertRangeToIntSlice("-1,9", ",") })
+		assert.Panics(t, func() { ConvertRangeToIntSlice("9,0", ",") })
+	})
 }

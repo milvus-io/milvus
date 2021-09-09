@@ -2,11 +2,8 @@
 reviewers:
   - bigsheeper
   - FluorineDog
-  - neza2017
   - XuanYang-cn
   - zhenshan.cao
 
 approvers:
-  - czs007
-  - neza2017
-  - scsven
+  - pr-inspection

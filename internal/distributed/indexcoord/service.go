@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/types"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -37,7 +39,7 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Server struct {
-	indexcoord *indexcoord.IndexCoord
+	indexcoord types.IndexCoord
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -71,6 +73,7 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	if err := s.indexcoord.Register(); err != nil {
+		log.Error("IndexCoord", zap.Any("register session error", err))
 		return err
 	}
 
@@ -78,11 +81,11 @@ func (s *Server) init() error {
 	go s.startGrpcLoop(Params.ServicePort)
 	// wait for grpc IndexCoord loop start
 	if err := <-s.grpcErrChan; err != nil {
+		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
-	s.indexcoord.UpdateStateCode(internalpb.StateCode_Initializing)
-
 	if err := s.indexcoord.Init(); err != nil {
+		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
 	return nil
@@ -115,6 +118,11 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+func (s *Server) SetClient(indexCoordClient types.IndexCoord) error {
+	s.indexcoord = indexCoordClient
+	return nil
+}
+
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.indexcoord.GetComponentStates(ctx)
 }
@@ -143,11 +151,15 @@ func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 	return s.indexcoord.GetIndexFilePaths(ctx, req)
 }
 
+func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.indexcoord.GetMetrics(ctx, request)
+}
+
 func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
 
-	log.Debug("IndexCoord", zap.Int("network port", grpcPort))
+	log.Debug("IndexCoord", zap.String("network address", Params.ServiceAddress), zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("IndexCoord", zap.String("GrpcServer:failed to listen", err.Error()))

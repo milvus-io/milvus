@@ -13,6 +13,7 @@ package indexcoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -103,6 +104,11 @@ func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
 	log.Debug("IndexCoord reloadMeta mt.client.LoadWithPrefix2", zap.Any("indexBuildID", indexBuildID), zap.Error(err))
 	if err != nil {
 		return nil, err
+	}
+
+	if len(values) == 0 {
+		log.Error("IndexCoord reload Meta", zap.Any("indexBuildID", indexBuildID), zap.Error(errors.New("meta doesn't exist in KV")))
+		return nil, errors.New("meta doesn't exist in KV")
 	}
 	im := &indexpb.IndexMeta{}
 	err = proto.UnmarshalText(values[0], im)

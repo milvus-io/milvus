@@ -21,13 +21,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/trace"
-
-	"github.com/coreos/etcd/mvcc/mvccpb"
-	"github.com/golang/protobuf/proto"
-	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -38,8 +35,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -72,6 +72,8 @@ type IndexCoord struct {
 	metaTable   *metaTable
 	nodeManager *NodeManager
 
+	metricsCacheManager *metricsinfo.MetricsCacheManager
+
 	nodeLock sync.RWMutex
 
 	// Add callback functions at different stages
@@ -96,19 +98,22 @@ func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 // Register register index service at etcd
 func (i *IndexCoord) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if i.session == nil {
+		return errors.New("failed to initialize session")
+	}
 	i.session.Init(typeutil.IndexCoordRole, Params.Address, true)
 	return nil
 }
 
 func (i *IndexCoord) Init() error {
 	log.Debug("IndexCoord", zap.Any("etcd endpoints", Params.EtcdEndpoints))
+	i.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		if err != nil {
 			return err
 		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		metakv, err := NewMetaTable(etcdKV)
 		if err != nil {
 			return err
@@ -131,10 +136,14 @@ func (i *IndexCoord) Init() error {
 		log.Debug("IndexCoord", zap.Any("Get IndexNode Sessions error", err))
 	}
 	for _, session := range sessions {
-		if err = i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
-			log.Debug("IndexCoord", zap.Any("ServerID", session.ServerID),
-				zap.Any("Add IndexNode error", err))
-		}
+		session := session
+		go func() {
+			if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
+				log.Debug("IndexCoord", zap.Any("ServerID", session.ServerID),
+					zap.Any("Add IndexNode error", err))
+			}
+		}()
+
 	}
 	log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1)
@@ -145,7 +154,12 @@ func (i *IndexCoord) Init() error {
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
-	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, kvRootPath, "index_gid"))
+	etcdKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, kvRootPath, "index_gid")
+	if err != nil {
+		log.Debug("IndexCoord TSOKVBase initialize failed", zap.Error(err))
+	}
+
+	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)
 	if err := i.idAllocator.Initialize(); err != nil {
 		log.Debug("IndexCoord idAllocator initialize failed", zap.Error(err))
 		return err
@@ -178,8 +192,8 @@ func (i *IndexCoord) Init() error {
 		return err
 	}
 	log.Debug("IndexCoord new task scheduler success")
-	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
+
+	i.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	log.Debug("IndexCoord assign tasks server success", zap.Error(err))
 	return nil
@@ -206,7 +220,9 @@ func (i *IndexCoord) Start() error {
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	log.Debug("IndexCoord start")
+	i.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
+	log.Debug("IndexCoord start successfully")
 
 	return nil
 }
@@ -214,6 +230,7 @@ func (i *IndexCoord) Start() error {
 func (i *IndexCoord) Stop() error {
 	i.loopCancel()
 	i.sched.Close()
+	i.loopWg.Wait()
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
@@ -222,6 +239,11 @@ func (i *IndexCoord) Stop() error {
 
 func (i *IndexCoord) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
+}
+
+func (i *IndexCoord) isHealthy() bool {
+	code := i.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
 }
 
 func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
@@ -425,6 +447,81 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	return ret, nil
 }
 
+func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("IndexCoord.GetMetrics",
+		zap.Int64("node_id", i.ID),
+		zap.String("req", req.Request))
+
+	if !i.isHealthy() {
+		log.Warn("IndexCoord.GetMetrics failed",
+			zap.Int64("node_id", i.ID),
+			zap.String("req", req.Request),
+			zap.Error(errIndexCoordIsUnhealthy(i.ID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgIndexCoordIsUnhealthy(i.ID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("IndexCoord.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", i.ID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("IndexCoord.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		ret, err := i.metricsCacheManager.GetSystemInfoMetrics()
+		if err == nil && ret != nil {
+			return ret, nil
+		}
+		log.Debug("failed to get system info metrics from cache, recompute instead",
+			zap.Error(err))
+
+		metrics, err := getSystemInfoMetrics(ctx, req, i)
+
+		log.Debug("IndexCoord.GetMetrics",
+			zap.Int64("node_id", i.ID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		i.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
+
+		return metrics, err
+	}
+
+	log.Debug("IndexCoord.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", i.ID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
+	}, nil
+}
+
 func (i *IndexCoord) tsLoop() {
 	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsoTicker.Stop()
@@ -513,15 +610,19 @@ func (i *IndexCoord) watchNodeLoop() {
 				serverID := event.Session.ServerID
 				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID),
 					zap.Any("address", event.Session.Address))
-				err := i.nodeManager.AddNode(serverID, event.Session.Address)
-				if err != nil {
-					log.Debug("IndexCoord", zap.Any("Add IndexNode err", err))
-				}
-				log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
+				go func() {
+					err := i.nodeManager.AddNode(serverID, event.Session.Address)
+					if err != nil {
+						log.Error("IndexCoord", zap.Any("Add IndexNode err", err))
+					}
+					log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
+				}()
+				i.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("IndexCoord watchNodeLoop SessionDelEvent", zap.Any("serverID", serverID))
 				i.nodeManager.RemoveNode(serverID)
+				i.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
 		}
 	}
@@ -567,6 +668,22 @@ func (i *IndexCoord) watchMetaLoop() {
 	}
 }
 
+func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.CreateIndexRequest) bool {
+	ctx, cancel := context.WithTimeout(i.loopCtx, reqTimeoutInterval)
+	defer cancel()
+	resp, err := builderClient.CreateIndex(ctx, req)
+	if err != nil {
+		log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
+		return false
+	}
+
+	if resp.ErrorCode != commonpb.ErrorCode_Success {
+		log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
+		return false
+	}
+	return true
+}
+
 func (i *IndexCoord) assignTaskLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
@@ -586,7 +703,7 @@ func (i *IndexCoord) assignTaskLoop() {
 			if err != nil {
 				log.Debug("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
 			}
-			if len(i.nodeManager.nodeClients) <= 0 {
+			if len(sessions) <= 0 {
 				log.Debug("There is no IndexNode available as this time.")
 				break
 			}
@@ -611,6 +728,7 @@ func (i *IndexCoord) assignTaskLoop() {
 					log.Debug("IndexCoord assignmentTasksLoop can not find available IndexNode")
 					break
 				}
+				log.Debug("IndexCoord PeekClient success", zap.Int64("nodeID", nodeID))
 				req := &indexpb.CreateIndexRequest{
 					IndexBuildID: indexBuildID,
 					IndexName:    meta.indexMeta.Req.IndexName,
@@ -621,13 +739,8 @@ func (i *IndexCoord) assignTaskLoop() {
 					TypeParams:   meta.indexMeta.Req.TypeParams,
 					IndexParams:  meta.indexMeta.Req.IndexParams,
 				}
-				resp, err := builderClient.CreateIndex(ctx, req)
-				if err != nil {
-					log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
-					continue
-				}
-				if resp.ErrorCode != commonpb.ErrorCode_Success {
-					log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
+				if !i.assignTask(builderClient, req) {
+					log.Debug("IndexCoord assignTask assign task to IndexNode failed")
 					continue
 				}
 				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {

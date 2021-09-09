@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -91,7 +92,9 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		}
 		opts := trace.GetInterceptorOpts()
 		log.Debug("IndexCoordClient try connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr,
+		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr,
 			grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
@@ -201,4 +204,11 @@ func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 		return c.grpcClient.GetIndexFilePaths(ctx, req)
 	})
 	return ret.(*indexpb.GetIndexFilePathsResponse), err
+}
+
+func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetMetrics(ctx, req)
+	})
+	return ret.(*milvuspb.GetMetricsResponse), err
 }

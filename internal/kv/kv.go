@@ -13,6 +13,7 @@ package kv
 
 import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type BaseKV interface {
@@ -35,10 +36,26 @@ type TxnKV interface {
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }
 
+type MetaKv interface {
+	TxnKV
+	GetPath(key string) string
+	LoadWithPrefix(key string) ([]string, []string, error)
+	LoadWithPrefix2(key string) ([]string, []string, []int64, error)
+	LoadWithRevision(key string) ([]string, []string, int64, error)
+	Watch(key string) clientv3.WatchChan
+	WatchWithPrefix(key string) clientv3.WatchChan
+	WatchWithRevision(key string, revision int64) clientv3.WatchChan
+	SaveWithLease(key, value string, id clientv3.LeaseID) error
+	Grant(ttl int64) (id clientv3.LeaseID, err error)
+	KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error)
+	CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error
+	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error
+}
+
 type SnapShotKV interface {
-	Save(key, value string) (typeutil.Timestamp, error)
+	Save(key string, value string, ts typeutil.Timestamp) error
 	Load(key string, ts typeutil.Timestamp) (string, error)
-	MultiSave(kvs map[string]string, additions ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error)
+	MultiSave(kvs map[string]string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
 	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
-	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, additions ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error)
+	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
 }

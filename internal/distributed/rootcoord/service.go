@@ -352,3 +352,7 @@ func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Releas
 func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	return s.rootCoord.SegmentFlushCompleted(ctx, in)
 }
+
+func (s *Server) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.rootCoord.GetMetrics(ctx, in)
+}

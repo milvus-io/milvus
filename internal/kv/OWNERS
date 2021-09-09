@@ -2,13 +2,10 @@
 reviewers:
   - czs007
   - sunby
-  - neza2017
   - godchen0212
   - XuanYang-cn
   - xiaocai2333
   - fishpenguin
 
 approvers:
-  - czs007
-  - neza2017
-  - scsven
+  - pr-inspection

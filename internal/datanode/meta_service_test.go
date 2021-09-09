@@ -13,13 +13,16 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/stretchr/testify/assert"
 )
 
 const (
-	collectionID0   = UniqueID(0)
+	collectionID0   = UniqueID(2)
 	collectionID1   = UniqueID(1)
 	collectionName0 = "collection_0"
 	collectionName1 = "collection_1"
@@ -46,5 +49,50 @@ func TestMetaService_All(t *testing.T) {
 		mf := &MetaFactory{}
 		collectionMeta := mf.CollectionMetaFactory(collectionID0, collectionName0)
 		printCollectionStruct(collectionMeta)
+	})
+}
+
+//RootCoordFails1 root coord mock for failure
+type RootCoordFails1 struct {
+	RootCoordFactory
+}
+
+// DescribeCollection override method that will fails
+func (rc *RootCoordFails1) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	return nil, errors.New("always fail")
+}
+
+//RootCoordFails2 root coord mock for failure
+type RootCoordFails2 struct {
+	RootCoordFactory
+}
+
+// DescribeCollection override method that will fails
+func (rc *RootCoordFails2) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	return &milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+	}, nil
+}
+
+func TestMetaServiceRootCoodFails(t *testing.T) {
+
+	t.Run("Test Describe with error", func(t *testing.T) {
+		rc := &RootCoordFails1{}
+		rc.setCollectionID(collectionID0)
+		rc.setCollectionName(collectionName0)
+
+		ms := newMetaService(rc, collectionID0)
+		_, err := ms.getCollectionSchema(context.Background(), collectionID1, 0)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test Describe wit nil response", func(t *testing.T) {
+		rc := &RootCoordFails2{}
+		rc.setCollectionID(collectionID0)
+		rc.setCollectionName(collectionName0)
+
+		ms := newMetaService(rc, collectionID0)
+		_, err := ms.getCollectionSchema(context.Background(), collectionID1, 0)
+		assert.NotNil(t, err)
 	})
 }

@@ -12,29 +12,116 @@
 package paramtable
 
 import (
+	"os"
+	"strings"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/milvus-io/milvus/internal/log"
 )
 
-var Params ParamTable
+var Params BaseParamTable
 var once sync.Once
 
-type ParamTable struct {
+type BaseParamTable struct {
 	BaseTable
+
+	// --- ETCD ---
+	EtcdEndpoints []string
+	MetaRootPath  string
+	KvRootPath    string
+
+	// --- Embed ETCD ---
+	UseEmbedEtcd   bool
+	EtcdConfigPath string
+	EtcdDataDir    string
+
+	initOnce sync.Once
 
 	LogConfig *log.Config
 }
 
-func (p *ParamTable) Init() {
-	once.Do(func() {
+func (p *BaseParamTable) Init() {
+	p.initOnce.Do(func() {
 		p.BaseTable.Init()
-
-		p.initLogCfg()
+		p.LoadCfgToMemory()
 	})
 }
 
-func (p *ParamTable) initLogCfg() {
+func (p *BaseParamTable) LoadCfgToMemory() {
+	p.initEtcdConf()
+	p.initMetaRootPath()
+	p.initKvRootPath()
+	p.initLogCfg()
+}
+
+func (p *BaseParamTable) initEtcdConf() {
+	p.initUseEmbedEtcd()
+	if p.UseEmbedEtcd {
+		p.initConfigPath()
+		p.initEtcdDataDir()
+	} else {
+		p.initEtcdEndpoints()
+	}
+}
+
+func (p *BaseParamTable) initUseEmbedEtcd() {
+	p.UseEmbedEtcd = p.ParseBool("etcd.use.embed", false)
+	if p.UseEmbedEtcd && (os.Getenv(metricsinfo.DeployModeEnvKey) != metricsinfo.StandaloneDeployMode) {
+		panic("embedded etcd can not be used under distributed mode")
+	}
+}
+
+func (p *BaseParamTable) initConfigPath() {
+	addr, err := p.LoadWithDefault("etcd.config.path", "")
+	if err != nil {
+		panic(err)
+	}
+	p.EtcdConfigPath = addr
+}
+
+func (p *BaseParamTable) initEtcdDataDir() {
+	addr, err := p.LoadWithDefault("etcd.data.dir", "default.etcd")
+	if err != nil {
+		panic(err)
+	}
+	p.EtcdDataDir = addr
+}
+
+func (p *BaseParamTable) initEtcdEndpoints() {
+	endpoints, err := p.Load("_EtcdEndpoints")
+	if err != nil {
+		panic(err)
+	}
+	p.EtcdEndpoints = strings.Split(endpoints, ",")
+}
+
+func (p *BaseParamTable) initMetaRootPath() {
+	rootPath, err := p.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	subPath, err := p.Load("etcd.metaSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.MetaRootPath = rootPath + "/" + subPath
+}
+
+func (p *BaseParamTable) initKvRootPath() {
+	rootPath, err := p.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	subPath, err := p.Load("etcd.kvSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.KvRootPath = rootPath + "/" + subPath
+}
+
+func (p *BaseParamTable) initLogCfg() {
 	p.LogConfig = &log.Config{}
 	format, err := p.Load("log.format")
 	if err != nil {

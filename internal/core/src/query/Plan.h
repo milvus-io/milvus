@@ -38,8 +38,11 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& placeholder_group_blo
 int64_t
 GetNumOfQueries(const PlaceholderGroup*);
 
+// std::unique_ptr<RetrievePlan>
+// CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request);
+
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request);
+CreateRetrievePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int size);
 
 // Query Overall TopK from Plan
 // Used to alloc result memory at Go side

@@ -16,10 +16,10 @@ import (
 )
 
 type RocksdbKV struct {
-	opts         *gorocksdb.Options
-	db           *gorocksdb.DB
-	writeOptions *gorocksdb.WriteOptions
-	readOptions  *gorocksdb.ReadOptions
+	Opts         *gorocksdb.Options
+	DB           *gorocksdb.DB
+	WriteOptions *gorocksdb.WriteOptions
+	ReadOptions  *gorocksdb.ReadOptions
 	name         string
 }
 
@@ -39,16 +39,16 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 		return nil, err
 	}
 	return &RocksdbKV{
-		opts:         opts,
-		db:           db,
-		writeOptions: wo,
-		readOptions:  ro,
+		Opts:         opts,
+		DB:           db,
+		WriteOptions: wo,
+		ReadOptions:  ro,
 		name:         name,
 	}, nil
 }
 
 func (kv *RocksdbKV) Close() {
-	kv.db.Close()
+	kv.DB.Close()
 }
 
 func (kv *RocksdbKV) GetName() string {
@@ -56,22 +56,22 @@ func (kv *RocksdbKV) GetName() string {
 }
 
 func (kv *RocksdbKV) Load(key string) (string, error) {
-	value, err := kv.db.Get(kv.readOptions, []byte(key))
+	value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
 	defer value.Free()
 	return string(value.Data()), err
 }
 
 func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	kv.readOptions.SetPrefixSameAsStart(true)
-	kv.db.Close()
-	kv.opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(key)))
+	kv.ReadOptions.SetPrefixSameAsStart(true)
+	kv.DB.Close()
+	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(key)))
 	var err error
-	kv.db, err = gorocksdb.OpenDb(kv.opts, kv.GetName())
+	kv.DB, err = gorocksdb.OpenDb(kv.Opts, kv.GetName())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	iter := kv.db.NewIterator(kv.readOptions)
+	iter := kv.DB.NewIterator(kv.ReadOptions)
 	defer iter.Close()
 	keys := make([]string, 0)
 	values := make([]string, 0)
@@ -93,7 +93,7 @@ func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
 func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	values := make([]string, 0, len(keys))
 	for _, key := range keys {
-		value, err := kv.db.Get(kv.readOptions, []byte(key))
+		value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
 		if err != nil {
 			return []string{}, err
 		}
@@ -103,7 +103,7 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 }
 
 func (kv *RocksdbKV) Save(key, value string) error {
-	err := kv.db.Put(kv.writeOptions, []byte(key), []byte(value))
+	err := kv.DB.Put(kv.WriteOptions, []byte(key), []byte(value))
 	return err
 }
 
@@ -113,26 +113,26 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 	for k, v := range kvs {
 		writeBatch.Put([]byte(k), []byte(v))
 	}
-	err := kv.db.Write(kv.writeOptions, writeBatch)
+	err := kv.DB.Write(kv.WriteOptions, writeBatch)
 	return err
 }
 
 func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
-	kv.readOptions.SetPrefixSameAsStart(true)
-	kv.db.Close()
-	kv.opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(prefix)))
+	kv.ReadOptions.SetPrefixSameAsStart(true)
+	kv.DB.Close()
+	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(prefix)))
 	var err error
-	kv.db, err = gorocksdb.OpenDb(kv.opts, kv.GetName())
+	kv.DB, err = gorocksdb.OpenDb(kv.Opts, kv.GetName())
 	if err != nil {
 		return err
 	}
 
-	iter := kv.db.NewIterator(kv.readOptions)
+	iter := kv.DB.NewIterator(kv.ReadOptions)
 	defer iter.Close()
 	iter.Seek([]byte(prefix))
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
-		err := kv.db.Delete(kv.writeOptions, key.Data())
+		err := kv.DB.Delete(kv.WriteOptions, key.Data())
 		if err != nil {
 			return nil
 		}
@@ -144,7 +144,7 @@ func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 }
 
 func (kv *RocksdbKV) Remove(key string) error {
-	err := kv.db.Delete(kv.writeOptions, []byte(key))
+	err := kv.DB.Delete(kv.WriteOptions, []byte(key))
 	return err
 }
 
@@ -154,7 +154,7 @@ func (kv *RocksdbKV) MultiRemove(keys []string) error {
 	for _, key := range keys {
 		writeBatch.Delete([]byte(key))
 	}
-	err := kv.db.Write(kv.writeOptions, writeBatch)
+	err := kv.DB.Write(kv.WriteOptions, writeBatch)
 	return err
 }
 
@@ -167,13 +167,29 @@ func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []stri
 	for _, key := range removals {
 		writeBatch.Delete([]byte(key))
 	}
-	err := kv.db.Write(kv.writeOptions, writeBatch)
+	err := kv.DB.Write(kv.WriteOptions, writeBatch)
+	return err
+}
+
+func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
+	writeBatch := gorocksdb.NewWriteBatch()
+	defer writeBatch.Clear()
+	if len(startKey) == 0 {
+		iter := kv.DB.NewIterator(kv.ReadOptions)
+		defer iter.Close()
+		iter.SeekToFirst()
+		startKey = string(iter.Key().Data())
+	}
+
+	writeBatch.DeleteRange([]byte(startKey), []byte(endKey))
+	err := kv.DB.Write(kv.WriteOptions, writeBatch)
 	return err
 }
 
 func (kv *RocksdbKV) MultiRemoveWithPrefix(keys []string) error {
 	panic("not implement")
 }
+
 func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	panic("not implement")
 }

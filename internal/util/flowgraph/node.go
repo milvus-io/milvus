@@ -49,7 +49,6 @@ type nodeCtx struct {
 
 func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 	if nodeCtx.node.IsInputNode() {
-		// fmt.Println("start InputNode.inStream")
 		inStream, ok := nodeCtx.node.(*InputNode)
 		if !ok {
 			log.Error("Invalid inputNode")
@@ -71,7 +70,6 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 				)
 			}
 			wg.Done()
-			//fmt.Println(nodeCtx.node.Name(), "closed")
 			return
 		default:
 			// inputs from inputsMessages for Operate
@@ -105,10 +103,11 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 func (nodeCtx *nodeCtx) Close() {
-	for _, channel := range nodeCtx.inputChannels {
-		close(channel)
-		fmt.Println("close inputChannel")
-	}
+	// data race with nodeCtx.ReceiveMsg { nodeCtx.inputChannels[inputChanIdx] <- msg }
+	//for _, channel := range nodeCtx.inputChannels {
+	//	close(channel)
+	//	log.Warn("close inputChannel")
+	//}
 	nodeCtx.node.Close()
 }
 
@@ -161,7 +160,7 @@ func (nodeCtx *nodeCtx) collectInputMessages(exitCtx context.Context) {
 		go func() {
 			for i := 0; i < len(nodeCtx.inputMessages); i++ {
 				for nodeCtx.inputMessages[i].TimeTick() != latestTime {
-					fmt.Println("try to align timestamp, t1 =", latestTime, ", t2 =", nodeCtx.inputMessages[i].TimeTick())
+					log.Debug("try to align timestamp", zap.Uint64("t1", latestTime), zap.Uint64("t2", nodeCtx.inputMessages[i].TimeTick()))
 					channel := nodeCtx.inputChannels[i]
 					select {
 					case <-exitCtx.Done():

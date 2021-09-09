@@ -21,21 +21,8 @@ import (
 	"go.uber.org/zap"
 )
 
-type pChanStatistics struct {
-	minTs Timestamp
-	maxTs Timestamp
-}
-
 // ticker can update ts only when the minTs greater than the ts of ticker, we can use maxTs to update current later
 type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
-
-// use interface tsoAllocator to keep channelsTimeTickerImpl testable
-type tsoAllocator interface {
-	//Start() error
-	AllocOne() (Timestamp, error)
-	//Alloc(count uint32) ([]Timestamp, error)
-	//ClearCache()
-}
 
 type channelsTimeTicker interface {
 	start() error
@@ -97,16 +84,17 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 		return err
 	}
 
+	stats, err := ticker.getStatisticsFunc()
+	if err != nil {
+		log.Debug("Proxy channelsTimeTickerImpl failed to getStatistics", zap.Error(err))
+		return nil
+	}
+
 	ticker.statisticsMtx.Lock()
 	defer ticker.statisticsMtx.Unlock()
 
 	ticker.currentsMtx.Lock()
 	defer ticker.currentsMtx.Unlock()
-
-	stats, err := ticker.getStatisticsFunc()
-	if err != nil {
-		log.Debug("Proxy channelsTimeTickerImpl failed to getStatistics", zap.Error(err))
-	}
 
 	for pchan := range ticker.currents {
 		current := ticker.currents[pchan]

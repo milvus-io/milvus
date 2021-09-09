@@ -3,11 +3,8 @@ reviewers:
   - godchen0212
   - XuanYang-cn
   - sunby
-  - neza2017
   - czs007
   - xiaocai2333
 
 approvers:
-  - czs007
-  - neza2017
-  - scsven
+  - pr-inspection

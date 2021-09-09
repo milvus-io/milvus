@@ -102,6 +102,7 @@ message VectorANNS {
 message PlanNode {
   oneof node {
     VectorANNS vector_anns = 1;
+    Expr predicates = 2;
   }
-  repeated int64 output_field_ids = 2;
+  repeated int64 output_field_ids = 3;
 }

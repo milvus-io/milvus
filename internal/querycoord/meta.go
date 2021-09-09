@@ -57,8 +57,6 @@ type Meta interface {
 
 	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
 
-	hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error)
-	getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error)
 	getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error)
 	addDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
 	removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
@@ -468,6 +466,14 @@ func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID Unique
 		}
 		releasedPartitionIDs = append(releasedPartitionIDs, partitionID)
 		info.ReleasedPartitionIDs = releasedPartitionIDs
+
+		// If user loaded a collectionA, and release a partitionB which belongs to collectionA,
+		// and then load collectionA again, if we don't set the inMemoryPercentage to 0 when releasing
+		// partitionB, the second loading of collectionA would directly return because
+		// the inMemoryPercentage in ShowCollection response is still the old value -- 100.
+		// So if releasing partition, inMemoryPercentage should be set to 0.
+		info.InMemoryPercentage = 0
+
 		err := saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
@@ -486,40 +492,6 @@ func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID Unique
 	}
 
 	return nil
-}
-
-func (m *MetaReplica) hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error) {
-	m.RLock()
-	defer m.RUnlock()
-
-	if info, ok := m.collectionInfos[collectionID]; ok {
-		channelInfos := info.ChannelInfos
-		for _, channelInfo := range channelInfos {
-			for _, channel := range channelInfo.ChannelIDs {
-				if channel == channelID {
-					return true, nil
-				}
-			}
-		}
-		return false, nil
-	}
-
-	return false, errors.New("hasWatchedDmChannel: can't find collection in collectionInfos")
-}
-
-func (m *MetaReplica) getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error) {
-	m.RLock()
-	defer m.RUnlock()
-
-	if info, ok := m.collectionInfos[collectionID]; ok {
-		channels := make([]string, 0)
-		for _, channelsInfo := range info.ChannelInfos {
-			channels = append(channels, channelsInfo.ChannelIDs...)
-		}
-		return channels, nil
-	}
-
-	return nil, errors.New("getDmChannelsByCollectionID: can't find collection in collectionInfos")
 }
 
 func (m *MetaReplica) getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error) {

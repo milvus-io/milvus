@@ -87,7 +87,6 @@ TEST_P(IDMAPTest, idmap_basic) {
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
     //    PrintResult(result, nq, k);
-    ReleaseQueryResult(result);
 
     if (index_mode_ == milvus::knowhere::IndexMode::MODE_GPU) {
 #ifdef MILVUS_GPU_VERSION
@@ -102,7 +101,6 @@ TEST_P(IDMAPTest, idmap_basic) {
     auto result2 = new_index->Query(query_dataset, conf, nullptr);
     AssertAnns(result2, nq, k);
     //    PrintResult(re_result, nq, k);
-    ReleaseQueryResult(result2);
 
 #if 0
     auto result3 = new_index->QueryById(id_dataset, conf);
@@ -119,7 +117,6 @@ TEST_P(IDMAPTest, idmap_basic) {
 
     auto result_bs_1 = index_->Query(query_dataset, conf, concurrent_bitset_ptr);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
-    ReleaseQueryResult(result_bs_1);
 
 #if 0
     auto result_bs_2 = index_->QueryById(id_dataset, conf);
@@ -158,7 +155,6 @@ TEST_P(IDMAPTest, idmap_serialize) {
         auto re_result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);
-        ReleaseQueryResult(re_result);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
         auto binaryset = index_->Serialize(conf);
@@ -178,7 +174,6 @@ TEST_P(IDMAPTest, idmap_serialize) {
         auto result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, k);
         //        PrintResult(result, nq, k);
-        ReleaseQueryResult(result);
     }
 }
 
@@ -203,7 +198,6 @@ TEST_P(IDMAPTest, idmap_slice) {
         auto re_result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);
-        ReleaseQueryResult(re_result);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
         auto binaryset = index_->Serialize(conf);
@@ -214,7 +208,6 @@ TEST_P(IDMAPTest, idmap_slice) {
         auto result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, k);
         //        PrintResult(result, nq, k);
-        ReleaseQueryResult(result);
     }
 }
 
@@ -472,7 +465,6 @@ TEST_P(IDMAPTest, idmap_copy) {
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
-    ReleaseQueryResult(result);
 
     {
         // clone
@@ -487,7 +479,6 @@ TEST_P(IDMAPTest, idmap_copy) {
         auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto clone_result = clone_index->Query(query_dataset, conf, nullptr);
         AssertAnns(clone_result, nq, k);
-        ReleaseQueryResult(clone_result);
         ASSERT_THROW({ std::static_pointer_cast<milvus::knowhere::GPUIDMAP>(clone_index)->GetRawVectors(); },
                      milvus::knowhere::KnowhereException);
 
@@ -500,7 +491,6 @@ TEST_P(IDMAPTest, idmap_copy) {
         clone_index->Load(binary);
         auto new_result = clone_index->Query(query_dataset, conf, nullptr);
         AssertAnns(new_result, nq, k);
-        ReleaseQueryResult(new_result);
 
         //        auto clone_gpu_idx = clone_index->Clone();
         //        auto clone_gpu_res = clone_gpu_idx->Search(query_dataset, conf);
@@ -510,7 +500,6 @@ TEST_P(IDMAPTest, idmap_copy) {
         auto host_index = milvus::knowhere::cloner::CopyGpuToCpu(clone_index, conf);
         auto host_result = host_index->Query(query_dataset, conf, nullptr);
         AssertAnns(host_result, nq, k);
-        ReleaseQueryResult(host_result);
         ASSERT_TRUE(std::static_pointer_cast<milvus::knowhere::IDMAP>(host_index)->GetRawVectors() != nullptr);
 
         // gpu to gpu
@@ -519,7 +508,6 @@ TEST_P(IDMAPTest, idmap_copy) {
             std::static_pointer_cast<milvus::knowhere::GPUIDMAP>(device_index)->CopyGpuToGpu(DEVICEID, conf);
         auto device_result = new_device_index->Query(query_dataset, conf, nullptr);
         AssertAnns(device_result, nq, k);
-        ReleaseQueryResult(device_result);
     }
 }
 #endif

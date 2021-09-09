@@ -1,0 +1,13 @@
+reviewers:
+  - binbinlv
+  - ThreadDao
+  - wangting0128
+  - yanliang567
+
+approvers:
+  - pr-inspection
+
+labels:
+- area/test
+- sig/testing
+

@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -35,19 +37,14 @@ type Node interface {
 	stop()
 	clearNodeInfo() error
 
-	hasCollection(collectionID UniqueID) bool
 	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
 	setCollectionInfo(info *querypb.CollectionInfo) error
-	getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error)
 	showCollections() []*querypb.CollectionInfo
 	releaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) error
 
-	hasPartition(collectionID UniqueID, partitionID UniqueID) bool
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
 	releasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) error
 
-	hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error)
-	getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error)
 	watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error
 	removeDmChannel(collectionID UniqueID, channels []string) error
 
@@ -63,6 +60,8 @@ type Node interface {
 	loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error
 	releaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) error
 	getComponentInfo(ctx context.Context) *internalpb.ComponentInfo
+
+	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 type queryNode struct {
@@ -80,37 +79,38 @@ type queryNode struct {
 	serviceLock          sync.RWMutex
 }
 
-func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) Node {
+func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
 	collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
 	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
+	client, err := nodeclient.NewClient(childCtx, address)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	node := &queryNode{
 		ctx:                  childCtx,
 		cancel:               cancel,
 		id:                   id,
 		address:              address,
+		client:               client,
 		kvClient:             kv,
 		collectionInfos:      collectionInfo,
 		watchedQueryChannels: watchedChannels,
 		onService:            false,
 	}
 
-	return node
+	return node, nil
 }
 
 func (qn *queryNode) start() error {
-	client, err := nodeclient.NewClient(qn.ctx, qn.address)
-	if err != nil {
+	if err := qn.client.Init(); err != nil {
 		return err
 	}
-	if err = client.Init(); err != nil {
-		return err
-	}
-	if err = client.Start(); err != nil {
+	if err := qn.client.Start(); err != nil {
 		return err
 	}
 
-	qn.client = client
 	qn.serviceLock.Lock()
 	qn.onService = true
 	qn.serviceLock.Unlock()
@@ -126,32 +126,6 @@ func (qn *queryNode) stop() {
 		qn.client.Stop()
 	}
 	qn.cancel()
-}
-
-func (qn *queryNode) hasCollection(collectionID UniqueID) bool {
-	qn.RLock()
-	defer qn.RUnlock()
-
-	if _, ok := qn.collectionInfos[collectionID]; ok {
-		return true
-	}
-
-	return false
-}
-
-func (qn *queryNode) hasPartition(collectionID UniqueID, partitionID UniqueID) bool {
-	qn.RLock()
-	defer qn.RUnlock()
-
-	if info, ok := qn.collectionInfos[collectionID]; ok {
-		for _, id := range info.PartitionIDs {
-			if partitionID == id {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
@@ -189,16 +163,6 @@ func (qn *queryNode) setCollectionInfo(info *querypb.CollectionInfo) error {
 		return err
 	}
 	return nil
-}
-
-func (qn *queryNode) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {
-	qn.Lock()
-	defer qn.Lock()
-
-	if _, ok := qn.collectionInfos[collectionID]; ok {
-		return proto.Clone(qn.collectionInfos[collectionID]).(*querypb.CollectionInfo), nil
-	}
-	return nil, errors.New("GetCollectionInfoByID: can't find collection")
 }
 
 func (qn *queryNode) showCollections() []*querypb.CollectionInfo {
@@ -275,40 +239,6 @@ func (qn *queryNode) releasePartitionsInfo(collectionID UniqueID, partitionIDs [
 	}
 
 	return nil
-}
-
-func (qn *queryNode) hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error) {
-	qn.RLock()
-	defer qn.RUnlock()
-
-	if info, ok := qn.collectionInfos[collectionID]; ok {
-		channelInfos := info.ChannelInfos
-		for _, channelInfo := range channelInfos {
-			for _, channel := range channelInfo.ChannelIDs {
-				if channel == channelID {
-					return true, nil
-				}
-			}
-		}
-		return false, nil
-	}
-
-	return false, errors.New("HasWatchedDmChannel: can't find collection in collectionInfos")
-}
-
-func (qn *queryNode) getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error) {
-	qn.RLock()
-	defer qn.RUnlock()
-
-	if info, ok := qn.collectionInfos[collectionID]; ok {
-		channels := make([]string, 0)
-		for _, channelsInfo := range info.ChannelInfos {
-			channels = append(channels, channelsInfo.ChannelIDs...)
-		}
-		return channels, nil
-	}
-
-	return nil, errors.New("GetDmChannelsByCollectionID: can't find collection in collectionInfos")
 }
 
 func (qn *queryNode) addDmChannel(collectionID UniqueID, channels []string) error {
@@ -592,6 +522,16 @@ func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.Component
 	}
 
 	return res.State
+}
+
+func (qn *queryNode) getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	qn.serviceLock.RLock()
+	if !qn.onService {
+		return nil, errQueryNodeIsNotOnService(qn.id)
+	}
+	qn.serviceLock.RUnlock()
+
+	return qn.client.GetMetrics(ctx, in)
 }
 
 func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error {

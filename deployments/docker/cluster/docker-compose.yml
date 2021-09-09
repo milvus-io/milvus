@@ -3,29 +3,29 @@ version: '3.5'
 services:
   etcd:
     container_name: milvus-etcd
-    image: quay.io/coreos/etcd:latest
+    image: quay.io/coreos/etcd:v3.5.0
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
-    command: etcd -listen-peer-urls=http://127.0.0.1:2380 -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379,http://0.0.0.0:4001 -initial-advertise-peer-urls=http://127.0.0.1:2380 --listen-metrics-urls=http://127.0.0.1:2381 --initial-cluster default=http://127.0.0.1:2380 --data-dir /etcd
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--tries=1", "--spider", "http://localhost:2381/health"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 
   pulsar:
     container_name: milvus-pulsar
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:2.7.3
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/pulsar:/pulsar/data
-    command: >
-      /bin/sh -c "
-                  echo "" >> /pulsar/conf/standalone.conf && \
-                  echo "maxMessageSize=104857600" >> /pulsar/conf/standalone.conf && \
-                  echo "" >> /pulsar/conf/standalone.conf && \
-                  echo "nettyMaxFrameSizeBytes=104857600" >> /pulsar/conf/standalone.conf && \
-                  sed -i 's/^defaultRetentionTimeInMinutes=.*/defaultRetentionTimeInMinutes=10080/' /pulsar/conf/broker.conf && \
-                  bin/pulsar standalone"
+    environment:
+      # bin/apply-config-from-env.py script will modify the configuration file based on the environment variables
+      # nettyMaxFrameSizeBytes must be calculated from maxMessageSize + 10240 (padding)
+      - nettyMaxFrameSizeBytes=104867840 # this is 104857600 + 10240 (padding)
+      - defaultRetentionTimeInMinutes=10080
+      - defaultRetentionSizeInMB=-1
+      # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
+      - PULSAR_PREFIX_maxMessageSize=104857600
+      - PULSAR_GC=-XX:+UseG1GC
+    command: |
+      /bin/bash -c \
+      "bin/apply-config-from-env.py conf/standalone.conf && \
+      exec bin/pulsar standalone --no-functions-worker --no-stream-storage"
 
   minio:
     container_name: milvus-minio
@@ -44,7 +44,7 @@ services:
 
   rootcoord:
     container_name: milvus-rootcoord
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
     command: ["milvus", "run", "rootcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -58,7 +58,7 @@ services:
 
   proxy:
     container_name: milvus-proxy
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
     command: ["milvus", "run", "proxy"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -69,7 +69,7 @@ services:
 
   querycoord:
     container_name: milvus-querycoord
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
     command: ["milvus", "run", "querycoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -83,7 +83,7 @@ services:
 
   querynode:
     container_name: milvus-querynode
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
     command: ["milvus", "run", "querynode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -94,7 +94,7 @@ services:
 
   indexcoord:
     container_name: milvus-indexcoord
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
     command: ["milvus", "run", "indexcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -108,7 +108,7 @@ services:
 
   indexnode:
     container_name: milvus-indexnode
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
     command: ["milvus", "run", "indexnode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -120,7 +120,7 @@ services:
 
   datacoord:
     container_name: milvus-datacoord
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
     command: ["milvus", "run", "datacoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -134,7 +134,7 @@ services:
 
   datanode:
     container_name: milvus-datanode
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
     command: ["milvus", "run", "datanode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379

@@ -534,7 +534,7 @@ func (context *ParserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType sc
 					FloatVal: float64(node.Value),
 				},
 			}
-		} else if typeutil.IsIntergerType(dataType) {
+		} else if typeutil.IsIntegerType(dataType) {
 			gv = &planpb.GenericValue{
 				Val: &planpb.GenericValue_Int64Val{
 					Int64Val: int64(node.Value),
@@ -629,6 +629,25 @@ func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vector
 				PlaceholderTag: "$0",
 				FieldId:        fieldID,
 			},
+		},
+	}
+	return planNode, nil
+}
+
+func CreateExprQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
+	schema, err := typeutil.CreateSchemaHelper(schemaPb)
+	if err != nil {
+		return nil, err
+	}
+
+	expr, err := parseQueryExpr(schema, exprStr)
+	if err != nil {
+		return nil, err
+	}
+
+	planNode := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Predicates{
+			Predicates: expr,
 		},
 	}
 	return planNode, nil

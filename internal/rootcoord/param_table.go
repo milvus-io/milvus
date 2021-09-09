@@ -30,14 +30,15 @@ type ParamTable struct {
 	Port    int
 
 	PulsarAddress     string
-	RocksmqPath       string
 	EtcdEndpoints     []string
 	MetaRootPath      string
 	KvRootPath        string
 	MsgChannelSubName string
 	TimeTickChannel   string
 	StatisticsChannel string
+	DmlChannelName    string
 
+	DmlChannelNum               int64
 	MaxPartitionNum             int64
 	DefaultPartitionName        string
 	DefaultIndexName            string
@@ -61,7 +62,6 @@ func (p *ParamTable) Init() {
 		}
 
 		p.initPulsarAddress()
-		p.initRocksmqPath()
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 		p.initKvRootPath()
@@ -69,7 +69,9 @@ func (p *ParamTable) Init() {
 		p.initMsgChannelSubName()
 		p.initTimeTickChannel()
 		p.initStatisticsChannelName()
+		p.initDmlChannelName()
 
+		p.initDmlChannelNum()
 		p.initMaxPartitionNum()
 		p.initMinSegmentSizeToEnableIndex()
 		p.initDefaultPartitionName()
@@ -89,14 +91,6 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = addr
-}
-
-func (p *ParamTable) initRocksmqPath() {
-	path, err := p.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.RocksmqPath = path
 }
 
 func (p *ParamTable) initEtcdEndpoints() {
@@ -153,6 +147,18 @@ func (p *ParamTable) initStatisticsChannelName() {
 		panic(err)
 	}
 	p.StatisticsChannel = channel
+}
+
+func (p *ParamTable) initDmlChannelName() {
+	channel, err := p.Load("msgChannel.chanNamePrefix.rootCoordDml")
+	if err != nil {
+		panic(err)
+	}
+	p.DmlChannelName = channel
+}
+
+func (p *ParamTable) initDmlChannelNum() {
+	p.DmlChannelNum = p.ParseInt64("rootcoord.dmlChannelNum")
 }
 
 func (p *ParamTable) initMaxPartitionNum() {

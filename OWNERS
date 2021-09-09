@@ -2,9 +2,7 @@ filters:
   ".*":
     reviewers:
       - czs007
-      - del-zhenwu
       - jeffoverflow
-      - neza2017
       - scsven
       - shengjun1985
       - sunby
@@ -13,10 +11,4 @@ filters:
       - yanliang567
       - zwd1208
     approvers:
-      - czs007
-      - neza2017
-      - scsven
-      - shengjun1985
-      - xiaofan-luan
-      - yanliang567
-      - zwd1208
+      - pr-inspection

@@ -20,9 +20,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coreos/etcd/mvcc/mvccpb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/golang/protobuf/proto"
-	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -53,7 +54,10 @@ type QueryCoord struct {
 	queryCoordID uint64
 	meta         Meta
 	cluster      *queryNodeCluster
+	newNodeFn    newQueryNodeFn
 	scheduler    *TaskScheduler
+
+	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	dataCoordClient types.DataCoord
 	rootCoordClient types.RootCoord
@@ -79,11 +83,10 @@ func (qc *QueryCoord) Register() error {
 
 func (qc *QueryCoord) Init() error {
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		if err != nil {
 			return err
 		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		qc.kvClient = etcdKV
 		return nil
 	}
@@ -100,7 +103,7 @@ func (qc *QueryCoord) Init() error {
 		return err
 	}
 
-	qc.cluster, err = newQueryNodeCluster(qc.meta, qc.kvClient)
+	qc.cluster, err = newQueryNodeCluster(qc.meta, qc.kvClient, qc.newNodeFn)
 	if err != nil {
 		log.Error("query coordinator init cluster failed", zap.Error(err))
 		return err
@@ -111,6 +114,8 @@ func (qc *QueryCoord) Init() error {
 		log.Error("query coordinator init task scheduler failed", zap.Error(err))
 		return err
 	}
+
+	qc.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	return nil
 }
@@ -162,6 +167,7 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 		msFactory:  factory,
+		newNodeFn:  newQueryNode,
 	}
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -240,6 +246,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 				if err != nil {
 					log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 				}
+				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("get a del event after queryNode down", zap.Int64("nodeID", serverID))
@@ -272,6 +279,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 					meta:               qc.meta,
 				}
 				qc.scheduler.Enqueue([]task{loadBalanceTask})
+				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
 		}
 	}

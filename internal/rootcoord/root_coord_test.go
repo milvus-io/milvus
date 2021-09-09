@@ -14,12 +14,15 @@ package rootcoord
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"path"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -40,8 +43,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
+
+const TestDMLChannelNum = 32
 
 type proxyMock struct {
 	types.Proxy
@@ -63,6 +68,13 @@ func (p *proxyMock) GetCollArray() []string {
 	ret := make([]string, 0, len(p.collArray))
 	ret = append(ret, p.collArray...)
 	return ret
+}
+
+func (p *proxyMock) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
 }
 
 type dataMock struct {
@@ -247,6 +259,142 @@ func getNotTtMsg(ctx context.Context, n int, ch <-chan *msgstream.MsgPack) []msg
 	}
 }
 
+func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32, modifyFunc func(*etcdpb.CollectionInfo)) error {
+	schema := schemapb.CollectionSchema{
+		Name: collName,
+	}
+
+	sbf, err := proto.Marshal(&schema)
+	if err != nil {
+		return err
+	}
+
+	t := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_CreateCollection,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collName,
+		Schema:         sbf,
+		ShardsNum:      shardsNum,
+	}
+
+	err = proto.Unmarshal(t.Schema, &schema)
+	if err != nil {
+		return fmt.Errorf("unmarshal schema error= %w", err)
+	}
+
+	for idx, field := range schema.Fields {
+		field.FieldID = int64(idx + StartOfUserFieldID)
+	}
+	rowIDField := &schemapb.FieldSchema{
+		FieldID:      int64(RowIDField),
+		Name:         RowIDFieldName,
+		IsPrimaryKey: false,
+		Description:  "row id",
+		DataType:     schemapb.DataType_Int64,
+	}
+	timeStampField := &schemapb.FieldSchema{
+		FieldID:      int64(TimeStampField),
+		Name:         TimeStampFieldName,
+		IsPrimaryKey: false,
+		Description:  "time stamp",
+		DataType:     schemapb.DataType_Int64,
+	}
+	schema.Fields = append(schema.Fields, rowIDField, timeStampField)
+
+	collID, _, err := core.IDAllocator(1)
+	if err != nil {
+		return fmt.Errorf("alloc collection id error = %w", err)
+	}
+	partID, _, err := core.IDAllocator(1)
+	if err != nil {
+		return fmt.Errorf("alloc partition id error = %w", err)
+	}
+
+	vchanNames := make([]string, t.ShardsNum)
+	chanNames := make([]string, t.ShardsNum)
+	for i := int32(0); i < t.ShardsNum; i++ {
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.dmlChannels.GetDmlMsgStreamName(), collID, i)
+		chanNames[i] = ToPhysicalChannel(vchanNames[i])
+	}
+
+	collInfo := etcdpb.CollectionInfo{
+		ID:                         collID,
+		Schema:                     &schema,
+		PartitionIDs:               []typeutil.UniqueID{partID},
+		PartitionNames:             []string{Params.DefaultPartitionName},
+		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
+		VirtualChannelNames:        vchanNames,
+		PhysicalChannelNames:       chanNames,
+		ShardsNum:                  0, // intend to set zero
+		PartitionCreatedTimestamps: []uint64{0},
+	}
+
+	if modifyFunc != nil {
+		modifyFunc(&collInfo)
+	}
+
+	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
+
+	// schema is modified (add RowIDField and TimestampField),
+	// so need Marshal again
+	schemaBytes, err := proto.Marshal(&schema)
+	if err != nil {
+		return fmt.Errorf("marshal schema error = %w", err)
+	}
+
+	ddCollReq := internalpb.CreateCollectionRequest{
+		Base:                 t.Base,
+		DbName:               t.DbName,
+		CollectionName:       t.CollectionName,
+		PartitionName:        Params.DefaultPartitionName,
+		DbID:                 0, //TODO,not used
+		CollectionID:         collID,
+		PartitionID:          partID,
+		Schema:               schemaBytes,
+		VirtualChannelNames:  vchanNames,
+		PhysicalChannelNames: chanNames,
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		ddCollReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
+	}
+
+	reason := fmt.Sprintf("create collection %d", collID)
+	ts, err := core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	createCollectionFn := func() error {
+		// lock for ddl operation
+		core.ddlLock.Lock()
+		defer core.ddlLock.Unlock()
+
+		core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+
+		err = core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
+		if err != nil {
+			return fmt.Errorf("meta table add collection failed,error = %w", err)
+		}
+		return nil
+	}
+
+	err = createCollectionFn()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func TestRootCoord(t *testing.T) {
 	const (
 		dbName   = "testDb"
@@ -260,6 +408,7 @@ func TestRootCoord(t *testing.T) {
 
 	coreFactory := msgstream.NewPmsFactory()
 	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, coreFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
@@ -269,6 +418,7 @@ func TestRootCoord(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.DmlChannelName = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
 
 	err = core.Register()
 	assert.Nil(t, err)
@@ -334,6 +484,7 @@ func TestRootCoord(t *testing.T) {
 	timeTickStream.Start()
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
+	clearMsgChan(1500*time.Millisecond, dmlStream.Chan())
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -351,6 +502,7 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 
 	time.Sleep(100 * time.Millisecond)
+	shardsNum := int32(8)
 
 	t.Run("time tick", func(t *testing.T) {
 		ttmsg, ok := <-timeTickStream.Chan()
@@ -393,7 +545,6 @@ func TestRootCoord(t *testing.T) {
 		}
 		sbf, err := proto.Marshal(&schema)
 		assert.Nil(t, err)
-
 		req := &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateCollection,
@@ -404,21 +555,22 @@ func TestRootCoord(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collName,
 			Schema:         sbf,
+			ShardsNum:      shardsNum,
 		}
 		status, err := core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		assert.Equal(t, 2, len(core.dmlChannels.dml))
+		assert.Equal(t, shardsNum, int32(core.dmlChannels.GetNumChannels()))
 
 		pChan := core.MetaTable.ListCollectionPhysicalChannels()
 		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
 		dmlStream.Start()
 
 		// get CreateCollectionMsg
-		msgPack, ok := <-dmlStream.Chan()
-		assert.True(t, ok)
-		createMsg, ok := (msgPack.Msgs[0]).(*msgstream.CreateCollectionMsg)
+		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
+		assert.Equal(t, 1, len(msgs))
+		createMsg, ok := (msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
 		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
@@ -427,8 +579,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, createMeta.PartitionIDs[0], createMsg.PartitionID)
 		assert.Equal(t, 1, len(createMeta.PartitionNames))
 		assert.Equal(t, createMeta.PartitionNames[0], createMsg.PartitionName)
-		assert.Equal(t, 2, len(createMeta.VirtualChannelNames))
-		assert.Equal(t, 2, len(createMeta.PhysicalChannelNames))
+		assert.Equal(t, shardsNum, int32(len(createMeta.VirtualChannelNames)))
+		assert.Equal(t, shardsNum, int32(len(createMeta.PhysicalChannelNames)))
+		assert.Equal(t, shardsNum, createMeta.ShardsNum)
 
 		vChanName := createMeta.VirtualChannelNames[0]
 		assert.Equal(t, createMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
@@ -444,9 +597,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, len(core.chanTimeTick.proxyTimeTick), 2)
 		pt, ok := core.chanTimeTick.proxyTimeTick[core.session.ServerID]
 		assert.True(t, ok)
-		assert.Equal(t, 2, len(pt.in.ChannelNames))
-		assert.Equal(t, 2, len(pt.in.Timestamps))
-		assert.Equal(t, 2, len(pt.timeTick))
+		assert.Equal(t, shardsNum, int32(len(pt.in.ChannelNames)))
+		assert.Equal(t, shardsNum, int32(len(pt.in.Timestamps)))
+		assert.Equal(t, shardsNum, int32(len(pt.timeTick)))
 		assert.ElementsMatch(t, pt.in.ChannelNames, createMeta.PhysicalChannelNames)
 		assert.Equal(t, pt.in.Timestamps[0], pt.in.Timestamps[1])
 		assert.Equal(t, pt.in.Timestamps[0], pt.in.DefaultTimestamp)
@@ -498,6 +651,9 @@ func TestRootCoord(t *testing.T) {
 		status, err = core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+		err = core.reSendDdMsg(core.ctx, true)
+		assert.Nil(t, err)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -566,8 +722,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, collName, rsp.Schema.Name)
 		assert.Equal(t, collMeta.ID, rsp.CollectionID)
-		assert.Equal(t, 2, len(rsp.VirtualChannelNames))
-		assert.Equal(t, 2, len(rsp.PhysicalChannelNames))
+		assert.Equal(t, shardsNum, int32(len(rsp.VirtualChannelNames)))
+		assert.Equal(t, shardsNum, int32(len(rsp.PhysicalChannelNames)))
+		assert.Equal(t, shardsNum, rsp.ShardsNum)
 	})
 
 	t.Run("show collection", func(t *testing.T) {
@@ -637,6 +794,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 		assert.Equal(t, collMeta.PartitionIDs[1], ddReq.PartitionID)
+
+		err = core.reSendDdMsg(core.ctx, true)
+		assert.NotNil(t, err)
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -969,6 +1129,25 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 		assert.Equal(t, dropPartID, ddReq.PartitionID)
+
+		err = core.reSendDdMsg(core.ctx, true)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("remove DQL msgstream", func(t *testing.T) {
+		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.Nil(t, err)
+
+		req := &proxypb.ReleaseDQLMessageStreamRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_RemoveQueryChannels,
+				SourceID: core.session.ServerID,
+			},
+			CollectionID: collMeta.ID,
+		}
+		status, err := core.ReleaseDQLMessageStream(core.ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -1039,6 +1218,9 @@ func TestRootCoord(t *testing.T) {
 		err = proto.UnmarshalText(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
+
+		err = core.reSendDdMsg(core.ctx, true)
+		assert.NotNil(t, err)
 	})
 
 	t.Run("context_cancel", func(t *testing.T) {
@@ -1413,7 +1595,6 @@ func TestRootCoord(t *testing.T) {
 		p1 := sessionutil.Session{
 			ServerID: 100,
 		}
-
 		p2 := sessionutil.Session{
 			ServerID: 101,
 		}
@@ -1424,13 +1605,18 @@ func TestRootCoord(t *testing.T) {
 		s2, err := json.Marshal(&p2)
 		assert.Nil(t, err)
 
-		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyRole)+"-1", string(s1))
+		proxy1 := path.Join(sessKey, typeutil.ProxyRole) + "-1"
+		proxy2 := path.Join(sessKey, typeutil.ProxyRole) + "-2"
+		_, err = core.etcdCli.Put(ctx2, proxy1, string(s1))
 		assert.Nil(t, err)
-		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyRole)+"-2", string(s2))
+		_, err = core.etcdCli.Put(ctx2, proxy2, string(s2))
 		assert.Nil(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		core.dmlChannels.AddProducerChannels("c0", "c1", "c2")
+		cn0 := core.dmlChannels.GetDmlMsgStreamName()
+		cn1 := core.dmlChannels.GetDmlMsgStreamName()
+		cn2 := core.dmlChannels.GetDmlMsgStreamName()
+		core.dmlChannels.AddProducerChannels(cn0, cn1, cn2)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1474,6 +1660,55 @@ func TestRootCoord(t *testing.T) {
 
 		// add 3 proxy channels
 		assert.Equal(t, 3, core.chanTimeTick.GetChanNum()-numChan)
+
+		_, err = core.etcdCli.Delete(ctx2, proxy1)
+		assert.Nil(t, err)
+		_, err = core.etcdCli.Delete(ctx2, proxy2)
+		assert.Nil(t, err)
+	})
+
+	t.Run("get metrics", func(t *testing.T) {
+		// not healthy
+		stateSave := core.stateCode.Load().(internalpb.StateCode)
+		core.UpdateStateCode(internalpb.StateCode_Abnormal)
+		resp, err := core.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		core.UpdateStateCode(stateSave)
+
+		// failed to parse metric type
+		invalidRequest := "invalid request"
+		resp, err = core.GetMetrics(ctx, &milvuspb.GetMetricsRequest{
+			Request: invalidRequest,
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// unsupported metric type
+		unsupportedMetricType := "unsupported"
+		req, err := metricsinfo.ConstructRequestByMetricType(unsupportedMetricType)
+		assert.Nil(t, err)
+		resp, err = core.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// normal case
+		systemInfoMetricType := metricsinfo.SystemInfoMetrics
+		req, err = metricsinfo.ConstructRequestByMetricType(systemInfoMetricType)
+		assert.Nil(t, err)
+		resp, err = core.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("get system info", func(t *testing.T) {
+		// normal case
+		systemInfoMetricType := metricsinfo.SystemInfoMetrics
+		req, err := metricsinfo.ConstructRequestByMetricType(systemInfoMetricType)
+		assert.Nil(t, err)
+		resp, err := core.getSystemInfoMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	err = core.Stop()
@@ -1676,6 +1911,8 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, p2.Status.ErrorCode)
 	})
+	err = core.Stop()
+	assert.Nil(t, err)
 }
 
 func TestRootCoord2(t *testing.T) {
@@ -1690,6 +1927,7 @@ func TestRootCoord2(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
@@ -1789,6 +2027,31 @@ func TestRootCoord2(t *testing.T) {
 		assert.True(t, ok)
 		t.Log("time tick", m1.Base.Timestamp)
 	})
+
+	t.Run("describe collection", func(t *testing.T) {
+		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.Nil(t, err)
+		req := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     120,
+				Timestamp: 120,
+				SourceID:  120,
+			},
+			DbName:         dbName,
+			CollectionName: collName,
+		}
+		rsp, err := core.DescribeCollection(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+		assert.Equal(t, collName, rsp.Schema.Name)
+		assert.Equal(t, collMeta.ID, rsp.CollectionID)
+		assert.Equal(t, DefaultShardsNum, int32(len(rsp.VirtualChannelNames)))
+		assert.Equal(t, DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
+		assert.Equal(t, DefaultShardsNum, rsp.ShardsNum)
+	})
+	err = core.Stop()
+	assert.Nil(t, err)
 }
 
 func TestCheckInit(t *testing.T) {
@@ -1907,5 +2170,266 @@ func TestCheckInit(t *testing.T) {
 		return nil
 	}
 	err = c.checkInit()
+	assert.Nil(t, err)
+	err = c.Stop()
+	assert.Nil(t, err)
+}
+
+func TestCheckFlushedSegments(t *testing.T) {
+	const (
+		dbName   = "testDb"
+		collName = "testColl"
+		partName = "testPartition"
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msFactory := msgstream.NewPmsFactory()
+	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
+	core, err := NewCore(ctx, msFactory)
+	assert.Nil(t, err)
+	randVal := rand.Int()
+
+	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
+
+	dm := &dataMock{randVal: randVal}
+	err = core.SetDataCoord(ctx, dm)
+	assert.Nil(t, err)
+
+	im := &indexMock{
+		fileArray:  []string{},
+		idxBuildID: []int64{},
+		idxID:      []int64{},
+		idxDropID:  []int64{},
+		mutex:      sync.Mutex{},
+	}
+	err = core.SetIndexCoord(im)
+	assert.Nil(t, err)
+
+	qm := &queryMock{
+		collID: nil,
+		mutex:  sync.Mutex{},
+	}
+	err = core.SetQueryCoord(qm)
+	assert.Nil(t, err)
+
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
+		return nil, nil
+	}
+
+	err = core.Init()
+	assert.Nil(t, err)
+
+	err = core.Start()
+	assert.Nil(t, err)
+
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	timeTickStream, _ := msFactory.NewMsgStream(ctx)
+	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.Start()
+
+	time.Sleep(100 * time.Millisecond)
+	t.Run("check flushed segments", func(t *testing.T) {
+		ctx := context.Background()
+		var collID int64 = 1
+		var partID int64 = 2
+		var segID int64 = 1001
+		var fieldID int64 = 101
+		var indexID int64 = 6001
+		core.MetaTable.segID2IndexMeta[segID] = make(map[int64]etcdpb.SegmentIndexInfo)
+		core.MetaTable.partID2SegID[partID] = make(map[int64]bool)
+		core.MetaTable.collID2Meta[collID] = etcdpb.CollectionInfo{ID: collID}
+		// do nothing, since collection has 0 index
+		core.checkFlushedSegments(ctx)
+
+		// get field schema by id fail
+		core.MetaTable.collID2Meta[collID] = etcdpb.CollectionInfo{
+			ID:           collID,
+			PartitionIDs: []int64{partID},
+			FieldIndexes: []*etcdpb.FieldIndexInfo{
+				{
+					FiledID: fieldID,
+					IndexID: indexID,
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{},
+			},
+		}
+		core.checkFlushedSegments(ctx)
+
+		// fail to get segment id ,dont panic
+		core.CallGetFlushedSegmentsService = func(_ context.Context, collID, partID int64) ([]int64, error) {
+			return []int64{}, errors.New("service not available")
+		}
+		core.checkFlushedSegments(core.ctx)
+		// non-exist segID
+		core.CallGetFlushedSegmentsService = func(_ context.Context, collID, partID int64) ([]int64, error) {
+			return []int64{2001}, nil
+		}
+		core.checkFlushedSegments(core.ctx)
+
+		// missing index info
+		core.MetaTable.collID2Meta[collID] = etcdpb.CollectionInfo{
+			ID:           collID,
+			PartitionIDs: []int64{partID},
+			FieldIndexes: []*etcdpb.FieldIndexInfo{
+				{
+					FiledID: fieldID,
+					IndexID: indexID,
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: fieldID,
+					},
+				},
+			},
+		}
+		core.checkFlushedSegments(ctx)
+		// existing segID, buildIndex failed
+		core.CallGetFlushedSegmentsService = func(_ context.Context, cid, pid int64) ([]int64, error) {
+			assert.Equal(t, collID, cid)
+			assert.Equal(t, partID, pid)
+			return []int64{segID}, nil
+		}
+		core.MetaTable.indexID2Meta[indexID] = etcdpb.IndexInfo{
+			IndexID: indexID,
+		}
+		core.CallBuildIndexService = func(_ context.Context, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo) (int64, error) {
+			assert.Equal(t, fieldID, field.FieldID)
+			assert.Equal(t, indexID, idx.IndexID)
+			return -1, errors.New("build index build")
+		}
+
+		core.checkFlushedSegments(ctx)
+
+		var indexBuildID int64 = 10001
+		core.CallBuildIndexService = func(_ context.Context, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo) (int64, error) {
+			return indexBuildID, nil
+		}
+		core.checkFlushedSegments(core.ctx)
+
+	})
+	err = core.Stop()
+	assert.Nil(t, err)
+}
+
+func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
+	const (
+		dbName   = "testDb"
+		collName = "testColl"
+	)
+
+	shardsNum := int32(2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msFactory := msgstream.NewPmsFactory()
+	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
+
+	core, err := NewCore(ctx, msFactory)
+	assert.Nil(t, err)
+	randVal := rand.Int()
+
+	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
+
+	dm := &dataMock{randVal: randVal}
+	err = core.SetDataCoord(ctx, dm)
+	assert.Nil(t, err)
+
+	im := &indexMock{
+		fileArray:  []string{},
+		idxBuildID: []int64{},
+		idxID:      []int64{},
+		idxDropID:  []int64{},
+		mutex:      sync.Mutex{},
+	}
+	err = core.SetIndexCoord(im)
+	assert.Nil(t, err)
+
+	qm := &queryMock{
+		collID: nil,
+		mutex:  sync.Mutex{},
+	}
+	err = core.SetQueryCoord(qm)
+	assert.Nil(t, err)
+
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
+		return nil, nil
+	}
+
+	err = core.Init()
+	assert.Nil(t, err)
+
+	err = core.Start()
+	assert.Nil(t, err)
+
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	timeTickStream, _ := msFactory.NewMsgStream(ctx)
+	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.Start()
+
+	time.Sleep(100 * time.Millisecond)
+
+	modifyFunc := func(collInfo *etcdpb.CollectionInfo) {
+		collInfo.ShardsNum = 0
+	}
+
+	createCollectionInMeta(dbName, collName, core, shardsNum, modifyFunc)
+
+	t.Run("describe collection", func(t *testing.T) {
+		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.Nil(t, err)
+		req := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     120,
+				Timestamp: 120,
+				SourceID:  120,
+			},
+			DbName:         dbName,
+			CollectionName: collName,
+		}
+		rsp, err := core.DescribeCollection(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+		assert.Equal(t, collName, rsp.Schema.Name)
+		assert.Equal(t, collMeta.ID, rsp.CollectionID)
+		assert.Equal(t, shardsNum, int32(len(rsp.VirtualChannelNames)))
+		assert.Equal(t, shardsNum, int32(len(rsp.PhysicalChannelNames)))
+		assert.Equal(t, shardsNum, rsp.ShardsNum)
+	})
+	err = core.Stop()
 	assert.Nil(t, err)
 }

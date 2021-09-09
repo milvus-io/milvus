@@ -14,9 +14,14 @@ package funcutil
 import (
 	"sort"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestSliceContain(t *testing.T) {
+func Test_SliceContain(t *testing.T) {
+	invalid := "invalid"
+	assert.Panics(t, func() { SliceContain(invalid, 1) })
+
 	strSlice := []string{"test", "for", "SliceContain"}
 	intSlice := []int{1, 2, 3}
 
@@ -42,7 +47,12 @@ func TestSliceContain(t *testing.T) {
 	}
 }
 
-func TestSliceSetEqual(t *testing.T) {
+func Test_SliceSetEqual(t *testing.T) {
+	invalid := "invalid"
+	assert.Panics(t, func() { SliceSetEqual(invalid, 1) })
+	temp := []int{1, 2, 3}
+	assert.Panics(t, func() { SliceSetEqual(temp, invalid) })
+
 	cases := []struct {
 		s1   interface{}
 		s2   interface{}
@@ -69,7 +79,12 @@ func TestSliceSetEqual(t *testing.T) {
 	}
 }
 
-func TestSortedSliceEqual(t *testing.T) {
+func Test_SortedSliceEqual(t *testing.T) {
+	invalid := "invalid"
+	assert.Panics(t, func() { SortedSliceEqual(invalid, 1) })
+	temp := []int{1, 2, 3}
+	assert.Panics(t, func() { SortedSliceEqual(temp, invalid) })
+
 	sortSlice := func(slice interface{}, less func(i, j int) bool) {
 		sort.Slice(slice, less)
 	}

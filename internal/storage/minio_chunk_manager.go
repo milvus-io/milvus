@@ -13,6 +13,7 @@ package storage
 
 import (
 	"errors"
+	"io"
 
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 )
@@ -47,6 +48,19 @@ func (mcm *MinioChunkManager) Read(key string) ([]byte, error) {
 	return []byte(results), err
 }
 
-func (mcm *MinioChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
-	return 0, errors.New("Minio file manager cannot readat")
+func (mcm *MinioChunkManager) ReadAt(key string, p []byte, off int64) (int, error) {
+	results, err := mcm.minio.Load(key)
+	if err != nil {
+		return -1, err
+	}
+
+	if off < 0 || int64(len([]byte(results))) < off {
+		return 0, errors.New("MinioChunkManager: invalid offset")
+	}
+	n := copy(p, []byte(results)[off:])
+	if n < len(p) {
+		return n, io.EOF
+	}
+
+	return n, nil
 }

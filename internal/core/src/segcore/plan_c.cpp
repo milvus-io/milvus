@@ -130,23 +130,51 @@ DeletePlaceholderGroup(CPlaceholderGroup cPlaceholder_group) {
     // std::cout << "delete placeholder" << std::endl;
 }
 
-CStatus
-CreateRetrievePlan(CCollection c_col, CProto retrieve_request, CRetrievePlan* output) {
-    auto col = (milvus::segcore::Collection*)c_col;
-    try {
-        milvus::proto::segcore::RetrieveRequest request;
-        request.ParseFromArray(retrieve_request.proto_blob, retrieve_request.proto_size);
-        auto plan = milvus::query::CreateRetrievePlan(*col->get_schema(), std::move(request));
-        *output = plan.release();
+// CStatus
+// CreateRetrievePlan(CCollection c_col, CProto retrieve_request, CRetrievePlan* output) {
+//    auto col = (milvus::segcore::Collection*)c_col;
+//    try {
+//        milvus::proto::segcore::RetrieveRequest request;
+//        request.ParseFromArray(retrieve_request.proto_blob, retrieve_request.proto_size);
+//        auto plan = milvus::query::CreateRetrievePlan(*col->get_schema(), std::move(request));
+//        *output = plan.release();
+//
+//        auto status = CStatus();
+//        status.error_code = Success;
+//        status.error_msg = "";
+//        return status;
+//    } catch (std::exception& e) {
+//        auto status = CStatus();
+//        status.error_code = UnexpectedError;
+//        status.error_msg = strdup(e.what());
+//        return status;
+//    }
+//}
 
+CStatus
+CreateRetrievePlanByExpr(CCollection c_col, const char* serialized_expr_plan, int64_t size, CRetrievePlan* res_plan) {
+    auto col = (milvus::segcore::Collection*)c_col;
+
+    try {
+        auto res = milvus::query::CreateRetrievePlanByExpr(*col->get_schema(), serialized_expr_plan, size);
         auto status = CStatus();
+
         status.error_code = Success;
         status.error_msg = "";
+        auto plan = (CRetrievePlan)res.release();
+        *res_plan = plan;
+        return status;
+    } catch (milvus::SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        *res_plan = nullptr;
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
+        *res_plan = nullptr;
         return status;
     }
 }

@@ -20,6 +20,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestEventTypeCode_String(t *testing.T) {
+	var code EventTypeCode = 127
+	res := code.String()
+	assert.Equal(t, res, "InvalidEventType")
+
+	code = DeleteEventType
+	res = code.String()
+	assert.Equal(t, res, "DeleteEventType")
+}
+
 func TestSizeofStruct(t *testing.T) {
 	var buf bytes.Buffer
 	err := binary.Write(&buf, binary.LittleEndian, baseEventHeader{})
@@ -74,5 +84,4 @@ func TestEventWriter(t *testing.T) {
 	assert.EqualValues(t, length, buffer.Len())
 	err = insertEvent.Close()
 	assert.Nil(t, err)
-
 }

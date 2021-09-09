@@ -55,4 +55,12 @@ struct BinaryVectorANNS : VectorPlanNode {
     accept(PlanNodeVisitor&) override;
 };
 
+struct RetrievePlanNode : PlanNode {
+ public:
+    void
+    accept(PlanNodeVisitor&) override;
+
+    ExprPtr predicate_;
+};
+
 }  // namespace milvus::query

@@ -126,6 +126,9 @@ class SegmentSealedImpl : public SegmentSealed {
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
+    std::vector<SegOffset>
+    search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
+
     //    virtual void
     //    build_index_if_primary_key(FieldId field_id);
 

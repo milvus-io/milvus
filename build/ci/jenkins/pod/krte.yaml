@@ -24,11 +24,11 @@ spec:
       limits:
         cpu: "6"
         memory: 12Gi
-        ephemeral-storage: "30Gi"
+        ephemeral-storage: "100Gi"
       requests:
         cpu: "3"
         memory: 10Gi
-        ephemeral-storage: "30Gi"
+        ephemeral-storage: "100Gi"
     volumeMounts:
     - mountPath: /docker-graph
       name: docker-graph
@@ -43,10 +43,16 @@ spec:
       name: build-cache
       subPath: docker-volume
   - name: etcd
-    image: quay.io/coreos/etcd:v3.4.13
+    image: quay.io/coreos/etcd:v3.5.0
     env:
     - name: ETCD_LOG_LEVEL
       value: debug
+    - name: ETCD_QUOTA_BACKEND_BYTES
+      value: "4294967296"
+    - name: ETCD_AUTO_COMPACTION_MODE
+      value: "revision"
+    - name: ETCD_AUTO_COMPACTION_RETENTION
+      value: "1000"
     command:
     - etcd
     - -advertise-client-urls=http://127.0.0.1:2379
@@ -54,7 +60,7 @@ spec:
     resources:
       limits:
         cpu: "2"
-        memory: "4Gi"
+        memory: "6Gi"
     ports:
     - containerPort: 2379
       name: client

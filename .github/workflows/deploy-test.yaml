@@ -1,0 +1,61 @@
+name: Deploy Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 20 * * *"
+
+jobs:
+
+  test-docker-compose:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [standalone,cluster]
+        task: [reinstall,upgrade]
+
+    steps:
+
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Run deploy test
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
+          pip install -r requirements.txt
+          pip install --upgrade protobuf
+          mkdir -p ${{ matrix.mode }}/logs
+          echo "test -m ${{ matrix.mode }} -t ${{ matrix.task }}" > ./${{ matrix.mode }}/logs/test_info.log
+          python scripts/get_tag.py >> ./${{ matrix.mode }}/logs/test_info.log
+          bash test.sh -m ${{ matrix.mode }} -t ${{ matrix.task }} -p ""
+
+
+      - name: 'Send mail'
+        if: ${{ failure() }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.EMAIL_SERVICE_NAME }}
+          server_port: 465
+          username: ${{ secrets.TEST_EMAIL_USERNAME }}
+          password: ${{ secrets.TEST_EMAIL_PASSWORD  }}
+          subject: Deploy Test
+          body: "test ${{ matrix.mode }} ${{ matrix.task }} failed"
+          to: ${{ secrets.QA_EMAIL_ADDRESS }}
+          from: GitHub Actions
+
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: logs-${{ matrix.mode }}-${{ matrix.task }}
+          path: tests/python_client/deploy/${{ matrix.mode }}/logs
+
+        
+
+        

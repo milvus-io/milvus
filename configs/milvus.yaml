@@ -36,6 +36,8 @@ pulsar:
 
 rocksmq:
   path: /var/lib/milvus/rdb_data
+  retentionTimeInMinutes: 4320
+  retentionSizeInMB: 0
 
 rootCoord:
   address: localhost
@@ -114,9 +116,11 @@ dataNode:
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
-storage:
+localStorage:
   path: /var/lib/milvus/data/
+  enabled: true
 
+# Configures the system log output.
 log:
   level: debug # info, warn, error, panic, fatal
   file:

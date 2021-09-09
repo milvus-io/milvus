@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -498,5 +500,84 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 	return &querypb.GetSegmentInfoResponse{
 		Status: status,
 		Infos:  segmentInfos,
+	}, nil
+}
+
+func (qc *QueryCoord) isHealthy() bool {
+	code := qc.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
+}
+
+func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("QueryCoord.GetMetrics",
+		zap.Int64("node_id", Params.QueryCoordID),
+		zap.String("req", req.Request))
+
+	if !qc.isHealthy() {
+		log.Warn("QueryCoord.GetMetrics failed",
+			zap.Int64("node_id", Params.QueryCoordID),
+			zap.String("req", req.Request),
+			zap.Error(errQueryCoordIsUnhealthy(Params.QueryCoordID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgQueryCoordIsUnhealthy(Params.QueryCoordID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("QueryCoord.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.QueryCoordID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("QueryCoord.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		ret, err := qc.metricsCacheManager.GetSystemInfoMetrics()
+		if err == nil && ret != nil {
+			return ret, nil
+		}
+		log.Debug("failed to get system info metrics from cache, recompute instead",
+			zap.Error(err))
+
+		metrics, err := getSystemInfoMetrics(ctx, req, qc)
+
+		log.Debug("QueryCoord.GetMetrics",
+			zap.Int64("node_id", Params.QueryCoordID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		qc.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
+
+		return metrics, err
+	}
+	log.Debug("QueryCoord.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.QueryCoordID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }

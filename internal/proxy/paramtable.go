@@ -31,16 +31,21 @@ const (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	NetworkPort    int
-	IP             string
+	// NetworkPort & IP are not used
+	NetworkPort int
+	IP          string
+
 	NetworkAddress string
-	Alias          string
+
+	// TODO(dragondriver): maybe using the Proxy + ProxyID as the alias is more reasonable
+	Alias string
 
 	EtcdEndpoints    []string
 	MetaRootPath     string
 	RootCoordAddress string
 	PulsarAddress    string
-	RocksmqPath      string
+
+	RocksmqPath string // not used in Proxy
 
 	ProxyID                    UniqueID
 	TimeTickInterval           time.Duration
@@ -51,6 +56,7 @@ type ParamTable struct {
 	MsgStreamTimeTickBufSize   int64
 	MaxNameLength              int64
 	MaxFieldNum                int64
+	MaxShardNum                int32
 	MaxDimension               int64
 	DefaultPartitionName       string
 	DefaultIndexName           string
@@ -86,6 +92,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMsgStreamTimeTickBufSize()
 	pt.initMaxNameLength()
 	pt.initMaxFieldNum()
+	pt.initMaxShardNum()
 	pt.initMaxDimension()
 	pt.initDefaultPartitionName()
 	pt.initDefaultIndexName()
@@ -157,6 +164,18 @@ func (pt *ParamTable) initMaxNameLength() {
 		panic(err)
 	}
 	pt.MaxNameLength = maxNameLength
+}
+
+func (pt *ParamTable) initMaxShardNum() {
+	str, err := pt.Load("proxy.maxShardNum")
+	if err != nil {
+		panic(err)
+	}
+	maxShardNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	pt.MaxShardNum = int32(maxShardNum)
 }
 
 func (pt *ParamTable) initMaxFieldNum() {

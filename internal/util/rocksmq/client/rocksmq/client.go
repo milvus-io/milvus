@@ -18,7 +18,9 @@ import (
 type RocksMQ = server.RocksMQ
 
 func NewClient(options ClientOptions) (Client, error) {
-	options.Server = server.Rmq
+	if options.Server == nil {
+		options.Server = server.Rmq
+	}
 	return newClient(options)
 }
 

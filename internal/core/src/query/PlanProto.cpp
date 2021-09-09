@@ -95,6 +95,8 @@ ExtractBinaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const p
     };
     setValue(result->lower_value_, expr_proto.lower_value());
     setValue(result->upper_value_, expr_proto.upper_value());
+    result->lower_inclusive_ = expr_proto.lower_inclusive();
+    result->upper_inclusive_ = expr_proto.upper_inclusive();
     return result;
 }
 
@@ -135,6 +137,17 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     return plan_node;
 }
 
+std::unique_ptr<RetrievePlanNode>
+ProtoParser::RetrievePlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
+    Assert(plan_node_proto.has_predicates());
+    auto& predicate_proto = plan_node_proto.predicates();
+    auto expr_opt = [&]() -> ExprPtr { return ParseExpr(predicate_proto); }();
+
+    auto plan_node = [&]() -> std::unique_ptr<RetrievePlanNode> { return std::make_unique<RetrievePlanNode>(); }();
+    plan_node->predicate_ = std::move(expr_opt);
+    return plan_node;
+}
+
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     auto plan = std::make_unique<Plan>(schema);
@@ -155,6 +168,24 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     }
 
     return plan;
+}
+
+std::unique_ptr<RetrievePlan>
+ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
+    auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
+
+    auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
+    ExtractedPlanInfo plan_info(schema.size());
+    ExtractInfoPlanNodeVisitor extractor(plan_info);
+    plan_node->accept(extractor);
+
+    retrieve_plan->plan_node_ = std::move(plan_node);
+    for (auto field_id_raw : plan_node_proto.output_field_ids()) {
+        auto field_id = FieldId(field_id_raw);
+        auto offset = schema.get_offset(field_id);
+        retrieve_plan->field_offsets_.push_back(offset);
+    }
+    return retrieve_plan;
 }
 
 ExprPtr

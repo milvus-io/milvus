@@ -25,6 +25,7 @@ extern "C" {
 
 typedef void* CSegmentInterface;
 typedef void* CSearchResult;
+typedef void* CRetrieveResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -44,10 +45,7 @@ Search(CSegmentInterface c_segment,
        CSearchResult* result);
 
 CProtoResult
-GetEntityByIds(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp);
-
-CStatus
-FillTargetEntry(CSegmentInterface c_segment, CSearchPlan c_plan, CSearchResult result);
+Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);

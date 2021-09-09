@@ -78,6 +78,15 @@ Assemble(BinarySet& binarySet) {
 void
 Disassemble(const int64_t& slice_size_in_byte, BinarySet& binarySet) {
     milvus::json meta_info;
+    auto slice_meta = binarySet.Erase(INDEX_FILE_SLICE_META);
+    if (slice_meta != nullptr) {
+        milvus::json last_meta_data =
+            milvus::json::parse(std::string(reinterpret_cast<char*>(slice_meta->data.get()), slice_meta->size));
+        for (auto& item : last_meta_data[META]) {
+            meta_info[META].emplace_back(item);
+        }
+    }
+
     std::vector<std::string> slice_key_list;
     for (auto& kv : binarySet.binary_map_) {
         if (kv.second->size > slice_size_in_byte) {

@@ -205,6 +205,10 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.params.Load(strings.ToLower(key))
 }
 
+func (gp *BaseTable) LoadWithDefault(key string, defaultValue string) (string, error) {
+	return gp.params.LoadWithDefault(strings.ToLower(key), defaultValue)
+}
+
 func (gp *BaseTable) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	return gp.params.LoadRange(strings.ToLower(key), strings.ToLower(endKey), limit)
 }
@@ -268,6 +272,18 @@ func (gp *BaseTable) Save(key, value string) error {
 	return gp.params.Save(strings.ToLower(key), value)
 }
 
+func (gp *BaseTable) ParseBool(key string, defaultValue bool) bool {
+	valueStr, err := gp.LoadWithDefault(key, strconv.FormatBool(defaultValue))
+	if err != nil {
+		panic(err)
+	}
+	value, err := strconv.ParseBool(valueStr)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
 func (gp *BaseTable) ParseFloat(key string) float64 {
 	valueStr, err := gp.Load(key)
 	if err != nil {
@@ -314,18 +330,6 @@ func (gp *BaseTable) ParseInt(key string) int {
 		panic(err)
 	}
 	return value
-}
-
-func (gp *BaseTable) ParseIntWithErr(key string) (int, error) {
-	valueStr, err := gp.Load(key)
-	if err != nil {
-		return 0, err
-	}
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return 0, err
-	}
-	return value, nil
 }
 
 // package methods

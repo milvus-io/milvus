@@ -1,3 +1,14 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
 // Copyright 2019 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,6 +33,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -53,6 +65,18 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 		output = stdOut
 	}
 	return InitLoggerWithWriteSyncer(cfg, output, opts...)
+}
+
+// InitTestLogger initializes a logger for unit tests
+func InitTestLogger(t zaptest.TestingT, cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, error) {
+	writer := newTestingWriter(t)
+	zapOptions := []zap.Option{
+		// Send zap errors to the same writer and mark the test as failed if
+		// that happens.
+		zap.ErrorOutput(writer.WithMarkFailed(true)),
+	}
+	opts = append(zapOptions, opts...)
+	return InitLoggerWithWriteSyncer(cfg, writer, opts...)
 }
 
 // InitLoggerWithWriteSyncer initializes a zap logger with specified  write syncer.

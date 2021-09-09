@@ -16,12 +16,21 @@ import (
 	"math/rand"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestProcessFuncParallel(t *testing.T) {
+func dummyFunc() {
+}
+
+func Test_GetFunctionName(t *testing.T) {
+	name := GetFunctionName(dummyFunc)
+	assert.True(t, strings.Contains(name, "dummyFunc"))
+}
+
+func Test_ProcessFuncParallel(t *testing.T) {
 	total := 64
 	s := make([]int, total)
 
@@ -36,6 +45,12 @@ func TestProcessFuncParallel(t *testing.T) {
 	}
 
 	var err error
+
+	err = ProcessFuncParallel(total, 0, naiveF, "naiveF") // maxParallel = 0
+	assert.Equal(t, err, nil)
+
+	err = ProcessFuncParallel(0, 1, naiveF, "naiveF") // total = 0
+	assert.Equal(t, err, nil)
 
 	err = ProcessFuncParallel(total, 1, naiveF, "naiveF") // serial
 	assert.Equal(t, err, nil, "process function serially must be right")

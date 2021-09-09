@@ -17,28 +17,49 @@ jobs:
   contributor:
     runs-on: ubuntu-latest
     steps:
-      # Update README.md
-      - uses: milvus-io/hero-bot@1.11
+      - name: checkout code
+        run: |
+          sudo git clone https://.:${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/${{ github.repository }}.git
+          git config --global user.email "sre-ci-robot@zilliz.com"
+          git config --global user.name "sre-ci-robot"
+          sudo chmod -R 777 milvus
+          cd milvus
+          pwd
+          
+      - name: Update README.md
+        uses: milvus-io/hero-bot@dco-enabled
         with:
           # Required
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           repos: 'milvus-io/milvus,bootcamp,community,docs,milvus-helm,milvus-sdk-go,milvus-sdk-java,milvus-sdk-node,milvus.io,pymilvus,pymilvus-orm'
-          target: 'milvus-io/milvus/README.md'
+          targetFile: './README.md'
           # Optional
           isAscend: True
           width: '30px'
           customUserConfig: 'milvus-io/milvus/.contributors'
-
-      # Update README_CN.md
-      - uses: milvus-io/hero-bot@1.11
+          workingDir: '/home/runner/work/milvus/milvus/milvus'
+          
+      - name: Update README_CN.md
+        uses: milvus-io/hero-bot@dco-enabled
         with:
+          # Required
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           repos: 'milvus-io/milvus,bootcamp,community,docs,milvus-helm,milvus-sdk-go,milvus-sdk-java,milvus-sdk-node,milvus.io,pymilvus,pymilvus-orm'
-          target: 'milvus-io/milvus/README_CN.md'
+          targetFile: './README_CN.md'
           # Optional
           isAscend: True
           width: '30px'
           customUserConfig: 'milvus-io/milvus/.contributors'
+          workingDir: '/home/runner/work/milvus/milvus/milvus'
+    
+      - name: commit code
+        run: |
+          cd milvus
+          pwd
+          git add -u
+          git commit -s -m 'Update all contributors'
+          git push
+
 
 
 

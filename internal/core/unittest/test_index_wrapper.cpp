@@ -278,6 +278,7 @@ TEST(IVFFLATNMWrapper, Build) {
 }
 
 TEST(IVFFLATNMWrapper, Codec) {
+    int64_t flat_nb = 1000000;
     auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     auto metric_type = milvus::knowhere::Metric::L2;
     indexcgo::TypeParams type_params;
@@ -289,9 +290,9 @@ TEST(IVFFLATNMWrapper, Codec) {
     assert(ok);
     ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
     assert(ok);
-    auto dataset = GenDataset(NB, metric_type, false);
+    auto dataset = GenDataset(flat_nb, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = milvus::knowhere::GenDataset(flat_nb, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));

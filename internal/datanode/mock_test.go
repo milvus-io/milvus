@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -44,7 +43,6 @@ const ctxTimeInMillisecond = 5000
 const debug = false
 
 func newIDLEDataNodeMock(ctx context.Context) *DataNode {
-
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
 
@@ -53,7 +51,6 @@ func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
-
 	node.SetRootCoordInterface(rc)
 
 	ds := &DataCoordFactory{}
@@ -91,16 +88,6 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 	ds := &DataCoordFactory{}
 	node.SetDataCoordInterface(ds)
 
-	vchan := &datapb.VchannelInfo{
-		CollectionID:      1,
-		ChannelName:       dmChannelName,
-		UnflushedSegments: []*datapb.SegmentInfo{},
-		FlushedSegments:   []int64{},
-	}
-	node.Start()
-
-	_ = node.NewDataSyncService(vchan)
-
 	return node
 }
 
@@ -118,13 +105,10 @@ func refreshChannelNames() {
 }
 
 func clearEtcd(rootPath string) error {
-	etcdEndpoints := Params.EtcdEndpoints
-	log.Info("etcd tests address", zap.Any("endpoints", etcdEndpoints))
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, rootPath)
 	if err != nil {
 		return err
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, rootPath)
 
 	err = etcdKV.RemoveWithPrefix("writer/segment")
 	if err != nil {
@@ -165,9 +149,19 @@ type RootCoordFactory struct {
 
 type DataCoordFactory struct {
 	types.DataCoord
+
+	SaveBinlogPathError     bool
+	SaveBinlogPathNotSucess bool
 }
 
 func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	if ds.SaveBinlogPathError {
+		return nil, errors.New("Error")
+	}
+	if ds.SaveBinlogPathNotSucess {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+	}
+
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
@@ -524,10 +518,24 @@ func (m *RootCoordFactory) DescribeCollection(ctx context.Context, in *milvuspb.
 	f := MetaFactory{}
 	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
 	resp := &milvuspb.DescribeCollectionResponse{
-		Status:       &commonpb.Status{},
-		CollectionID: m.collectionID,
-		Schema:       meta.Schema,
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
 	}
+
+	if m.collectionID == -2 {
+		resp.Status.Reason = "Status not success"
+		return resp, nil
+	}
+
+	if m.collectionID == -1 {
+		resp.Status.ErrorCode = commonpb.ErrorCode_Success
+		return resp, errors.New(resp.Status.GetReason())
+	}
+
+	resp.CollectionID = m.collectionID
+	resp.Schema = meta.Schema
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
 

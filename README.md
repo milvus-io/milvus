@@ -26,9 +26,9 @@
 
 ## What is Milvus?
 
-Milvus is an open-source vector database built to power AI applications and embedding similarity search. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
+Milvus is an open-source vector database built to power embedding similarity search and AI applications. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
 
-Both Milvus Standalone and Milvus Cluster are available.
+Milvus 2.0 is a cloud-native vector database with storage and computation separated by design. All components in this refactored version of Milvus are stateless to enhance elasticity and flexibility. For more architecture datails, see [Milvus Architecture Overview](https://milvus.io/docs/v2.0.0/architecture_overview.md).
 
 
 Milvus was released under the [open-source Apache License 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) in October 2019. It is currently a graduate project under [LF AI & Data Foundation](https://lfaidata.foundation/).
@@ -72,7 +72,7 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 <details>
   <summary><b>Community supported, industry recognized</b></summary>
-  With over 1,000 enterprise users, 6,000+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the <a href="https://lfaidata.foundation/">LF AI & Data Foundation</a>, Milvus has institutional support.
+  With over 1,000 enterprise users, 7,500+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the <a href="https://lfaidata.foundation/">LF AI & Data Foundation</a>, Milvus has institutional support.
   </details>
 
 
@@ -80,13 +80,13 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 ## Quick start
 
-### To start using Milvus
+### Install Milvus
 
 - [Standalone Quick Start Guide](https://milvus.io/docs/v2.0.0/install_standalone-docker.md)
 
 - [Cluster Quick Start Guide](https://milvus.io/docs/v2.0.0/install_cluster-docker.md)
 
-### To start developing Milvus
+### Build Milvus from source code
 
 ```bash
 # Clone github repository.
@@ -158,7 +158,7 @@ Blazing fast similarity search, substructure search, or superstructure search fo
 
 ## Bootcamps
 
-Milvus [bootcamp](https://github.com/milvus-io/bootcamp/tree/new-bootcamp) are designed to expose users to both the simplicity and depth of the vector database. Discover how to run benchmark tests as well as build similarity search applications spanning chatbots, recommendation systems, reverse image search, molecular search, and much more.
+Milvus [bootcamp](https://github.com/milvus-io/bootcamp) are designed to expose users to both the simplicity and depth of the vector database. Discover how to run benchmark tests as well as build similarity search applications spanning chatbots, recommendation systems, reverse image search, molecular search, and much more.
 
 
 ## Contributing
@@ -331,8 +331,12 @@ For guidance on installation, development, deployment, and administration, check
 
 The implemented SDK and its API documentation are listed below:
 
-- [PyMilvus-ORM](https://github.com/milvus-io/pymilvus-orm)
+- [PyMilvus SDK](https://github.com/milvus-io/pymilvus)
+- [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
+### Milvus insight 
+Milvus insight provides an intuitive and efficient GUI for Milvus. 
+- [Quick start](https://github.com/milvus-io/milvus-insight#quick-start)
 
 
 ## Community
@@ -343,7 +347,7 @@ Join the Milvus community on [Slack](https://join.slack.com/t/milvusio/shared_in
     <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_slack_4a07c4c92f.png" alt="Miluvs Slack Channel"  height="150" width="500">
 </a>
 
-You can also check out our [FAQ page](https://milvus.io/docs/v1.0.0/performance_faq.md) to discover solutions or answers to your issues or questions.
+You can also check out our [FAQ page](https://milvus.io/docs/v2.0.0/performance_faq.md) to discover solutions or answers to your issues or questions.
 
 Subscribe to Milvus mailing lists:
 
@@ -358,7 +362,7 @@ Follow Milvus on social media:
 
 ## Join Us
 
-Zilliz, the company behind Milvus, is [actively hiring](https://app.mokahr.com/apply/zilliz/37974#/) full-stack developers and solution engineers to build the next-generation open-source data fabric.
+Zilliz, the company behind Milvus, is [actively hiring](https://app.mokahr.com/apply/zilliz/37974#/) algorithm, database, full-stack developers and solution engineers to build the next-generation open-source data fabric.
 
 ## Reference
 

@@ -4,13 +4,10 @@ reviewers:
   - czs007
   - FluorineDog
   - godchen0212
-  - neza2017
   - xiaocai2333
 
 approvers:
-  - czs007
-  - neza2017
-  - scsven
+  - pr-inspection
 
 labels:
 - component/proxy

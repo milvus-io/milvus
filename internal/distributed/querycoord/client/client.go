@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -91,7 +92,9 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		}
 		opts := trace.GetInterceptorOpts()
 		log.Debug("QueryCoordClient try reconnect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr,
+		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr,
 			grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
@@ -243,4 +246,11 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 		return c.grpcClient.GetSegmentInfo(ctx, req)
 	})
 	return ret.(*querypb.GetSegmentInfoResponse), err
+}
+
+func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetMetrics(ctx, req)
+	})
+	return ret.(*milvuspb.GetMetricsResponse), err
 }

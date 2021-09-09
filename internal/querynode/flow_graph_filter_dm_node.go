@@ -110,9 +110,9 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 
 	// check if the collection from message is target collection
 	if msg.CollectionID != fdmNode.collectionID {
-		log.Debug("filter invalid insert message, collection is not the target collection",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
+		//log.Debug("filter invalid insert message, collection is not the target collection",
+		//	zap.Any("collectionID", msg.CollectionID),
+		//	zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
 
@@ -185,6 +185,7 @@ func newFilteredDmNode(replica ReplicaInterface,
 	if loadType != loadTypeCollection && loadType != loadTypePartition {
 		err := errors.New("invalid flow graph type")
 		log.Warn(err.Error())
+		return nil
 	}
 
 	return &filterDmNode{
