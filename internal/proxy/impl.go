@@ -121,7 +121,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	cct := &CreateCollectionTask{
+	cct := &createCollectionTask{
 		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
 		CreateCollectionRequest: request,
@@ -174,7 +174,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	dct := &DropCollectionTask{
+	dct := &dropCollectionTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
@@ -228,7 +228,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	hct := &HasCollectionTask{
+	hct := &hasCollectionTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		HasCollectionRequest: request,
@@ -282,7 +282,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	lct := &LoadCollectionTask{
+	lct := &loadCollectionTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
@@ -332,7 +332,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	rct := &ReleaseCollectionTask{
+	rct := &releaseCollectionTask{
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleaseCollectionRequest: request,
@@ -385,7 +385,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	dct := &DescribeCollectionTask{
+	dct := &describeCollectionTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		DescribeCollectionRequest: request,
@@ -441,7 +441,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	g := &GetCollectionStatisticsTask{
+	g := &getCollectionStatisticsTask{
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
 		GetCollectionStatisticsRequest: request,
@@ -497,7 +497,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	sct := &ShowCollectionsTask{
+	sct := &showCollectionsTask{
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		ShowCollectionsRequest: request,
@@ -520,7 +520,10 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 
 	log.Debug("ShowCollections",
 		zap.String("role", Params.RoleName),
-		zap.Any("request", request))
+		zap.String("DbName", sct.ShowCollectionsRequest.DbName),
+		zap.String("ShowType", sct.ShowCollectionsRequest.Type.String()),
+		zap.Any("CollectionNames", sct.ShowCollectionsRequest.CollectionNames),
+	)
 	defer func() {
 		log.Debug("ShowCollections Done",
 			zap.Error(err),
@@ -546,7 +549,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	cpt := &CreatePartitionTask{
+	cpt := &createPartitionTask{
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		CreatePartitionRequest: request,
@@ -599,7 +602,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	dpt := &DropPartitionTask{
+	dpt := &dropPartitionTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DropPartitionRequest: request,
@@ -654,7 +657,7 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	hpt := &HasPartitionTask{
+	hpt := &hasPartitionTask{
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		HasPartitionRequest: request,
@@ -713,7 +716,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	lpt := &LoadPartitionTask{
+	lpt := &loadPartitionsTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadPartitionsRequest: request,
@@ -766,7 +769,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	rpt := &ReleasePartitionTask{
+	rpt := &releasePartitionsTask{
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleasePartitionsRequest: request,
@@ -821,7 +824,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	g := &GetPartitionStatisticsTask{
+	g := &getPartitionStatisticsTask{
 		ctx:                           ctx,
 		Condition:                     NewTaskCondition(ctx),
 		GetPartitionStatisticsRequest: request,
@@ -880,7 +883,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	spt := &ShowPartitionsTask{
+	spt := &showPartitionsTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		ShowPartitionsRequest: request,
@@ -904,7 +907,10 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 
 	log.Debug("ShowPartitions",
 		zap.String("role", Params.RoleName),
-		zap.Any("request", request))
+		zap.String("db", spt.ShowPartitionsRequest.DbName),
+		zap.String("collection", spt.ShowPartitionsRequest.CollectionName),
+		zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames),
+	)
 	defer func() {
 		log.Debug("ShowPartitions Done",
 			zap.Error(err),
