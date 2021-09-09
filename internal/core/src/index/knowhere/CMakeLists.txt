@@ -14,7 +14,8 @@
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
-set(MILVUS_THIRDPARTY_SRC external)
+
+set(KNOWHERE_THIRDPARTY_SRC ${INDEX_SOURCE_DIR}/thirdparty)
 if (MILVUS_SUPPORT_SPTAG)
     include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 
@@ -45,12 +46,12 @@ set(external_srcs
 
 set (LOG_SRC
         knowhere/common/Log.cpp
-        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
+        ${KNOWHERE_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 add_library(index_log STATIC ${LOG_SRC})
 set_target_properties(index_log PROPERTIES RULE_LAUNCH_COMPILE "")
 set_target_properties(index_log PROPERTIES RULE_LAUNCH_LINK "")
-include_directories(${MILVUS_THIRDPARTY_SRC})
+#include_directories(${KNOWHERE_THIRDPARTY_SRC})
 
 set(config_srcs
         knowhere/archive/KnowhereConfig.cpp
