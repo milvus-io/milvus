@@ -37,7 +37,7 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
    
    5. write test yaml and run with the yaml param:
    
-      `cd milvus-benchmark/ && python main.py --local --host=* --port=19530 --suite=suites/2_insert_data.yaml`
+      `cd milvus_benchmark/ && python main.py --local --host=* --port=19530 --suite=suites/2_insert_data.yaml`
 
 ### Test suite
 
