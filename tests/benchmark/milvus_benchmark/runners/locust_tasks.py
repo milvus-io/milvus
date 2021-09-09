@@ -74,6 +74,7 @@ class Tasks(TaskSet):
 
     @task
     def get(self):
+        """ query interface """
         op = "get"
         # ids = [random.randint(1, 10000000) for _ in range(self.params[op]["ids_length"])]
         self.client.get(self.values["get_ids"][:self.params[op]["ids_length"]])
