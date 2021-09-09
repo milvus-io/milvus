@@ -348,16 +348,24 @@ func (node *Proxy) Start() error {
 	}
 	log.Debug("init global meta cache ...")
 
-	node.sched.Start()
+	if err := node.sched.Start(); err != nil {
+		return err
+	}
 	log.Debug("start scheduler ...")
 
-	node.idAllocator.Start()
+	if err := node.idAllocator.Start(); err != nil {
+		return err
+	}
 	log.Debug("start id allocator ...")
 
-	node.segAssigner.Start()
+	if err := node.segAssigner.Start(); err != nil {
+		return err
+	}
 	log.Debug("start seg assigner ...")
 
-	node.tick.Start()
+	if err := node.tick.Start(); err != nil {
+		return err
+	}
 	log.Debug("start time tick ...")
 
 	err = node.chTicker.start()

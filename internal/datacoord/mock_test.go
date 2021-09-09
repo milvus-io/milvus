@@ -153,7 +153,7 @@ func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.Flush
 
 func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): change the id, though it's not important in ut
-	nodeID := UniqueID(20210819)
+	nodeID := UniqueID(c.id)
 
 	nodeInfos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{

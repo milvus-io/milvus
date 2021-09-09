@@ -18,6 +18,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"go.uber.org/zap"
@@ -278,7 +280,7 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 
 	mgr.updateChannels(channels)
 
-	id := getUniqueIntGeneratorIns().get()
+	id := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 
 	vchans, pchans := make([]string, 0, len(channels)), make([]string, 0, len(channels))
 	for k, v := range channels {

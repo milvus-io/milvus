@@ -518,6 +518,19 @@ func genSimpleRowIDField() []IntPrimaryKey {
 	return ids
 }
 
+func genMsgStreamBaseMsg() msgstream.BaseMsg {
+	return msgstream.BaseMsg{
+		HashValues: []uint32{0},
+	}
+}
+
+func genCommonMsgBase(msgType commonpb.MsgType) *commonpb.MsgBase {
+	return &commonpb.MsgBase{
+		MsgType: msgType,
+		MsgID:   rand.Int63(),
+	}
+}
+
 func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 	rowData, err := genSimpleCommonBlob()
 	if err != nil {
@@ -525,14 +538,9 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 	}
 
 	return &msgstream.InsertMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
+		BaseMsg: genMsgStreamBaseMsg(),
 		InsertRequest: internalpb.InsertRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_Retrieve,
-				MsgID:   rand.Int63(),
-			},
+			Base:           genCommonMsgBase(commonpb.MsgType_Retrieve),
 			CollectionName: defaultCollectionName,
 			PartitionName:  defaultPartitionName,
 			CollectionID:   defaultCollectionID,
@@ -861,10 +869,7 @@ func genSimpleSearchRequest() (*internalpb.SearchRequest, error) {
 		return nil, err
 	}
 	return &internalpb.SearchRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_Search,
-			MsgID:   rand.Int63(), // TODO: random msgID?
-		},
+		Base:             genCommonMsgBase(commonpb.MsgType_Search),
 		CollectionID:     defaultCollectionID,
 		PartitionIDs:     []UniqueID{defaultPartitionID},
 		Dsl:              simpleDSL,
@@ -898,9 +903,7 @@ func genSimpleSearchMsg() (*msgstream.SearchMsg, error) {
 		return nil, err
 	}
 	return &msgstream.SearchMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
+		BaseMsg:       genMsgStreamBaseMsg(),
 		SearchRequest: *req,
 	}, nil
 }
@@ -911,9 +914,7 @@ func genSimpleRetrieveMsg() (*msgstream.RetrieveMsg, error) {
 		return nil, err
 	}
 	return &msgstream.RetrieveMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
+		BaseMsg:         genMsgStreamBaseMsg(),
 		RetrieveRequest: *req,
 	}, nil
 }

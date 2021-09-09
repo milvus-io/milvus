@@ -21,47 +21,11 @@ type MsgStreamMsg = flowgraph.MsgStreamMsg
 
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
-	gcRecord       *gcRecord
 	timeRange      TimeRange
 }
 
 type serviceTimeMsg struct {
-	gcRecord  *gcRecord
 	timeRange TimeRange
-}
-
-type gcMsg struct {
-	gcRecord  *gcRecord
-	timeRange TimeRange
-}
-
-type DeleteData struct {
-	deleteIDs        map[UniqueID][]UniqueID
-	deleteTimestamps map[UniqueID][]Timestamp
-	deleteOffset     map[UniqueID]int64
-}
-
-type DeleteRecord struct {
-	entityID  UniqueID
-	timestamp Timestamp
-	segmentID UniqueID
-}
-
-type DeletePreprocessData struct {
-	deleteRecords []*DeleteRecord
-	count         int32
-}
-
-// TODO: delete collection id
-type partitionWithID struct {
-	partitionID  UniqueID
-	collectionID UniqueID
-}
-
-type gcRecord struct {
-	// collections and partitions to be dropped
-	collections []UniqueID
-	partitions  []partitionWithID
 }
 
 func (iMsg *insertMsg) TimeTick() Timestamp {
@@ -70,8 +34,4 @@ func (iMsg *insertMsg) TimeTick() Timestamp {
 
 func (stMsg *serviceTimeMsg) TimeTick() Timestamp {
 	return stMsg.timeRange.timestampMax
-}
-
-func (gcMsg *gcMsg) TimeTick() Timestamp {
-	return gcMsg.timeRange.timestampMax
 }

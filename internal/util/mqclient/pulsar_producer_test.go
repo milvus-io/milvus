@@ -12,41 +12,34 @@
 package mqclient
 
 import (
-	"fmt"
+	"context"
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPulsarConsumer_Subscription(t *testing.T) {
+func TestPulsarProducer(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(t, err)
 	defer pc.Close()
+	assert.NoError(t, err)
+	assert.NotNil(t, pc)
 
-	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
-	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
-		Topic:                       "Topic",
-		SubscriptionName:            "SubName",
-		Type:                        pulsar.SubscriptionType(Exclusive),
-		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(SubscriptionPositionEarliest),
-		MessageChannel:              receiveChannel,
-	})
+	topic := "TEST"
+	producer, err := pc.CreateProducer(ProducerOptions{Topic: topic})
 	assert.Nil(t, err)
-	assert.NotNil(t, consumer)
+	assert.NotNil(t, producer)
 
-	str := consumer.Subscription()
-	assert.NotNil(t, str)
-}
+	pulsarProd := producer.(*pulsarProducer)
+	assert.Equal(t, pulsarProd.Topic(), topic)
 
-func Test_PatchEarliestMessageID(t *testing.T) {
-	mid := pulsar.EarliestMessageID()
+	msg := &ProducerMessage{
+		Payload:    []byte{},
+		Properties: map[string]string{},
+	}
+	err = producer.Send(context.TODO(), msg)
+	assert.Nil(t, err)
 
-	// String() -> ledgerID:entryID:partitionIdx
-	assert.Equal(t, "-1:-1:-1", fmt.Sprintf("%v", mid))
-
-	patchEarliestMessageID(&mid)
-
-	assert.Equal(t, "-1:-1:0", fmt.Sprintf("%v", mid))
+	pulsarProd.Close()
 }

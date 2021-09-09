@@ -13,6 +13,7 @@ package indexnode
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math/rand"
 	"strconv"
@@ -81,6 +82,9 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 // Register register index node at etcd
 func (i *IndexNode) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if i.session == nil {
+		return errors.New("failed to initialize session")
+	}
 	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = i.session.ServerID
 	return nil

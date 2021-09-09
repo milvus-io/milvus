@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -52,7 +54,7 @@ func TestChannelsTimeTickerImpl_start(t *testing.T) {
 	pchanNum := rand.Uint64()%10 + 1
 	pchans := make([]pChan, 0, pchanNum)
 	for i := 0; uint64(i) < pchanNum; i++ {
-		pchans = append(pchans, genUniqueStr())
+		pchans = append(pchans, funcutil.GenRandomStr())
 	}
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
@@ -74,7 +76,7 @@ func TestChannelsTimeTickerImpl_close(t *testing.T) {
 	pchanNum := rand.Uint64()%10 + 1
 	pchans := make([]pChan, 0, pchanNum)
 	for i := 0; uint64(i) < pchanNum; i++ {
-		pchans = append(pchans, genUniqueStr())
+		pchans = append(pchans, funcutil.GenRandomStr())
 	}
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
@@ -96,7 +98,7 @@ func TestChannelsTimeTickerImpl_addPChan(t *testing.T) {
 	pchanNum := rand.Uint64()%10 + 1
 	pchans := make([]pChan, 0, pchanNum)
 	for i := 0; uint64(i) < pchanNum; i++ {
-		pchans = append(pchans, genUniqueStr())
+		pchans = append(pchans, funcutil.GenRandomStr())
 	}
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
@@ -107,7 +109,7 @@ func TestChannelsTimeTickerImpl_addPChan(t *testing.T) {
 
 	newPChanNum := rand.Uint64()%10 + 1
 	for i := 0; uint64(i) < newPChanNum; i++ {
-		err = ticker.addPChan(genUniqueStr())
+		err = ticker.addPChan(funcutil.GenRandomStr())
 		assert.Equal(t, nil, err)
 	}
 
@@ -124,7 +126,7 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 	pchanNum := rand.Uint64()%10 + 1
 	pchans := make([]pChan, 0, pchanNum)
 	for i := 0; uint64(i) < pchanNum; i++ {
-		pchans = append(pchans, genUniqueStr())
+		pchans = append(pchans, funcutil.GenRandomStr())
 	}
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
@@ -171,7 +173,7 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 	pchanNum := rand.Uint64()%10 + 1
 	pchans := make([]pChan, 0, pchanNum)
 	for i := 0; uint64(i) < pchanNum; i++ {
-		pchans = append(pchans, genUniqueStr())
+		pchans = append(pchans, funcutil.GenRandomStr())
 	}
 	tso := newMockTsoAllocator()
 	ctx := context.Background()

@@ -18,8 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -457,7 +455,7 @@ func TestTaskScheduler(t *testing.T) {
 	ctx := context.Background()
 	tsoAllocatorIns := newMockTsoAllocator()
 	idAllocatorIns := newMockIDAllocatorInterface()
-	factory := msgstream.NewSimpleMsgStreamFactory()
+	factory := NewSimpleMsgStreamFactory()
 
 	sched, err := newTaskScheduler(ctx, idAllocatorIns, tsoAllocatorIns, factory)
 	assert.NoError(t, err)

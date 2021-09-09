@@ -141,7 +141,7 @@ clean:
 	@find . -name '*~' | xargs rm -fv
 	@rm -rf bin/
 	@rm -rf lib/
-	@rm $(GOPATH)/bin/milvus
+	@rm -rf $(GOPATH)/bin/milvus
 
 milvus-tools: 
 	@echo "Building tools ..."
