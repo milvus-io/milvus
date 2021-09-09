@@ -644,7 +644,7 @@
             "timeFrom": null,
             "timeRegions": [],
             "timeShift": null,
-            "title": "Show Collection Rate",
+            "title": "Show Collections Rate",
             "tooltip": {
               "shared": true,
               "sort": 0,
