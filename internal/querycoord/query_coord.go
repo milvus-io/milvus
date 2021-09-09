@@ -83,7 +83,7 @@ func (qc *QueryCoord) Register() error {
 
 func (qc *QueryCoord) Init() error {
 	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath, etcdkv.ExtraParams{Params: &Params})
 		if err != nil {
 			return err
 		}

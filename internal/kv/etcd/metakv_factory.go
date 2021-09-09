@@ -42,7 +42,7 @@ func NewMetaKvFactory(rootPath string, param *paramtable.BaseParamTable) (kv.Met
 		}
 		return metaKv, err
 	}
-	metaKv, err := NewEtcdKV(param.EtcdEndpoints, rootPath)
+	metaKv, err := NewEtcdKV(param.EtcdEndpoints, rootPath, ExtraParams{Params: param})
 	if err != nil {
 		return nil, err
 	}

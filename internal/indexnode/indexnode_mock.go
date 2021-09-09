@@ -114,7 +114,7 @@ func (inm *Mock) Register() error {
 		return errors.New("IndexNode register failed")
 	}
 	Params.Init()
-	inm.etcdKV, _ = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	inm.etcdKV, _ = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath, etcdkv.ExtraParams{Params: &Params})
 	inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole)
 	session := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 	session.Init(typeutil.IndexNodeRole, "localhost:21121", false)

@@ -278,7 +278,7 @@ func (s *Server) startSegmentManager() {
 
 func (s *Server) initMeta() error {
 	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath, etcdkv.ExtraParams{Params: &Params})
 		if err != nil {
 			return err
 		}

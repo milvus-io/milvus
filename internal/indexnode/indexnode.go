@@ -94,7 +94,7 @@ func (i *IndexNode) Init() error {
 	i.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
 	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath, etcdkv.ExtraParams{Params: &Params})
 		i.etcdKV = etcdKV
 		return err
 	}

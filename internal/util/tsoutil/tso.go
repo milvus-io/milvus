@@ -50,6 +50,6 @@ func Mod24H(ts uint64) uint64 {
 	return (physical << logicalBits) | logical
 }
 
-func NewTSOKVBase(etcdEndpoints []string, tsoRoot, subPath string) (*etcdkv.EtcdKV, error) {
-	return etcdkv.NewEtcdKV(etcdEndpoints, path.Join(tsoRoot, subPath))
+func NewTSOKVBase(etcdEndpoints []string, tsoRoot, subPath string, opts ...etcdkv.NewEtcdKVOption) (*etcdkv.EtcdKV, error) {
+	return etcdkv.NewEtcdKV(etcdEndpoints, path.Join(tsoRoot, subPath), opts...)
 }

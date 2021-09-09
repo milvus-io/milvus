@@ -148,7 +148,8 @@ func NewTaskScheduler(ctx context.Context, meta Meta, cluster *queryNodeCluster,
 		dataCoord:        dataCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
-	etcdKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryCoordTaskID")
+	etcdKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryCoordTaskID",
+		etcdkv.ExtraParams{Params: &Params})
 	if err != nil {
 		return nil, err
 	}

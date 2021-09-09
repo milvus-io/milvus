@@ -13,7 +13,11 @@ package etcdkv
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"github.com/pkg/errors"
+	"io/ioutil"
 	"path"
 	"time"
 
@@ -32,12 +36,116 @@ type EtcdKV struct {
 	rootPath string
 }
 
+const (
+	kCfgKeyTlsBase   = "etcd.tls"
+	kCfgKeyTlsCert   = kCfgKeyTlsBase + ".cert"
+	kCfgKeyTlsKey    = kCfgKeyTlsBase + ".key"
+	kCfgKeyTlsCACert = kCfgKeyTlsBase + ".caCert"
+)
+
+func loadParam(table paramTableGetter, key string) (string, error) {
+	val, err := table.Load(key)
+	if err != nil {
+		return "", errors.Wrapf(err, "get parameter from global paramtable, key=%s", key)
+	}
+	return val, nil
+}
+
+func loadParamAndEnsureNotEmpty(table paramTableGetter, key string) (string, error) {
+	v, err := loadParam(table, key)
+	if err != nil {
+		return "", err
+	}
+	if len(v) == 0 {
+		return "", errors.Errorf("field %s must set in the global paramtable", key)
+	}
+	return v, nil
+}
+
+func newEtcdClient(endpoints []string, table paramTableGetter) (*clientv3.Client, error) {
+	certFile, err := loadParam(table, kCfgKeyTlsCert)
+	if err != nil {
+		return nil, err
+	}
+	var cfg clientv3.Config
+	cfg.Endpoints = endpoints
+	cfg.DialTimeout = 5 * time.Second
+
+	// if certFile is set, lookup other fields
+	if len(certFile) != 0 {
+		keyFile, err := loadParamAndEnsureNotEmpty(table, kCfgKeyTlsKey)
+		if err != nil {
+			return nil, err
+		}
+		caCertFile, err := loadParamAndEnsureNotEmpty(table, kCfgKeyTlsCACert)
+		if err != nil {
+			return nil, err
+		}
+
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, errors.Wrap(err, "load etcd cert key pair error")
+		}
+		cacert, err := ioutil.ReadFile(caCertFile)
+		if err != nil {
+			return nil, errors.Wrapf(err, "load etcd CACert file error, filename = %s", caCertFile)
+		}
+
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(cacert)
+
+		cfg.TLS = &tls.Config{
+			Certificates: []tls.Certificate{
+				cert,
+			},
+			RootCAs: caCertPool,
+		}
+	}
+
+	return clientv3.New(cfg)
+}
+
+// NewEtcdKVOption for NewEtcdKV.
+type NewEtcdKVOption interface {
+	isNewEtcdKVOption()
+}
+
+type paramTableGetter interface {
+	Load(key string) (string, error)
+}
+
+type dummyParamTable struct{}
+
+func (d dummyParamTable) Load(key string) (string, error) {
+	return "", nil
+}
+
+// ExtraParams for NewEtcdKV. Just parse global parameter table to Params.
+// The TLS will be enabled when etcd.tls.{key/cert/caCert} set.
+type ExtraParams struct {
+	Params paramTableGetter
+}
+
+func (opt ExtraParams) isNewEtcdKVOption() {}
+
+func extractParamTable(opts ...NewEtcdKVOption) paramTableGetter {
+	for _, opt := range opts {
+		withTable, ok := opt.(ExtraParams)
+		if ok {
+			return withTable.Params
+		}
+	}
+	return dummyParamTable{}
+}
+
 // NewEtcdKV creates a new etcd kv.
-func NewEtcdKV(etcdEndpoints []string, rootPath string) (*EtcdKV, error) {
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   etcdEndpoints,
-		DialTimeout: 5 * time.Second,
-	})
+// The optional extraOpts should be set when
+//	* the caller wants NewEtcdKV support etcd.tls configuration
+//     * Use `ExtraParams{Params}` to pass the YAML configure file to `NewEtcdKV`. The etcd.tls.{key/cert/caCert} fields
+//       will be used when set.
+func NewEtcdKV(etcdEndpoints []string, rootPath string, extraOpts ...NewEtcdKVOption) (*EtcdKV, error) {
+	client, err := newEtcdClient(etcdEndpoints, extractParamTable(extraOpts...))
+
 	if err != nil {
 		return nil, err
 	}

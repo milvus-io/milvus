@@ -101,7 +101,7 @@ func (node *QueryNode) Register() error {
 func (node *QueryNode) Init() error {
 	//ctx := context.Background()
 	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath, etcdkv.ExtraParams{Params: &Params})
 		if err != nil {
 			return err
 		}

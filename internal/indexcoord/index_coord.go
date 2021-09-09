@@ -110,7 +110,7 @@ func (i *IndexCoord) Init() error {
 	i.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath, etcdkv.ExtraParams{Params: &Params})
 		if err != nil {
 			return err
 		}
@@ -154,7 +154,8 @@ func (i *IndexCoord) Init() error {
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
-	etcdKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, kvRootPath, "index_gid")
+	etcdKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, kvRootPath, "index_gid",
+		etcdkv.ExtraParams{Params: &Params})
 	if err != nil {
 		log.Debug("IndexCoord TSOKVBase initialize failed", zap.Error(err))
 	}

@@ -873,7 +873,7 @@ func (c *Core) Init() error {
 				log.Error("RootCoord, Failed to new MetaTable", zap.Any("reason", initError))
 				return initError
 			}
-			if c.kvBase, initError = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.KvRootPath); initError != nil {
+			if c.kvBase, initError = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.KvRootPath, etcdkv.ExtraParams{Params: &Params}); initError != nil {
 				log.Error("RootCoord, Failed to new EtcdKV", zap.Any("reason", initError))
 				return initError
 			}
@@ -887,7 +887,8 @@ func (c *Core) Init() error {
 		}
 
 		log.Debug("RootCoord, Set TSO and ID Allocator")
-		kv, initError := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid")
+		kv, initError := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid",
+			etcdkv.ExtraParams{Params: &Params})
 		if initError != nil {
 			return
 		}
@@ -902,7 +903,8 @@ func (c *Core) Init() error {
 			return idAllocator.UpdateID()
 		}
 
-		kv, initError = tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "tso")
+		kv, initError = tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "tso",
+			etcdkv.ExtraParams{Params: &Params})
 		if initError != nil {
 			return
 		}

@@ -50,7 +50,8 @@ func main() {
 		datacoord.Params.SegmentBinlogSubPath = segmentBinlogSubPath
 	}
 
-	etcdKV, err := etcdkv.NewEtcdKV(datacoord.Params.EtcdEndpoints, datacoord.Params.MetaRootPath)
+	etcdKV, err := etcdkv.NewEtcdKV(datacoord.Params.EtcdEndpoints, datacoord.Params.MetaRootPath,
+		etcdkv.ExtraParams{Params: &datacoord.Params})
 	if err != nil {
 		log.Error("failed to connect to etcd", zap.Error(err))
 		return
