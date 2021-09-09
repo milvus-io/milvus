@@ -334,6 +334,9 @@ The implemented SDK and its API documentation are listed below:
 - [PyMilvus SDK](https://github.com/milvus-io/pymilvus)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
+### Milvus insight 
+Milvus insight provides an intuitive and efficient GUI for Milvus. 
+- [Quick start](https://github.com/milvus-io/milvus-insight#quick-start)
 
 
 ## Community
