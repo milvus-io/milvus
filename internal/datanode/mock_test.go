@@ -43,7 +43,6 @@ const ctxTimeInMillisecond = 5000
 const debug = false
 
 func newIDLEDataNodeMock(ctx context.Context) *DataNode {
-
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
 
@@ -52,7 +51,6 @@ func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
-
 	node.SetRootCoordInterface(rc)
 
 	ds := &DataCoordFactory{}
@@ -89,16 +87,6 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 
 	ds := &DataCoordFactory{}
 	node.SetDataCoordInterface(ds)
-
-	vchan := &datapb.VchannelInfo{
-		CollectionID:      1,
-		ChannelName:       dmChannelName,
-		UnflushedSegments: []*datapb.SegmentInfo{},
-		FlushedSegments:   []int64{},
-	}
-	node.Start()
-
-	_ = node.NewDataSyncService(vchan)
 
 	return node
 }
