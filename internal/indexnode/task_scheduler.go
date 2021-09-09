@@ -199,13 +199,13 @@ func NewTaskScheduler(ctx context.Context,
 	return s, nil
 }
 
-func (sched *TaskScheduler) setParallelism(parallel int) {
-	if parallel <= 0 {
-		log.Debug("IndexNode can not set parallelism to less than zero!")
-		return
-	}
-	sched.buildParallel = parallel
-}
+//func (sched *TaskScheduler) setParallelism(parallel int) {
+//	if parallel <= 0 {
+//		log.Debug("IndexNode can not set parallelism to less than zero!")
+//		return
+//	}
+//	sched.buildParallel = parallel
+//}
 
 func (sched *TaskScheduler) scheduleIndexBuildTask() []task {
 	ret := make([]task, 0)
