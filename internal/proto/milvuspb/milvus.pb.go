@@ -79,12 +79,18 @@ func (PlaceholderType) EnumDescriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{1}
 }
 
+//*
+// Create collection in milvus
 type CreateCollectionRequest struct {
-	Base           *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName         string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	// `schema` is the serialized `schema.CollectionSchema`
-	Schema               []byte   `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The unique collection name in milvus.(Required)
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// The serialized `schema.CollectionSchema`(Required)
+	Schema []byte `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
+	// Once set, no modification is allowed (Optional)
 	ShardsNum            int32    `protobuf:"varint,5,opt,name=shards_num,json=shardsNum,proto3" json:"shards_num,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
