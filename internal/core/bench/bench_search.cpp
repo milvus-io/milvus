@@ -73,7 +73,7 @@ Search_SmallIndex(benchmark::State& state) {
     segconf.set_size_per_chunk(chunk_size);
     auto segment = CreateGrowingSegment(schema, segconf);
     if (!is_small_index) {
-        segment->debug_disable_small_index();
+        segment->disable_small_index();
     }
     segment->PreInsert(N);
     ColumnBasedRawData raw_data;

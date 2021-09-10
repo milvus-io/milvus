@@ -12,16 +12,17 @@
 package paramtable
 
 import (
-	"log"
 	"os"
 	"path"
 	"runtime"
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"go.uber.org/zap"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
@@ -39,27 +40,40 @@ type Base interface {
 }
 
 type BaseTable struct {
-	params *memkv.MemoryKV
+	params    *memkv.MemoryKV
+	configDir string
 }
 
 func (gp *BaseTable) Init() {
 	gp.params = memkv.NewMemoryKV()
 
-	err := gp.LoadYaml("milvus.yaml")
-	if err != nil {
+	_, fpath, _, _ := runtime.Caller(0)
+	configDir := path.Dir(fpath) + "/../../../configs/"
+	if _, err := os.Stat(configDir); err != nil {
+		log.Warn("cannot access config directory", zap.String("configDir", configDir), zap.Error(err))
+		if runPath, err1 := os.Getwd(); err1 != nil {
+			panic(err1.Error())
+		} else {
+			configDir = runPath + "/configs/"
+		}
+	}
+	gp.configDir = configDir
+	log.Debug("config directory", zap.String("configDir", gp.configDir))
+
+	if err := gp.LoadYaml("milvus.yaml"); err != nil {
 		panic(err)
 	}
-
-	err = gp.LoadYaml("advanced/common.yaml")
-	if err != nil {
+	if err := gp.LoadYaml("advanced/common.yaml"); err != nil {
 		panic(err)
 	}
-
-	err = gp.LoadYaml("advanced/channel.yaml")
-	if err != nil {
+	if err := gp.LoadYaml("advanced/channel.yaml"); err != nil {
 		panic(err)
 	}
 	gp.tryloadFromEnv()
+}
+
+func (gp *BaseTable) GetConfigDir() string {
+	return gp.configDir
 }
 
 func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error {
@@ -215,15 +229,9 @@ func (gp *BaseTable) LoadRange(key, endKey string, limit int) ([]string, []strin
 
 func (gp *BaseTable) LoadYaml(fileName string) error {
 	config := viper.New()
-	_, fpath, _, _ := runtime.Caller(0)
-	configFile := path.Dir(fpath) + "/../../../configs/" + fileName
-	_, err := os.Stat(configFile)
-	if os.IsNotExist(err) {
-		runPath, err := os.Getwd()
-		if err != nil {
-			panic(err)
-		}
-		configFile = runPath + "/configs/" + fileName
+	configFile := gp.configDir + fileName
+	if _, err := os.Stat(configFile); err != nil {
+		panic("cannot access config file: " + configFile)
 	}
 
 	config.SetConfigFile(configFile)
@@ -241,7 +249,7 @@ func (gp *BaseTable) LoadYaml(fileName string) error {
 				for _, v := range val {
 					ss, err := cast.ToStringE(v)
 					if err != nil {
-						log.Panic(err)
+						panic(err)
 					}
 					if len(str) == 0 {
 						str = ss
@@ -251,7 +259,7 @@ func (gp *BaseTable) LoadYaml(fileName string) error {
 				}
 
 			default:
-				log.Panicf("undefine config type, key=%s", key)
+				panic("undefined config type, key=" + key)
 			}
 		}
 		err = gp.params.Save(strings.ToLower(key), str)

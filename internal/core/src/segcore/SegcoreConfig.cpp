@@ -42,16 +42,16 @@ apply_parser(const YAML::Node& node, Func func) {
     return results;
 }
 
-SegcoreConfig
+void
 SegcoreConfig::parse_from(const std::string& config_path) {
     try {
-        SegcoreConfig result;
         YAML::Node top_config = YAML::LoadFile(config_path);
         Assert(top_config.IsMap());
         auto seg_config = subnode(top_config, "segcore");
         auto chunk_size = subnode(seg_config, "chunk_size").as<int64_t>();
-        result.size_per_chunk_ = chunk_size;
+        this->size_per_chunk_ = chunk_size;
 
+#if 0
         auto index_list = subnode(seg_config, "small_index");
 
         Assert(index_list.IsSequence());
@@ -92,16 +92,16 @@ SegcoreConfig::parse_from(const std::string& config_path) {
             }
 
             for (auto metric_type : metric_types) {
-                Assert(result.table_.count(metric_type));
+                Assert(result.table_.count(metric_type) == 0);
                 result.table_[metric_type] = conf;
             }
         }
-        return result;
+#endif
     } catch (const SegcoreError& e) {
-        // re-throw
         throw e;
     } catch (const std::exception& e) {
-        PanicInfo(std::string("Invalid Yaml:\n") + e.what());
+        std::string str = std::string("Invalid Yaml: ") + config_path + ", err: " + e.what();
+        PanicInfo(str);
     }
 }
 
