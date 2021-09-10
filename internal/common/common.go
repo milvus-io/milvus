@@ -24,4 +24,5 @@ const (
 	TimeStampField     = 1
 	RowIDFieldName     = "RowID"
 	TimeStampFieldName = "Timestamp"
+	DefaultShardsNum   = int32(2)
 )
