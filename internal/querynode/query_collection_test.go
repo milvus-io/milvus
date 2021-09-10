@@ -447,3 +447,36 @@ func TestResultHandlerStage_TranslateHits(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestQueryCollection_AddPopUnsolvedMsg(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	qCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.Nil(t, err)
+	var i int64
+	for i = 0; i < 3; i++ {
+		qCollection.addToUnsolvedMsg(&msgstream.RetrieveMsg{
+			RetrieveRequest: internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{MsgID: i},
+			},
+		})
+	}
+
+	unsolved := qCollection.popAllUnsolvedMsg()
+	assert.EqualValues(t, 3, len(unsolved))
+	for i := 0; i < 3; i++ {
+		assert.EqualValues(t, i, unsolved[i].ID())
+	}
+
+	// add new msg to unsolved msgs and check old unsolved msg
+	for i := 0; i < 3; i++ {
+		qCollection.addToUnsolvedMsg(&msgstream.RetrieveMsg{
+			RetrieveRequest: internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{MsgID: 4},
+			},
+		})
+	}
+
+	for i := 0; i < 3; i++ {
+		assert.EqualValues(t, i, unsolved[i].ID())
+	}
+}
