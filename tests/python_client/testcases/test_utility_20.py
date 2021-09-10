@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 from base.client_base import TestcaseBase
 from base.utility_wrapper import ApiUtilityWrapper
@@ -110,7 +112,6 @@ class TestUtilityParams(TestcaseBase):
                 check_items={ct.err_code: 1, ct.err_msg: "Invalid"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
     def test_drop_collection_name_invalid(self, get_invalid_collection_name):
         self._connect()
         error = f'`collection_name` value {get_invalid_collection_name} is illegal'
@@ -222,7 +223,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.loading_progress("not_existed_name", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tag(CaseLabel.L1)
-    @pytest.mark.xfail("issue #7613")
+    @pytest.mark.xfail(reason="issue #7613")
     def test_loading_progress_invalid_partition_names(self, get_invalid_partition_names):
         """
         target: test loading progress with invalid partition names
@@ -280,7 +281,7 @@ class TestUtilityParams(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={ct.err_code: 1, ct.err_msg: f'partitionID of partitionName:{ct.default_tag} can not be find'})
 
-    def _test_drop_collection_not_existed(self):
+    def test_drop_collection_not_existed(self):
         """
         target: test drop an not existed collection
         method: drop a not created collection
@@ -290,8 +291,6 @@ class TestUtilityParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         error = {ct.err_code: 0, ct.err_msg: "describe collection failed: can't find collection:"}
         self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
-        # with pytest.raises(Exception) as e:
-        # self.utility_wrap.drop_collection(c_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_calc_distance_left_vector_invalid_type(self, get_invalid_vector_dict):
@@ -908,6 +907,49 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert res[num_loaded_entities] == nb
 
+    @pytest.mark.tag(CaseLabel.L0)
+    def test_drop_collection(self):
+        """
+        target: test utility drop collection by name
+        method: input collection name and drop collection
+        expected: collection is dropped
+        """
+        c_name = cf.gen_unique_str(prefix)
+        self.init_collection_wrap(c_name)
+        assert self.utility_wrap.has_collection(c_name)[0]
+        self.utility_wrap.drop_collection(c_name)
+        assert not self.utility_wrap.has_collection(c_name)[0]
+
+    def test_drop_collection_repeatedly(self):
+        """
+        target: test drop collection repeatedly
+        method: 1.collection.drop 2.utility.drop_collection
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        assert self.utility_wrap.has_collection(c_name)[0]
+        collection_w.drop()
+        assert not self.utility_wrap.has_collection(c_name)[0]
+        error = {ct.err_code: 1, ct.err_msg: {"describe collection failed: can't find collection:"}}
+        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+
+    def test_drop_collection_create_repeatedly(self):
+        """
+        target: test repeatedly create and drop same name collection
+        method: repeatedly create and drop collection
+        expected: no exception
+        """
+        from time import sleep
+        loops = 3
+        c_name = cf.gen_unique_str(prefix)
+        for _ in range(loops):
+            self.init_collection_wrap(c_name)
+            assert self.utility_wrap.has_collection(c_name)[0]
+            self.utility_wrap.drop_collection(c_name)
+            assert not self.utility_wrap.has_collection(c_name)[0]
+            sleep(1)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_calc_distance_default(self):
         """
@@ -1229,3 +1271,34 @@ class TestUtilityAdvanced(TestcaseBase):
         res, _ = self.utility_wrap.list_collections()
         for name in [c_name, c_name_2]:
             assert name in res
+
+    def test_drop_multi_collection_concurrent(self):
+        """
+        target: test concurrent drop collection
+        method: multi thread drop one collection
+        expected: drop successfully
+        """
+        thread_num = 3
+        threads = []
+        c_names = []
+        num = 5
+
+        for i in range(thread_num*num):
+            c_name = cf.gen_unique_str(prefix)
+            self.init_collection_wrap(c_name)
+            c_names.append(c_name)
+
+        def create_and_drop_collection(names):
+            for name in names:
+                assert self.utility_wrap.has_collection(name)[0]
+                self.utility_wrap.drop_collection(name)
+                assert not self.utility_wrap.has_collection(name)[0]
+
+        for i in range(thread_num):
+            x = threading.Thread(target=create_and_drop_collection, args=(c_names[i*num:(i+1)*num],))
+            threads.append(x)
+            x.start()
+        for t in threads:
+            t.join()
+        log.debug(self.utility_wrap.list_collections()[0])
+
