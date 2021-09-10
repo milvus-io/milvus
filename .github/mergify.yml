@@ -83,6 +83,7 @@ pull_request_rules:
   - name: Remove ci-passed when unittest failed
     conditions:
       - base=master
+      - -title~=\[skip ci\]
       - "check-failure=Build and test AMD64 Ubuntu 18.04"
     actions:
       label:
@@ -92,6 +93,7 @@ pull_request_rules:
   - name: Remove ci-passed when ci failed
     conditions:
       - base=master
+      - -title~=\[skip ci\]
       - "check-failure=continuous-integration/jenkins/pr-merge"
     actions:
       label:
@@ -101,6 +103,7 @@ pull_request_rules:
   - name: Remove ci-passed when ci pending
     conditions:
       - base=master
+      - -title~=\[skip ci\]
       - "check-pending=continuous-integration/jenkins/pr-merge"
     actions:
       label:
