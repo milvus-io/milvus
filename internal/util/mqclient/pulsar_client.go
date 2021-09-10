@@ -93,6 +93,7 @@ func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
 	return &pulsarID{messageID: pID}, nil
 }
 
+// close pulsar client
 func (pc *pulsarClient) Close() {
 	pc.client.Close()
 }
