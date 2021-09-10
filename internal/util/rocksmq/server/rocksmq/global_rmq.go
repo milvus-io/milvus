@@ -73,6 +73,23 @@ func CloseRocksMQ() {
 	if Rmq != nil {
 		Rmq.stopRetention()
 		if Rmq.store != nil {
+			Rmq.consumers.Range(func(k, v interface{}) bool {
+				var topic string
+				for _, consumer := range v.([]*Consumer) {
+					err := Rmq.DestroyConsumerGroup(consumer.Topic, consumer.GroupName)
+					if err != nil {
+						log.Warn("Rocksmq DestroyConsumerGroup failed!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName))
+					}
+					topic = consumer.Topic
+				}
+				if topic != "" {
+					err := Rmq.DestroyTopic(topic)
+					if err != nil {
+						log.Warn("Rocksmq DestroyTopic failed!", zap.Any("topic", topic))
+					}
+				}
+				return true
+			})
 			Rmq.store.Close()
 		}
 	}
