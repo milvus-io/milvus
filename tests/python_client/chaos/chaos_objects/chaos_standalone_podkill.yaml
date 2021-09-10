@@ -14,4 +14,4 @@ spec:
       app.kubernetes.io/name: milvus
       component: standalone
   scheduler:
-    cron: '@every 3s'
+    cron: '@every 5s'

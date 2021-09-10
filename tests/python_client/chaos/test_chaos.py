@@ -6,7 +6,6 @@ from checker import CreateChecker, InsertFlushChecker, \
     SearchChecker, QueryChecker, IndexChecker, Op
 from chaos_opt import ChaosOpt
 from utils.util_log import test_log as log
-from common import common_func as cf
 from chaos_commons import *
 from common.common_type import CaseLabel
 from chaos import constants
@@ -48,8 +47,7 @@ class TestChaosBase:
         for t in test_collections:
             test_chaos = t.get('testcase', {}).get('chaos', {})
             if test_chaos in chaos_yaml:
-                expects = t.get('testcase', {}).get('expectation', {}) \
-                    .get('cluster_1_node', {})
+                expects = t.get('testcase', {}).get('expectation', {}).get('cluster_1_node', {})
                 log.debug(f"yaml.expects: {expects}")
                 self.expect_create = expects.get(Op.create.value, constants.SUCC)
                 self.expect_insert = expects.get(Op.insert.value, constants.SUCC)
@@ -118,7 +116,7 @@ class TestChaos(TestChaosBase):
             log.error("Fail to get the testcase info in testcases.yaml")
             assert False
 
-        # wait 120s
+        # wait 20s
         sleep(constants.WAIT_PER_OP*2)
 
         # assert statistic:all ops 100% succ
@@ -133,7 +131,7 @@ class TestChaos(TestChaosBase):
         # reset counting
         reset_counting(self.health_checkers)
 
-        # wait 120s
+        # wait 40s
         sleep(constants.WAIT_PER_OP*4)
 
         for k, t in self.checker_threads.items():
@@ -157,6 +155,7 @@ class TestChaos(TestChaosBase):
         for k, t in self.checker_threads.items():
             log.debug(f"Thread {k} is_alive(): {t.is_alive()}")
         sleep(2)
+
         # reconnect if needed
         sleep(constants.WAIT_PER_OP*2)
         reconnect(connections, self.host, self.port)
@@ -164,7 +163,7 @@ class TestChaos(TestChaosBase):
         # reset counting again
         reset_counting(self.health_checkers)
 
-        # wait 300s (varies by feature)
+        # wait 50s (varies by feature)
         sleep(constants.WAIT_PER_OP*5)
 
         # assert statistic: all ops success again
