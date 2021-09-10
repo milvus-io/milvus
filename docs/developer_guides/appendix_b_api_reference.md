@@ -101,7 +101,7 @@ message FieldSchema {
 }
 ```
 
-**Field schema** contains all the base information of a field including field **fieldID**, **name**, **description**, **data_type**, **type_params** and **index_params**. **data_type** is a enum type to distingush different data type.Total enum is shown in the last of this doc
+**Field schema** contains all the base information of a field including **fieldID**, **name**, **description**, **data_type**, **type_params** and **index_params**. **data_type** is an enum type to distingush different data types.Total enum is shown in the last of this doc
 
 **type_params** contains the detailed information of data_type. For example, vector data type should include dimension information. You can give a pair of <dim, 8> to let the field store 8-dimension vector.
 
@@ -120,7 +120,7 @@ ErrorCode error_code = 1;
 }
 ```
 
-**Status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is an enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describe the detailed error.
 
 
 
@@ -163,7 +163,7 @@ message Status {
 }
 ```
 
-**Status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is an enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 
 
