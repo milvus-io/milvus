@@ -144,8 +144,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 	}
 	setSegments()
 
-	// sendQueryNodeStats
-	return loader.indexLoader.sendQueryNodeStats()
+	return nil
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {

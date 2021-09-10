@@ -20,7 +20,6 @@ import (
 	"path"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/indexnode"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -850,91 +849,6 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	}
 
 	return paths, fieldIDs, nil
-}
-
-func generateIndex(segmentID UniqueID) ([]string, error) {
-	const (
-		msgLength = 1000
-		DIM       = 16
-	)
-
-	indexParams := make(map[string]string)
-	indexParams["index_type"] = "IVF_PQ"
-	indexParams["index_mode"] = "cpu"
-	indexParams["dim"] = "16"
-	indexParams["k"] = "10"
-	indexParams["nlist"] = "100"
-	indexParams["nprobe"] = "10"
-	indexParams["m"] = "4"
-	indexParams["nbits"] = "8"
-	indexParams["metric_type"] = "L2"
-	indexParams["SLICE_SIZE"] = "4"
-
-	var indexParamsKV []*commonpb.KeyValuePair
-	for key, value := range indexParams {
-		indexParamsKV = append(indexParamsKV, &commonpb.KeyValuePair{
-			Key:   key,
-			Value: value,
-		})
-	}
-
-	typeParams := make(map[string]string)
-	typeParams["dim"] = strconv.Itoa(DIM)
-	var indexRowData []float32
-	for n := 0; n < msgLength; n++ {
-		for i := 0; i < DIM; i++ {
-			indexRowData = append(indexRowData, float32(n*i))
-		}
-	}
-
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
-	if err != nil {
-		return nil, err
-	}
-
-	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
-	if err != nil {
-		return nil, err
-	}
-
-	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		BucketName:        Params.MinioBucketName,
-		CreateBucket:      true,
-	}
-
-	kv, err := minioKV.NewMinIOKV(context.Background(), option)
-	if err != nil {
-		return nil, err
-	}
-
-	// save index to minio
-	binarySet, err := index.Serialize()
-	if err != nil {
-		return nil, err
-	}
-
-	// serialize index params
-	var indexCodec storage.IndexCodec
-	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, "index_test_name", 1234)
-	if err != nil {
-		return nil, err
-	}
-
-	indexPaths := make([]string, 0)
-	for _, index := range serializedIndexBlobs {
-		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
-		indexPaths = append(indexPaths, p)
-		err := kv.Save(p, string(index.Value))
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return indexPaths, nil
 }
 
 func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) error {

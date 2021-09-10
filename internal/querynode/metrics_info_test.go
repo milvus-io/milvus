@@ -12,11 +12,29 @@
 package querynode
 
 import (
+	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 func TestGetSystemInfoMetrics(t *testing.T) {
-	log.Info("TestGetSystemInfoMetrics, todo")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+
+	req := &milvuspb.GetMetricsRequest{
+		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+	}
+	resp, err := getSystemInfoMetrics(ctx, req, node)
+	assert.NoError(t, err)
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 }

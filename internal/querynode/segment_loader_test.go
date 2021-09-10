@@ -66,6 +66,48 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestSegmentLoader_notOnService(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	historical, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
+
+	err = historical.replica.removeSegment(defaultSegmentID)
+	assert.NoError(t, err)
+
+	kv, err := genEtcdKV()
+	assert.NoError(t, err)
+
+	loader := newSegmentLoader(ctx, nil, nil, historical.replica, kv)
+	assert.NotNil(t, loader)
+
+	schema, _ := genSimpleSchema()
+
+	fieldBinlog, err := saveSimpleBinLog(ctx)
+	assert.NoError(t, err)
+
+	req := &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_WatchQueryChannels,
+			MsgID:   rand.Int63(),
+		},
+		NodeID:        0,
+		Schema:        schema,
+		LoadCondition: querypb.TriggerCondition_grpcRequest,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:    defaultSegmentID,
+				PartitionID:  defaultPartitionID,
+				CollectionID: defaultCollectionID,
+				BinlogPaths:  fieldBinlog,
+			},
+		},
+	}
+	err = loader.loadSegment(req, false)
+	assert.NoError(t, err)
+}
+
 func TestSegmentLoader_CheckSegmentMemory(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
