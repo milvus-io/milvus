@@ -16,9 +16,6 @@ DEFAULT_CPUS = 48
 
 RAW_DATA_DIR = "/test/milvus/raw_data/"
 
-# nars log
-# LOG_PATH = "/test/milvus/benchmark/logs/{}/".format(BRANCH)
-
 DEFAULT_DEPLOY_MODE = "single"
 
 NAMESPACE = "chaos-testing"
