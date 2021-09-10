@@ -77,9 +77,9 @@ class TestE2e(TestcaseBase):
         log.debug(f"assert search: {tt}")
 
         # query
-        term_expr = f'{ct.default_int64_field_name} in [3001,4001,4999,2999]'
+        term_expr = f'{ct.default_int64_field_name} in [1001,1201,4999,2999]'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
-        log.debug(f"assert query: {tt}")
+        log.debug(f"assert query result {len(res)}: {tt}")
         # assert len(res) == 4
