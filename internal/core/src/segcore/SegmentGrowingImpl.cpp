@@ -202,9 +202,9 @@ SegmentGrowingImpl::do_insert(int64_t reserved_begin,
     }
 
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
-    if (!debug_disable_small_index_) {
-        indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / segcore_config_.get_size_per_chunk(),
-                                           record_);
+    if (enable_small_index_) {
+        int64_t chunk_size = segcore_config_.get_size_per_chunk();
+        indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / chunk_size, record_);
     }
 }
 
