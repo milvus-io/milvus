@@ -286,3 +286,20 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 //	err = node.Stop()
 //	assert.NoError(t, err)
 //}
+
+func TestCollectionReplica_statistic(t *testing.T) {
+	t.Run("test getCollectionIDs", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		ids := replica.getCollectionIDs()
+		assert.Len(t, ids, 1)
+		assert.Equal(t, defaultCollectionID, ids[0])
+	})
+
+	t.Run("test getCollectionIDs", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		num := replica.getSegmentNum()
+		assert.Equal(t, 0, num)
+	})
+}
