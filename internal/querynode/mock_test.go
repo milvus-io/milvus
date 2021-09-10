@@ -42,6 +42,7 @@ import (
 // common definitions
 const ctxTimeInMillisecond = 5000
 const debug = false
+const runTimeConsumingTest = true
 
 const (
 	dimKey        = "dim"
@@ -188,6 +189,76 @@ func genIndexBinarySet() ([][]byte, error) {
 		bytesSet = append(bytesSet, binarySet[i].Value)
 	}
 	return bytesSet, nil
+}
+
+func generateIndex(segmentID UniqueID) ([]string, error) {
+	indexParams := genSimpleIndexParams()
+
+	var indexParamsKV []*commonpb.KeyValuePair
+	for key, value := range indexParams {
+		indexParamsKV = append(indexParamsKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	typeParams := make(map[string]string)
+	typeParams["dim"] = strconv.Itoa(defaultDim)
+	var indexRowData []float32
+	for n := 0; n < defaultMsgLength; n++ {
+		for i := 0; i < defaultDim; i++ {
+			indexRowData = append(indexRowData, float32(n*i))
+		}
+	}
+
+	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	if err != nil {
+		return nil, err
+	}
+
+	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	if err != nil {
+		return nil, err
+	}
+
+	option := &minioKV.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		BucketName:        Params.MinioBucketName,
+		CreateBucket:      true,
+	}
+
+	kv, err := minioKV.NewMinIOKV(context.Background(), option)
+	if err != nil {
+		return nil, err
+	}
+
+	// save index to minio
+	binarySet, err := index.Serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	// serialize index params
+	var indexCodec storage.IndexCodec
+	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, "index_test_name", 1234)
+	if err != nil {
+		return nil, err
+	}
+
+	indexPaths := make([]string, 0)
+	for _, index := range serializedIndexBlobs {
+		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
+		indexPaths = append(indexPaths, p)
+		err := kv.Save(p, string(index.Value))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return indexPaths, nil
 }
 
 func genSimpleSchema() (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {

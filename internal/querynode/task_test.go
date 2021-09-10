@@ -99,30 +99,32 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	// TODO: time consuming, reduce seek error time
-	t.Run("test execute seek error", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+	if runTimeConsumingTest {
+		t.Run("test execute seek error", func(t *testing.T) {
 
-		task := watchDmChannelsTask{
-			req:  genWatchDMChannelsRequest(),
-			node: node,
-		}
-		task.req.Infos = []*datapb.VchannelInfo{
-			{
-				CollectionID: defaultCollectionID,
-				ChannelName:  defaultVChannel,
-				SeekPosition: &msgstream.MsgPosition{
-					ChannelName: defaultVChannel,
-					MsgID:       []byte{1, 2, 3},
-					MsgGroup:    defaultSubName,
-					Timestamp:   0,
+			node, err := genSimpleQueryNode(ctx)
+			assert.NoError(t, err)
+
+			task := watchDmChannelsTask{
+				req:  genWatchDMChannelsRequest(),
+				node: node,
+			}
+			task.req.Infos = []*datapb.VchannelInfo{
+				{
+					CollectionID: defaultCollectionID,
+					ChannelName:  defaultVChannel,
+					SeekPosition: &msgstream.MsgPosition{
+						ChannelName: defaultVChannel,
+						MsgID:       []byte{1, 2, 3},
+						MsgGroup:    defaultSubName,
+						Timestamp:   0,
+					},
 				},
-			},
-		}
-		err = task.Execute(ctx)
-		assert.Error(t, err)
-	})
+			}
+			err = task.Execute(ctx)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestTask_loadSegmentsTask(t *testing.T) {
