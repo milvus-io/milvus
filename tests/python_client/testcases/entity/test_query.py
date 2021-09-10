@@ -199,7 +199,7 @@ class TestQueryBase:
         """
         target: test query empty collection
         method: query on a empty collection
-        expected: todo
+        expected: query result is empty
         """
         connect.load_collection(collection)
         res = connect.query(collection, default_term_expr)
