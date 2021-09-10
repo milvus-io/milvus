@@ -32,11 +32,11 @@ minio:
 pulsar:
   address: localhost
   port: 6650
-  maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes
+  maxMessageSize: 5242880 # 5M, 5 * 1024 * 1024 Bytes
 
 rocksmq:
   path: /var/lib/milvus/rdb_data
-  retentionTimeInMinutes: 4320
+  retentionTimeInMinutes: 4320 # 72 hours
   retentionSizeInMB: 0
 
 rootCoord:
@@ -44,8 +44,8 @@ rootCoord:
   port: 53100
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, 2^31 − 1
+    serverMaxSendSize: 2147483647 # math.MaxInt32, 2^31 − 1
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
@@ -53,8 +53,8 @@ proxy:
   port: 19530
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, 2^31 − 1
+    serverMaxSendSize: 2147483647 # math.MaxInt32, 2^31 − 1
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
@@ -63,8 +63,8 @@ queryCoord:
   port: 19531
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, 2^31 − 1
+    serverMaxSendSize: 2147483647 # math.MaxInt32, 2^31 − 1
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
@@ -73,8 +73,8 @@ queryNode:
   port: 21123
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, 2^31 − 1
+    serverMaxSendSize: 2147483647 # math.MaxInt32, 2^31 − 1
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
@@ -83,8 +83,8 @@ indexCoord:
   port: 31000
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, 2^31 − 1
+    serverMaxSendSize: 2147483647 # math.MaxInt32, 2^31 − 1
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
@@ -92,8 +92,8 @@ indexNode:
   port: 21121
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, 2^31 − 1
+    serverMaxSendSize: 2147483647 # math.MaxInt32, 2^31 − 1
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
