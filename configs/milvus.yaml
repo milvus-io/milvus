@@ -102,8 +102,8 @@ dataCoord:
   port: 13333
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, 2^31 − 1
+    serverMaxSendSize: 2147483647 # math.MaxInt32, 2^31 − 1
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
@@ -111,8 +111,8 @@ dataNode:
   port: 21124
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, 2^31 − 1
+    serverMaxSendSize: 2147483647 # math.MaxInt32, 2^31 − 1
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
