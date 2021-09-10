@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 
@@ -156,11 +157,11 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 	dsService.saveBinlog = saveBinlog
 
+	pchan := rootcoord.ToPhysicalChannel(vchanInfo.GetChannelName())
 	var dmStreamNode Node = newDmInputNode(
 		dsService.ctx,
 		dsService.msFactory,
-		vchanInfo.CollectionID,
-		vchanInfo.GetChannelName(),
+		pchan,
 		vchanInfo.GetSeekPosition(),
 	)
 	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)

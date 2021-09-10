@@ -22,11 +22,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
+
+type ddlTimetickInfo struct {
+	ddlMinTs typeutil.Timestamp
+	ddlTsSet map[typeutil.Timestamp]struct{}
+}
 
 type timetickSync struct {
 	core          *Core
@@ -187,7 +191,7 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 
 	t.proxyTimeTick[in.Base.SourceID] = newChannelTimeTickMsg(in)
 	//log.Debug("update proxyTimeTick", zap.Int64("source id", in.Base.SourceID),
-	//	zap.Any("Ts", in.Timestamps), zap.Uint64("inTs", in.DefaultTimestamp), zap.String("reason", reason))
+	//	zap.Uint64("inTs", in.DefaultTimestamp), zap.String("reason", reason))
 
 	t.sendToChannel()
 	return nil
@@ -221,53 +225,34 @@ func (t *timetickSync) StartWatch() {
 	for {
 		select {
 		case <-t.core.ctx.Done():
-			log.Debug("rootcoord context done", zap.Error(t.core.ctx.Err()))
+			log.Debug("root coord context done", zap.Error(t.core.ctx.Err()))
 			return
-		case proxyTimetick, ok := <-t.sendChan:
+		case ptt, ok := <-t.sendChan:
 			if !ok {
 				log.Debug("timetickSync sendChan closed")
 				return
 			}
 
 			// reduce each channel to get min timestamp
-			local := proxyTimetick[t.core.session.ServerID]
-			if len(local.in.ChannelNames) == 0 {
-				continue
-			}
-
-			hdr := fmt.Sprintf("send ts to %d channels", len(local.in.ChannelNames))
-			tr := timerecord.NewTimeRecorder(hdr)
-			wg := sync.WaitGroup{}
-			for _, chanName := range local.in.ChannelNames {
-				wg.Add(1)
-				go func(chanName string) {
-					mints := local.getTimetick(chanName)
-					for _, tt := range proxyTimetick {
-						ts := tt.getTimetick(chanName)
-						if ts < mints {
-							mints = ts
-						}
+			mtt := ptt[t.core.session.ServerID]
+			for _, chanName := range mtt.in.ChannelNames {
+				mints := mtt.getTimetick(chanName)
+				for _, tt := range ptt {
+					ts := tt.getTimetick(chanName)
+					if ts < mints {
+						mints = ts
 					}
-					if err := t.SendTimeTickToChannel([]string{chanName}, mints); err != nil {
-						log.Debug("SendTimeTickToChannel fail", zap.Error(err))
-					}
-					wg.Done()
-				}(chanName)
-			}
-			wg.Wait()
-			span := tr.ElapseSpan()
-			// rootcoord send tt msg to all channels every 200ms by default
-			if span.Milliseconds() > 200 {
-				log.Warn("rootcoord send tt to all channels too slowly",
-					zap.Int("chanNum", len(local.in.ChannelNames)),
-					zap.Int64("span", span.Milliseconds()))
+				}
+				if err := t.SendChannelTimeTick(chanName, mints); err != nil {
+					log.Debug("SendChannelTimeTick fail", zap.Error(err))
+				}
 			}
 		}
 	}
 }
 
-// SendTimeTickToChannel send each channel's min timetick to msg stream
-func (t *timetickSync) SendTimeTickToChannel(chanNames []string, ts typeutil.Timestamp) error {
+// SendChannelTimeTick send each channel's min timetick to msg stream
+func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestamp) error {
 	msgPack := msgstream.MsgPack{}
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: ts,
@@ -288,14 +273,11 @@ func (t *timetickSync) SendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
-	if err := t.core.dmlChannels.Broadcast(chanNames, &msgPack); err != nil {
-		return err
-	}
-
-	for _, chanName := range chanNames {
+	err := t.core.dmlChannels.Broadcast(chanName, &msgPack)
+	if err == nil {
 		metrics.RootCoordInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(tsoutil.Mod24H(ts)))
 	}
-	return nil
+	return err
 }
 
 // GetProxyNum return the num of detected proxy node
