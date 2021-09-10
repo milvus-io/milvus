@@ -41,6 +41,18 @@ func TestPlan_Plan(t *testing.T) {
 	deleteCollection(collection)
 }
 
+func TestPlan_NilCollection(t *testing.T) {
+	collection := &Collection{
+		id: defaultCollectionID,
+	}
+
+	_, err := createSearchPlan(collection, "")
+	assert.Error(t, err)
+
+	_, err = createSearchPlanByExpr(collection, nil)
+	assert.Error(t, err)
+}
+
 func TestPlan_PlaceholderGroup(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionID, false)

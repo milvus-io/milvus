@@ -35,6 +35,10 @@ type MarshaledHits struct {
 }
 
 func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchResult, numSegments int64) error {
+	if plan.cSearchPlan == nil {
+		return errors.New("nil search plan")
+	}
+
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cSearchResult)
