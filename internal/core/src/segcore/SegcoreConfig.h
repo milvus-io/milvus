@@ -31,7 +31,7 @@ class SegcoreConfig {
     default_config() {
         // TODO: remove this when go side is ready
         SegcoreConfig config;
-        config.set_size_per_chunk(32 * 1024);
+        config.set_size_per_chunk(2 * 1024);
         SmallIndexConf sub_conf;
         sub_conf.build_params["nlist"] = 100;
         sub_conf.search_params["nprobe"] = 4;
