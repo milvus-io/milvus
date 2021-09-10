@@ -14,7 +14,6 @@ msgChannel:
   chanNamePrefix:
     rootCoordTimeTick: "rootcoord-timetick"
     rootCoordStatistics: "rootcoord-statistics"
-    rootCoordDml: "rootcoord-dml"
     search: "search"
     searchResult: "searchResult"
     proxyTimeTick: "proxyTimeTick"

@@ -200,7 +200,7 @@ Also, you should provide the field value of the source data file path `source_fi
 
    The following diagram shows the runtime execution graph of the benchmark (local mode based on argo workflow)
 
-   <img src="asserts/uml.jpg" />
+   <img src="assets/uml.jpg" />
 
 ## Test report
 
@@ -256,6 +256,6 @@ The query expression:
 
 After the execution of the above query is complete, we will get its charts:
 
- <img src="asserts/dash.png" />
+ <img src="assets/dash.png" />
 
 In this chart, we will found there has an improvement from 2.0.0-RC3 to 2.0.0-RC5.

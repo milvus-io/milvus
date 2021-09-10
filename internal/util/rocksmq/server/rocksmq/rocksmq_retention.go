@@ -76,10 +76,10 @@ func prefixLoad(db *gorocksdb.DB, prefix string) ([]string, []string, error) {
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		value := iter.Value()
-		defer key.Free()
-		defer value.Free()
 		keys = append(keys, string(key.Data()))
+		key.Free()
 		values = append(values, string(value.Data()))
+		value.Free()
 	}
 	if err := iter.Err(); err != nil {
 		return nil, nil, err
@@ -112,12 +112,15 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 
 func (ri *retentionInfo) startRetentionInfo() error {
 	var wg sync.WaitGroup
+	ri.kv.ResetPrefixLength(FixedChannelNameLen)
 	for _, topic := range ri.topics {
+		log.Debug("Start load retention info", zap.Any("topic", topic))
 		// Load all page infos
 		wg.Add(1)
 		go ri.loadRetentionInfo(topic, &wg)
 	}
 	wg.Wait()
+	log.Debug("Finish load retention info, start retention")
 	go ri.retention()
 
 	return nil

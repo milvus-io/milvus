@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package indexnode
+package indexcoord
 
 import (
 	"testing"
@@ -17,10 +17,6 @@ import (
 
 func TestParamTable(t *testing.T) {
 	Params.Init()
-
-	t.Run("IP", func(t *testing.T) {
-		t.Logf("IP: %v", Params.IP)
-	})
 
 	t.Run("Address", func(t *testing.T) {
 		t.Logf("Address: %v", Params.Address)
@@ -30,16 +26,12 @@ func TestParamTable(t *testing.T) {
 		t.Logf("Port: %v", Params.Port)
 	})
 
-	t.Run("NodeID", func(t *testing.T) {
-		t.Logf("NodeID: %v", Params.NodeID)
-	})
-
-	t.Run("Alias", func(t *testing.T) {
-		t.Logf("Alias: %v", Params.Alias)
-	})
-
 	t.Run("EtcdEndpoints", func(t *testing.T) {
 		t.Logf("EtcdEndpoints: %v", Params.EtcdEndpoints)
+	})
+
+	t.Run("KvRootPath", func(t *testing.T) {
+		t.Logf("KvRootPath: %v", Params.KvRootPath)
 	})
 
 	t.Run("MetaRootPath", func(t *testing.T) {
@@ -80,21 +72,50 @@ func TestParamTable(t *testing.T) {
 //func TestParamTable_Panic(t *testing.T) {
 //	Params.Init()
 //
+//
+//	t.Run("initEtcdEndpoints", func(t *testing.T) {
+//		err := Params.Remove("_EtcdEndpoints")
+//		assert.Nil(t, err)
+//
+//		shouldPanic(t, "initEtcdEndpoints", func() {
+//			Params.initEtcdEndpoints()
+//		})
+//	})
+//
+//	t.Run("initMetaRootPath", func(t *testing.T) {
+//		err := Params.Remove("etcd.rootPath")
+//		assert.Nil(t, err)
+//
+//		shouldPanic(t, "initMetaRootPath", func() {
+//			Params.initMetaRootPath()
+//		})
+//	})
+//
+//	t.Run("initKvRootPath", func(t *testing.T) {
+//		err := Params.Remove("etcd.rootPath")
+//		assert.Nil(t, err)
+//
+//		shouldPanic(t, "initKvRootPath", func() {
+//			Params.initKvRootPath()
+//		})
+//
+//		err = Params.Save("etcd.rootPath", "test")
+//		assert.Nil(t, err)
+//
+//		err = Params.Remove("etcd.kvSubPath")
+//		assert.Nil(t, err)
+//
+//		shouldPanic(t, "initKvRootPath", func() {
+//			Params.initKvRootPath()
+//		})
+//	})
+//
 //	t.Run("initMinIOAddress", func(t *testing.T) {
 //		err := Params.Remove("_MinioAddress")
 //		assert.Nil(t, err)
 //
 //		shouldPanic(t, "initMinIOAddress", func() {
 //			Params.initMinIOAddress()
-//		})
-//	})
-//
-//	t.Run("initMinIOAccessKeyID", func(t *testing.T) {
-//		err := Params.Remove("minio.accessKeyID")
-//		assert.Nil(t, err)
-//
-//		shouldPanic(t, "initMinIOAccessKeyID", func() {
-//			Params.initMinIOAccessKeyID()
 //		})
 //	})
 //
@@ -122,33 +143,6 @@ func TestParamTable(t *testing.T) {
 //
 //		shouldPanic(t, "initMinIOUseSSL", func() {
 //			Params.initMinIOUseSSL()
-//		})
-//	})
-//
-//	t.Run("initEtcdEndpoints", func(t *testing.T) {
-//		err := Params.Remove("_EtcdEndpoints")
-//		assert.Nil(t, err)
-//
-//		shouldPanic(t, "initEtcdEndpoints", func() {
-//			Params.initEtcdEndpoints()
-//		})
-//	})
-//
-//	t.Run("initMetaRootPath", func(t *testing.T) {
-//		err := Params.Remove("etcd.rootPath")
-//		assert.Nil(t, err)
-//
-//		shouldPanic(t, "initMetaRootPath", func() {
-//			Params.initMetaRootPath()
-//		})
-//
-//		err = Params.Save("etcd.rootPath", "test")
-//		assert.Nil(t, err)
-//		err = Params.Remove("etcd.metaSubPath")
-//		assert.Nil(t, err)
-//
-//		shouldPanic(t, "initMetaRootPath", func() {
-//			Params.initMetaRootPath()
 //		})
 //	})
 //

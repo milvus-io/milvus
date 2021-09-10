@@ -804,6 +804,7 @@ func (dp *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 
 /////////////////////////////////////////LoadIndex//////////////////////////////////////////
 // TODO(wxyu): comment it until really needed
+/*
 type LoadIndexMsg struct {
 	BaseMsg
 	internalpb.LoadIndex
@@ -853,6 +854,7 @@ func (lim *LoadIndexMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 
 	return loadIndexMsg, nil
 }
+*/
 
 /////////////////////////////////////////LoadBalanceSegments//////////////////////////////////////////
 type LoadBalanceSegmentsMsg struct {

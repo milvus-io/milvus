@@ -12,6 +12,7 @@
 package indexnode
 
 import (
+	"container/list"
 	"context"
 	"path"
 	"strconv"
@@ -726,4 +727,27 @@ func TestIndexNode_Error(t *testing.T) {
 
 	err = in.Stop()
 	assert.Nil(t, err)
+}
+
+func TestIndexNode_InitError(t *testing.T) {
+	ctx := context.Background()
+	in := &IndexNode{
+		sched: &TaskScheduler{
+			IndexBuildQueue: &IndexBuildTaskQueue{
+				BaseTaskQueue: BaseTaskQueue{
+					unissuedTasks: list.New(),
+					activeTasks:   make(map[UniqueID]task),
+					maxTaskNum:    0,
+					utBufChan:     make(chan int, 1024),
+				},
+			},
+		},
+	}
+	in.UpdateStateCode(internalpb.StateCode_Healthy)
+
+	t.Run("CreateIndex", func(t *testing.T) {
+		status, err := in.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
 }

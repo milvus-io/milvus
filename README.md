@@ -88,6 +88,16 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 ### Build Milvus from source code
 
+Check the requirements first.
+
+```bash
+go: 1.15
+cmake: >=3.16
+gcc: 7.5
+```
+
+Clone Milvus repo and build.
+
 ```bash
 # Clone github repository.
 $ git clone https://github.com/milvus-io/milvus.git

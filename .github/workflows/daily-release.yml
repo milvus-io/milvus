@@ -10,7 +10,7 @@ on:
     #         │ │ │ │ │
     #         │ │ │ │ │
     #         │ │ │ │ │
-    - cron:  '* 18 * * *'
+    - cron:  '0 18 * * *'
 
 jobs:
   nightly:
@@ -24,6 +24,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
+      with:
+        fetch-depth: '0'
 
     - name: Get the latest of Milvus dev image tag
       shell: bash
@@ -52,14 +54,17 @@ jobs:
         tag=${{ env.tag }}
         IFS=- read branch date sha <<< "$tag"
         echo "build=$date" >> $GITHUB_ENV
+        echo "sha=$(git rev-parse $sha)" >> $GITHUB_ENV
 
     - name: Create a daily release
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        body: "Image: ${IMAGE_REPO}/${DAILY}:${{ env.tag }}"
+        body: "Image: ${{ env.IMAGE_REPO}}/${{ env.DAILY }}:${{ env.tag }}"
         prerelease: true
-        tag_name: "v2.0.0-testing${{ env.build }}"
+        tag_name: "v2.0.0-testing-${{ env.build }}"
+        release_name: "milvus-2.0.0-testing-${{ env.build }}"
+        commitish: "${{ env.sha }}"
 
 
