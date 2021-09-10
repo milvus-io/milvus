@@ -67,8 +67,8 @@ const illegalRequestErrStr = "Illegal request"
 // services in datanode package.
 //
 // DataNode implements `types.Component`, `types.DataNode` interfaces.
-//  `rootCoord` is grpc client of root coordinator.
-//  `dataCoord` is grpc client of data service.
+//  `rootCoord` is a grpc client of root coordinator.
+//  `dataCoord` is a grpc client of data service.
 //  `NodeID` is unique to each datanode.
 //  `State` is current statement of this data node, indicating whether it's healthy.
 //
@@ -198,7 +198,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	}
 }
 
-// handleChannelEvt handels event from kv watch event
+// handleChannelEvt handles event from kv watch event
 func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 	switch evt.Type {
 	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
@@ -226,7 +226,7 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 		if err != nil {
 			log.Warn("fail to change WatchState to complete", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
 			node.ReleaseDataSyncService(string(evt.Kv.Key))
-			// maybe retry logic and exit logic
+			// TODO GOOSE: maybe retry logic and exit logic
 		}
 	case clientv3.EventTypeDelete:
 		// guaranteed there is no "/" in channel name
