@@ -23,6 +23,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/indexnode"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
@@ -137,6 +138,56 @@ func genFloatVectorField(param vecFieldParam) *schemapb.FieldSchema {
 		},
 	}
 	return fieldVec
+}
+
+func genSimpleIndexParams() indexParam {
+	indexParams := make(map[string]string)
+	indexParams["index_type"] = "IVF_PQ"
+	indexParams["index_mode"] = "cpu"
+	indexParams["dim"] = strconv.FormatInt(defaultDim, 10)
+	indexParams["k"] = "10"
+	indexParams["nlist"] = "100"
+	indexParams["nprobe"] = "10"
+	indexParams["m"] = "4"
+	indexParams["nbits"] = "8"
+	indexParams["metric_type"] = "L2"
+	indexParams["SLICE_SIZE"] = "400"
+	return indexParams
+}
+
+func genIndexBinarySet() ([][]byte, error) {
+	indexParams := genSimpleIndexParams()
+
+	typeParams := make(map[string]string)
+	typeParams["dim"] = strconv.Itoa(defaultDim)
+	var indexRowData []float32
+	for n := 0; n < defaultMsgLength; n++ {
+		for i := 0; i < defaultDim; i++ {
+			indexRowData = append(indexRowData, float32(n*i))
+		}
+	}
+
+	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	if err != nil {
+		return nil, err
+	}
+
+	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	if err != nil {
+		return nil, err
+	}
+
+	// save index to minio
+	binarySet, err := index.Serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	bytesSet := make([][]byte, 0)
+	for i := range binarySet {
+		bytesSet = append(bytesSet, binarySet[i].Value)
+	}
+	return bytesSet, nil
 }
 
 func genSimpleSchema() (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {

@@ -61,6 +61,8 @@ const (
 	ConnectEtcdMaxRetryTime = 1000
 )
 
+const illegalRequestErrStr = "Illegal request"
+
 // DataNode communicates with outside services and unioun all
 // services in datanode package.
 //
@@ -362,12 +364,12 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	}
 
 	switch {
-	case node.State.Load() != internalpb.StateCode_Healthy:
-		status.Reason = fmt.Sprintf("DataNode %d not healthy, please re-send message", node.NodeID)
+	case !node.isHealthy():
+		status.Reason = msgDataNodeIsUnhealthy(node.NodeID)
 		return status, nil
 
 	case len(in.GetVchannels()) == 0:
-		status.Reason = "Illegal request"
+		status.Reason = illegalRequestErrStr
 		return status, nil
 
 	default:

@@ -333,7 +333,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 
 ### SDK
 
-- [PyMilvus-ORM](https://github.com/milvus-io/pymilvus-orm)
+- [PyMilvus](https://github.com/milvus-io/pymilvus)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
 

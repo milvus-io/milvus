@@ -23,27 +23,18 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 	tests := []struct {
 		replica Replica
 
-		expectedErr bool
 		description string
 	}{
-		{nil, true, "Nil input"},
-		{&SegmentReplica{}, false, "pointer of SegmentReplica"},
+		{&SegmentReplica{}, "pointer of SegmentReplica"},
 	}
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			dn, err := newDeleteDNode(test.replica)
+			dn := newDeleteDNode(test.replica)
 
-			if test.expectedErr {
-				assert.Error(t, err)
-				assert.Nil(t, dn)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, dn)
-
-				assert.Equal(t, "deleteNode", dn.Name())
-				dn.Close()
-			}
+			assert.NotNil(t, dn)
+			assert.Equal(t, "deleteNode", dn.Name())
+			dn.Close()
 		})
 	}
 

@@ -120,6 +120,7 @@ localStorage:
   path: /var/lib/milvus/data/
   enabled: true
 
+# Configures the system log output.
 log:
   level: debug # info, warn, error, panic, fatal
   file:

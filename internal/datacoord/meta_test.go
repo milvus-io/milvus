@@ -147,7 +147,6 @@ func TestMeta_Basic(t *testing.T) {
 	t.Run("Test GetCount", func(t *testing.T) {
 		const rowCount0 = 100
 		const rowCount1 = 300
-		const dim = 1024
 
 		// no segment
 		nums := meta.GetNumRowsOfCollection(collID)

@@ -137,10 +137,6 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
 	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
 	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
-	if targetSegment.segmentType != segmentTypeGrowing {
-		wg.Done()
-		return
-	}
 	if err != nil {
 		log.Warn("cannot find segment:", zap.Int64("segmentID", segmentID))
 		// TODO: add error handling

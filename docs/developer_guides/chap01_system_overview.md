@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-In this section, we sketch the system design of Milvus, including data model, data organization, architecture, and state synchronization.
+In this section, we sketch the system design of Milvus, including the data model, data organization, architecture, and state synchronization.
 
 
 
@@ -14,7 +14,7 @@ Milvus exposes the following set of data features to applications:
 
 * a query language specifies data definition, data manipulation, and data query, where data definition includes create, drop, and data manipulation includes insert, upsert, delete, and data query falls into three types, primary key search, approximate nearest neighbor search (ANNS), ANNS with predicates.
 
-The requests' execution order is strictly in accordance with their issue-time order. We take proxy's issue time as a request's issue time. For a batch request, all its sub-requests share a same issue time. In cases there are multiple proxies, issue time from different proxies are regarded as coming from a central clock.
+The requests' execution order is strictly in accordance with their issue-time order. We take proxy's issue time as a request's issue time. For a batch request, all its sub-requests share the same issue time. In cases there are multiple proxies, issue time from different proxies are regarded as coming from a central clock.
 
 Transaction is currently not supported by Milvus.
 
@@ -28,9 +28,9 @@ A batch insert/delete is guaranteed to become visible atomically.
 
 <img src="./figs/data_organization.png" width=550>
 
-In Milvus, 'collection' refers to the concept of table. A collection can be optionally divided into several 'partitions'. Both collection and partition are the basic execution scopes of queries. When use parition, users should clearly know how a collection should be partitioned. In most cases, parition leads to more flexible data management and more efficient querying. For a partitioned collection, queries can be executed both on the collection or a set of specified partitions.
+In Milvus, 'collection' refers to the concept of table. A collection can be optionally divided into several 'partitions'. Both collection and partition are the basic execution scopes of queries. When using partition, users should clearly know how a collection should be partitioned. In most cases, partition leads to more flexible data management and more efficient querying. For a partitioned collection, queries can be executed both on the collection or a set of specified partitions.
 
-Each collection or parition contains a set of 'segment groups'. Segment group is the basic unit of data-to-node mapping. It's also the basic unit of replica. For instance, if a query node failed, its segment groups will be redistributed accross other nodes. If a query node is overloaded, part of its  segment groups will be migrated to underloaded ones. If a hot collection/partition is detected, its segment groups will be replicated to smooth the system load skewness.
+Each collection or partition contains a set of 'segment groups'. Segment group is the basic unit of data-to-node mapping. It's also the basic unit of replica. For instance, if a query node failed, its segment groups will be redistributed accross other nodes. If a query node is overloaded, part of its  segment groups will be migrated to underloaded ones. If a hot collection/partition is detected, its segment groups will be replicated to smooth the system load skewness.
 
 'Segment' is the finest unit of data organization. It is where the data and indexes are actually kept. Each segment contains a set of rows. In order to reduce the memory footprint during a query execution and to fully utilize SIMD, the physical data layout within segments is organized in a column-based manner.
 

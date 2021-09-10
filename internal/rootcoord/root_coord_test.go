@@ -46,6 +46,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+const TestDMLChannelNum = 32
+
 type proxyMock struct {
 	types.Proxy
 	collArray []string
@@ -263,6 +265,9 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	}
 
 	sbf, err := proto.Marshal(&schema)
+	if err != nil {
+		return err
+	}
 
 	t := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -403,6 +408,7 @@ func TestRootCoord(t *testing.T) {
 
 	coreFactory := msgstream.NewPmsFactory()
 	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, coreFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
@@ -1905,6 +1911,8 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, p2.Status.ErrorCode)
 	})
+	err = core.Stop()
+	assert.Nil(t, err)
 }
 
 func TestRootCoord2(t *testing.T) {
@@ -1919,6 +1927,7 @@ func TestRootCoord2(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
@@ -2041,6 +2050,8 @@ func TestRootCoord2(t *testing.T) {
 		assert.Equal(t, DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
 		assert.Equal(t, DefaultShardsNum, rsp.ShardsNum)
 	})
+	err = core.Stop()
+	assert.Nil(t, err)
 }
 
 func TestCheckInit(t *testing.T) {
@@ -2160,6 +2171,8 @@ func TestCheckInit(t *testing.T) {
 	}
 	err = c.checkInit()
 	assert.Nil(t, err)
+	err = c.Stop()
+	assert.Nil(t, err)
 }
 
 func TestCheckFlushedSegments(t *testing.T) {
@@ -2174,6 +2187,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
@@ -2313,7 +2327,8 @@ func TestCheckFlushedSegments(t *testing.T) {
 		core.checkFlushedSegments(core.ctx)
 
 	})
-
+	err = core.Stop()
+	assert.Nil(t, err)
 }
 
 func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
@@ -2328,6 +2343,8 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
+
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
@@ -2413,4 +2430,6 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 		assert.Equal(t, shardsNum, int32(len(rsp.PhysicalChannelNames)))
 		assert.Equal(t, shardsNum, rsp.ShardsNum)
 	})
+	err = core.Stop()
+	assert.Nil(t, err)
 }

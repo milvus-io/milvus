@@ -41,11 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-const (
-	rootCoordClientTimout = 20 * time.Second
-	connEtcdMaxRetryTime  = 100000
-	connEtcdRetryInterval = 200 * time.Millisecond
-)
+const connEtcdMaxRetryTime = 100000
 
 var (
 	// TODO: sunby put to config
@@ -95,7 +91,6 @@ type Server struct {
 	allocator       allocator
 	cluster         *Cluster
 	rootCoordClient types.RootCoord
-	ddChannelName   string
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 

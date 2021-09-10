@@ -72,7 +72,7 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 <details>
   <summary><b>Community supported, industry recognized</b></summary>
-  With over 1,000 enterprise users, 6,000+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the <a href="https://lfaidata.foundation/">LF AI & Data Foundation</a>, Milvus has institutional support.
+  With over 1,000 enterprise users, 7,500+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the <a href="https://lfaidata.foundation/">LF AI & Data Foundation</a>, Milvus has institutional support.
   </details>
 
 
@@ -80,13 +80,13 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 ## Quick start
 
-### To start using Milvus
+### Install Milvus
 
 - [Standalone Quick Start Guide](https://milvus.io/docs/v2.0.0/install_standalone-docker.md)
 
 - [Cluster Quick Start Guide](https://milvus.io/docs/v2.0.0/install_cluster-docker.md)
 
-### To start developing Milvus
+### Build Milvus from source code
 
 ```bash
 # Clone github repository.
@@ -331,9 +331,12 @@ For guidance on installation, development, deployment, and administration, check
 
 The implemented SDK and its API documentation are listed below:
 
-- [PyMilvus-ORM SDK](https://github.com/milvus-io/pymilvus-orm)
+- [PyMilvus SDK](https://github.com/milvus-io/pymilvus)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
+### Milvus insight 
+Milvus insight provides an intuitive and efficient GUI for Milvus. 
+- [Quick start](https://github.com/milvus-io/milvus-insight#quick-start)
 
 
 ## Community

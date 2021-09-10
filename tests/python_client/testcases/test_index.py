@@ -349,7 +349,7 @@ class TestIndexAdvanced(TestcaseBase):
         """
         target: index can still build if not finished before server restart
         method: create index by `index`, and then restart server, assert server is indexing
-        expected: index build finished after server resstart
+        expected: index build finished after server restart
         """
         pass
 

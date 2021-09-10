@@ -43,7 +43,6 @@ const ctxTimeInMillisecond = 5000
 const debug = false
 
 func newIDLEDataNodeMock(ctx context.Context) *DataNode {
-
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
 
@@ -52,7 +51,6 @@ func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
-
 	node.SetRootCoordInterface(rc)
 
 	ds := &DataCoordFactory{}
@@ -89,16 +87,6 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 
 	ds := &DataCoordFactory{}
 	node.SetDataCoordInterface(ds)
-
-	vchan := &datapb.VchannelInfo{
-		CollectionID:      1,
-		ChannelName:       dmChannelName,
-		UnflushedSegments: []*datapb.SegmentInfo{},
-		FlushedSegments:   []int64{},
-	}
-	node.Start()
-
-	_ = node.NewDataSyncService(vchan)
 
 	return node
 }
@@ -161,9 +149,19 @@ type RootCoordFactory struct {
 
 type DataCoordFactory struct {
 	types.DataCoord
+
+	SaveBinlogPathError     bool
+	SaveBinlogPathNotSucess bool
 }
 
 func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	if ds.SaveBinlogPathError {
+		return nil, errors.New("Error")
+	}
+	if ds.SaveBinlogPathNotSucess {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+	}
+
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 

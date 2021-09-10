@@ -72,16 +72,12 @@ func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, erro
 	return results, nil
 }
 
-func newDeleteDNode(replica Replica) (*deleteNode, error) {
+func newDeleteDNode(replica Replica) *deleteNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
-
-	if replica == nil {
-		return nil, errors.New("Nill input replica")
-	}
 
 	return &deleteNode{
 		BaseNode: baseNode,
 		replica:  replica,
-	}, nil
+	}
 }

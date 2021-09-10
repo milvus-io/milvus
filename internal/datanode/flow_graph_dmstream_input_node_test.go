@@ -13,6 +13,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -20,14 +21,25 @@ import (
 )
 
 type mockMsgStreamFactory struct {
+	SetParamsReturnNil  bool
+	NewMsgStreamNoError bool
 }
 
+var _ msgstream.Factory = &mockMsgStreamFactory{}
+
 func (mm *mockMsgStreamFactory) SetParams(params map[string]interface{}) error {
+	if !mm.SetParamsReturnNil {
+		return errors.New("Set Params Error")
+	}
+
 	return nil
 }
 
 func (mm *mockMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
-	return nil, nil
+	if !mm.NewMsgStreamNoError {
+		return nil, errors.New("New MsgStream error")
+	}
+	return &mockTtMsgStream{}, nil
 }
 
 func (mm *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {

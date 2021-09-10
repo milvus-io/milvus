@@ -29,7 +29,7 @@ flushing, waiting for both binlog paths.
 
 ## Detailed design
 
-1. Redisign of DDL binlog paths and etcd paths for these binlog paths
+1. Redesign of DDL binlog paths and etcd paths for these binlog paths
 
 
 DDL flushes based on a manul flush of a segment.

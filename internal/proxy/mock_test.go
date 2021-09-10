@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/msgstream"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
@@ -242,4 +244,112 @@ func newMockDqlTask(ctx context.Context) *mockDqlTask {
 
 func newDefaultMockDqlTask() *mockDqlTask {
 	return newMockDqlTask(context.Background())
+}
+
+type simpleMockMsgStream struct {
+	msgChan chan *msgstream.MsgPack
+
+	msgCount    int
+	msgCountMtx sync.RWMutex
+}
+
+func (ms *simpleMockMsgStream) Start() {
+}
+
+func (ms *simpleMockMsgStream) Close() {
+}
+
+func (ms *simpleMockMsgStream) Chan() <-chan *msgstream.MsgPack {
+	return ms.msgChan
+}
+
+func (ms *simpleMockMsgStream) AsProducer(channels []string) {
+}
+
+func (ms *simpleMockMsgStream) AsConsumer(channels []string, subName string) {
+}
+
+func (ms *simpleMockMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 {
+	return nil
+}
+
+func (ms *simpleMockMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {
+}
+
+func (ms *simpleMockMsgStream) getMsgCount() int {
+	ms.msgCountMtx.RLock()
+	defer ms.msgCountMtx.RUnlock()
+
+	return ms.msgCount
+}
+
+func (ms *simpleMockMsgStream) increaseMsgCount(delta int) {
+	ms.msgCountMtx.Lock()
+	defer ms.msgCountMtx.Unlock()
+
+	ms.msgCount += delta
+}
+
+func (ms *simpleMockMsgStream) decreaseMsgCount(delta int) {
+	ms.increaseMsgCount(-delta)
+}
+
+func (ms *simpleMockMsgStream) Produce(pack *msgstream.MsgPack) error {
+	defer ms.increaseMsgCount(1)
+
+	ms.msgChan <- pack
+
+	return nil
+}
+
+func (ms *simpleMockMsgStream) Broadcast(pack *msgstream.MsgPack) error {
+	return nil
+}
+
+func (ms *simpleMockMsgStream) GetProduceChannels() []string {
+	return nil
+}
+
+func (ms *simpleMockMsgStream) Consume() *msgstream.MsgPack {
+	if ms.getMsgCount() <= 0 {
+		return nil
+	}
+
+	defer ms.decreaseMsgCount(1)
+
+	return <-ms.msgChan
+}
+
+func (ms *simpleMockMsgStream) Seek(offset []*msgstream.MsgPosition) error {
+	return nil
+}
+
+func newSimpleMockMsgStream() *simpleMockMsgStream {
+	return &simpleMockMsgStream{
+		msgChan:  make(chan *msgstream.MsgPack, 1024),
+		msgCount: 0,
+	}
+}
+
+type simpleMockMsgStreamFactory struct {
+}
+
+func (factory *simpleMockMsgStreamFactory) SetParams(params map[string]interface{}) error {
+	return nil
+}
+
+func (factory *simpleMockMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return newSimpleMockMsgStream(), nil
+}
+
+func (factory *simpleMockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return newSimpleMockMsgStream(), nil
+}
+
+func (factory *simpleMockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return newSimpleMockMsgStream(), nil
+}
+
+func newSimpleMockMsgStreamFactory() *simpleMockMsgStreamFactory {
+	return &simpleMockMsgStreamFactory{}
 }
