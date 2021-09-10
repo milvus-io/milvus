@@ -59,6 +59,38 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	return coord, nil
 }
 
+func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
+	factory := msgstream.NewPmsFactory()
+
+	coord, err := NewQueryCoordTest(ctx, factory)
+	if err != nil {
+		return nil, err
+	}
+
+	rootCoord := newRootCoordMock()
+	rootCoord.createCollection(defaultCollectionID)
+	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
+
+	dataCoord, err := newDataCoordMock(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	coord.SetRootCoord(rootCoord)
+	coord.SetDataCoord(dataCoord)
+
+	err = coord.Register()
+	if err != nil {
+		return nil, err
+	}
+	err = coord.Init()
+	if err != nil {
+		return nil, err
+	}
+
+	return coord, nil
+}
+
 //func waitQueryNodeOnline(cluster *queryNodeCluster, nodeID int64)
 
 func waitAllQueryNodeOffline(cluster *queryNodeCluster, nodes map[int64]Node) bool {

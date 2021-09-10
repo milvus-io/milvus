@@ -368,7 +368,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 
 	hasCollection := qc.meta.hasCollection(collectionID)
 	if !hasCollection {
-		log.Warn("release partitions end, query coordinator don't have the log of", zap.String("collectionID", fmt.Sprintln(collectionID)))
+		log.Warn("release partitions end, query coordinator don't have the log of", zap.Int64("collectionID", collectionID))
 		return status, nil
 	}
 
@@ -380,6 +380,19 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		return status, err
 	}
 
+	toReleasedPartitions := make([]UniqueID, 0)
+	for _, id := range partitionIDs {
+		hasPartition := qc.meta.hasPartition(collectionID, id)
+		if hasPartition {
+			toReleasedPartitions = append(toReleasedPartitions, id)
+		}
+	}
+	if len(toReleasedPartitions) == 0 {
+		log.Warn("release partitions end, query coordinator don't have the log of", zap.Int64s("partitionIDs", partitionIDs))
+		return status, nil
+	}
+
+	req.PartitionIDs = toReleasedPartitions
 	releasePartitionTask := &ReleasePartitionTask{
 		BaseTask: BaseTask{
 			ctx:              qc.loopCtx,
@@ -541,7 +554,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 				Reason:    err.Error(),
 			},
 			Response: "",
-		}, nil
+		}, err
 	}
 
 	log.Debug("QueryCoord.GetMetrics",
@@ -568,16 +581,18 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 		return metrics, err
 	}
-	log.Debug("QueryCoord.GetMetrics failed, request metric type is not implemented yet",
+	err = errors.New(metricsinfo.MsgUnimplementedMetric)
+	log.Debug("QueryCoord.GetMetrics failed",
 		zap.Int64("node_id", Params.QueryCoordID),
 		zap.String("req", req.Request),
-		zap.String("metric_type", metricType))
+		zap.String("metric_type", metricType),
+		zap.Error(err))
 
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    metricsinfo.MsgUnimplementedMetric,
+			Reason:    err.Error(),
 		},
 		Response: "",
-	}, nil
+	}, err
 }

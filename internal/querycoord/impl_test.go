@@ -23,6 +23,30 @@ func TestGrpcTask(t *testing.T) {
 	node, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 
+	t.Run("Test ShowParsOnNotLoadedCol", func(t *testing.T) {
+		res, err := queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test LoadEmptyPartition", func(t *testing.T) {
+		status, err := queryCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadPartitions,
+			},
+			CollectionID: defaultCollectionID,
+			Schema:       genCollectionSchema(defaultCollectionID, false),
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
 	t.Run("Test LoadPartition", func(t *testing.T) {
 		status, err := queryCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
 			Base: &commonpb.MsgBase{
@@ -32,7 +56,7 @@ func TestGrpcTask(t *testing.T) {
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			Schema:       genCollectionSchema(defaultCollectionID, false),
 		})
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -44,8 +68,20 @@ func TestGrpcTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 		})
-		assert.Equal(t, res.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
 		assert.Nil(t, err)
+	})
+
+	t.Run("Test ShowNotLoadedPartitions", func(t *testing.T) {
+		res, err := queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{-1},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
 	})
 
 	t.Run("Test ShowAllPartitions", func(t *testing.T) {
@@ -55,7 +91,7 @@ func TestGrpcTask(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 		})
-		assert.Equal(t, res.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -67,7 +103,7 @@ func TestGrpcTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 		})
-		assert.Equal(t, res.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -79,7 +115,20 @@ func TestGrpcTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 			Schema:       genCollectionSchema(defaultCollectionID, false),
 		})
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test LoadParAfterLoadCol", func(t *testing.T) {
+		status, err := queryCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadPartitions,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+			Schema:       genCollectionSchema(defaultCollectionID, false),
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -90,9 +139,19 @@ func TestGrpcTask(t *testing.T) {
 			},
 			CollectionIDs: []UniqueID{defaultCollectionID},
 		})
-		assert.Equal(t, 100, int(res.InMemoryPercentages[0]))
-		assert.Equal(t, res.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
 		assert.Nil(t, err)
+	})
+
+	t.Run("Test ShowNotLoadedCollections", func(t *testing.T) {
+		res, err := queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+			CollectionIDs: []UniqueID{-1},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
 	})
 
 	t.Run("Test ShowAllCollections", func(t *testing.T) {
@@ -101,7 +160,7 @@ func TestGrpcTask(t *testing.T) {
 				MsgType: commonpb.MsgType_ShowCollections,
 			},
 		})
-		assert.Equal(t, res.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -112,7 +171,42 @@ func TestGrpcTask(t *testing.T) {
 			},
 			SegmentIDs: []UniqueID{defaultSegmentID},
 		})
-		assert.Equal(t, res.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleaseParOfNotLoadedCol", func(t *testing.T) {
+		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleasePartitions,
+			},
+			CollectionID: -1,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleaseEmptyPartitions", func(t *testing.T) {
+		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleasePartitions,
+			},
+			CollectionID: defaultCollectionID,
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test ReleaseNotExistPartition", func(t *testing.T) {
+		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleasePartitions,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{-1},
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -124,9 +218,19 @@ func TestGrpcTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 		})
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 		assert.Nil(t, err)
+	})
 
+	t.Run("Test ReleaseNotExistCollection", func(t *testing.T) {
+		status, err := queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleaseCollection,
+			},
+			CollectionID: -1,
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Nil(t, err)
 	})
 
 	t.Run("Test ReleaseCollection", func(t *testing.T) {
@@ -136,7 +240,7 @@ func TestGrpcTask(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 		})
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -152,8 +256,8 @@ func TestGrpcTask(t *testing.T) {
 
 	t.Run("Test GetComponentStates", func(t *testing.T) {
 		states, err := queryCoord.GetComponentStates(ctx)
-		assert.Equal(t, states.Status.ErrorCode, commonpb.ErrorCode_Success)
-		assert.Equal(t, states.State.StateCode, internalpb.StateCode_Healthy)
+		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
+		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
 		assert.Nil(t, err)
 	})
 
@@ -161,7 +265,7 @@ func TestGrpcTask(t *testing.T) {
 		res, err := queryCoord.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{
 			CollectionID: defaultCollectionID,
 		})
-		assert.Equal(t, res.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -177,6 +281,32 @@ func TestGrpcTask(t *testing.T) {
 
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
+	})
+
+	t.Run("Test InvalidMetricType", func(t *testing.T) {
+		metricReq := make(map[string]string)
+		metricReq["invalidKey"] = "invalidValue"
+		req, err := json.Marshal(metricReq)
+		assert.Nil(t, err)
+		res, err := queryCoord.GetMetrics(ctx, &milvuspb.GetMetricsRequest{
+			Base:    &commonpb.MsgBase{},
+			Request: string(req),
+		})
+
+		assert.NotNil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+
+		metricReq = make(map[string]string)
+		metricReq[metricsinfo.MetricTypeKey] = "invalid"
+		req, err = json.Marshal(metricReq)
+		assert.Nil(t, err)
+		res, err = queryCoord.GetMetrics(ctx, &milvuspb.GetMetricsRequest{
+			Base:    &commonpb.MsgBase{},
+			Request: string(req),
+		})
+
+		assert.NotNil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
 	})
 
 	//nodes, err := queryCoord.cluster.getOnServiceNodes()
@@ -256,4 +386,156 @@ func TestLoadBalanceTask(t *testing.T) {
 	queryNode1.stop()
 	queryNode2.stop()
 	queryCoord.Stop()
+}
+
+func TestGrpcTaskBeforeHealthy(t *testing.T) {
+	ctx := context.Background()
+	unHealthyCoord, err := startUnHealthyQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	t.Run("Test LoadPartition", func(t *testing.T) {
+		status, err := unHealthyCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadPartitions,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+			Schema:       genCollectionSchema(defaultCollectionID, false),
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test ShowPartitions", func(t *testing.T) {
+		res, err := unHealthyCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test ShowAllPartitions", func(t *testing.T) {
+		res, err := unHealthyCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+			CollectionID: defaultCollectionID,
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test GetPartitionStates", func(t *testing.T) {
+		res, err := unHealthyCoord.GetPartitionStates(ctx, &querypb.GetPartitionStatesRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_GetPartitionStatistics,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test LoadCollection", func(t *testing.T) {
+		status, err := unHealthyCoord.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadCollection,
+			},
+			CollectionID: defaultCollectionID,
+			Schema:       genCollectionSchema(defaultCollectionID, false),
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test ShowCollections", func(t *testing.T) {
+		res, err := unHealthyCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+			CollectionIDs: []UniqueID{defaultCollectionID},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test ShowAllCollections", func(t *testing.T) {
+		res, err := unHealthyCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowCollections,
+			},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test GetSegmentInfo", func(t *testing.T) {
+		res, err := unHealthyCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			SegmentIDs: []UniqueID{defaultSegmentID},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test ReleasePartition", func(t *testing.T) {
+		status, err := unHealthyCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleasePartitions,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.NotNil(t, err)
+
+	})
+
+	t.Run("Test ReleaseCollection", func(t *testing.T) {
+		status, err := unHealthyCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleaseCollection,
+			},
+			CollectionID: defaultCollectionID,
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test GetComponentStates", func(t *testing.T) {
+		states, err := unHealthyCoord.GetComponentStates(ctx)
+		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
+		assert.Equal(t, internalpb.StateCode_Abnormal, states.State.StateCode)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test CreateQueryChannel", func(t *testing.T) {
+		res, err := unHealthyCoord.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{
+			CollectionID: defaultCollectionID,
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test GetMetrics", func(t *testing.T) {
+		metricReq := make(map[string]string)
+		metricReq[metricsinfo.MetricTypeKey] = "system_info"
+		req, err := json.Marshal(metricReq)
+		assert.Nil(t, err)
+		res, err := unHealthyCoord.GetMetrics(ctx, &milvuspb.GetMetricsRequest{
+			Base:    &commonpb.MsgBase{},
+			Request: string(req),
+		})
+
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+	})
+
 }
