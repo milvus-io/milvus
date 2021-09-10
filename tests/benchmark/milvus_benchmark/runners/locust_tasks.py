@@ -12,6 +12,7 @@ logger = logging.getLogger("milvus_benchmark.runners.locust_tasks")
 class Tasks(TaskSet):
     @task
     def query(self):
+        """ search interface """
         op = "query"
         # X = utils.generate_vectors(self.params[op]["nq"], self.op_info["dimension"])
         vector_query = {"vector": {self.op_info["vector_field_name"]: {
