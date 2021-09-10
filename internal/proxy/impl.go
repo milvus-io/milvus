@@ -126,7 +126,6 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		Condition:               NewTaskCondition(ctx),
 		CreateCollectionRequest: request,
 		rootCoord:               node.rootCoord,
-		dataCoordClient:         node.dataCoord,
 	}
 
 	log.Debug("CreateCollection enqueue",
@@ -935,7 +934,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	cit := &CreateIndexTask{
+	cit := &createIndexTask{
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		CreateIndexRequest: request,
@@ -993,7 +992,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	dit := &DescribeIndexTask{
+	dit := &describeIndexTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
@@ -1023,7 +1022,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
-		zap.String("index name", request.IndexName))
+	)
 	defer func() {
 		log.Debug("DescribeIndex Done",
 			zap.Error(err),
@@ -1057,7 +1056,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-	dit := &DropIndexTask{
+	dit := &dropIndexTask{
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		DropIndexRequest: request,
@@ -1117,7 +1116,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	gibpt := &GetIndexBuildProgressTask{
+	gibpt := &getIndexBuildProgressTask{
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		GetIndexBuildProgressRequest: request,
@@ -1183,7 +1182,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	dipt := &GetIndexStateTask{
+	dipt := &getIndexStateTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		GetIndexStateRequest: request,
@@ -1246,7 +1245,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	it := &InsertTask{
+	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		dataCoord: node.dataCoord,
@@ -1312,8 +1311,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
-		zap.Any("len(RowData)", len(it.RowData)),
-		zap.Any("len(RowIDs)", len(it.RowIDs)),
 	)
 
 	if err != nil {
@@ -1420,7 +1417,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	qt := &SearchTask{
+	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb.SearchRequest{
@@ -1513,7 +1510,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		resp.Status.Reason = "proxy is not healthy"
 		return resp, nil
 	}
-	ft := &FlushTask{
+	ft := &flushTask{
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		FlushRequest: request,
@@ -1570,7 +1567,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		OutputFields:   request.OutputFields,
 	}
 
-	qt := &QueryTask{
+	qt := &queryTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
@@ -1657,7 +1654,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			OutputFields:   outputFields,
 		}
 
-		qt := &QueryTask{
+		qt := &queryTask{
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{

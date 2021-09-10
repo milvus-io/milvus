@@ -22,6 +22,8 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -166,11 +168,17 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// replace pchannel with vchannel
-	for _, pos := range iMsg.startPositions {
+	startPositions := make([]*internalpb.MsgPosition, 0, len(iMsg.startPositions))
+	for idx := range iMsg.startPositions {
+		pos := proto.Clone(iMsg.startPositions[idx]).(*internalpb.MsgPosition)
 		pos.ChannelName = ibNode.channelName
+		startPositions = append(startPositions, pos)
 	}
-	for _, pos := range iMsg.endPositions {
+	endPositions := make([]*internalpb.MsgPosition, 0, len(iMsg.endPositions))
+	for idx := range iMsg.endPositions {
+		pos := proto.Clone(iMsg.endPositions[idx]).(*internalpb.MsgPosition)
 		pos.ChannelName = ibNode.channelName
+		endPositions = append(endPositions, pos)
 	}
 
 	// Updating segment statistics
@@ -183,7 +191,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 		if !ibNode.replica.hasSegment(currentSegID, true) {
 			err := ibNode.replica.addNewSegment(currentSegID, collID, partitionID, msg.GetChannelID(),
-				iMsg.startPositions[0], iMsg.endPositions[0])
+				startPositions[0], endPositions[0])
 			if err != nil {
 				log.Error("add segment wrong", zap.Error(err))
 			}
@@ -605,7 +613,13 @@ func (ibNode *insertBufferNode) bufferInsertMsg(iMsg *insertMsg, msg *msgstream.
 	ibNode.insertBuffer.insertData[currentSegID] = idata
 
 	// store current endPositions as Segment->EndPostion
-	ibNode.replica.updateSegmentEndPosition(currentSegID, iMsg.endPositions[0])
+	endPositions := make([]*internalpb.MsgPosition, 0, len(iMsg.endPositions))
+	for idx := range iMsg.endPositions {
+		pos := proto.Clone(iMsg.endPositions[idx]).(*internalpb.MsgPosition)
+		pos.ChannelName = ibNode.channelName
+		endPositions = append(endPositions, pos)
+	}
+	ibNode.replica.updateSegmentEndPosition(currentSegID, endPositions[0])
 	// update segment pk filter
 	ibNode.replica.updateSegmentPKRange(currentSegID, msg.GetRowIDs())
 	return nil
