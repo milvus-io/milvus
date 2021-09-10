@@ -4,59 +4,61 @@
 
 Your Milvus installation may fail when images are not properly loaded from public Docker registries. To pull all images and save them into a directory that can be moved to the target host and loaded manually, perform the following procedure:
 
-1. Save Milvus manifest and Docker images
+### Step 1: Save Milvus manifest and Docker images
 
-If you install your Milvus with the **docker-compose.yml** file, use these command:
+#### If you install your Milvus with the **docker-compose.yml** file, use these command:
 
-- Download Milvus docker-compose.yml
-```shell
-# Download Milvus standalone docker-compose.yml
-wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/standalone/docker-compose.yml -O docker-compose.yml
-```
+1. Download Milvus standalone docker-compose.yml
+   ```shell
+   # Download Milvus standalone docker-compose.yml
+   wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/standalone/docker-compose.yml -O docker-compose.yml
+   ```
 
-or
+   &nbsp;&nbsp;&nbsp; or download Milvus cluster docker-compose.yml
 
-```shell
-# Download Milvus cluster docker-compose.yml
-wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/cluster/docker-compose.yml -O docker-compose.yml
-```
+   ```shell
+   # Download Milvus cluster docker-compose.yml
+   wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/cluster/docker-compose.yml -O docker-compose.yml
+   ```
 
-- Pull and save Docker images
-```shell
-# Pull and save Docker images
-pip3 install -r requirements.txt
-python3 save_image.py --manifest docker-compose.yml
-```
+2. Pull and save Docker images
+   ```shell
+   # Pull and save Docker images
+   pip3 install -r requirements.txt
+   python3 save_image.py --manifest docker-compose.yml
+   ```
 
-If you install your Milvus with **Helm**, use these command: 
-- Update Helm repo
-```shell
-helm repo add milvus https://milvus-io.github.io/milvus-helm/
-helm repo update
-```
+#### If you install your Milvus with **Helm**, use these command:
+1. Update Helm repo
+   ```shell
+   helm repo add milvus https://milvus-io.github.io/milvus-helm/
+   helm repo update
+   ```
 
-- Get Kubernetes manifest of Milvus standalone
-```shell
-# Get Kubernetes manifest of Milvus standalone
-helm template my-release milvus/milvus > milvus_manifest.yaml
-```
+2. Get Kubernetes manifest of Milvus standalone
+   ```shell
+   # Get Kubernetes manifest of Milvus standalone
+   helm template my-release milvus/milvus > milvus_manifest.yaml
+   ```
 
-or
+   &nbsp;&nbsp;&nbsp;or get Kubernetes manifest of Milvus cluster
 
-```shell
-# Get Kubernetes manifest of Milvus cluster
-helm template --set cluster.enabled=true my-release milvus/milvus > milvus_manifest.yaml
-```
+   ```shell
+   # Get Kubernetes manifest of Milvus cluster
+   helm template --set cluster.enabled=true my-release milvus/milvus > milvus_manifest.yaml
+   ```
 
-- Pull and save Docker images
-```shell
-pip3 install -r requirements.txt
-python3 save_image.py --manifest milvus_manifest.yaml
-```
+3. Pull and save Docker images
+   ```shell
+   pip3 install -r requirements.txt
+   python3 save_image.py --manifest milvus_manifest.yaml
+   ```
 
 The Docker images will be stored under **images** directory.
 
-2. Enter the following command to load the Docker images:
+### Step 2: Load Docker images:
+
+Enter the following command to load the Docker images:
 
 ```shell
 cd images/
