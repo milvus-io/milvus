@@ -24,11 +24,6 @@ class SpanBase {
     }
 
     int64_t
-    get_element_sizeof() const {
-        return element_sizeof_;
-    }
-
-    int64_t
     row_count() const {
         return row_count_;
     }
