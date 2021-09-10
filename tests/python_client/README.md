@@ -1,4 +1,4 @@
-# Guidelines for Test Framewrok
+# Guidelines for Test Framework
 
 This document guides you through the Pytest-based PyMilvus test framework.
 
