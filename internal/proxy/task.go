@@ -48,12 +48,12 @@ import (
 )
 
 const (
-	InsertTaskName                  = "insertTask"
+	InsertTaskName                  = "InsertTask"
 	CreateCollectionTaskName        = "CreateCollectionTask"
 	DropCollectionTaskName          = "DropCollectionTask"
-	SearchTaskName                  = "searchTask"
+	SearchTaskName                  = "SearchTask"
 	RetrieveTaskName                = "RetrieveTask"
-	QueryTaskName                   = "queryTask"
+	QueryTaskName                   = "QueryTask"
 	AnnsFieldKey                    = "anns_field"
 	TopKKey                         = "topk"
 	MetricTypeKey                   = "metric_type"
@@ -67,12 +67,12 @@ const (
 	DropPartitionTaskName           = "DropPartitionTask"
 	HasPartitionTaskName            = "HasPartitionTask"
 	ShowPartitionTaskName           = "ShowPartitionTask"
-	CreateIndexTaskName             = "createIndexTask"
-	DescribeIndexTaskName           = "describeIndexTask"
-	DropIndexTaskName               = "dropIndexTask"
-	GetIndexStateTaskName           = "getIndexStateTask"
-	GetIndexBuildProgressTaskName   = "getIndexBuildProgressTask"
-	FlushTaskName                   = "flushTask"
+	CreateIndexTaskName             = "CreateIndexTask"
+	DescribeIndexTaskName           = "DescribeIndexTask"
+	DropIndexTaskName               = "DropIndexTask"
+	GetIndexStateTaskName           = "GetIndexStateTask"
+	GetIndexBuildProgressTaskName   = "GetIndexBuildProgressTask"
+	FlushTaskName                   = "FlushTask"
 	LoadCollectionTaskName          = "LoadCollectionTask"
 	ReleaseCollectionTaskName       = "ReleaseCollectionTask"
 	LoadPartitionTaskName           = "LoadPartitionsTask"
@@ -1112,6 +1112,8 @@ func (cct *createCollectionTask) SetTs(ts Timestamp) {
 
 func (cct *createCollectionTask) OnEnqueue() error {
 	cct.Base = &commonpb.MsgBase{}
+	cct.Base.MsgType = commonpb.MsgType_CreateCollection
+	cct.Base.SourceID = Params.ProxyID
 	return nil
 }
 
@@ -1121,8 +1123,11 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	cct.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(cct.Schema, cct.schema)
+	if err != nil {
+		return err
+	}
 	cct.schema.AutoID = false
-	cct.CreateCollectionRequest.Schema, _ = proto.Marshal(cct.schema)
+	cct.CreateCollectionRequest.Schema, err = proto.Marshal(cct.schema)
 	if err != nil {
 		return err
 	}

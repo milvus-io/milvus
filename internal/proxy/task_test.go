@@ -1,7 +1,12 @@
 package proxy
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
@@ -11,6 +16,70 @@ import (
 )
 
 // TODO(dragondriver): add more test cases
+
+func constructCollectionSchema(
+	int64Field, floatVecField string,
+	dim int,
+	collectionName string,
+) *schemapb.CollectionSchema {
+
+	pk := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         int64Field,
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     schemapb.DataType_Int64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       true,
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         floatVecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: strconv.Itoa(dim),
+			},
+		},
+		IndexParams: nil,
+		AutoID:      false,
+	}
+	return &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			pk,
+			fVec,
+		},
+	}
+}
+
+func constructCreateCollectionRequest(
+	schema *schemapb.CollectionSchema,
+	dbName, collectionName string,
+	shardsNum int32,
+) *milvuspb.CreateCollectionRequest {
+	bs, err := proto.Marshal(schema)
+	if err != nil {
+		panic(
+			fmt.Sprintf(
+				"failed to marshal collection schema, schema: %v, error: %v",
+				schema,
+				err))
+	}
+	return &milvuspb.CreateCollectionRequest{
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         bs,
+		ShardsNum:      shardsNum,
+	}
+}
 
 func TestGetNumRowsOfScalarField(t *testing.T) {
 	cases := []struct {
@@ -507,8 +576,4 @@ func TestTranslateOutputFields(t *testing.T) {
 	outputFields, err = translateOutputFields([]string{"%", idFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
-}
-
-func TestCreateCollectionTask(t *testing.T) {
-
 }
