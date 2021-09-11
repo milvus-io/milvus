@@ -11,7 +11,7 @@ on:
     #         │ │ │ │ │
     #         │ │ │ │ │
     #         │ │ │ │ │
-    - cron:  '* 0 * * *'
+    - cron:  '0 0 * * *'
 
 jobs:
   contributor:
@@ -52,13 +52,13 @@ jobs:
           customUserConfig: 'milvus-io/milvus/.contributors'
           workingDir: '/home/runner/work/milvus/milvus/milvus'
     
-      - name: commit code
-        run: |
-          cd milvus
-          pwd
-          git add -u
-          git commit -s -m 'Update all contributors'
-          git push
+          #      - name: commit code
+          #        run: |
+          #          cd milvus
+          #          pwd
+          #          git add -u
+          #          git commit -s -m 'Update all contributors'
+          #          git push
 
 
 
