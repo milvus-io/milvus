@@ -1,12 +1,23 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
+	"github.com/milvus-io/milvus/internal/util/distance"
 
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 
@@ -466,6 +477,14 @@ func TestProxy(t *testing.T) {
 	int64Field := "int64"
 	floatVecField := "fVec"
 	dim := 128
+	rowNum := 3000
+	indexName := "_default"
+	nlist := 10
+	nprobe := 10
+	topk := 10
+	nq := 10
+	expr := fmt.Sprintf("%s > 0", int64Field)
+	var segmentIDs []int64
 
 	// an int64 field (pk) & a float vector field
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
@@ -519,6 +538,113 @@ func TestProxy(t *testing.T) {
 	}
 	createCollectionReq := constructCreateCollectionRequest()
 
+	constructInsertRequest := func() *milvuspb.InsertRequest {
+		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
+		hashKeys := generateHashKeys(rowNum)
+		return &milvuspb.InsertRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  "",
+			FieldsData:     []*schemapb.FieldData{fVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(rowNum),
+		}
+	}
+
+	constructCreateIndexRequest := func() *milvuspb.CreateIndexRequest {
+		return &milvuspb.CreateIndexRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldName:      floatVecField,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: strconv.Itoa(dim),
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: distance.L2,
+				},
+				{
+					Key:   "index_type",
+					Value: "IVF_FLAT",
+				},
+				{
+					Key:   "nlist",
+					Value: strconv.Itoa(nlist),
+				},
+			},
+		}
+	}
+
+	constructPlaceholderGroup := func() *milvuspb.PlaceholderGroup {
+		values := make([][]byte, 0, nq)
+		for i := 0; i < nq; i++ {
+			bs := make([]byte, 0, dim*4)
+			for j := 0; j < dim; j++ {
+				var buffer bytes.Buffer
+				f := rand.Float32()
+				err := binary.Write(&buffer, binary.LittleEndian, f)
+				assert.NoError(t, err)
+				bs = append(bs, buffer.Bytes()...)
+			}
+			values = append(values, bs)
+		}
+
+		return &milvuspb.PlaceholderGroup{
+			Placeholders: []*milvuspb.PlaceholderValue{
+				{
+					Tag:    "$0",
+					Type:   milvuspb.PlaceholderType_FloatVector,
+					Values: values,
+				},
+			},
+		}
+	}
+
+	constructSearchRequest := func() *milvuspb.SearchRequest {
+		params := make(map[string]string)
+		params["nprobe"] = strconv.Itoa(nprobe)
+		b, err := json.Marshal(params)
+		assert.NoError(t, err)
+		plg := constructPlaceholderGroup()
+		plgBs, err := proto.Marshal(plg)
+		assert.NoError(t, err)
+
+		return &milvuspb.SearchRequest{
+			Base:             nil,
+			DbName:           dbName,
+			CollectionName:   collectionName,
+			PartitionNames:   nil,
+			Dsl:              expr,
+			PlaceholderGroup: plgBs,
+			DslType:          commonpb.DslType_BoolExprV1,
+			OutputFields:     nil,
+			SearchParams: []*commonpb.KeyValuePair{
+				{
+					Key:   MetricTypeKey,
+					Value: distance.L2,
+				},
+				{
+					Key:   SearchParamsKey,
+					Value: string(b),
+				},
+				{
+					Key:   AnnsFieldKey,
+					Value: floatVecField,
+				},
+				{
+					Key:   TopKKey,
+					Value: strconv.Itoa(topk),
+				},
+			},
+			TravelTimestamp:    0,
+			GuaranteeTimestamp: 0,
+		}
+	}
+
 	t.Run("create collection", func(t *testing.T) {
 		req := createCollectionReq
 		resp, err := proxy.CreateCollection(ctx, req)
@@ -553,62 +679,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.False(t, resp.Value)
-	})
-
-	t.Run("load collection", func(t *testing.T) {
-		resp, err := proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		// load other collection -> fail
-		resp, err = proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: otherCollectionName,
-		})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-
-	t.Run("show in-memory collections", func(t *testing.T) {
-		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-			Base:            nil,
-			DbName:          dbName,
-			TimeStamp:       0,
-			Type:            milvuspb.ShowType_InMemory,
-			CollectionNames: nil,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, 1, len(resp.CollectionNames))
-
-		// get in-memory percentage
-		resp, err = proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-			Base:            nil,
-			DbName:          dbName,
-			TimeStamp:       0,
-			Type:            milvuspb.ShowType_InMemory,
-			CollectionNames: []string{collectionName},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, 1, len(resp.CollectionNames))
-		assert.Equal(t, 1, len(resp.InMemoryPercentages))
-
-		// get in-memory percentage of  not loaded collection -> fail
-		resp, err = proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-			Base:            nil,
-			DbName:          dbName,
-			TimeStamp:       0,
-			Type:            milvuspb.ShowType_InMemory,
-			CollectionNames: []string{otherCollectionName},
-		})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
@@ -737,6 +807,166 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	t.Run("get partition statistics", func(t *testing.T) {
+		resp, err := proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// non-exist partition -> fail
+		resp, err = proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  otherPartitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// non-exist collection -> fail
+		resp, err = proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("show partitions", func(t *testing.T) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			PartitionNames: nil,
+			Type:           milvuspb.ShowType_All,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// default partition
+		assert.Equal(t, 2, len(resp.PartitionNames))
+
+		// non-exist collection -> fail
+		resp, err = proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			CollectionID:   collectionID + 1,
+			PartitionNames: nil,
+			Type:           milvuspb.ShowType_All,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("insert", func(t *testing.T) {
+		req := constructInsertRequest()
+
+		resp, err := proxy.Insert(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, rowNum, len(resp.SuccIndex))
+		assert.Equal(t, 0, len(resp.ErrIndex))
+		assert.Equal(t, int64(rowNum), resp.InsertCnt)
+	})
+
+	// TODO(dragondriver): proxy.Delete()
+
+	t.Run("create index", func(t *testing.T) {
+		req := constructCreateIndexRequest()
+
+		resp, err := proxy.CreateIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("describe index", func(t *testing.T) {
+		resp, err := proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldName:      floatVecField,
+			IndexName:      "",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		indexName = resp.IndexDescriptions[0].IndexName
+	})
+
+	t.Run("get index build progress", func(t *testing.T) {
+		resp, err := proxy.GetIndexBuildProgress(ctx, &milvuspb.GetIndexBuildProgressRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldName:      floatVecField,
+			IndexName:      indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("get index state", func(t *testing.T) {
+		resp, err := proxy.GetIndexState(ctx, &milvuspb.GetIndexStateRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldName:      floatVecField,
+			IndexName:      indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("flush", func(t *testing.T) {
+		resp, err := proxy.Flush(ctx, &milvuspb.FlushRequest{
+			Base:            nil,
+			DbName:          dbName,
+			CollectionNames: []string{collectionName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		segmentIDs = resp.CollSegIDs[collectionName].Data
+
+		f := func() bool {
+			states := make(map[int64]commonpb.SegmentState) // segment id -> segment state
+			for _, id := range segmentIDs {
+				states[id] = commonpb.SegmentState_Sealed
+			}
+			resp, err := proxy.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			for _, info := range resp.Infos {
+				states[info.SegmentID] = info.State
+			}
+			for id, state := range states {
+				if state != commonpb.SegmentState_Flushed {
+					log.Debug("waiting for segment to be flushed",
+						zap.Int64("segment id", id),
+						zap.Any("state", state))
+					return false
+				}
+			}
+			return true
+		}
+
+		// waiting for flush operation to be done
+		for f() {
+		}
+	})
+
 	t.Run("load partitions", func(t *testing.T) {
 		resp, err := proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
 			Base:           nil,
@@ -810,65 +1040,202 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	t.Run("get partition statistics", func(t *testing.T) {
-		resp, err := proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
+	t.Run("load collection", func(t *testing.T) {
+		resp, err := proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			PartitionName:  partitionName,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		// non-exist partition -> fail
-		resp, err = proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  otherPartitionName,
-		})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-
-		// non-exist collection -> fail
-		resp, err = proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
+		// load other collection -> fail
+		resp, err = proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: otherCollectionName,
-			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		f := func() bool {
+			resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+				Base:            nil,
+				DbName:          dbName,
+				TimeStamp:       0,
+				Type:            milvuspb.ShowType_InMemory,
+				CollectionNames: []string{collectionName},
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+			for idx, name := range resp.CollectionNames {
+				if name == collectionName && resp.InMemoryPercentages[idx] == 100 {
+					return true
+				}
+			}
+
+			return false
+		}
+
+		// waiting for collection to be loaded
+		for f() {
+		}
+	})
+
+	t.Run("show in-memory collections", func(t *testing.T) {
+		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_InMemory,
+			CollectionNames: nil,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.CollectionNames))
+
+		// get in-memory percentage
+		resp, err = proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_InMemory,
+			CollectionNames: []string{collectionName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.CollectionNames))
+		assert.Equal(t, 1, len(resp.InMemoryPercentages))
+
+		// get in-memory percentage of  not loaded collection -> fail
+		resp, err = proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_InMemory,
+			CollectionNames: []string{otherCollectionName},
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	t.Run("show partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
-		assert.NoError(t, err)
+	t.Run("search", func(t *testing.T) {
+		req := constructSearchRequest()
 
-		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+		//resp, err := proxy.Search(ctx, req)
+		_, err := proxy.Search(ctx, req)
+		assert.NoError(t, err)
+		// FIXME(dragondriver)
+		// assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// TODO(dragondriver): compare search result
+	})
+
+	t.Run("query", func(t *testing.T) {
+		//resp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
+		_, err := proxy.Query(ctx, &milvuspb.QueryRequest{
+			Base:               nil,
+			DbName:             dbName,
+			CollectionName:     collectionName,
+			Expr:               expr,
+			OutputFields:       nil,
+			PartitionNames:     nil,
+			TravelTimestamp:    0,
+			GuaranteeTimestamp: 0,
+		})
+		assert.NoError(t, err)
+		// FIXME(dragondriver)
+		// assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// TODO(dragondriver): compare query result
+	})
+
+	t.Run("calculate distance", func(t *testing.T) {
+		opLeft := &milvuspb.VectorsArray{
+			Array: &milvuspb.VectorsArray_DataArray{
+				DataArray: &schemapb.VectorField{
+					Dim: int64(dim),
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: generateFloatVectors(nq, dim),
+						},
+					},
+				},
+			},
+		}
+
+		opRight := &milvuspb.VectorsArray{
+			Array: &milvuspb.VectorsArray_DataArray{
+				DataArray: &schemapb.VectorField{
+					Dim: int64(dim),
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: generateFloatVectors(nq, dim),
+						},
+					},
+				},
+			},
+		}
+
+		//resp, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
+		_, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
+			Base:    nil,
+			OpLeft:  opLeft,
+			OpRight: opRight,
+			Params: []*commonpb.KeyValuePair{
+				{
+					Key:   MetricTypeKey,
+					Value: distance.L2,
+				},
+			},
+		})
+		assert.NoError(t, err)
+		// assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// TODO(dragondriver): compare distance
+
+		// TODO(dragondriver): use primary key to calculate distance
+	})
+
+	t.Run("get dd channel", func(t *testing.T) {
+		f := func() {
+			_, _ = proxy.GetDdChannel(ctx, &internalpb.GetDdChannelRequest{})
+		}
+		assert.Panics(t, f)
+	})
+
+	t.Run("get persistent segment info", func(t *testing.T) {
+		resp, err := proxy.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			CollectionID:   collectionID,
-			PartitionNames: nil,
-			Type:           milvuspb.ShowType_All,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		// default partition
-		assert.Equal(t, 2, len(resp.PartitionNames))
+	})
 
-		// non-exist collection -> fail
-		resp, err = proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+	t.Run("get query segment info", func(t *testing.T) {
+		resp, err := proxy.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
 			Base:           nil,
 			DbName:         dbName,
-			CollectionName: otherCollectionName,
-			CollectionID:   collectionID + 1,
-			PartitionNames: nil,
-			Type:           milvuspb.ShowType_All,
+			CollectionName: collectionName,
 		})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	// TODO(dragondriver): dummy
+
+	t.Run("register link", func(t *testing.T) {
+		resp, err := proxy.RegisterLink(ctx, &milvuspb.RegisterLinkRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("get metrics", func(t *testing.T) {
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.NoError(t, err)
+		resp, err := proxy.GetMetrics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("release partition", func(t *testing.T) {
@@ -1023,6 +1390,18 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.Equal(t, 0, len(resp.CollectionNames))
+	})
+
+	t.Run("drop index", func(t *testing.T) {
+		resp, err := proxy.DropIndex(ctx, &milvuspb.DropIndexRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldName:      floatVecField,
+			IndexName:      indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {

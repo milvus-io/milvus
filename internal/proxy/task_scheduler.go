@@ -684,9 +684,9 @@ func (sched *taskScheduler) collectResultLoop() {
 						continue
 					}
 
-					st, ok := t.(*SearchTask)
+					st, ok := t.(*searchTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as SearchTask failed", zap.Any("ReqID", reqID))
+						log.Debug("Proxy collectResultLoop type assert t as searchTask failed", zap.Any("ReqID", reqID))
 						delete(searchResultBufs, reqID)
 						searchResultBufFlags[reqID] = true
 						continue
@@ -718,7 +718,7 @@ func (sched *taskScheduler) collectResultLoop() {
 
 					//t := sched.getTaskByReqID(reqID)
 					{
-						colName := t.(*SearchTask).query.CollectionName
+						colName := t.(*searchTask).query.CollectionName
 						log.Debug("Proxy collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(searchResultBufs[reqID].resultBuf)))
 					}
 
@@ -783,9 +783,9 @@ func (sched *taskScheduler) collectResultLoop() {
 						continue
 					}
 
-					st, ok := t.(*QueryTask)
+					st, ok := t.(*queryTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as QueryTask failed")
+						log.Debug("Proxy collectResultLoop type assert t as queryTask failed")
 						delete(queryResultBufs, reqID)
 						queryResultBufFlags[reqID] = true
 						continue
@@ -817,7 +817,7 @@ func (sched *taskScheduler) collectResultLoop() {
 
 					//t := sched.getTaskByReqID(reqID)
 					{
-						colName := t.(*QueryTask).query.CollectionName
+						colName := t.(*queryTask).query.CollectionName
 						log.Debug("Proxy collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBufs[reqID].resultBuf)))
 					}
 

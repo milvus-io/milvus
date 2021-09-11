@@ -101,7 +101,7 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	var err error
 
 	// schema is empty, though won't happened in system
-	case1 := InsertTask{
+	case1 := insertTask{
 		schema: &schemapb.CollectionSchema{
 			Name:        "TestInsertTask_checkLengthOfFieldsData",
 			Description: "TestInsertTask_checkLengthOfFieldsData",
@@ -119,7 +119,7 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	assert.Equal(t, nil, err)
 
 	// schema has two fields, neither of them are autoID
-	case2 := InsertTask{
+	case2 := insertTask{
 		schema: &schemapb.CollectionSchema{
 			Name:        "TestInsertTask_checkLengthOfFieldsData",
 			Description: "TestInsertTask_checkLengthOfFieldsData",
@@ -165,7 +165,7 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	assert.Equal(t, nil, err)
 
 	// schema has two field, one of them are autoID
-	case3 := InsertTask{
+	case3 := insertTask{
 		schema: &schemapb.CollectionSchema{
 			Name:        "TestInsertTask_checkLengthOfFieldsData",
 			Description: "TestInsertTask_checkLengthOfFieldsData",
@@ -198,7 +198,7 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	assert.Equal(t, nil, err)
 
 	// schema has one field which is autoID
-	case4 := InsertTask{
+	case4 := insertTask{
 		schema: &schemapb.CollectionSchema{
 			Name:        "TestInsertTask_checkLengthOfFieldsData",
 			Description: "TestInsertTask_checkLengthOfFieldsData",
@@ -222,7 +222,7 @@ func TestInsertTask_checkRowNums(t *testing.T) {
 	var err error
 
 	// passed NumRows is less than 0
-	case1 := InsertTask{
+	case1 := insertTask{
 		req: &milvuspb.InsertRequest{
 			NumRows: 0,
 		},
@@ -234,7 +234,7 @@ func TestInsertTask_checkRowNums(t *testing.T) {
 
 	numRows := 20
 	dim := 128
-	case2 := InsertTask{
+	case2 := insertTask{
 		schema: &schemapb.CollectionSchema{
 			Name:        "TestInsertTask_checkRowNums",
 			Description: "TestInsertTask_checkRowNums",
@@ -507,4 +507,8 @@ func TestTranslateOutputFields(t *testing.T) {
 	outputFields, err = translateOutputFields([]string{"%", idFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+}
+
+func TestCreateCollectionTask(t *testing.T) {
+
 }

@@ -48,12 +48,12 @@ import (
 )
 
 const (
-	InsertTaskName                  = "InsertTask"
+	InsertTaskName                  = "insertTask"
 	CreateCollectionTaskName        = "CreateCollectionTask"
 	DropCollectionTaskName          = "DropCollectionTask"
-	SearchTaskName                  = "SearchTask"
+	SearchTaskName                  = "searchTask"
 	RetrieveTaskName                = "RetrieveTask"
-	QueryTaskName                   = "QueryTask"
+	QueryTaskName                   = "queryTask"
 	AnnsFieldKey                    = "anns_field"
 	TopKKey                         = "topk"
 	MetricTypeKey                   = "metric_type"
@@ -67,12 +67,12 @@ const (
 	DropPartitionTaskName           = "DropPartitionTask"
 	HasPartitionTaskName            = "HasPartitionTask"
 	ShowPartitionTaskName           = "ShowPartitionTask"
-	CreateIndexTaskName             = "CreateIndexTask"
-	DescribeIndexTaskName           = "DescribeIndexTask"
-	DropIndexTaskName               = "DropIndexTask"
-	GetIndexStateTaskName           = "GetIndexStateTask"
-	GetIndexBuildProgressTaskName   = "GetIndexBuildProgressTask"
-	FlushTaskName                   = "FlushTask"
+	CreateIndexTaskName             = "createIndexTask"
+	DescribeIndexTaskName           = "describeIndexTask"
+	DropIndexTaskName               = "dropIndexTask"
+	GetIndexStateTaskName           = "getIndexStateTask"
+	GetIndexBuildProgressTaskName   = "getIndexBuildProgressTask"
+	FlushTaskName                   = "flushTask"
 	LoadCollectionTaskName          = "LoadCollectionTask"
 	ReleaseCollectionTaskName       = "ReleaseCollectionTask"
 	LoadPartitionTaskName           = "LoadPartitionsTask"
@@ -104,7 +104,7 @@ type dmlTask interface {
 
 type BaseInsertTask = msgstream.InsertMsg
 
-type InsertTask struct {
+type insertTask struct {
 	BaseInsertTask
 	req *milvuspb.InsertRequest
 	Condition
@@ -121,40 +121,40 @@ type InsertTask struct {
 	schema         *schemapb.CollectionSchema
 }
 
-func (it *InsertTask) TraceCtx() context.Context {
+func (it *insertTask) TraceCtx() context.Context {
 	return it.ctx
 }
 
-func (it *InsertTask) ID() UniqueID {
+func (it *insertTask) ID() UniqueID {
 	return it.Base.MsgID
 }
 
-func (it *InsertTask) SetID(uid UniqueID) {
+func (it *insertTask) SetID(uid UniqueID) {
 	it.Base.MsgID = uid
 }
 
-func (it *InsertTask) Name() string {
+func (it *insertTask) Name() string {
 	return InsertTaskName
 }
 
-func (it *InsertTask) Type() commonpb.MsgType {
+func (it *insertTask) Type() commonpb.MsgType {
 	return it.Base.MsgType
 }
 
-func (it *InsertTask) BeginTs() Timestamp {
+func (it *insertTask) BeginTs() Timestamp {
 	return it.BeginTimestamp
 }
 
-func (it *InsertTask) SetTs(ts Timestamp) {
+func (it *insertTask) SetTs(ts Timestamp) {
 	it.BeginTimestamp = ts
 	it.EndTimestamp = ts
 }
 
-func (it *InsertTask) EndTs() Timestamp {
+func (it *insertTask) EndTs() Timestamp {
 	return it.EndTimestamp
 }
 
-func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
+func (it *insertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 	ret := make(map[pChan]pChanStatistics)
 
 	channels, err := it.getChannels()
@@ -174,7 +174,7 @@ func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 	return ret, nil
 }
 
-func (it *InsertTask) getChannels() ([]pChan, error) {
+func (it *insertTask) getChannels() ([]pChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.CollectionName)
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func (it *InsertTask) getChannels() ([]pChan, error) {
 	return channels, err
 }
 
-func (it *InsertTask) OnEnqueue() error {
+func (it *insertTask) OnEnqueue() error {
 	it.BaseInsertTask.InsertRequest.Base = &commonpb.MsgBase{}
 	return nil
 }
@@ -237,7 +237,7 @@ func getNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint32, error) {
 	return uint32(int((8 * int64(l)) / dim)), nil
 }
 
-func (it *InsertTask) checkLengthOfFieldsData() error {
+func (it *insertTask) checkLengthOfFieldsData() error {
 	neededFieldsNum := 0
 	for _, field := range it.schema.Fields {
 		if !field.AutoID {
@@ -252,7 +252,7 @@ func (it *InsertTask) checkLengthOfFieldsData() error {
 	return nil
 }
 
-func (it *InsertTask) checkRowNums() error {
+func (it *insertTask) checkRowNums() error {
 	if it.req.NumRows <= 0 {
 		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
 	}
@@ -335,7 +335,7 @@ func (it *InsertTask) checkRowNums() error {
 }
 
 // TODO(dragondriver): ignore the order of fields in request, use the order of CollectionSchema to reorganize data
-func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
+func (it *insertTask) transferColumnBasedRequestToRowBasedData() error {
 	dTypes := make([]schemapb.DataType, 0, len(it.req.FieldsData))
 	datas := make([][]interface{}, 0, len(it.req.FieldsData))
 	rowNum := 0
@@ -576,7 +576,7 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 	return nil
 }
 
-func (it *InsertTask) checkFieldAutoID() error {
+func (it *insertTask) checkFieldAutoID() error {
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if it.req.NumRows <= 0 {
 		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
@@ -723,7 +723,7 @@ func (it *InsertTask) checkFieldAutoID() error {
 	return nil
 }
 
-func (it *InsertTask) PreExecute(ctx context.Context) error {
+func (it *insertTask) PreExecute(ctx context.Context) error {
 	it.Base.MsgType = commonpb.MsgType_Insert
 	it.Base.SourceID = Params.ProxyID
 
@@ -778,7 +778,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstream.MsgPack) (*msgstream.MsgPack, error) {
+func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstream.MsgPack) (*msgstream.MsgPack, error) {
 	newPack := &msgstream.MsgPack{
 		BeginTs:        pack.BeginTs,
 		EndTs:          pack.EndTs,
@@ -841,7 +841,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
-			log.Debug("InsertTask.go", zap.Any("MapInfo", mapInfo),
+			log.Debug("insertTask.go", zap.Any("MapInfo", mapInfo),
 				zap.Error(err))
 			return nil, err
 		}
@@ -990,7 +990,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	return newPack, nil
 }
 
-func (it *InsertTask) Execute(ctx context.Context) error {
+func (it *insertTask) Execute(ctx context.Context) error {
 	collectionName := it.BaseInsertTask.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
@@ -1065,18 +1065,17 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (it *InsertTask) PostExecute(ctx context.Context) error {
+func (it *insertTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
 type createCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
-	ctx             context.Context
-	rootCoord       types.RootCoord
-	dataCoordClient types.DataCoord
-	result          *commonpb.Status
-	schema          *schemapb.CollectionSchema
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
+	schema    *schemapb.CollectionSchema
 }
 
 func (cct *createCollectionTask) TraceCtx() context.Context {
@@ -1336,7 +1335,7 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 	return resultFieldNames, nil
 }
 
-type SearchTask struct {
+type searchTask struct {
 	Condition
 	*internalpb.SearchRequest
 	ctx       context.Context
@@ -1347,44 +1346,44 @@ type SearchTask struct {
 	qc        types.QueryCoord
 }
 
-func (st *SearchTask) TraceCtx() context.Context {
+func (st *searchTask) TraceCtx() context.Context {
 	return st.ctx
 }
 
-func (st *SearchTask) ID() UniqueID {
+func (st *searchTask) ID() UniqueID {
 	return st.Base.MsgID
 }
 
-func (st *SearchTask) SetID(uid UniqueID) {
+func (st *searchTask) SetID(uid UniqueID) {
 	st.Base.MsgID = uid
 }
 
-func (st *SearchTask) Name() string {
+func (st *searchTask) Name() string {
 	return SearchTaskName
 }
 
-func (st *SearchTask) Type() commonpb.MsgType {
+func (st *searchTask) Type() commonpb.MsgType {
 	return st.Base.MsgType
 }
 
-func (st *SearchTask) BeginTs() Timestamp {
+func (st *searchTask) BeginTs() Timestamp {
 	return st.Base.Timestamp
 }
 
-func (st *SearchTask) EndTs() Timestamp {
+func (st *searchTask) EndTs() Timestamp {
 	return st.Base.Timestamp
 }
 
-func (st *SearchTask) SetTs(ts Timestamp) {
+func (st *searchTask) SetTs(ts Timestamp) {
 	st.Base.Timestamp = ts
 }
 
-func (st *SearchTask) OnEnqueue() error {
+func (st *searchTask) OnEnqueue() error {
 	st.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (st *SearchTask) getChannels() ([]pChan, error) {
+func (st *searchTask) getChannels() ([]pChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1393,7 +1392,7 @@ func (st *SearchTask) getChannels() ([]pChan, error) {
 	return st.chMgr.getChannels(collID)
 }
 
-func (st *SearchTask) getVChannels() ([]vChan, error) {
+func (st *searchTask) getVChannels() ([]vChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1410,7 +1409,7 @@ func (st *SearchTask) getVChannels() ([]vChan, error) {
 	return st.chMgr.getVChannels(collID)
 }
 
-func (st *SearchTask) PreExecute(ctx context.Context) error {
+func (st *searchTask) PreExecute(ctx context.Context) error {
 	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
 
@@ -1539,7 +1538,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("Proxy::SearchTask::PreExecute", zap.Any("plan.OutputFieldIds", plan.OutputFieldIds),
+		log.Debug("Proxy::searchTask::PreExecute", zap.Any("plan.OutputFieldIds", plan.OutputFieldIds),
 			zap.Any("plan", plan.String()))
 	}
 	travelTimestamp := st.query.TravelTimestamp
@@ -1596,7 +1595,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (st *SearchTask) Execute(ctx context.Context) error {
+func (st *searchTask) Execute(ctx context.Context) error {
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: *st.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
@@ -1928,7 +1927,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, avail
 //	}
 //}
 
-func (st *SearchTask) PostExecute(ctx context.Context) error {
+func (st *searchTask) PostExecute(ctx context.Context) error {
 	t0 := time.Now()
 	defer func() {
 		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))
@@ -1936,8 +1935,8 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 	for {
 		select {
 		case <-st.TraceCtx().Done():
-			log.Debug("Proxy", zap.Int64("SearchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
-			return fmt.Errorf("SearchTask:wait to finish failed, timeout: %d", st.ID())
+			log.Debug("Proxy", zap.Int64("searchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
+			return fmt.Errorf("searchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
 			filterSearchResult := make([]*internalpb.SearchResults, 0)
@@ -2024,7 +2023,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 	}
 }
 
-type QueryTask struct {
+type queryTask struct {
 	Condition
 	*internalpb.RetrieveRequest
 	ctx       context.Context
@@ -2036,44 +2035,44 @@ type QueryTask struct {
 	ids       *schemapb.IDs
 }
 
-func (qt *QueryTask) TraceCtx() context.Context {
+func (qt *queryTask) TraceCtx() context.Context {
 	return qt.ctx
 }
 
-func (qt *QueryTask) ID() UniqueID {
+func (qt *queryTask) ID() UniqueID {
 	return qt.Base.MsgID
 }
 
-func (qt *QueryTask) SetID(uid UniqueID) {
+func (qt *queryTask) SetID(uid UniqueID) {
 	qt.Base.MsgID = uid
 }
 
-func (qt *QueryTask) Name() string {
+func (qt *queryTask) Name() string {
 	return RetrieveTaskName
 }
 
-func (qt *QueryTask) Type() commonpb.MsgType {
+func (qt *queryTask) Type() commonpb.MsgType {
 	return qt.Base.MsgType
 }
 
-func (qt *QueryTask) BeginTs() Timestamp {
+func (qt *queryTask) BeginTs() Timestamp {
 	return qt.Base.Timestamp
 }
 
-func (qt *QueryTask) EndTs() Timestamp {
+func (qt *queryTask) EndTs() Timestamp {
 	return qt.Base.Timestamp
 }
 
-func (qt *QueryTask) SetTs(ts Timestamp) {
+func (qt *queryTask) SetTs(ts Timestamp) {
 	qt.Base.Timestamp = ts
 }
 
-func (qt *QueryTask) OnEnqueue() error {
+func (qt *queryTask) OnEnqueue() error {
 	qt.Base.MsgType = commonpb.MsgType_Retrieve
 	return nil
 }
 
-func (qt *QueryTask) getChannels() ([]pChan, error) {
+func (qt *queryTask) getChannels() ([]pChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(qt.ctx, qt.query.CollectionName)
 	if err != nil {
 		return nil, err
@@ -2082,7 +2081,7 @@ func (qt *QueryTask) getChannels() ([]pChan, error) {
 	return qt.chMgr.getChannels(collID)
 }
 
-func (qt *QueryTask) getVChannels() ([]vChan, error) {
+func (qt *queryTask) getVChannels() ([]vChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(qt.ctx, qt.query.CollectionName)
 	if err != nil {
 		return nil, err
@@ -2132,7 +2131,7 @@ func IDs2Expr(fieldName string, ids []int64) string {
 	return fieldName + " in [ " + idsStr + " ]"
 }
 
-func (qt *QueryTask) PreExecute(ctx context.Context) error {
+func (qt *queryTask) PreExecute(ctx context.Context) error {
 	qt.Base.MsgType = commonpb.MsgType_Retrieve
 	qt.Base.SourceID = Params.ProxyID
 
@@ -2347,7 +2346,7 @@ func (qt *QueryTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (qt *QueryTask) Execute(ctx context.Context) error {
+func (qt *queryTask) Execute(ctx context.Context) error {
 	var tsMsg msgstream.TsMsg = &msgstream.RetrieveMsg{
 		RetrieveRequest: *qt.RetrieveRequest,
 		BaseMsg: msgstream.BaseMsg{
@@ -2397,7 +2396,7 @@ func (qt *QueryTask) Execute(ctx context.Context) error {
 	return err
 }
 
-func (qt *QueryTask) PostExecute(ctx context.Context) error {
+func (qt *queryTask) PostExecute(ctx context.Context) error {
 	t0 := time.Now()
 	defer func() {
 		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))
@@ -2405,7 +2404,7 @@ func (qt *QueryTask) PostExecute(ctx context.Context) error {
 	select {
 	case <-qt.TraceCtx().Done():
 		log.Debug("proxy", zap.Int64("Query: wait to finish failed, timeout!, taskID:", qt.ID()))
-		return fmt.Errorf("QueryTask:wait to finish failed, timeout : %d", qt.ID())
+		return fmt.Errorf("queryTask:wait to finish failed, timeout : %d", qt.ID())
 	case retrieveResults := <-qt.resultBuf:
 		retrieveResult := make([]*internalpb.RetrieveResults, 0)
 		var reason string
@@ -3433,7 +3432,7 @@ func (spt *showPartitionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type CreateIndexTask struct {
+type createIndexTask struct {
 	Condition
 	*milvuspb.CreateIndexRequest
 	ctx       context.Context
@@ -3441,44 +3440,44 @@ type CreateIndexTask struct {
 	result    *commonpb.Status
 }
 
-func (cit *CreateIndexTask) TraceCtx() context.Context {
+func (cit *createIndexTask) TraceCtx() context.Context {
 	return cit.ctx
 }
 
-func (cit *CreateIndexTask) ID() UniqueID {
+func (cit *createIndexTask) ID() UniqueID {
 	return cit.Base.MsgID
 }
 
-func (cit *CreateIndexTask) SetID(uid UniqueID) {
+func (cit *createIndexTask) SetID(uid UniqueID) {
 	cit.Base.MsgID = uid
 }
 
-func (cit *CreateIndexTask) Name() string {
+func (cit *createIndexTask) Name() string {
 	return CreateIndexTaskName
 }
 
-func (cit *CreateIndexTask) Type() commonpb.MsgType {
+func (cit *createIndexTask) Type() commonpb.MsgType {
 	return cit.Base.MsgType
 }
 
-func (cit *CreateIndexTask) BeginTs() Timestamp {
+func (cit *createIndexTask) BeginTs() Timestamp {
 	return cit.Base.Timestamp
 }
 
-func (cit *CreateIndexTask) EndTs() Timestamp {
+func (cit *createIndexTask) EndTs() Timestamp {
 	return cit.Base.Timestamp
 }
 
-func (cit *CreateIndexTask) SetTs(ts Timestamp) {
+func (cit *createIndexTask) SetTs(ts Timestamp) {
 	cit.Base.Timestamp = ts
 }
 
-func (cit *CreateIndexTask) OnEnqueue() error {
+func (cit *createIndexTask) OnEnqueue() error {
 	cit.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
+func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	cit.Base.MsgType = commonpb.MsgType_CreateIndex
 	cit.Base.SourceID = Params.ProxyID
 
@@ -3531,7 +3530,7 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (cit *CreateIndexTask) Execute(ctx context.Context) error {
+func (cit *createIndexTask) Execute(ctx context.Context) error {
 	var err error
 	cit.result, err = cit.rootCoord.CreateIndex(ctx, cit.CreateIndexRequest)
 	if cit.result == nil {
@@ -3543,11 +3542,11 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	return err
 }
 
-func (cit *CreateIndexTask) PostExecute(ctx context.Context) error {
+func (cit *createIndexTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type DescribeIndexTask struct {
+type describeIndexTask struct {
 	Condition
 	*milvuspb.DescribeIndexRequest
 	ctx       context.Context
@@ -3555,44 +3554,44 @@ type DescribeIndexTask struct {
 	result    *milvuspb.DescribeIndexResponse
 }
 
-func (dit *DescribeIndexTask) TraceCtx() context.Context {
+func (dit *describeIndexTask) TraceCtx() context.Context {
 	return dit.ctx
 }
 
-func (dit *DescribeIndexTask) ID() UniqueID {
+func (dit *describeIndexTask) ID() UniqueID {
 	return dit.Base.MsgID
 }
 
-func (dit *DescribeIndexTask) SetID(uid UniqueID) {
+func (dit *describeIndexTask) SetID(uid UniqueID) {
 	dit.Base.MsgID = uid
 }
 
-func (dit *DescribeIndexTask) Name() string {
+func (dit *describeIndexTask) Name() string {
 	return DescribeIndexTaskName
 }
 
-func (dit *DescribeIndexTask) Type() commonpb.MsgType {
+func (dit *describeIndexTask) Type() commonpb.MsgType {
 	return dit.Base.MsgType
 }
 
-func (dit *DescribeIndexTask) BeginTs() Timestamp {
+func (dit *describeIndexTask) BeginTs() Timestamp {
 	return dit.Base.Timestamp
 }
 
-func (dit *DescribeIndexTask) EndTs() Timestamp {
+func (dit *describeIndexTask) EndTs() Timestamp {
 	return dit.Base.Timestamp
 }
 
-func (dit *DescribeIndexTask) SetTs(ts Timestamp) {
+func (dit *describeIndexTask) SetTs(ts Timestamp) {
 	dit.Base.Timestamp = ts
 }
 
-func (dit *DescribeIndexTask) OnEnqueue() error {
+func (dit *describeIndexTask) OnEnqueue() error {
 	dit.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (dit *DescribeIndexTask) PreExecute(ctx context.Context) error {
+func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
 	dit.Base.SourceID = Params.ProxyID
 
@@ -3608,7 +3607,7 @@ func (dit *DescribeIndexTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (dit *DescribeIndexTask) Execute(ctx context.Context) error {
+func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	var err error
 	dit.result, err = dit.rootCoord.DescribeIndex(ctx, dit.DescribeIndexRequest)
 	if dit.result == nil {
@@ -3620,11 +3619,11 @@ func (dit *DescribeIndexTask) Execute(ctx context.Context) error {
 	return err
 }
 
-func (dit *DescribeIndexTask) PostExecute(ctx context.Context) error {
+func (dit *describeIndexTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type DropIndexTask struct {
+type dropIndexTask struct {
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
@@ -3632,44 +3631,44 @@ type DropIndexTask struct {
 	result    *commonpb.Status
 }
 
-func (dit *DropIndexTask) TraceCtx() context.Context {
+func (dit *dropIndexTask) TraceCtx() context.Context {
 	return dit.ctx
 }
 
-func (dit *DropIndexTask) ID() UniqueID {
+func (dit *dropIndexTask) ID() UniqueID {
 	return dit.Base.MsgID
 }
 
-func (dit *DropIndexTask) SetID(uid UniqueID) {
+func (dit *dropIndexTask) SetID(uid UniqueID) {
 	dit.Base.MsgID = uid
 }
 
-func (dit *DropIndexTask) Name() string {
+func (dit *dropIndexTask) Name() string {
 	return DropIndexTaskName
 }
 
-func (dit *DropIndexTask) Type() commonpb.MsgType {
+func (dit *dropIndexTask) Type() commonpb.MsgType {
 	return dit.Base.MsgType
 }
 
-func (dit *DropIndexTask) BeginTs() Timestamp {
+func (dit *dropIndexTask) BeginTs() Timestamp {
 	return dit.Base.Timestamp
 }
 
-func (dit *DropIndexTask) EndTs() Timestamp {
+func (dit *dropIndexTask) EndTs() Timestamp {
 	return dit.Base.Timestamp
 }
 
-func (dit *DropIndexTask) SetTs(ts Timestamp) {
+func (dit *dropIndexTask) SetTs(ts Timestamp) {
 	dit.Base.Timestamp = ts
 }
 
-func (dit *DropIndexTask) OnEnqueue() error {
+func (dit *dropIndexTask) OnEnqueue() error {
 	dit.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (dit *DropIndexTask) PreExecute(ctx context.Context) error {
+func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DropIndex
 	dit.Base.SourceID = Params.ProxyID
 
@@ -3690,7 +3689,7 @@ func (dit *DropIndexTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (dit *DropIndexTask) Execute(ctx context.Context) error {
+func (dit *dropIndexTask) Execute(ctx context.Context) error {
 	var err error
 	dit.result, err = dit.rootCoord.DropIndex(ctx, dit.DropIndexRequest)
 	if dit.result == nil {
@@ -3702,11 +3701,11 @@ func (dit *DropIndexTask) Execute(ctx context.Context) error {
 	return err
 }
 
-func (dit *DropIndexTask) PostExecute(ctx context.Context) error {
+func (dit *dropIndexTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type GetIndexBuildProgressTask struct {
+type getIndexBuildProgressTask struct {
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
 	ctx        context.Context
@@ -3716,44 +3715,44 @@ type GetIndexBuildProgressTask struct {
 	result     *milvuspb.GetIndexBuildProgressResponse
 }
 
-func (gibpt *GetIndexBuildProgressTask) TraceCtx() context.Context {
+func (gibpt *getIndexBuildProgressTask) TraceCtx() context.Context {
 	return gibpt.ctx
 }
 
-func (gibpt *GetIndexBuildProgressTask) ID() UniqueID {
+func (gibpt *getIndexBuildProgressTask) ID() UniqueID {
 	return gibpt.Base.MsgID
 }
 
-func (gibpt *GetIndexBuildProgressTask) SetID(uid UniqueID) {
+func (gibpt *getIndexBuildProgressTask) SetID(uid UniqueID) {
 	gibpt.Base.MsgID = uid
 }
 
-func (gibpt *GetIndexBuildProgressTask) Name() string {
+func (gibpt *getIndexBuildProgressTask) Name() string {
 	return GetIndexBuildProgressTaskName
 }
 
-func (gibpt *GetIndexBuildProgressTask) Type() commonpb.MsgType {
+func (gibpt *getIndexBuildProgressTask) Type() commonpb.MsgType {
 	return gibpt.Base.MsgType
 }
 
-func (gibpt *GetIndexBuildProgressTask) BeginTs() Timestamp {
+func (gibpt *getIndexBuildProgressTask) BeginTs() Timestamp {
 	return gibpt.Base.Timestamp
 }
 
-func (gibpt *GetIndexBuildProgressTask) EndTs() Timestamp {
+func (gibpt *getIndexBuildProgressTask) EndTs() Timestamp {
 	return gibpt.Base.Timestamp
 }
 
-func (gibpt *GetIndexBuildProgressTask) SetTs(ts Timestamp) {
+func (gibpt *getIndexBuildProgressTask) SetTs(ts Timestamp) {
 	gibpt.Base.Timestamp = ts
 }
 
-func (gibpt *GetIndexBuildProgressTask) OnEnqueue() error {
+func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
 	gibpt.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (gibpt *GetIndexBuildProgressTask) PreExecute(ctx context.Context) error {
+func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
 	gibpt.Base.MsgType = commonpb.MsgType_GetIndexBuildProgress
 	gibpt.Base.SourceID = Params.ProxyID
 
@@ -3764,7 +3763,7 @@ func (gibpt *GetIndexBuildProgressTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
+func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	collectionName := gibpt.CollectionName
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists
@@ -3924,11 +3923,11 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (gibpt *GetIndexBuildProgressTask) PostExecute(ctx context.Context) error {
+func (gibpt *getIndexBuildProgressTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type GetIndexStateTask struct {
+type getIndexStateTask struct {
 	Condition
 	*milvuspb.GetIndexStateRequest
 	ctx        context.Context
@@ -3937,44 +3936,44 @@ type GetIndexStateTask struct {
 	result     *milvuspb.GetIndexStateResponse
 }
 
-func (gist *GetIndexStateTask) TraceCtx() context.Context {
+func (gist *getIndexStateTask) TraceCtx() context.Context {
 	return gist.ctx
 }
 
-func (gist *GetIndexStateTask) ID() UniqueID {
+func (gist *getIndexStateTask) ID() UniqueID {
 	return gist.Base.MsgID
 }
 
-func (gist *GetIndexStateTask) SetID(uid UniqueID) {
+func (gist *getIndexStateTask) SetID(uid UniqueID) {
 	gist.Base.MsgID = uid
 }
 
-func (gist *GetIndexStateTask) Name() string {
+func (gist *getIndexStateTask) Name() string {
 	return GetIndexStateTaskName
 }
 
-func (gist *GetIndexStateTask) Type() commonpb.MsgType {
+func (gist *getIndexStateTask) Type() commonpb.MsgType {
 	return gist.Base.MsgType
 }
 
-func (gist *GetIndexStateTask) BeginTs() Timestamp {
+func (gist *getIndexStateTask) BeginTs() Timestamp {
 	return gist.Base.Timestamp
 }
 
-func (gist *GetIndexStateTask) EndTs() Timestamp {
+func (gist *getIndexStateTask) EndTs() Timestamp {
 	return gist.Base.Timestamp
 }
 
-func (gist *GetIndexStateTask) SetTs(ts Timestamp) {
+func (gist *getIndexStateTask) SetTs(ts Timestamp) {
 	gist.Base.Timestamp = ts
 }
 
-func (gist *GetIndexStateTask) OnEnqueue() error {
+func (gist *getIndexStateTask) OnEnqueue() error {
 	gist.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (gist *GetIndexStateTask) PreExecute(ctx context.Context) error {
+func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 	gist.Base.MsgType = commonpb.MsgType_GetIndexState
 	gist.Base.SourceID = Params.ProxyID
 
@@ -3985,7 +3984,7 @@ func (gist *GetIndexStateTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
+func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 	collectionName := gist.CollectionName
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists
@@ -4131,11 +4130,11 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (gist *GetIndexStateTask) PostExecute(ctx context.Context) error {
+func (gist *getIndexStateTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type FlushTask struct {
+type flushTask struct {
 	Condition
 	*milvuspb.FlushRequest
 	ctx       context.Context
@@ -4143,50 +4142,50 @@ type FlushTask struct {
 	result    *milvuspb.FlushResponse
 }
 
-func (ft *FlushTask) TraceCtx() context.Context {
+func (ft *flushTask) TraceCtx() context.Context {
 	return ft.ctx
 }
 
-func (ft *FlushTask) ID() UniqueID {
+func (ft *flushTask) ID() UniqueID {
 	return ft.Base.MsgID
 }
 
-func (ft *FlushTask) SetID(uid UniqueID) {
+func (ft *flushTask) SetID(uid UniqueID) {
 	ft.Base.MsgID = uid
 }
 
-func (ft *FlushTask) Name() string {
+func (ft *flushTask) Name() string {
 	return FlushTaskName
 }
 
-func (ft *FlushTask) Type() commonpb.MsgType {
+func (ft *flushTask) Type() commonpb.MsgType {
 	return ft.Base.MsgType
 }
 
-func (ft *FlushTask) BeginTs() Timestamp {
+func (ft *flushTask) BeginTs() Timestamp {
 	return ft.Base.Timestamp
 }
 
-func (ft *FlushTask) EndTs() Timestamp {
+func (ft *flushTask) EndTs() Timestamp {
 	return ft.Base.Timestamp
 }
 
-func (ft *FlushTask) SetTs(ts Timestamp) {
+func (ft *flushTask) SetTs(ts Timestamp) {
 	ft.Base.Timestamp = ts
 }
 
-func (ft *FlushTask) OnEnqueue() error {
+func (ft *flushTask) OnEnqueue() error {
 	ft.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (ft *FlushTask) PreExecute(ctx context.Context) error {
+func (ft *flushTask) PreExecute(ctx context.Context) error {
 	ft.Base.MsgType = commonpb.MsgType_Flush
 	ft.Base.SourceID = Params.ProxyID
 	return nil
 }
 
-func (ft *FlushTask) Execute(ctx context.Context) error {
+func (ft *flushTask) Execute(ctx context.Context) error {
 	coll2Segments := make(map[string]*schemapb.LongArray)
 	for _, collName := range ft.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, collName)
@@ -4223,7 +4222,7 @@ func (ft *FlushTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (ft *FlushTask) PostExecute(ctx context.Context) error {
+func (ft *flushTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
