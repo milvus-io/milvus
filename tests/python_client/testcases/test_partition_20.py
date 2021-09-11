@@ -449,7 +449,6 @@ class TestPartitionOperations(TestcaseBase):
                          check_items={ct.err_code: 1, ct.err_msg: "default partition cannot be deleted"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop_partition_twice(self):
         """
         target: verify drop the same partition twice
@@ -475,7 +474,6 @@ class TestPartitionOperations(TestcaseBase):
                          check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_create_and_drop_multi_times(self):
         """
         target: verify create and drop for times
