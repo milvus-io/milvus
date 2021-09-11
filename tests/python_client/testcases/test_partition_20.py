@@ -585,7 +585,7 @@ class TestPartitionOperations(TestcaseBase):
         target: verify release an dropped partition
         method: 1.create a partition
                 2. drop the partition
-                2. release the partition
+                3. release the partition
         expected: raise exception
         """
         # create partition
@@ -605,7 +605,7 @@ class TestPartitionOperations(TestcaseBase):
         target: verify release an dropped collection
         method: 1.create a collection and partition
                 2. drop the collection
-                2. release the partition
+                3. release the partition
         expected: raise exception
         """
         # create collection
@@ -631,8 +631,8 @@ class TestPartitionOperations(TestcaseBase):
         target: verify release a partition after the collection released
         method: 1.create a collection and partition
                 2. insert some data
-                2. release the collection
-                2. release the partition
+                3. release the collection
+                4. release the partition
         expected: partition released successfully
         """
         # create collection
