@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1631348992457,
+  "iteration": 1631349762420,
   "links": [],
   "panels": [
     {
@@ -3002,7 +3002,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Show Segment Rate",
+      "title": "Show Segments Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -3103,7 +3103,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Descirbe Segment Rate",
+      "title": "Descirbe Segments Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -4838,5 +4838,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 78
+  "version": 80
 }
