@@ -29,6 +29,7 @@ import (
 	"errors"
 	"strconv"
 	"sync/atomic"
+	"unsafe"
 
 	"go.uber.org/zap"
 
@@ -123,7 +124,9 @@ func (node *QueryNode) Init() error {
 		node.etcdKV)
 	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV)
 
-	C.SegcoreInit()
+	cConfigDir := C.CString(Params.BaseTable.GetConfigDir())
+	C.SegcoreInit(cConfigDir)
+	C.free(unsafe.Pointer(cConfigDir))
 
 	if node.rootCoord == nil {
 		log.Error("null root coordinator detected")

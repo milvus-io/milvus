@@ -19,5 +19,5 @@
 TEST(Init, Naive) {
     using namespace milvus;
     using namespace milvus::segcore;
-    SegcoreInit();
+    SegcoreInit(NULL);
 }

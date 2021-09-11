@@ -186,7 +186,7 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 		return nil
 	}
 
-	log.Debug("create segment", zap.Int64("segmentID", segmentID))
+	log.Debug("create segment", zap.Int64("segmentID", segmentID), zap.Int32("segmentType", int32(segType)))
 
 	var segment = &Segment{
 		segmentPtr:       segmentPtr,

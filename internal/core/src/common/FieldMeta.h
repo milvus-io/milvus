@@ -23,10 +23,6 @@ datatype_sizeof(DataType data_type, int dim = 1) {
     switch (data_type) {
         case DataType::BOOL:
             return sizeof(bool);
-        case DataType::DOUBLE:
-            return sizeof(double);
-        case DataType::FLOAT:
-            return sizeof(float);
         case DataType::INT8:
             return sizeof(int8_t);
         case DataType::INT16:
@@ -35,6 +31,10 @@ datatype_sizeof(DataType data_type, int dim = 1) {
             return sizeof(int32_t);
         case DataType::INT64:
             return sizeof(int64_t);
+        case DataType::FLOAT:
+            return sizeof(float);
+        case DataType::DOUBLE:
+            return sizeof(double);
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
@@ -43,7 +43,6 @@ datatype_sizeof(DataType data_type, int dim = 1) {
         }
         default: {
             throw std::invalid_argument("unsupported data type");
-            return 0;
         }
     }
 }
@@ -54,10 +53,6 @@ datatype_name(DataType data_type) {
     switch (data_type) {
         case DataType::BOOL:
             return "bool";
-        case DataType::DOUBLE:
-            return "double";
-        case DataType::FLOAT:
-            return "float";
         case DataType::INT8:
             return "int8_t";
         case DataType::INT16:
@@ -66,6 +61,10 @@ datatype_name(DataType data_type) {
             return "int32_t";
         case DataType::INT64:
             return "int64_t";
+        case DataType::FLOAT:
+            return "float";
+        case DataType::DOUBLE:
+            return "double";
         case DataType::VECTOR_FLOAT:
             return "vector_float";
         case DataType::VECTOR_BINARY: {
@@ -84,7 +83,7 @@ datatype_is_vector(DataType datatype) {
 }
 
 inline bool
-datatype_is_interger(DataType datatype) {
+datatype_is_integer(DataType datatype) {
     switch (datatype) {
         case DataType::INT8:
         case DataType::INT16:
@@ -99,8 +98,8 @@ datatype_is_interger(DataType datatype) {
 inline bool
 datatype_is_floating(DataType datatype) {
     switch (datatype) {
-        case DataType::DOUBLE:
         case DataType::FLOAT:
+        case DataType::DOUBLE:
             return true;
         default:
             return false;
@@ -166,7 +165,7 @@ class FieldMeta {
         if (is_vector()) {
             return datatype_sizeof(type_, get_dim());
         } else {
-            return datatype_sizeof(type_, 1);
+            return datatype_sizeof(type_);
         }
     }
 
