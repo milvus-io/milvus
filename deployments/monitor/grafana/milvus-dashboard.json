@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1631329496680,
+  "iteration": 1631348992457,
   "links": [],
   "panels": [
     {
@@ -3746,7 +3746,7 @@
           "expr": "sum(rate(process_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m]))",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "total",
+          "legendFormat": "cpu usage",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -4838,5 +4838,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 77
+  "version": 78
 }
