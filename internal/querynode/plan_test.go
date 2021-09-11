@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 )
 
 func TestPlan_Plan(t *testing.T) {
@@ -39,6 +41,26 @@ func TestPlan_Plan(t *testing.T) {
 	assert.Equal(t, metricType, "L2")
 	plan.delete()
 	deleteCollection(collection)
+}
+
+func TestPlan_createSearchPlanByExpr(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	historical, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
+
+	col, err := historical.replica.getCollectionByID(defaultCollectionID)
+	assert.NoError(t, err)
+
+	planNode := &planpb.PlanNode{
+		OutputFieldIds: []FieldID{rowIDFieldID},
+	}
+	expr, err := proto.Marshal(planNode)
+	assert.NoError(t, err)
+
+	_, err = createSearchPlanByExpr(col, expr)
+	assert.Error(t, err)
 }
 
 func TestPlan_NilCollection(t *testing.T) {
