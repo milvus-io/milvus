@@ -137,6 +137,15 @@ func (coord *RootCoordMock) GetComponentStates(ctx context.Context) (*internalpb
 }
 
 func (coord *RootCoordMock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.StringResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+		}, nil
+	}
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -151,6 +160,15 @@ func (coord *RootCoordMock) Register() error {
 }
 
 func (coord *RootCoordMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.StringResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+		}, nil
+	}
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -161,6 +179,13 @@ func (coord *RootCoordMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.S
 }
 
 func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	coord.collMtx.Lock()
 	defer coord.collMtx.Unlock()
 
@@ -228,6 +253,13 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 }
 
 func (coord *RootCoordMock) DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	coord.collMtx.Lock()
 	defer coord.collMtx.Unlock()
 
@@ -255,6 +287,16 @@ func (coord *RootCoordMock) DropCollection(ctx context.Context, req *milvuspb.Dr
 }
 
 func (coord *RootCoordMock) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			Value: false,
+		}, nil
+	}
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
@@ -270,6 +312,17 @@ func (coord *RootCoordMock) HasCollection(ctx context.Context, req *milvuspb.Has
 }
 
 func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			Schema:       nil,
+			CollectionID: 0,
+		}, nil
+	}
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
@@ -300,6 +353,16 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 }
 
 func (coord *RootCoordMock) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			CollectionNames: nil,
+		}, nil
+	}
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
@@ -333,6 +396,13 @@ func (coord *RootCoordMock) ShowCollections(ctx context.Context, req *milvuspb.S
 }
 
 func (coord *RootCoordMock) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
@@ -372,6 +442,13 @@ func (coord *RootCoordMock) CreatePartition(ctx context.Context, req *milvuspb.C
 }
 
 func (coord *RootCoordMock) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
@@ -404,6 +481,16 @@ func (coord *RootCoordMock) DropPartition(ctx context.Context, req *milvuspb.Dro
 }
 
 func (coord *RootCoordMock) HasPartition(ctx context.Context, req *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			Value: false,
+		}, nil
+	}
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
@@ -432,6 +519,17 @@ func (coord *RootCoordMock) HasPartition(ctx context.Context, req *milvuspb.HasP
 }
 
 func (coord *RootCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("rootcoord is not healthy, state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			PartitionNames: nil,
+			PartitionIDs:   nil,
+		}, nil
+	}
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
@@ -477,6 +575,13 @@ func (coord *RootCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sh
 }
 
 func (coord *RootCoordMock) CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -484,6 +589,16 @@ func (coord *RootCoordMock) CreateIndex(ctx context.Context, req *milvuspb.Creat
 }
 
 func (coord *RootCoordMock) DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			IndexDescriptions: nil,
+		}, nil
+	}
 	return &milvuspb.DescribeIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -494,6 +609,13 @@ func (coord *RootCoordMock) DescribeIndex(ctx context.Context, req *milvuspb.Des
 }
 
 func (coord *RootCoordMock) DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -501,6 +623,17 @@ func (coord *RootCoordMock) DropIndex(ctx context.Context, req *milvuspb.DropInd
 }
 
 func (coord *RootCoordMock) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &rootcoordpb.AllocTimestampResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			Timestamp: 0,
+			Count:     0,
+		}, nil
+	}
 	coord.lastTsMtx.Lock()
 	defer coord.lastTsMtx.Unlock()
 
@@ -521,6 +654,17 @@ func (coord *RootCoordMock) AllocTimestamp(ctx context.Context, req *rootcoordpb
 }
 
 func (coord *RootCoordMock) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &rootcoordpb.AllocIDResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			ID:    0,
+			Count: 0,
+		}, nil
+	}
 	begin, _ := uniquegenerator.GetUniqueIntGeneratorIns().GetInts(int(req.Count))
 	return &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
@@ -533,6 +677,13 @@ func (coord *RootCoordMock) AllocID(ctx context.Context, req *rootcoordpb.AllocI
 }
 
 func (coord *RootCoordMock) UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -540,6 +691,16 @@ func (coord *RootCoordMock) UpdateChannelTimeTick(ctx context.Context, req *inte
 }
 
 func (coord *RootCoordMock) DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.DescribeSegmentResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			IndexID: 0,
+		}, nil
+	}
 	return &milvuspb.DescribeSegmentResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -552,6 +713,16 @@ func (coord *RootCoordMock) DescribeSegment(ctx context.Context, req *milvuspb.D
 }
 
 func (coord *RootCoordMock) ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.ShowSegmentsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			SegmentIDs: nil,
+		}, nil
+	}
 	return &milvuspb.ShowSegmentsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -562,6 +733,13 @@ func (coord *RootCoordMock) ShowSegments(ctx context.Context, req *milvuspb.Show
 }
 
 func (coord *RootCoordMock) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -569,6 +747,13 @@ func (coord *RootCoordMock) ReleaseDQLMessageStream(ctx context.Context, in *pro
 }
 
 func (coord *RootCoordMock) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -576,6 +761,17 @@ func (coord *RootCoordMock) SegmentFlushCompleted(ctx context.Context, in *datap
 }
 
 func (coord *RootCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "failed",
+			},
+			Response: "",
+		}, nil
+	}
 	rootCoordTopology := metricsinfo.RootCoordTopology{
 		Self: metricsinfo.RootCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
