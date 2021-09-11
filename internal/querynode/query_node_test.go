@@ -240,3 +240,42 @@ func TestQueryNode_Start(t *testing.T) {
 	<-localNode.queryNodeLoopCtx.Done()
 	localNode.Stop()
 }
+
+func TestQueryNode_SetCoord(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	err = node.SetIndexCoord(nil)
+	assert.Error(t, err)
+
+	err = node.SetRootCoord(nil)
+	assert.Error(t, err)
+
+	// TODO: add mock coords
+	//err = node.SetIndexCoord(newIndexCorrd)
+}
+
+func TestQueryNode_register(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	err = node.Register()
+	assert.NoError(t, err)
+}
+
+func TestQueryNode_init(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	err = node.Init()
+	assert.NoError(t, err)
+}

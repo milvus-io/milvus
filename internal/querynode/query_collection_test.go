@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"reflect"
 	"testing"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -61,6 +64,20 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 		return nil, errors.New("nil simple query collection")
 	}
 	return queryCollection, nil
+}
+
+func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) {
+	// register
+	queryCollection.watcherSelectCase = make([]reflect.SelectCase, 0)
+	queryCollection.tSafeWatchers[defaultVChannel] = newTSafeWatcher()
+	queryCollection.streaming.tSafeReplica.addTSafe(defaultVChannel)
+	queryCollection.streaming.tSafeReplica.registerTSafeWatcher(defaultVChannel, queryCollection.tSafeWatchers[defaultVChannel])
+	queryCollection.watcherSelectCase = append(queryCollection.watcherSelectCase, reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(queryCollection.tSafeWatchers[defaultVChannel].watcherChan()),
+	})
+
+	queryCollection.streaming.tSafeReplica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
 }
 
 func TestQueryCollection_withoutVChannel(t *testing.T) {
@@ -305,7 +322,7 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 	})
 }
 
-func TestResultHandlerStage_TranslateHits(t *testing.T) {
+func TestQueryCollection_TranslateHits(t *testing.T) {
 	fieldID := FieldID(0)
 	fieldIDs := []FieldID{fieldID}
 
@@ -445,7 +462,139 @@ func TestResultHandlerStage_TranslateHits(t *testing.T) {
 		dataType := schemapb.DataType_FloatVector
 		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
 		assert.Error(t, err)
+
+		dataType = schemapb.DataType_BinaryVector
+		_, err = translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
+		assert.Error(t, err)
 	})
+}
+
+func TestQueryCollection_serviceableTime(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	st := Timestamp(1000)
+	queryCollection.setServiceableTime(st)
+
+	gracefulTimeInMilliSecond := Params.GracefulTime
+	gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
+	resST := queryCollection.getServiceableTime()
+	assert.Equal(t, st+gracefulTime, resST)
+}
+
+func TestQueryCollection_waitNewTSafe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	timestamp := Timestamp(1000)
+	updateTSafe(queryCollection, timestamp)
+
+	resTimestamp := queryCollection.waitNewTSafe()
+	assert.Equal(t, timestamp, resTimestamp)
+}
+
+func TestQueryCollection_mergeRetrieveResults(t *testing.T) {
+	fieldData := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: defaultVecFieldName,
+			FieldId:   simpleVecField.id,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: defaultDim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{1.1, 2.2, 3.3, 4.4},
+						},
+					},
+				},
+			},
+		},
+	}
+	result := &segcorepb.RetrieveResults{
+		Ids:        &schemapb.IDs{},
+		Offset:     []int64{0},
+		FieldsData: fieldData,
+	}
+
+	_, err := mergeRetrieveResults([]*segcorepb.RetrieveResults{result})
+	assert.NoError(t, err)
+
+	_, err = mergeRetrieveResults(nil)
+	assert.NoError(t, err)
+}
+
+func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	timestamp := Timestamp(1000)
+	updateTSafe(queryCollection, timestamp)
+
+	go queryCollection.doUnsolvedQueryMsg()
+
+	msg, err := genSimpleSearchMsg()
+	assert.NoError(t, err)
+	queryCollection.addToUnsolvedMsg(msg)
+
+	time.Sleep(200 * time.Millisecond)
+}
+
+func TestQueryCollection_search(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	queryChannel := genQueryChannel()
+	queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+	queryCollection.queryResultMsgStream.Start()
+
+	err = queryCollection.streaming.replica.removeSegment(defaultSegmentID)
+	assert.NoError(t, err)
+
+	err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
+	assert.NoError(t, err)
+
+	msg, err := genSimpleSearchMsg()
+	assert.NoError(t, err)
+
+	err = queryCollection.search(msg)
+	assert.NoError(t, err)
+}
+
+func TestQueryCollection_receive(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	queryChannel := genQueryChannel()
+	queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+	queryCollection.queryResultMsgStream.Start()
+
+	vecCM, err := genVectorChunkManager(ctx)
+	assert.NoError(t, err)
+
+	queryCollection.vectorChunkManager = vecCM
+
+	err = queryCollection.streaming.replica.removeSegment(defaultSegmentID)
+	assert.NoError(t, err)
+
+	err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
+	assert.NoError(t, err)
+
+	msg, err := genSimpleRetrieveMsg()
+	assert.NoError(t, err)
+
+	err = queryCollection.retrieve(msg)
+	assert.NoError(t, err)
 }
 
 func TestQueryCollection_AddPopUnsolvedMsg(t *testing.T) {
