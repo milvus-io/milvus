@@ -511,18 +511,29 @@ func genKey(collectionID, partitionID, segmentID UniqueID, fieldID int64) string
 	return path.Join(ids...)
 }
 
-func genSimpleStorageBlob() ([]*storage.Blob, error) {
-	collMeta := genSimpleCollectionMeta()
+func genStorageBlob(collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	msgLength int,
+	schema *schemapb.CollectionSchema) ([]*storage.Blob, error) {
+	collMeta := genCollectionMeta(collectionID, schema)
 	inCodec := storage.NewInsertCodec(collMeta)
-	insertData, err := genSimpleInsertData()
+	insertData, err := genInsertData(msgLength, schema)
 	if err != nil {
 		return nil, err
 	}
 	// timestamp field not allowed 0 timestamp
-	insertData.Data[timestampFieldID].(*storage.Int64FieldData).Data[0] = 1
-	binLogs, _, err := inCodec.Serialize(defaultPartitionID, defaultSegmentID, insertData)
+	if _, ok := insertData.Data[timestampFieldID]; ok {
+		insertData.Data[timestampFieldID].(*storage.Int64FieldData).Data[0] = 1
+	}
+	binLogs, _, err := inCodec.Serialize(partitionID, segmentID, insertData)
 
 	return binLogs, err
+}
+
+func genSimpleStorageBlob() ([]*storage.Blob, error) {
+	schema, _ := genSimpleSchema()
+	return genStorageBlob(defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 }
 
 func genSimpleFloatVectors() []float32 {
@@ -587,8 +598,17 @@ func genSimpleCommonBlob() ([]*commonpb.Blob, error) {
 	return genCommonBlob(defaultMsgLength, schema)
 }
 
-func saveSimpleBinLog(ctx context.Context) ([]*datapb.FieldBinlog, error) {
-	binLogs, err := genSimpleStorageBlob()
+func saveBinLog(ctx context.Context,
+	collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	msgLength int,
+	schema *schemapb.CollectionSchema) ([]*datapb.FieldBinlog, error) {
+	binLogs, err := genStorageBlob(collectionID,
+		partitionID,
+		segmentID,
+		msgLength,
+		schema)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +625,7 @@ func saveSimpleBinLog(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			return nil, err
 		}
 
-		key := genKey(defaultCollectionID, defaultPartitionID, defaultSegmentID, fieldID)
+		key := genKey(collectionID, partitionID, segmentID, fieldID)
 		kvs[key] = string(blob.Value[:])
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -620,6 +640,11 @@ func saveSimpleBinLog(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	}
 	err = kv.MultiSave(kvs)
 	return fieldBinlog, err
+}
+
+func saveSimpleBinLog(ctx context.Context) ([]*datapb.FieldBinlog, error) {
+	schema, _ := genSimpleSchema()
+	return saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 }
 
 func genSimpleTimestampFieldData() []Timestamp {
