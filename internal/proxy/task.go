@@ -1957,16 +1957,17 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			}
 
 			availableQueryNodeNum := len(filterSearchResult)
-			log.Debug("Proxy Search PostExecute stage1", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
+			log.Debug("Proxy Search PostExecute stage1",
+				zap.Any("availableQueryNodeNum", availableQueryNodeNum),
+				zap.Any("time cost", time.Since(t0)))
 			if availableQueryNodeNum <= 0 {
-				log.Debug("Proxy Search PostExecute failed", zap.Any("filterReason", filterReason))
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
 						Reason:    filterReason,
 					},
 				}
-				return errors.New(filterReason)
+				return fmt.Errorf("No Available Query node result, filter reason %s: id %d", filterReason, st.ID())
 			}
 
 			availableQueryNodeNum = 0
@@ -1996,7 +1997,6 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			}
 
 			results, err := decodeSearchResults(filterSearchResult)
-			log.Debug("Proxy Search PostExecute decodeSearchResults", zap.Error(err))
 			if err != nil {
 				return err
 			}
@@ -2022,7 +2022,6 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 					}
 				}
 			}
-			log.Debug("Proxy Search PostExecute Done")
 			return nil
 		}
 	}

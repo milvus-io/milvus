@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -129,15 +130,22 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	collInfo, ok := m.collInfo[collectionName]
 
 	if !ok {
+		t0 := time.Now()
 		m.mu.RUnlock()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
+			log.Warn("Failed to load collection from rootcoord ",
+				zap.String("collection name ", collectionName),
+				zap.Error(err))
 			return nil, err
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.updateCollection(coll, collectionName)
 		collInfo = m.collInfo[collectionName]
+		log.Debug("Reload collection from rootcoord ",
+			zap.String("collection name ", collectionName),
+			zap.Any("time take ", time.Since(t0)))
 		return collInfo.schema, nil
 	}
 	defer m.mu.RUnlock()
@@ -189,8 +197,11 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
-		m.updatePartitions(partitions, collectionName)
-
+		err = m.updatePartitions(partitions, collectionName)
+		if err != nil {
+			return nil, err
+		}
+		log.Debug("proxy", zap.Any("GetPartitions:partitions after update", partitions), zap.Any("collectionName", collectionName))
 		ret := make(map[string]typeutil.UniqueID)
 		partInfo := m.collInfo[collectionName].partInfo
 		for k, v := range partInfo {
@@ -236,8 +247,10 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		log.Debug("proxy", zap.Any("GetPartitionID:partitions before update", partitions), zap.Any("collectionName", collectionName))
-		m.updatePartitions(partitions, collectionName)
+		err = m.updatePartitions(partitions, collectionName)
+		if err != nil {
+			return nil, err
+		}
 		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
 
 		partInfo, ok = m.collInfo[collectionName].partInfo[partitionName]
@@ -312,7 +325,7 @@ func (m *MetaCache) showPartitions(ctx context.Context, collectionName string) (
 	return partitions, nil
 }
 
-func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse, collectionName string) {
+func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse, collectionName string) error {
 	_, ok := m.collInfo[collectionName]
 	if !ok {
 		m.collInfo[collectionName] = &collectionInfo{
@@ -322,6 +335,11 @@ func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse
 	partInfo := m.collInfo[collectionName].partInfo
 	if partInfo == nil {
 		partInfo = map[string]*partitionInfo{}
+	}
+
+	// check partitionID, createdTimestamp and utcstamp has sam element numbers
+	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
+		return errors.New("partition names and timestamps number is not aligned, response " + partitions.String())
 	}
 
 	for i := 0; i < len(partitions.PartitionIDs); i++ {
@@ -334,6 +352,7 @@ func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse
 		}
 	}
 	m.collInfo[collectionName].partInfo = partInfo
+	return nil
 }
 
 func (m *MetaCache) RemoveCollection(ctx context.Context, collectionName string) {
