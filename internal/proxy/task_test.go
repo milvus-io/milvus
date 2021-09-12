@@ -1,17 +1,17 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -576,4 +576,109 @@ func TestTranslateOutputFields(t *testing.T) {
 	outputFields, err = translateOutputFields([]string{"%", idFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+}
+
+func TestSearchTask(t *testing.T) {
+	ctx := context.Background()
+	ctxCancel, cancel := context.WithCancel(ctx)
+	qt := &searchTask{
+		ctx:       ctxCancel,
+		Condition: NewTaskCondition(context.TODO()),
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Search,
+				SourceID: Params.ProxyID,
+			},
+			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
+		},
+		resultBuf: make(chan []*internalpb.SearchResults),
+		query:     nil,
+		chMgr:     nil,
+		qc:        nil,
+	}
+
+	// no result
+	go func() {
+		qt.resultBuf <- []*internalpb.SearchResults{}
+	}()
+	err := qt.PostExecute(context.TODO())
+	assert.NotNil(t, err)
+
+	// test trace context done
+	cancel()
+	err = qt.PostExecute(context.TODO())
+	assert.NotNil(t, err)
+
+	// error result
+	ctx = context.Background()
+	qt = &searchTask{
+		ctx:       ctx,
+		Condition: NewTaskCondition(context.TODO()),
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Search,
+				SourceID: Params.ProxyID,
+			},
+			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
+		},
+		resultBuf: make(chan []*internalpb.SearchResults),
+		query:     nil,
+		chMgr:     nil,
+		qc:        nil,
+	}
+
+	// no result
+	go func() {
+		result := internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "test",
+			},
+		}
+		results := make([]*internalpb.SearchResults, 1)
+		results[0] = &result
+		qt.resultBuf <- results
+	}()
+	err = qt.PostExecute(context.TODO())
+	assert.NotNil(t, err)
+
+	log.Debug("PostExecute failed" + err.Error())
+	// check result SlicedBlob
+
+	ctx = context.Background()
+	qt = &searchTask{
+		ctx:       ctx,
+		Condition: NewTaskCondition(context.TODO()),
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Search,
+				SourceID: Params.ProxyID,
+			},
+			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
+		},
+		resultBuf: make(chan []*internalpb.SearchResults),
+		query:     nil,
+		chMgr:     nil,
+		qc:        nil,
+	}
+
+	// no result
+	go func() {
+		result := internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "test",
+			},
+			SlicedBlob: nil,
+		}
+		results := make([]*internalpb.SearchResults, 1)
+		results[0] = &result
+		qt.resultBuf <- results
+	}()
+	err = qt.PostExecute(context.TODO())
+	assert.Nil(t, err)
+
+	assert.Equal(t, qt.result.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+	// TODO, add decode result, reduce result test
 }
