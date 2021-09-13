@@ -49,7 +49,7 @@ func generateMsgPack() msgstream.MsgPack {
 	return msgPack
 }
 
-func TestNodeStart(t *testing.T) {
+func TestNodeCtx_Start(t *testing.T) {
 	os.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestNodeStart")
 	msFactory := msgstream.NewRmsFactory()
 	m := map[string]interface{}{}
