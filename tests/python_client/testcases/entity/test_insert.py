@@ -1173,6 +1173,11 @@ class TestInsertInvalidBinary(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_field_type(self, connect, binary_collection, get_field_type):
+        """
+        target: test insert with invalid field type
+        method: insert with invalid field type
+        expected: raise exception
+        """
         field_type = get_field_type
         tmp_entity = update_field_type(copy.deepcopy(default_binary_entity), 'int64', field_type)
         with pytest.raises(Exception):
