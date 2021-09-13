@@ -46,7 +46,7 @@ type indexLoader struct {
 	kv kv.BaseKV // minio kv
 }
 
-func (loader *indexLoader) loadIndex(segment *Segment, fieldID int64) error {
+func (loader *indexLoader) loadIndex(segment *Segment, fieldID FieldID) error {
 	// 1. use msg's index paths to get index bytes
 	var err error
 	var indexBuffer [][]byte
