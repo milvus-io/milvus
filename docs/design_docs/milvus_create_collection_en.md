@@ -35,7 +35,7 @@ message CollectionSchema {
 
 ```
 
-1. When received the `CreateCollection` request, the `Proxy` would wraps this request into `CreateCollectionTask`, and pushs this task into `DdTaskQueue` queue. After that, `Proxy` would call method of `WatiToFinish`  to wait until the task finished.
+1. When received the `CreateCollection` request, the `Proxy` would wraps this request into `CreateCollectionTask`, and pushes this task into `DdTaskQueue` queue. After that, `Proxy` would call method of `WatiToFinish`  to wait until the task is finished.
 ```go
 type task interface {
 	TraceCtx() context.Context
@@ -65,13 +65,13 @@ type CreateCollectionTask struct {
 }
 ```
 
-3. There is a backgroud service in `Proxy`, this service would get the `CreateCollectionTask` from `DdTaskQueue`, and executes it in three phases.
-    - `PreExecute`, do some static checking at this phase, such as check if `Collection Name` and `Field Name` is legal, if there are duplicate columns, etc.
-    - `Execute`, at thie phase, `Proxy` would send `CreateCollection` request to `RootCoord` via `Grpc`,and wait the reponse, the `proto` is defined as follow:
+3. There is a background service in `Proxy`, this service would get the `CreateCollectionTask` from `DdTaskQueue`, and execute it in three phases.
+    - `PreExecute`, do some static checking at this phase, such as check if `Collection Name` and `Field Name` are legal, if there are duplicate columns, etc.
+    - `Execute`, at this phase, `Proxy` would send `CreateCollection` request to `RootCoord` via `Grpc`, and wait for response, the `proto` is defined as follow:
     ```proto
     service RootCoord {
         ...
-        
+
         rpc CreateCollection(milvus.CreateCollectionRequest) returns (common.Status){}
 
         ...
@@ -79,7 +79,7 @@ type CreateCollectionTask struct {
     ```
     - `PostExecute`, `CreateCollectonTask` does nothing at this phase, and return directly.
 
-4. `RootCoord` would wraps the `CreateCollection` request into `CreateCollectionReqTask`, and then call function `executeTask`. `executeTask` would return until the `context` is done or `CreateCollectionReqTask.Execute` returned.
+4. `RootCoord` would wrap the `CreateCollection` request into `CreateCollectionReqTask`, and then call function `executeTask`. `executeTask` would return until the `context` is done or `CreateCollectionReqTask.Execute` is returned.
 ```go
 type reqTask interface {
 	Ctx() context.Context
@@ -100,7 +100,7 @@ type CreateCollectionReqTask struct {
 
 7. `RootCoord` would alloc a timestamp from `TSO` before writing `Collection`'s meta into `metaTable`, and this timestamp is considered as the point when the collection was created
 
-8. At last `RoooCoord` will send a message of `CreateCollectionRequest` into `MsgStream`, and other components, who has subscribe to the `MsgStream`, would be notified. The `Proto` of `CreateCollectionRequest` is defined as follow:
+8. At last `RootCoord` will send a message of `CreateCollectionRequest` into `MsgStream`, and other components, who have subscribed to the `MsgStream`, would be notified. The `Proto` of `CreateCollectionRequest` is defined as follow:
 ```proto
 message CreateCollectionRequest {
   common.MsgBase base = 1;
@@ -118,9 +118,9 @@ message CreateCollectionRequest {
 
 ```
 
-9. After all these operations, `RootCoord` would update internal timestamp and return, so the `Proxy` would get the reponse.
+9. After all these operations, `RootCoord` would update internal timestamp and return, so the `Proxy` would get the response.
 
 *Notes:*
-1. In the `Proxy`, all `DDL` requests will be wraped into `task`, and push the `task` into `DdTaskQueue`, the backgroud service will read a new `task` from `DdTaskQueue` only when the previous one is finished. So all the `DDL` requests are executed serially on the `Proxy`
+1. In the `Proxy`, all `DDL` requests will be wrapped into `task`, and push the `task` into `DdTaskQueue`, the background service will read a new `task` from `DdTaskQueue` only when the previous one is finished. So all the `DDL` requests are executed serially on the `Proxy`
 
-2. In the `RootCoord`, all `DDL` requests will be wrapped into `reqTask`, but there is no task queue, so the `DDL` requests will be executed in paralledl on `RootCoord`. 
+2. In the `RootCoord`, all `DDL` requests will be wrapped into `reqTask`, but there is no task queue, so the `DDL` requests will be executed in parallel on `RootCoord`.
