@@ -127,7 +127,6 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
 #ifdef MILVUS_GPU_VERSION
     milvus::knowhere::FaissGpuResourceMgr::GetInstance().Dump();
 #endif
-
 }
 
 TEST_P(IVFNMCPUTest, ivf_slice) {
