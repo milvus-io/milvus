@@ -354,6 +354,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	if enableTtChecker {
 		checker = NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
 		checker.Start()
+		defer checker.Stop()
 	}
 	for {
 		select {
