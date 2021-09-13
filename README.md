@@ -1,35 +1,27 @@
 <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_en_6c5b3a1466.png" alt="milvus banner">
 
-
-
-
 <div class="column" align="middle">
-<a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
-        <img src="https://img.shields.io/badge/Join-Slack-orange" /></a>
-        <img src="https://img.shields.io/github/license/milvus-io/milvus" />
-        <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" />
+  <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
+    <img src="https://img.shields.io/badge/Join-Slack-orange" alt="join-slack"/>
+  </a>
+  <img src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/>
+  <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count" />
 </div>
-
-
-
 
 <div class="column" align="middle">
   <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
-        <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
+    <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
   </a>
   <a href="https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard">
-        <img src="https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95" />
+    <img src="https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95" />
   </a>
 </div>
-
-
 
 ## What is Milvus?
 
 Milvus is an open-source vector database built to power embedding similarity search and AI applications. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
 
 Milvus 2.0 is a cloud-native vector database with storage and computation separated by design. All components in this refactored version of Milvus are stateless to enhance elasticity and flexibility. For more architecture datails, see [Milvus Architecture Overview](https://milvus.io/docs/v2.0.0/architecture_overview.md).
-
 
 Milvus was released under the [open-source Apache License 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) in October 2019. It is currently a graduate project under [LF AI & Data Foundation](https://lfaidata.foundation/).
 
@@ -40,18 +32,15 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
   Average latency measured in milliseconds on trillion vector datasets.
   </details>
 
-
 <details>
   <summary><b>Simplified unstructured data management</b></summary>
   <li>Rich APIs designed for data science workflows.</li><li>Consistent user experience across laptop, local cluster, and cloud.</li><li>Embed real-time search and analytics into virtually any application.</li>
   </details>
 
-
 <details>
   <summary><b>Reliable, always on vector database</b></summary>
   Milvus’ built-in replication and failover/failback features ensure data and applications can maintain business continuity in the event of a disruption.
   </details>
-
 
 <details>
   <summary><b>Highly scalable and elastic</b></summary>
@@ -63,20 +52,15 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
   In addition to vectors, Milvus supports data types such as Boolean, integers, floating-point numbers, and more. A collection in Milvus can hold multiple fields for accommodating different data features or properties. Milvus pairs scalar filtering with powerful vector similarity search to offer a modern, flexible platform for analyzing unstructured data.
   </details>
 
-
 <details>
   <summary><b>Unified Lambda structure</b></summary>
   Milvus combines stream and batch processing for data storage to balance timeliness and efficiency. Its unified interface makes vector similarity search a breeze.
   </details>
 
-
 <details>
   <summary><b>Community supported, industry recognized</b></summary>
   With over 1,000 enterprise users, 7,500+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the <a href="https://lfaidata.foundation/">LF AI & Data Foundation</a>, Milvus has institutional support.
   </details>
-
-
-
 
 ## Quick start
 
@@ -165,11 +149,9 @@ Interactive digital customer service that saves users time and businesses money.
 
 Blazing fast similarity search, substructure search, or superstructure search for a specified molecule.
 
-
 ## Bootcamps
 
 Milvus [bootcamp](https://github.com/milvus-io/bootcamp) are designed to expose users to both the simplicity and depth of the vector database. Discover how to run benchmark tests as well as build similarity search applications spanning chatbots, recommendation systems, reverse image search, molecular search, and much more.
-
 
 ## Contributing
 
@@ -344,14 +326,15 @@ The implemented SDK and its API documentation are listed below:
 - [PyMilvus SDK](https://github.com/milvus-io/pymilvus)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
-### Milvus insight 
-Milvus insight provides an intuitive and efficient GUI for Milvus. 
-- [Quick start](https://github.com/milvus-io/milvus-insight#quick-start)
+### Milvus insight
 
+Milvus insight provides an intuitive and efficient GUI for Milvus.
+
+- [Quick start](https://github.com/milvus-io/milvus-insight#quick-start)
 
 ## Community
 
-Join the Milvus community on [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) to share your suggestions, advice, and questions with our engineering team. 
+Join the Milvus community on [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) to share your suggestions, advice, and questions with our engineering team.
 
 <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
     <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_slack_4a07c4c92f.png" alt="Miluvs Slack Channel"  height="150" width="500">
@@ -388,8 +371,6 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 
-
-
 ## Acknowledgments
 
 Milvus adopts dependencies from the following:
@@ -398,6 +379,3 @@ Milvus adopts dependencies from the following:
 - Thanks to [etcd](https://github.com/coreos/etcd) for providing great open-source key-value store tools.
 - Thanks to [Pulsar](https://github.com/apache/pulsar) for its wonderful distributed pub-sub messaging system.
 - Thanks to [RocksDB](https://github.com/facebook/rocksdb) for the powerful storage engines.
-
-
-

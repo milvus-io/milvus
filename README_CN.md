@@ -1,28 +1,21 @@
 <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_ch_69fbf0fc45.png" alt="Milvus banner">
 
-
-
-
 <div class="column" align="middle">
-<a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
-        <img src="https://img.shields.io/badge/Join-Slack-orange" /></a>
-        <img src="https://img.shields.io/github/license/milvus-io/milvus" />
-        <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" />
+  <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
+    <img src="https://img.shields.io/badge/Join-Slack-orange" alt="join-slack"/>
+  </a>
+  <img src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/>
+  <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count" />
 </div>
-
-
-
 
 <div class="column" align="middle">
   <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
-        <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
+    <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
   </a>
   <a href="https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard">
-        <img src="https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95" />
+    <img src="https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95" />
   </a>
 </div>
-
-
 
 # 欢迎来到 Milvus
 
@@ -31,7 +24,6 @@
 Milvus 是一款全球领先的开源向量数据库，赋能 AI 应用和向量相似度搜索，加速非结构化数据检索。用户在任何部署环境中均可获得始终如一的用户体验。
 
 Milvus 2.0 是一款云原生向量数据库，采用存储与计算分离的架构设计。该重构版本的所有组件均为无状态组件，极大地增强了系统弹性和灵活性。更多系统架构细节，参考 [Milvus 系统架构](https://milvus.io/cn/docs/v2.0.0/architecture_overview.md)。
-
 
 Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/master/LICENSE) 协议发布，于 2019 年 10 月正式开源，是 [LF AI & Data 基金会](https://lfaidata.foundation/) 的毕业项目。
 
@@ -42,18 +34,15 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
   完成万亿条向量数据搜索的平均延迟以毫秒计。
   </details>
 
-
 <details>
   <summary><b>简化的非结构化数据管理</b></summary>
   <li>一整套专为数据科学工作流设计的 API。</li><li>无论是笔记本、本地集群还是云服务器，始终如一的跨平台用户体验。</li><li>可以在任何场景下实现实时搜索与分析。</li>
   </details>
 
-
 <details>
   <summary><b>稳定可靠的用户体验</b></summary>
   Milvus 具有故障转移和故障恢复的机制，即使服务中断，也能确保数据和应用的业务连续性。
   </details>
-
 
 <details>
   <summary><b>高度可扩展，弹性伸缩</b></summary>
@@ -65,19 +54,15 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
   除了向量以外，Milvus还支持布尔值、整型、浮点等数据类型。在 Milvus 中，一个 collection 可以包含多个字段来代表数据特征或属性。Milvus 还支持在向量相似度检索过程中进行标量字段过滤。
   </details>
 
-
 <details>
   <summary><b>基于 Lambda 架构的流批一体式数据存储</b></summary>
   Milvus 在存储数据时支持流处理和批处理两种方式，兼顾了流处理的时效性和批处理的效率。统一的对外接口使得向量相似度查询更为便捷。
   </details>
 
-
 <details>
   <summary><b>广受社区支持和业界认可</b></summary>
   Milvus 项目在 GitHub 上获星超 6000，拥有逾 1000 家企业用户，还有活跃的开源社区。Milvus 由 <a href="https://lfaidata.foundation/">LF AI & Data 基金会</a> 背书，是该基金会的毕业项目。
   </details>
-
-
 
 ## 快速开始
 
@@ -86,7 +71,6 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 - [Standalone Quick Start Guide](https://milvus.io/cn/docs/v2.0.0/install_standalone-docker.md)
 
 - [Cluster Quick Start Guide](https://milvus.io/cn/docs/v2.0.0/install_cluster-docker.md)
-
 
 ### 开发 Milvus
 
@@ -145,8 +129,6 @@ $ make milvus
   </tr>
 </table>
 
-
-
 #### 以图搜图系统
 
 从海量图片中快速检索最相似图片。
@@ -158,8 +140,6 @@ $ make milvus
 #### 分子式检索系统
 
 迅速检索相似化学分子式。
-
-
 
 ## 训练营
 
@@ -336,10 +316,9 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 - [PyMilvus](https://github.com/milvus-io/pymilvus)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
-
 ## 社区
 
-欢迎加入 [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) 频道分享你的建议与问题。你也可以通过 [FAQ](https://milvus.io/cn/docs/v1.0.0/performance_faq.md) 页面，查看常见问题及解答。 
+欢迎加入 [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) 频道分享你的建议与问题。你也可以通过 [FAQ](https://milvus.io/cn/docs/v1.0.0/performance_faq.md) 页面，查看常见问题及解答。
 
 订阅 Milvus 邮件：
 
@@ -374,8 +353,6 @@ Zilliz 是 Milvus 项目的幕后公司。我们正在 [招聘](https://app.moka
 }
 ```
 
-
-
 ## 特别感谢
 
 Milvus 采用了以下依赖库:
@@ -384,4 +361,3 @@ Milvus 采用了以下依赖库:
 - 感谢开源键值存储 [etcd](https://github.com/coreos/etcd)。
 - 感谢分布式信息发布/订阅平台 [Pulsar](https://github.com/apache/pulsar)。
 - 感谢存储引擎 [RocksDB](https://github.com/facebook/rocksdb)。
-
