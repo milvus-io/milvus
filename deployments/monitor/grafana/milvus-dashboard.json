@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1631525922242,
+  "iteration": 1631527447142,
   "links": [],
   "panels": [
     {
@@ -455,6 +455,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -463,6 +464,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3018,6 +3020,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:660",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3026,6 +3029,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:661",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3119,6 +3123,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:584",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3127,6 +3132,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:585",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3682,13 +3688,109 @@
       }
     },
     {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$datasource",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 68
+      },
+      "hiddenSeries": false,
+      "id": 123208,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.5.10",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "histogram_quantile(0.95, sum(rate(pulsar_client_consumer_processing_time_seconds_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[5m])) by (le, topic))",
+          "interval": "",
+          "legendFormat": "{{topic}}",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Pulsar Client Consumer Processing Time",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
       "collapsed": false,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 74
       },
       "id": 123157,
       "panels": [],
@@ -3712,7 +3814,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 69
+        "y": 75
       },
       "hiddenSeries": false,
       "id": 123202,
@@ -3771,6 +3873,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:269",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3779,6 +3882,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:270",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3808,7 +3912,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 69
+        "y": 75
       },
       "hiddenSeries": false,
       "id": 123204,
@@ -3867,6 +3971,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:345",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -3875,6 +3980,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:346",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -3905,7 +4011,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 69
+        "y": 75
       },
       "hiddenSeries": false,
       "id": 123206,
@@ -3964,6 +4070,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:421",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3972,6 +4079,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:422",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4002,7 +4110,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 75
+        "y": 81
       },
       "hiddenSeries": false,
       "id": 123135,
@@ -4097,7 +4205,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 75
+        "y": 81
       },
       "hiddenSeries": false,
       "id": 123133,
@@ -4157,6 +4265,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:92",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4165,6 +4274,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:93",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4195,7 +4305,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 75
+        "y": 81
       },
       "hiddenSeries": false,
       "id": 123125,
@@ -4291,7 +4401,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 81
+        "y": 87
       },
       "hiddenSeries": false,
       "id": 123137,
@@ -4349,6 +4459,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:51",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4357,6 +4468,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:52",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4387,7 +4499,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 81
+        "y": 87
       },
       "hiddenSeries": false,
       "id": 123131,
@@ -4444,6 +4556,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4452,6 +4565,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4482,7 +4596,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 81
+        "y": 87
       },
       "hiddenSeries": false,
       "id": 123127,
@@ -4579,7 +4693,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 87
+        "y": 93
       },
       "hiddenSeries": false,
       "id": 123129,
@@ -4714,8 +4828,8 @@
         "allValue": null,
         "current": {
           "selected": true,
-          "text": "default",
-          "value": "default"
+          "text": "test",
+          "value": "test"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -4744,9 +4858,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
-          "text": "All",
-          "value": "$__all"
+          "selected": true,
+          "text": "my-release",
+          "value": "my-release"
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}, app_kubernetes_io_instance)",
@@ -4775,10 +4889,9 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": "my-release-milvus-datacoord-778bb76bc7-64pxv",
+          "value": "my-release-milvus-datacoord-778bb76bc7-64pxv"
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -4840,5 +4953,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 85
+  "version": 86
 }
