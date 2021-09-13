@@ -128,17 +128,6 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr)
 
-    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_without_connection")
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_without_connect(self, dis_connect, collection):
-        """
-        target: test query without connection
-        method: close connect and query
-        expected: raise exception
-        """
-        with pytest.raises(Exception):
-            dis_connect.query(collection, default_term_expr)
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_invalid_collection_name(self, connect, get_collection_name):
         """
@@ -149,107 +138,6 @@ class TestQueryBase:
         collection_name = get_collection_name
         with pytest.raises(Exception):
             connect.query(collection_name, default_term_expr)
-    
-    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_after_index")
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_after_index(self, connect, collection, get_simple_index):
-        """
-        target: test query after creating index
-        method: query after index
-        expected: query result is correct
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.create_index(collection, ut.default_float_vec_field_name, get_simple_index)
-        connect.load_collection(collection)
-        term_expr = f'{default_int_field_name} in {ids[:default_pos]}'
-        res = connect.query(collection, term_expr, output_fields=["*", "%"])
-        logging.getLogger().info(res)
-        assert len(res) == default_pos
-        for _id, index in enumerate(ids[:default_pos]):
-            if res[index][default_int_field_name] == entities[0]["values"][index]:
-                assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[-1]["values"][index])
-
-    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_after_search")
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_query_after_search(self, connect, collection):
-        """
-        target: test query after search
-        method: query after search
-        expected: query result is correct
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        top_k = 10
-        nq = 2
-        query, _ = ut.gen_query_vectors(ut.default_float_vec_field_name, entities, top_k=top_k, nq=nq)
-        connect.load_collection(collection)
-        search_res = connect.search(collection, query)
-        assert len(search_res) == nq
-        assert len(search_res[0]) == top_k
-        term_expr = f'{default_int_field_name} in {ids[:default_pos]}'
-        res = connect.query(collection, term_expr, output_fields=["*", "%"])
-        logging.getLogger().info(res)
-        assert len(res) == default_pos
-        for _id, index in enumerate(ids[:default_pos]):
-            if res[index][default_int_field_name] == entities[0]["values"][index]:
-                assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
-
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_empty_collection")
-    def test_query_empty_collection(self, connect, collection):
-        """
-        target: test query empty collection
-        method: query on a empty collection
-        expected: query result is empty
-        """
-        connect.load_collection(collection)
-        res = connect.query(collection, default_term_expr)
-        logging.getLogger().info(res)
-        assert len(res) == 0
-
-    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_partition_without_loading")
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_without_loading(self, connect, collection):
-        """
-        target: test query without loading
-        method: no loading before query
-        expected: raise exception
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        with pytest.raises(Exception):
-            connect.query(collection, default_term_expr)
-
-    @pytest.mark.skip(reason="Contained in test_query_20.py::test_query_expr_non_primary_fields")
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_collection_not_primary_key(self, connect, collection):
-        """
-        target: test query on collection that not on the primary field
-        method: 1.create collection with auto_id=True 2.query on the other field
-        expected: exception raised
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.load_collection(collection)
-        term_expr = f'{default_float_field_name} in {entities[:default_pos]}'
-        with pytest.raises(Exception):
-            connect.query(collection, term_expr)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_expr_none(self, connect, collection):
-        """
-        target: test query with none expr
-        method: query with expr None
-        expected: raise exception
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.load_collection(collection)
-        with pytest.raises(Exception):
-            connect.query(collection, None)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("expr", [1, "1", "12-s", "中文", [], {}, ()])
@@ -264,63 +152,6 @@ class TestQueryBase:
         connect.load_collection(collection)
         with pytest.raises(Exception):
             connect.query(collection, expr)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_expr_not_existed_field(self, connect, collection):
-        """
-        target: test query with not existed field
-        method: query by term expr with fake field
-        expected: raise exception
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.load_collection(collection)
-        term_expr = 'field in [1, 2]'
-        with pytest.raises(Exception):
-            connect.query(collection, term_expr)
-
-    # TODO(yukun): "not in" is supported now
-    @pytest.mark.parametrize("expr", [f'{default_int_field_name} inn [1, 2]',
-                                    #   f'{default_int_field_name} not in [1, 2]',
-                                      f'{default_int_field_name} in not [1, 2]'])
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_expr_wrong_term_keyword(self, connect, collection, expr):
-        """
-        target: test query with wrong term expr keyword
-        method: query with wrong keyword term expr
-        expected: raise exception
-        """
-        connect.load_collection(collection)
-        with pytest.raises(Exception):
-            connect.query(collection, expr)
-
-    @pytest.mark.parametrize("expr", [f'{default_int_field_name} in 1',
-                                      f'{default_int_field_name} in "in"',
-                                      f'{default_int_field_name} in (mn)'])
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_expr_non_array_term(self, connect, collection, expr):
-        """
-        target: test query with non-array term expr
-        method: query with non-array term expr
-        expected: raise exception
-        """
-        connect.load_collection(collection)
-        with pytest.raises(Exception):
-            connect.query(collection, expr)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_expr_empty_term_array(self, connect, collection):
-        """
-        target: test query with empty array term expr
-        method: query with empty term expr
-        expected: todo
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.load_collection(collection)
-        term_expr = f'{default_int_field_name} in []'
-        res = connect.query(collection, term_expr)
-        assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_single_term_array(self, connect, collection):
