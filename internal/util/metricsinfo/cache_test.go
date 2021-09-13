@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewMetricsCacheManager(t *testing.T) {
+func Test_NewMetricsCacheManager(t *testing.T) {
 	manager := NewMetricsCacheManager()
 	assert.NotNil(t, manager)
 }

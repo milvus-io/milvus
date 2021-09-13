@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConstructComponentName(t *testing.T) {
+func Test_ConstructComponentName(t *testing.T) {
 	roleList := []string{
 		typeutil.QueryNodeRole,
 	}
