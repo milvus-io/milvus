@@ -35,7 +35,6 @@ jobs:
           python scripts/get_tag.py >> ./${{ matrix.mode }}/logs/test_info.log
           bash test.sh -m ${{ matrix.mode }} -t ${{ matrix.task }} -p ""
 
-
       - name: 'Send mail'
         if: ${{ failure() }}
         uses: dawidd6/action-send-mail@v3
@@ -45,7 +44,7 @@ jobs:
           username: ${{ secrets.TEST_EMAIL_USERNAME }}
           password: ${{ secrets.TEST_EMAIL_PASSWORD  }}
           subject: Deploy Test
-          body: "test ${{ matrix.mode }} ${{ matrix.task }} failed"
+          body: "test ${{ matrix.mode }} ${{ matrix.task }} failed \n You can view it at https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}"
           to: ${{ secrets.QA_EMAIL_ADDRESS }}
           from: GitHub Actions
 
