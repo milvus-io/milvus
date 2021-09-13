@@ -42,7 +42,6 @@ import (
 // common definitions
 const ctxTimeInMillisecond = 5000
 const debug = false
-const runTimeConsumingTest = true
 
 const (
 	dimKey        = "dim"

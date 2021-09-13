@@ -111,21 +111,19 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	if runTimeConsumingTest {
-		t.Run("test get index failed", func(t *testing.T) {
-			historical, err := genSimpleHistorical(ctx)
-			assert.NoError(t, err)
-
-			segment, err := genSimpleSealedSegment()
-			assert.NoError(t, err)
-
-			historical.loader.indexLoader.rootCoord = newMockRootCoord()
-			historical.loader.indexLoader.indexCoord = newMockIndexCoord()
-
-			err = historical.loader.indexLoader.loadIndex(segment, rowIDFieldID)
-			assert.Error(t, err)
-		})
-	}
+	//t.Run("test get index failed", func(t *testing.T) {
+	//	historical, err := genSimpleHistorical(ctx)
+	//	assert.NoError(t, err)
+	//
+	//	segment, err := genSimpleSealedSegment()
+	//	assert.NoError(t, err)
+	//
+	//	historical.loader.indexLoader.rootCoord = newMockRootCoord()
+	//	historical.loader.indexLoader.indexCoord = newMockIndexCoord()
+	//
+	//	err = historical.loader.indexLoader.loadIndex(segment, rowIDFieldID)
+	//	assert.Error(t, err)
+	//})
 
 	t.Run("test checkIndexReady failed", func(t *testing.T) {
 		historical, err := genSimpleHistorical(ctx)

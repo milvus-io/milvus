@@ -17,7 +17,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -99,32 +98,30 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	if runTimeConsumingTest {
-		t.Run("test execute seek error", func(t *testing.T) {
-
-			node, err := genSimpleQueryNode(ctx)
-			assert.NoError(t, err)
-
-			task := watchDmChannelsTask{
-				req:  genWatchDMChannelsRequest(),
-				node: node,
-			}
-			task.req.Infos = []*datapb.VchannelInfo{
-				{
-					CollectionID: defaultCollectionID,
-					ChannelName:  defaultVChannel,
-					SeekPosition: &msgstream.MsgPosition{
-						ChannelName: defaultVChannel,
-						MsgID:       []byte{1, 2, 3},
-						MsgGroup:    defaultSubName,
-						Timestamp:   0,
-					},
-				},
-			}
-			err = task.Execute(ctx)
-			assert.Error(t, err)
-		})
-	}
+	//t.Run("test execute seek error", func(t *testing.T) {
+	//
+	//	node, err := genSimpleQueryNode(ctx)
+	//	assert.NoError(t, err)
+	//
+	//	task := watchDmChannelsTask{
+	//		req:  genWatchDMChannelsRequest(),
+	//		node: node,
+	//	}
+	//	task.req.Infos = []*datapb.VchannelInfo{
+	//		{
+	//			CollectionID: defaultCollectionID,
+	//			ChannelName:  defaultVChannel,
+	//			SeekPosition: &msgstream.MsgPosition{
+	//				ChannelName: defaultVChannel,
+	//				MsgID:       []byte{1, 2, 3},
+	//				MsgGroup:    defaultSubName,
+	//				Timestamp:   0,
+	//			},
+	//		},
+	//	}
+	//	err = task.Execute(ctx)
+	//	assert.Error(t, err)
+	//})
 }
 
 func TestTask_loadSegmentsTask(t *testing.T) {
