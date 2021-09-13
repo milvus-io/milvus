@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestStream_PmsFactory(t *testing.T) {
+func TestPmsFactory(t *testing.T) {
 	pmsFactory := NewPmsFactory()
 
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
@@ -41,7 +41,7 @@ func TestStream_PmsFactory(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestStream_RmsFactory(t *testing.T) {
+func TestRmsFactory(t *testing.T) {
 	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
 	defer os.Unsetenv("ROCKSMQ_PATH")
 
