@@ -87,7 +87,7 @@ class TestFlushBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_partition_flush(self, connect, id_collection):
         '''
-        method: add entities into partition in collection, flush serveral times
+        method: add entities into partition in collection, flush several times
         expected: the length of ids and the collection row count
         '''
         connect.create_partition(id_collection, default_tag)
