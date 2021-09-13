@@ -135,7 +135,7 @@ func (t *timetickSync) RemoveDdlTimeTick(ts typeutil.Timestamp, reason string) {
 				minTs = tt
 			}
 		}
-		t.ddlMinTs = ts
+		t.ddlMinTs = minTs
 		log.Debug("update ddl minTs", zap.Any("minTs", ts))
 	}
 }
