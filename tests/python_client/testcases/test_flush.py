@@ -336,6 +336,11 @@ class TestFlushAsync:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_async_long(self, connect, collection):
+        """
+        target: test async flush
+        method: async flush collection
+        expected: status ok
+        """
         result = connect.insert(collection, default_entities)
         assert len(result.primary_keys) == default_nb
         future = connect.flush([collection], _async=True)
@@ -344,6 +349,11 @@ class TestFlushAsync:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_flush_async_long_drop_collection(self, connect, collection):
+        """
+        target: test drop collection after async flush
+        method: drop collection after async flush collection
+        expected: status ok
+        """
         for i in range(5):
             result = connect.insert(collection, default_entities)
             assert len(result.primary_keys) == default_nb
@@ -355,6 +365,11 @@ class TestFlushAsync:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_flush_async(self, connect, collection):
+        """
+        target: test async flush
+        method: async flush collection with callback
+        expected: status ok
+        """
         connect.insert(collection, default_entities)
         logging.getLogger().info("before")
         future = connect.flush([collection], _async=True, _callback=self.check_status)
@@ -379,6 +394,11 @@ class TestCollectionNameInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_with_invalid_collection_name(self, connect, get_invalid_collection_name):
+        """
+        target: test flush when collection is invalid
+        method: flush collection with invalid name
+        expected: raise exception
+        """
         collection_name = get_invalid_collection_name
         if collection_name is None or not collection_name:
             pytest.skip("while collection_name is None, then flush all collections")
@@ -387,6 +407,11 @@ class TestCollectionNameInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_flush_empty(self, connect, collection):
+        """
+        target: test flush with empty collection list
+        method: flush with empty collection params
+        expected: raise exception
+        """
         result = connect.insert(collection, default_entities)
         assert len(result.primary_keys) == default_nb
         try:
