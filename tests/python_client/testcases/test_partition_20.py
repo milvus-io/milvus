@@ -496,8 +496,6 @@ class TestPartitionOperations(TestcaseBase):
             assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("flush", [True, False])
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop_non_empty_partition(self):
         """
         target: verify drop a partition which has data inserted
@@ -517,10 +515,6 @@ class TestPartitionOperations(TestcaseBase):
 
         # insert data to partition
         partition_w.insert(cf.gen_default_dataframe_data())
-
-        # # flush   remove flush for issue #5837
-        # if flush:
-        #      self._connect().flush([collection_w.name])
 
         # drop partition
         partition_w.drop()
