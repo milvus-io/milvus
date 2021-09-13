@@ -33,6 +33,8 @@ Generally, we follow the "fork-and-pull" Git workflow.
 4.  [Commit](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/committing-changes-to-a-pull-request-branch-created-from-a-fork) changes to your own branch, then push to to GitHub with `git push --set-upstream origin my-topic-branch`. You must record your changes in [CHANGELOG.md](CHANGELOG.md) with issue numbers and descriptions.
 5.  Submit a [pull request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/about-pull-requests) so that we can review your changes.
 
+![](docs/developer_guides/figs/fork-and-pull.png)
+
 Remember to [sync your forked repository](https://docs.github.com/en/github/getting-started-with-github/fork-a-repo#keep-your-fork-synced) *before* submitting proposed changes upstream. If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
 
 ```shell
@@ -41,6 +43,8 @@ git checkout master
 git pull upstream master
 git checkout -b my-topic-branch
 ```
+
+![](docs/developer_guides/figs/local-develop-steps.png)
 
 ### General guidelines
 
