@@ -65,7 +65,7 @@ message AllocTimestampResponse {
 
 This is the format of `Timestamp`
 
-![Timestamp struct](./graphs/time_stamp_struct.png)
+![Timestamp struct](./graphs/time_stamp_struct.jpg)
 
 In an `AllocTimestamp` request, if `AllocTimestampRequest.count` is greater than `1`, `AllocTimestampResponse.timestamp` indicates the first available timestamp in the response.
 
