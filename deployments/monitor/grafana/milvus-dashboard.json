@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1631349762420,
+  "iteration": 1631514378893,
   "links": [],
   "panels": [
     {
@@ -3755,7 +3755,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "CPU Total usage",
+      "title": "CPU Usage Total",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -4659,6 +4659,7 @@
       }
     }
   ],
+  "refresh": false,
   "schemaVersion": 27,
   "style": "dark",
   "tags": [
@@ -4712,9 +4713,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
-          "text": "test",
-          "value": "test"
+          "selected": true,
+          "text": "default",
+          "value": "default"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -4774,9 +4775,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": "my-release-milvus-datacoord-778bb76bc7-64pxv",
-          "value": "my-release-milvus-datacoord-778bb76bc7-64pxv"
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -4805,8 +4807,8 @@
     ]
   },
   "time": {
-    "from": "now-5m",
-    "to": "now"
+    "from": "2021-09-12T11:24:03.543Z",
+    "to": "2021-09-12T18:05:10.396Z"
   },
   "timepicker": {
     "hidden": false,
@@ -4838,5 +4840,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 80
+  "version": 83
 }
