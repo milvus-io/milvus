@@ -9,6 +9,7 @@ import utils
 
 
 def parse_server_tag(server_tag):
+    """ Parse the yaml file configured by the server """
     # tag format: "8c"/"8c16m"/"8c16m1g"
     if server_tag[-1] == "c":
         p = r"(\d+)c"
