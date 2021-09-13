@@ -41,11 +41,6 @@ type getChannelsService interface {
 	GetChannels(collectionID UniqueID) (map[vChan]pChan, error)
 }
 
-// queryCoordShowCollectionsInterface used in searchTask & queryTask
-type queryCoordShowCollectionsInterface interface {
-	ShowCollections(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)
-}
-
 // createQueryChannelInterface defines CreateQueryChannel
 type createQueryChannelInterface interface {
 	CreateQueryChannel(ctx context.Context, request *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error)
