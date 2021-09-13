@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -294,7 +296,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
 	}
 	for _, field := range coll.Schema.Fields {
-		if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserField to replace 100
+		if field.FieldID >= common.StartOfUserFieldID {
 			resp.Schema.Fields = append(resp.Schema.Fields, field)
 		}
 	}

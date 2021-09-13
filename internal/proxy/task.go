@@ -27,6 +27,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -1348,7 +1350,7 @@ type searchTask struct {
 	result    *milvuspb.SearchResults
 	query     *milvuspb.SearchRequest
 	chMgr     channelsMgr
-	qc        types.QueryCoord
+	qc        queryCoordShowCollectionsInterface
 }
 
 func (st *searchTask) TraceCtx() context.Context {
@@ -1385,6 +1387,8 @@ func (st *searchTask) SetTs(ts Timestamp) {
 
 func (st *searchTask) OnEnqueue() error {
 	st.Base = &commonpb.MsgBase{}
+	st.Base.MsgType = commonpb.MsgType_Search
+	st.Base.SourceID = Params.ProxyID
 	return nil
 }
 
@@ -1513,10 +1517,22 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			SearchParams: searchParams,
 		}
 
+		log.Debug("create query plan",
+			//zap.Any("schema", schema),
+			zap.String("dsl", st.query.Dsl),
+			zap.String("anns field", annsField),
+			zap.Any("query info", queryInfo))
+
 		plan, err := CreateQueryPlan(schema, st.query.Dsl, annsField, queryInfo)
 		if err != nil {
-			//return errors.New("invalid expression: " + st.query.Dsl)
-			return err
+			log.Debug("failed to create query plan",
+				zap.Error(err),
+				//zap.Any("schema", schema),
+				zap.String("dsl", st.query.Dsl),
+				zap.String("anns field", annsField),
+				zap.Any("query info", queryInfo))
+
+			return fmt.Errorf("failed to create query plan: %v", err)
 		}
 		for _, name := range st.query.OutputFields {
 			hitField := false
@@ -2686,7 +2702,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
 
 		for _, field := range result.Schema.Fields {
-			if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
+			if field.FieldID >= common.StartOfUserFieldID {
 				dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{
 					FieldID:      field.FieldID,
 					Name:         field.Name,

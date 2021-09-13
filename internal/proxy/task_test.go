@@ -1,10 +1,20 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"math/rand"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/msgstream"
+
+	"github.com/milvus-io/milvus/internal/util/distance"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
@@ -58,6 +68,85 @@ func constructCollectionSchema(
 			pk,
 			fVec,
 		},
+	}
+}
+
+func constructPlaceholderGroup(
+	nq, dim int,
+) *milvuspb.PlaceholderGroup {
+	values := make([][]byte, 0, nq)
+	for i := 0; i < nq; i++ {
+		bs := make([]byte, 0, dim*4)
+		for j := 0; j < dim; j++ {
+			var buffer bytes.Buffer
+			f := rand.Float32()
+			err := binary.Write(&buffer, binary.LittleEndian, f)
+			if err != nil {
+				panic(err)
+			}
+			bs = append(bs, buffer.Bytes()...)
+		}
+		values = append(values, bs)
+	}
+
+	return &milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{
+			{
+				Tag:    "$0",
+				Type:   milvuspb.PlaceholderType_FloatVector,
+				Values: values,
+			},
+		},
+	}
+}
+
+func constructSearchRequest(
+	dbName, collectionName string,
+	expr string,
+	floatVecField string,
+	nq, dim, nprobe, topk int,
+) *milvuspb.SearchRequest {
+	params := make(map[string]string)
+	params["nprobe"] = strconv.Itoa(nprobe)
+	b, err := json.Marshal(params)
+	if err != nil {
+		panic(err)
+	}
+	plg := constructPlaceholderGroup(nq, dim)
+	plgBs, err := proto.Marshal(plg)
+	if err != nil {
+		panic(err)
+	}
+
+	return &milvuspb.SearchRequest{
+		Base:             nil,
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		PartitionNames:   nil,
+		Dsl:              expr,
+		PlaceholderGroup: plgBs,
+		DslType:          commonpb.DslType_BoolExprV1,
+		OutputFields:     nil,
+		SearchParams: []*commonpb.KeyValuePair{
+			{
+				Key:   MetricTypeKey,
+				Value: distance.L2,
+			},
+			{
+				Key:   SearchParamsKey,
+				Value: string(b),
+			},
+			{
+				Key:   AnnsFieldKey,
+				Value: floatVecField,
+			},
+			{
+				Key:   TopKKey,
+				Value: strconv.Itoa(topk),
+			},
+		},
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
@@ -668,6 +757,7 @@ func TestCreateCollectionTask(t *testing.T) {
 
 	rc := NewRootCoordMock()
 	rc.Start()
+	defer rc.Stop()
 	ctx := context.Background()
 	shardsNum := int32(2)
 	prefix := "TestCreateCollectionTask"
@@ -904,6 +994,7 @@ func TestDropCollectionTask(t *testing.T) {
 	Params.Init()
 	rc := NewRootCoordMock()
 	rc.Start()
+	defer rc.Stop()
 	ctx := context.Background()
 	InitMetaCache(rc)
 
@@ -988,6 +1079,7 @@ func TestHasCollectionTask(t *testing.T) {
 	Params.Init()
 	rc := NewRootCoordMock()
 	rc.Start()
+	defer rc.Stop()
 	ctx := context.Background()
 	InitMetaCache(rc)
 	prefix := "TestHasCollectionTask"
@@ -1069,6 +1161,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	Params.Init()
 	rc := NewRootCoordMock()
 	rc.Start()
+	defer rc.Stop()
 	ctx := context.Background()
 	InitMetaCache(rc)
 	prefix := "TestDescribeCollectionTask"
@@ -1120,6 +1213,7 @@ func TestCreatePartitionTask(t *testing.T) {
 	Params.Init()
 	rc := NewRootCoordMock()
 	rc.Start()
+	defer rc.Stop()
 	ctx := context.Background()
 	prefix := "TestCreatePartitionTask"
 	dbName := ""
@@ -1166,6 +1260,7 @@ func TestDropPartitionTask(t *testing.T) {
 	Params.Init()
 	rc := NewRootCoordMock()
 	rc.Start()
+	defer rc.Stop()
 	ctx := context.Background()
 	prefix := "TestDropPartitionTask"
 	dbName := ""
@@ -1212,6 +1307,7 @@ func TestHasPartitionTask(t *testing.T) {
 	Params.Init()
 	rc := NewRootCoordMock()
 	rc.Start()
+	defer rc.Stop()
 	ctx := context.Background()
 	prefix := "TestHasPartitionTask"
 	dbName := ""
@@ -1258,6 +1354,7 @@ func TestShowPartitionsTask(t *testing.T) {
 	Params.Init()
 	rc := NewRootCoordMock()
 	rc.Start()
+	defer rc.Stop()
 	ctx := context.Background()
 	prefix := "TestShowPartitionsTask"
 	dbName := ""
@@ -1307,4 +1404,203 @@ func TestShowPartitionsTask(t *testing.T) {
 	err = task.Execute(ctx)
 	assert.NotNil(t, err)
 
+}
+
+func TestSearchTask_all(t *testing.T) {
+	var err error
+
+	Params.Init()
+	Params.SearchResultChannelNames = []string{funcutil.GenRandomStr()}
+
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+
+	ctx := context.Background()
+
+	err = InitMetaCache(rc)
+	assert.NoError(t, err)
+
+	shardsNum := int32(2)
+	prefix := "TestSearchTask_all"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	int64Field := "int64"
+	floatVecField := "fvec"
+	dim := 128
+	expr := fmt.Sprintf("%s > 0", int64Field)
+	nq := 10
+	topk := 10
+	nprobe := 10
+
+	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColT := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+			ShardsNum:      shardsNum,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+		schema:    nil,
+	}
+
+	assert.NoError(t, createColT.OnEnqueue())
+	assert.NoError(t, createColT.PreExecute(ctx))
+	assert.NoError(t, createColT.Execute(ctx))
+	assert.NoError(t, createColT.PostExecute(ctx))
+
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	query := newMockGetChannelsService()
+	factory := newSimpleMockMsgStreamFactory()
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, query.GetChannels, nil, factory)
+	defer chMgr.removeAllDMLStream()
+	defer chMgr.removeAllDQLStream()
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	assert.NoError(t, err)
+
+	qc := newMockQueryCoordShowCollectionsInterface()
+	qc.addCollection(collectionID, 100)
+
+	req := constructSearchRequest(dbName, collectionName,
+		expr,
+		floatVecField,
+		nq, dim, nprobe, topk)
+
+	task := &searchTask{
+		Condition: NewTaskCondition(ctx),
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Search,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  Params.ProxyID,
+			},
+			ResultChannelID:    strconv.FormatInt(Params.ProxyID, 10),
+			DbID:               0,
+			CollectionID:       0,
+			PartitionIDs:       nil,
+			Dsl:                "",
+			PlaceholderGroup:   nil,
+			DslType:            0,
+			SerializedExprPlan: nil,
+			OutputFieldsId:     nil,
+			TravelTimestamp:    0,
+			GuaranteeTimestamp: 0,
+		},
+		ctx:       ctx,
+		resultBuf: make(chan []*internalpb.SearchResults),
+		result:    nil,
+		query:     req,
+		chMgr:     chMgr,
+		qc:        qc,
+	}
+
+	// simple mock for query node
+	// TODO(dragondriver): should we replace this mock using RocksMq or MemMsgStream?
+
+	err = chMgr.createDQLStream(collectionID)
+	assert.NoError(t, err)
+	stream, err := chMgr.getDQLStream(collectionID)
+	assert.NoError(t, err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	consumeCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-consumeCtx.Done():
+				return
+			case pack := <-stream.Chan():
+				for _, msg := range pack.Msgs {
+					_, ok := msg.(*msgstream.SearchMsg)
+					assert.True(t, ok)
+					// TODO(dragondriver): construct result according to the request
+
+					constructSearchResulstData := func() *schemapb.SearchResultData {
+						resultData := &schemapb.SearchResultData{
+							NumQueries: int64(nq),
+							TopK:       int64(topk),
+							FieldsData: nil,
+							Scores:     make([]float32, nq*topk),
+							Ids: &schemapb.IDs{
+								IdField: &schemapb.IDs_IntId{
+									IntId: &schemapb.LongArray{
+										Data: make([]int64, nq*topk),
+									},
+								},
+							},
+							Topks: make([]int64, nq),
+						}
+
+						// ids := make([]int64, topk)
+						// for i := 0; i < topk; i++ {
+						// 	ids[i] = int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+						// }
+
+						for i := 0; i < nq; i++ {
+							for j := 0; j < topk; j++ {
+								offset := i*topk + j
+								score := rand.Float32()
+								id := int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+								resultData.Scores[offset] = score
+								resultData.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data[offset] = id
+							}
+							resultData.Topks[i] = int64(topk)
+						}
+
+						return resultData
+					}
+
+					result1 := &internalpb.SearchResults{
+						Base: &commonpb.MsgBase{
+							MsgType:   commonpb.MsgType_SearchResult,
+							MsgID:     0,
+							Timestamp: 0,
+							SourceID:  0,
+						},
+						Status: &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_Success,
+							Reason:    "",
+						},
+						ResultChannelID:          "",
+						MetricType:               distance.L2,
+						NumQueries:               int64(nq),
+						TopK:                     int64(topk),
+						SealedSegmentIDsSearched: nil,
+						ChannelIDsSearched:       nil,
+						GlobalSealedSegmentIDs:   nil,
+						SlicedBlob:               nil,
+						SlicedNumCount:           1,
+						SlicedOffset:             0,
+					}
+					resultData := constructSearchResulstData()
+					sliceBlob, err := proto.Marshal(resultData)
+					assert.NoError(t, err)
+					result1.SlicedBlob = sliceBlob
+
+					// send search result
+					task.resultBuf <- []*internalpb.SearchResults{result1}
+				}
+			}
+		}
+	}()
+
+	assert.NoError(t, task.OnEnqueue())
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.NoError(t, task.PostExecute(ctx))
+
+	cancel()
+	wg.Wait()
 }
