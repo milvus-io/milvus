@@ -75,3 +75,33 @@ func TestGetAttrByKeyFromRepeatedKV(t *testing.T) {
 		assert.Equal(t, test.errIsNil, err == nil)
 	}
 }
+
+func TestUtil(t *testing.T) {
+	a, b := 1, 2
+	t.Run("getMax", func(t *testing.T) {
+		ans := getMax(a, b)
+		assert.Equal(t, b, ans)
+
+		ans = getMax(b, a)
+		assert.Equal(t, b, ans)
+	})
+
+	t.Run("getMin", func(t *testing.T) {
+		ans := getMin(a, b)
+		assert.Equal(t, a, ans)
+
+		ans = getMin(b, a)
+		assert.Equal(t, a, ans)
+	})
+}
+
+func TestGetPulsarConfig_Error(t *testing.T) {
+	protocol := "http"
+	ip := "pulsar"
+	port := "17777"
+	url := "/admin/v2/brokers/configuration/runtime"
+
+	ret, err := GetPulsarConfig(protocol, ip, port, url)
+	assert.NotNil(t, err)
+	assert.Nil(t, ret)
+}
