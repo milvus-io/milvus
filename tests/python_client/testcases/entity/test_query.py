@@ -128,6 +128,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr)
 
+    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_without_connection")
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_without_connect(self, dis_connect, collection):
         """
@@ -149,6 +150,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection_name, default_term_expr)
     
+    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_after_index")
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_after_index(self, connect, collection, get_simple_index):
         """
@@ -169,6 +171,7 @@ class TestQueryBase:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[-1]["values"][index])
 
+    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_after_search")
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_after_search(self, connect, collection):
         """
@@ -195,6 +198,7 @@ class TestQueryBase:
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_empty_collection")
     def test_query_empty_collection(self, connect, collection):
         """
         target: test query empty collection
@@ -206,6 +210,7 @@ class TestQueryBase:
         logging.getLogger().info(res)
         assert len(res) == 0
 
+    @pytest.mark.skip(reason="Repeat with test_query_20.py::test_query_partition_without_loading")
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_without_loading(self, connect, collection):
         """
@@ -218,6 +223,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr)
 
+    @pytest.mark.skip(reason="Contained in test_query_20.py::test_query_expr_non_primary_fields")
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_collection_not_primary_key(self, connect, collection):
         """
