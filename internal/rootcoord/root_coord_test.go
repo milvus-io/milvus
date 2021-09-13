@@ -406,7 +406,7 @@ type loadPrefixFailKV struct {
 
 // LoadWithPrefix override behavior
 func (kv *loadPrefixFailKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	return []string{}, []string{}, retry.NoRetryError(errors.New("mocked fail"))
+	return []string{}, []string{}, retry.Unrecoverable(errors.New("mocked fail"))
 }
 
 func TestRootCoordInit(t *testing.T) {
@@ -441,7 +441,7 @@ func TestRootCoordInit(t *testing.T) {
 	err = core.Register()
 	assert.Nil(t, err)
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
-		return nil, retry.NoRetryError(errors.New("injected"))
+		return nil, retry.Unrecoverable(errors.New("injected"))
 	}
 	err = core.Init()
 	assert.NotNil(t, err)
@@ -459,7 +459,7 @@ func TestRootCoordInit(t *testing.T) {
 	assert.Nil(t, err)
 	core.kvBaseCreate = func(root string) (kv.TxnKV, error) {
 		if root == Params.MetaRootPath {
-			return nil, retry.NoRetryError(errors.New("injected"))
+			return nil, retry.Unrecoverable(errors.New("injected"))
 		}
 		return memkv.NewMemoryKV(), nil
 	}
