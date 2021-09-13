@@ -203,7 +203,7 @@ func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64,
 	return fg, inputChan, outputChan, cancel
 }
 
-func TestTimeTickedFlowGraphAddNode(t *testing.T) {
+func TestTimeTickedFlowGraph_AddNode(t *testing.T) {
 	const MaxQueueLength = 1024
 	inputChan := make(chan float64, MaxQueueLength)
 
@@ -227,7 +227,7 @@ func TestTimeTickedFlowGraphAddNode(t *testing.T) {
 	assert.Equal(t, len(fg.nodeCtx), 2)
 }
 
-func TestTimeTickedFlowGraphSetEdges(t *testing.T) {
+func TestTimeTickedFlowGraph_SetEdges(t *testing.T) {
 	const MaxQueueLength = 1024
 	inputChan := make(chan float64, MaxQueueLength)
 
@@ -279,7 +279,7 @@ func TestTimeTickedFlowGraphSetEdges(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestTimeTickedFlowGraphStart(t *testing.T) {
+func TestTimeTickedFlowGraph_Start(t *testing.T) {
 	fg, inputChan, outputChan, cancel := createExampleFlowGraph()
 	defer cancel()
 	go fg.Start()
@@ -300,7 +300,7 @@ func TestTimeTickedFlowGraphStart(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 }
 
-func TestTimeTickedFlowGraphClose(t *testing.T) {
+func TestTimeTickedFlowGraph_Close(t *testing.T) {
 	fg, _, _, cancel := createExampleFlowGraph()
 	defer cancel()
 	fg.Close()
