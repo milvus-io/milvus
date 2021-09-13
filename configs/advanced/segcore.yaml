@@ -10,5 +10,5 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 segcore:
-  chunk_size: 32768
+  chunk_size: 32768 # 32M
 
