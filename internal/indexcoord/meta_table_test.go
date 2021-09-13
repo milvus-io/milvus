@@ -76,6 +76,14 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
+	t.Run("GetIndexMetaByIndexBuildID", func(t *testing.T) {
+		indexMeta := metaTable.GetIndexMetaByIndexBuildID(1)
+		assert.NotNil(t, indexMeta)
+
+		indexMeta2 := metaTable.GetIndexMetaByIndexBuildID(20)
+		assert.Nil(t, indexMeta2)
+	})
+
 	t.Run("BuildIndex", func(t *testing.T) {
 		err = metaTable.BuildIndex(UniqueID(4), 1)
 		assert.NotNil(t, err)

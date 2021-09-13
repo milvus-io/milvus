@@ -14,6 +14,7 @@ package indexnode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -79,10 +80,14 @@ func (inm *Mock) buildIndexTask() {
 			indexMeta.State = commonpb.IndexState_Failed
 			_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
 				proto.MarshalTextString(&indexMeta))
-			indexMeta.Version = indexMeta.Version + 1
-			indexMeta.State = commonpb.IndexState_Finished
-			_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0]+1,
-				proto.MarshalTextString(&indexMeta))
+			indexMeta2 := indexpb.IndexMeta{}
+			_, values2, versions2, _ := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
+			_ = proto.UnmarshalText(values2[0], &indexMeta2)
+			indexMeta2.Version = indexMeta.Version + 1
+			indexMeta2.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
+			indexMeta2.State = commonpb.IndexState_Finished
+			_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions2[0],
+				proto.MarshalTextString(&indexMeta2))
 		}
 	}
 }
@@ -91,6 +96,7 @@ func (inm *Mock) Start() error {
 	if inm.Err {
 		return errors.New("IndexNode start failed")
 	}
+	fmt.Println("haha")
 	inm.wg.Add(1)
 	go inm.buildIndexTask()
 	return nil
