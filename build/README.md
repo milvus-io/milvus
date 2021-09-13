@@ -92,20 +92,22 @@ Creating milvus_ubuntu_1 ... done
 Check running state of Dev Container:
 
 ```shell
-docker ps
+$ docker-compose -f docker-compose-devcontainer.yml ps
 
-CONTAINER ID        IMAGE                                                               COMMAND                  CREATED             STATUS                             PORTS                                                                NAMES
-8835ee913953        quay.io/coreos/etcd:v3.4.13                                         "etcd -advertise-cli…"   30 seconds ago      Up 29 seconds                      2379-2380/tcp                                                        milvus-distributed_etcd_1
-3bd7912f5e98        milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-20201209-104246   "autouseradd --user …"   30 seconds ago      Up 29 seconds                      22/tcp, 7777/tcp                                                     milvus-distributed_ubuntu_1
-9fa983091d3d        apachepulsar/pulsar:2.6.1                                           "bin/pulsar standalo…"   30 seconds ago      Up 29 seconds                                                                                           milvus-distributed_pulsar_1
-80687651517b        jaegertracing/all-in-one:latest                                     "/go/bin/all-in-one-…"   30 seconds ago      Up 29 seconds                      5775/udp, 5778/tcp, 14250/tcp, 14268/tcp, 6831-6832/udp, 16686/tcp   milvus-distributed_jaeger_1
-22190b591d74        minio/minio:RELEASE.2020-12-03T00-03-10Z     
+      Name                    Command                  State                                      Ports
+---------------------------------------------------------------------------------------------------------------------------------------
+milvus_builder_1   /tini -- autouseradd --use ...   Up
+milvus_etcd_1      etcd -advertise-client-url ...   Up             2379/tcp, 2380/tcp
+milvus_jaeger_1    /go/bin/all-in-one-linux         Up             14250/tcp, 14268/tcp, 16686/tcp, 5775/udp, 5778/tcp, 6831/udp,
+                                                                   6832/udp
+milvus_minio_1     /usr/bin/docker-entrypoint ...   Up (healthy)   9000/tcp
+milvus_pulsar_1    bin/pulsar standalone --no ...   Up
 ```
 
-3bd7912f5e98 is the docker of milvus dev, other containers are used as unit test dependencies. you can run compile and unit inside the container, enter it:
+`milvus_builder_1` is the docker of milvus dev, other containers are used as unit test dependencies. you can run compile and unit inside the container, enter it:
 
 ```shell
-docker exec -ti 3bd7912f5e98 bash
+docker exec -ti milvus_builder_1 bash
 ```
 
 Compile the project and run unit test, see details at the DEVELOPMENT.md
@@ -121,7 +123,7 @@ make unittest
 Stop Dev Container 
 
 ```shell
-./scripts/devcontainer.sh down # close Dev container
+./scripts/devcontainer.sh down        # close Dev container
 ```
 
 ## E2E Tests
