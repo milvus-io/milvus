@@ -1,11 +1,23 @@
 # Timesync -- All The things you should know
 
-`Time Synchronization` is the core part of `Milvus 2.0`, it affects all components of the system. This article describes the desgin detail of `Time Synchronization`.
+`Time Synchronization` is the kernel part of Milvus 2.0, it affects all components of the system. This document describes the detailed desgin of `Time Synchronization`.
 
-In the `Milvus 2.0`, all events (such as `Create Collection`, `Insert`, `Search`, `Drop Collection`, etc.) have a `Timestamp` to indicate when does this event occurred.
+There are 2 kinds of events in Milvus 2.0:
+- DDL events
+  - create collection
+  - drop collection
+  - create partition
+  - drop partition
+- DML events
+  - insert
+  - search
+  - etc
+    
+All events have a `Timestamp` to indicate when this event occurs.
 
-Suppose there are two users, `u1` and `u2`, have connected to the `Milvus`, and do the following actions at their respective timestamp.
-| timestamp | u1                   | u2           |
+Suppose there are two users, `u1` and `u2`. They connect to Milvus, and do following operations at respective timestamps.
+
+| ts        | u1                   | u2           |
 |-----------|----------------------|--------------|
 | t0        | create Collection C0 | -            |
 | t2        | -                    | search on C0 |
@@ -16,10 +28,12 @@ Suppose there are two users, `u1` and `u2`, have connected to the `Milvus`, and 
 | t15       | delete A1 from C0    | -            |
 | t17       | -                    | search on C0 | 
 
-Ideally, `u2` expects `C0` is empty when it searches at `t2`, and could only sees `A1` at `t7`; at `t12` , the search from `u2` could sees both `A1` and `A2`, but only sees `A2` at `t17`. It's much easier to achieve these targets in `single-node` database. But for `Distributed System` , such like `Milvus`,  it's a little difficult, and the following problems needs to be solved.
+Ideally, `u2` expects `C0` is empty at `t2`, and could only sees `A1` at `t7`; while `u2` could see both `A1` and `A2` at `t12`, but only see `A2` at `t17`.
 
-1. If `u1` and `u2` are on different nodes, and their time is not synchronized. To give an extreme example, suppose that the time of `u2` is 24 hours later than `u1`, then all the operations of `u1` can't been seen by `u2` until next day.
-2. Network latency. If `u2` starts the `Search on C0` at `t17`, then how to ensure that all the `events` before `t17` have been processed. If the envents of `delete A1 from C0` has been delayed dure to the network latency, then it would lead to incorrect state: `u2` would see both `A1` and `A2` at `t17`.
+It's easy to achieve this in a `single-node` database. But for a `Distributed System`, such like `Milvus`, it's a little difficult, following problems needs to be solved.
+
+1. If `u1` and `u2` are on different nodes, and their time clock is not synchronized. To give an extreme example, suppose that the time of `u2` is 24 hours later than `u1`, then all the operations of `u1` can't been seen by `u2` until next day.
+2. Network latency. If `u2` starts the `Search on C0` at `t17`, then how to guarantee that all the `events` before `t17` have been processed. If the events of `delete A1 from C0` has been delayed due to the network latency, then it would lead to incorrect state: `u2` would see both `A1` and `A2` at `t17`.
 
 `Time synchronization system` is used to solve the above problems.
 
