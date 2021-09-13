@@ -87,7 +87,7 @@ class TestFlushBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_partition_flush(self, connect, id_collection):
         '''
-        method: add entities into partition in collection, flush serveral times
+        method: add entities into partition in collection, flush several times
         expected: the length of ids and the collection row count
         '''
         connect.create_partition(id_collection, default_tag)
@@ -173,7 +173,7 @@ class TestFlushBase:
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_flush_multiable_times(self, connect, collection):
         '''
-        method: add entities, flush serveral times
+        method: add entities, flush several times
         expected: no error raised
         '''
         result = connect.insert(collection, default_entities)
@@ -237,7 +237,7 @@ class TestFlushBase:
     @pytest.mark.tags(CaseLabel.L0)
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
-        method: delete entities, flush serveral times
+        method: delete entities, flush several times
         expected: no error raised
         '''
         result = connect.insert(collection, default_entities)
