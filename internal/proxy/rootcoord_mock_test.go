@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"go.uber.org/zap"
@@ -67,6 +69,16 @@ type partitionMap struct {
 	partitionID2Meta map[typeutil.UniqueID]partitionMeta
 }
 
+type RootCoordMockOption func(mock *RootCoordMock)
+
+type describeCollectionFuncType func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+
+func SetDescribeCollectionFunc(f describeCollectionFuncType) RootCoordMockOption {
+	return func(mock *RootCoordMock) {
+		mock.SetDescribeCollectionFunc(f)
+	}
+}
+
 type RootCoordMock struct {
 	nodeID  typeutil.UniqueID
 	address string
@@ -84,6 +96,8 @@ type RootCoordMock struct {
 	// TODO(dragondriver): need default partition?
 	collID2Partitions map[typeutil.UniqueID]partitionMap
 	partitionMtx      sync.RWMutex
+
+	describeCollectionFunc describeCollectionFuncType
 
 	// TODO(dragondriver): index-related
 
@@ -205,6 +219,9 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 			Reason:    fmt.Sprintf("failed to parse schema, error: %v", err),
 		}, nil
 	}
+	for i := range schema.Fields {
+		schema.Fields[i].FieldID = int64(common.StartOfUserFieldID + i)
+	}
 
 	collID := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	coord.collName2ID[req.CollectionName] = collID
@@ -311,6 +328,14 @@ func (coord *RootCoordMock) HasCollection(ctx context.Context, req *milvuspb.Has
 	}, nil
 }
 
+func (coord *RootCoordMock) SetDescribeCollectionFunc(f describeCollectionFuncType) {
+	coord.describeCollectionFunc = f
+}
+
+func (coord *RootCoordMock) ResetDescribeCollectionFunc(f describeCollectionFuncType) {
+	coord.describeCollectionFunc = nil
+}
+
 func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	code := coord.state.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -323,6 +348,11 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 			CollectionID: 0,
 		}, nil
 	}
+
+	if coord.describeCollectionFunc != nil {
+		return coord.describeCollectionFunc(ctx, req)
+	}
+
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
@@ -828,8 +858,8 @@ func (coord *RootCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMet
 	}, nil
 }
 
-func NewRootCoordMock() *RootCoordMock {
-	return &RootCoordMock{
+func NewRootCoordMock(opts ...RootCoordMockOption) *RootCoordMock {
+	rc := &RootCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 		address:           funcutil.GenRandomStr(), // TODO(dragondriver): random address
 		statisticsChannel: funcutil.GenRandomStr(),
@@ -839,4 +869,10 @@ func NewRootCoordMock() *RootCoordMock {
 		collID2Partitions: make(map[typeutil.UniqueID]partitionMap),
 		lastTs:            typeutil.Timestamp(time.Now().UnixNano()),
 	}
+
+	for _, opt := range opts {
+		opt(rc)
+	}
+
+	return rc
 }

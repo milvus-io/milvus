@@ -313,7 +313,7 @@ from each task concurrently.
 
 The following figure is a schematic diagram of taskScheduer's scheduling of DqQueue.
 
-![task_scheduler_1](./graphs/task_scheduler_1.png)
+![task_scheduler_1](./graphs/task_scheduler_2.png)
 
 The tasks in DqQueue can be scheduled in parallel. In a scheduling process, taskScheduler will execute several tasks
 concurrently.

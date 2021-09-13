@@ -9,9 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package rootcoord
-
-import "github.com/milvus-io/milvus/internal/common"
+package common
 
 // system filed id:
 // 0: unique row id
@@ -21,9 +19,9 @@ import "github.com/milvus-io/milvus/internal/common"
 // 102: ...
 
 const (
-	StartOfUserFieldID = common.StartOfUserFieldID
-	RowIDField         = common.RowIDField
-	TimeStampField     = common.TimeStampField
-	RowIDFieldName     = common.RowIDFieldName
-	TimeStampFieldName = common.TimeStampFieldName
+	StartOfUserFieldID = 100
+	RowIDField         = 0
+	TimeStampField     = 1
+	RowIDFieldName     = "RowID"
+	TimeStampFieldName = "Timestamp"
 )
