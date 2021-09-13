@@ -161,3 +161,12 @@ func IsFloatingType(dataType schemapb.DataType) bool {
 		return false
 	}
 }
+
+func IsBoolType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Bool:
+		return true
+	default:
+		return false
+	}
+}
