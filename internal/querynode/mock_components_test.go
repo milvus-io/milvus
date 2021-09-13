@@ -127,8 +127,8 @@ func (m *mockRootCoord) DescribeSegment(ctx context.Context, req *milvuspb.Descr
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		IndexID:     int64(0),
-		BuildID:     int64(0),
+		IndexID:     indexID,
+		BuildID:     buildID,
 		EnableIndex: true,
 	}, nil
 }
@@ -201,7 +201,7 @@ func (m *mockIndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.Get
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
-				IndexBuildID:   int64(0),
+				IndexBuildID:   buildID,
 				IndexFilePaths: paths,
 			},
 		},
