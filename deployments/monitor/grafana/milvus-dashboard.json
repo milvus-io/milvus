@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1631514378893,
+  "iteration": 1631525922242,
   "links": [],
   "panels": [
     {
@@ -4376,7 +4376,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "GC max duration_seconds",
+      "description": "GC Max duration seconds",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -4428,7 +4428,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "GC max duration_seconds",
+      "title": "GC Max duration seconds",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -4807,8 +4807,8 @@
     ]
   },
   "time": {
-    "from": "2021-09-12T11:24:03.543Z",
-    "to": "2021-09-12T18:05:10.396Z"
+    "from": "now-5m",
+    "to": "now"
   },
   "timepicker": {
     "hidden": false,
@@ -4840,5 +4840,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 83
+  "version": 85
 }
