@@ -319,7 +319,7 @@ size_t ranklist_intersection_size (size_t k1, const int64_t *v1,
         }
         k2 = wp;
     }
-    const int64_t seen_flag = 1L << 60;
+    const int64_t seen_flag = 1LL << 60;
     size_t count = 0;
     for (size_t i = 0; i < k1; i++) {
         int64_t q = v1 [i];

@@ -15,7 +15,7 @@ namespace faiss {
 inline BitstringWriter::BitstringWriter(uint8_t *code, int code_size):
     code (code), code_size (code_size), i(0)
 {
-    bzero (code, code_size);
+    memset (code, 0, code_size);
 }
 
 inline void BitstringWriter::write(uint64_t x, int nbit) {

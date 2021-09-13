@@ -207,7 +207,7 @@ install(
 )
 
 install(
-        FILES ${CMAKE_BINARY_DIR}/src/segcore/libmilvus_segcore.so
+	FILES ${CMAKE_BINARY_DIR}/src/segcore/libmilvus_segcore${CMAKE_SHARED_LIBRARY_SUFFIX}
         DESTINATION lib
 )
 
@@ -218,8 +218,7 @@ install(
         FILES_MATCHING PATTERN "*_c.h"
 )
 
-install(
-        FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder.so
+install(FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder${CMAKE_SHARED_LIBRARY_SUFFIX}
         DESTINATION lib
 )
 
