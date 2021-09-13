@@ -8,6 +8,7 @@ from scale import scale_common as sc
 
 
 class HelmEnv:
+    milvus_chart_path = sc.get_milvus_chart_env_var()
 
     def __init__(self, release_name=None, **kwargs):
         self.release_name = release_name if release_name else cf.gen_unique_str("scale")
@@ -15,7 +16,6 @@ class HelmEnv:
         self.data_node = kwargs.get(constants.DATA_NODE, 1)
         self.index_node = kwargs.get(constants.INDEX_NODE, 1)
         self.query_node = kwargs.get(constants.QUERY_NODE, 1)
-        self.milvus_chart_path = sc.get_milvus_chart_env_var()
 
     def helm_install_cluster_milvus(self, image_pull_policy=constants.IF_NOT_PRESENT):
         """
