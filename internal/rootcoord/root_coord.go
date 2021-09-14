@@ -340,6 +340,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 						}
 					}
 					for _, idxInfo := range indexInfos {
+						/* #nosec G601 */
 						field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
 						if err != nil {
 							log.Debug("GetFieldSchemaByID",
