@@ -40,6 +40,7 @@ func newAllocator(s types.RootCoord) *allocator {
 	}
 }
 
+// allocID allocat one ID from rootCoord
 func (alloc *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
 	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
