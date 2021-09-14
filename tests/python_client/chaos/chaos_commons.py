@@ -9,13 +9,13 @@ from utils.util_log import test_log as log
 
 def check_config(chaos_config):
     if not chaos_config.get('kind', None):
-        raise Exception("kind is must be specified")
+        raise Exception("kind must be specified")
     if not chaos_config.get('spec', None):
-        raise Exception("spec is must be specified")
+        raise Exception("spec must be specified")
     if "action" not in chaos_config.get('spec', None):
-        raise Exception("action is must be specified in spec")
+        raise Exception("action must be specified in spec")
     if "selector" not in chaos_config.get('spec', None):
-        raise Exception("selector is must be specified in spec")
+        raise Exception("selector must be specified in spec")
     return True
 
 
