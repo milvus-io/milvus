@@ -12,3 +12,6 @@ filters:
       - zwd1208
     approvers:
       - pr-inspection
+  "go\\.(mod|sum)$":
+    labels:
+      - area/dependency
