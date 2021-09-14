@@ -33,16 +33,6 @@ pull_request_rules:
         add:
           - ci-passed
 
-#  - name: Test passed for tests20 changed
-#    conditions:
-#      - base=master
-#      - -files~=^(?!tests20\/python_client).+
-#      - "status-success=continuous-integration/jenkins/pr-merge"
-#    actions:
-#      label:
-#        add:
-#          - ci-passed
-
   - name: Test passed for document changed
     conditions:
       - base=master
