@@ -13,18 +13,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-
-	"github.com/milvus-io/milvus/internal/msgstream"
-
-	"github.com/milvus-io/milvus/internal/util/distance"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 	"github.com/stretchr/testify/assert"
@@ -1210,6 +1208,129 @@ func TestDescribeCollectionTask(t *testing.T) {
 	err = task.Execute(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
+}
+
+func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
+	Params.Init()
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	ctx := context.Background()
+	InitMetaCache(rc)
+	prefix := "TestDescribeCollectionTask"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	shardsNum := int32(2)
+	int64Field := "int64"
+	floatVecField := "fvec"
+	dim := 128
+
+	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      shardsNum,
+	}
+
+	rc.CreateCollection(ctx, createColReq)
+	globalMetaCache.GetCollectionID(ctx, collectionName)
+
+	//CreateCollection
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     100,
+				Timestamp: 100,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+	}
+	err = task.PreExecute(ctx)
+	assert.Nil(t, err)
+
+	err = task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	assert.Equal(t, shardsNum, task.result.ShardsNum)
+
+}
+
+func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
+	Params.Init()
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	ctx := context.Background()
+	InitMetaCache(rc)
+	prefix := "TestDescribeCollectionTask"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	int64Field := "int64"
+	floatVecField := "fvec"
+	dim := 128
+
+	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+	}
+
+	rc.CreateCollection(ctx, createColReq)
+	globalMetaCache.GetCollectionID(ctx, collectionName)
+
+	//CreateCollection
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     100,
+				Timestamp: 100,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+	}
+	task.PreExecute(ctx)
+
+	// missing collectionID in globalMetaCache
+	err = task.Execute(ctx)
+	assert.Nil(t, err)
+
+	err = task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	assert.Equal(t, common.DefaultShardsNum, task.result.ShardsNum)
+	rc.Stop()
 }
 
 func TestCreatePartitionTask(t *testing.T) {

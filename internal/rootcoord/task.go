@@ -16,8 +16,7 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -27,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type reqTask interface {
@@ -92,7 +92,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.CollectionName, schema.Name)
 	}
 	if t.Req.ShardsNum <= 0 {
-		t.Req.ShardsNum = DefaultShardsNum
+		t.Req.ShardsNum = common.DefaultShardsNum
 	}
 	log.Debug("CreateCollectionReqTask Execute", zap.Any("CollectionName", t.Req.CollectionName),
 		zap.Any("ShardsNum", t.Req.ShardsNum))

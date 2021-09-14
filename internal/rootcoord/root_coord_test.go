@@ -22,13 +22,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -2043,9 +2043,9 @@ func TestRootCoord2(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, collName, rsp.Schema.Name)
 		assert.Equal(t, collMeta.ID, rsp.CollectionID)
-		assert.Equal(t, DefaultShardsNum, int32(len(rsp.VirtualChannelNames)))
-		assert.Equal(t, DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
-		assert.Equal(t, DefaultShardsNum, rsp.ShardsNum)
+		assert.Equal(t, common.DefaultShardsNum, int32(len(rsp.VirtualChannelNames)))
+		assert.Equal(t, common.DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
+		assert.Equal(t, common.DefaultShardsNum, rsp.ShardsNum)
 	})
 	err = core.Stop()
 	assert.Nil(t, err)

@@ -225,7 +225,7 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 
 	var shardsNum int32
 	if req.ShardsNum <= 0 {
-		shardsNum = 2
+		shardsNum = common.DefaultShardsNum
 	} else {
 		shardsNum = req.ShardsNum
 	}
@@ -364,6 +364,9 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 	}
 
 	meta := coord.collID2Meta[collID]
+	if meta.shardsNum == 0 {
+		meta.shardsNum = int32(len(meta.virtualChannelNames))
+	}
 
 	return &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
@@ -372,6 +375,7 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 		},
 		Schema:               meta.schema,
 		CollectionID:         collID,
+		ShardsNum:            meta.shardsNum,
 		VirtualChannelNames:  meta.virtualChannelNames,
 		PhysicalChannelNames: meta.physicalChannelNames,
 		CreatedTimestamp:     meta.createdUtcTimestamp,
