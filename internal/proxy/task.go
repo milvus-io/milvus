@@ -1656,14 +1656,14 @@ func (st *searchTask) Execute(ctx context.Context) error {
 		}
 	}
 	err = stream.Produce(&msgPack)
-	log.Debug("proxy", zap.Int("length of searchMsg", len(msgPack.Msgs)))
-	log.Debug("proxy sent one searchMsg",
-		zap.Any("collectionID", st.CollectionID),
-		zap.Any("msgID", tsMsg.ID()),
-	)
 	if err != nil {
 		log.Debug("proxy", zap.String("send search request failed", err.Error()))
 	}
+	log.Debug("proxy sent one searchMsg",
+		zap.Any("collectionID", st.CollectionID),
+		zap.Any("msgID", tsMsg.ID()),
+		zap.Int("length of search msg", len(msgPack.Msgs)),
+	)
 	return err
 }
 

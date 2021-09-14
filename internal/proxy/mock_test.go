@@ -85,6 +85,7 @@ func newMockIDAllocatorInterface() idAllocatorInterface {
 
 type mockGetChannelsService struct {
 	collectionID2Channels map[UniqueID]map[vChan]pChan
+	f                     getChannelsFuncType
 }
 
 func newMockGetChannelsService() *mockGetChannelsService {
@@ -94,6 +95,10 @@ func newMockGetChannelsService() *mockGetChannelsService {
 }
 
 func (m *mockGetChannelsService) GetChannels(collectionID UniqueID) (map[vChan]pChan, error) {
+	if m.f != nil {
+		return m.f(collectionID)
+	}
+
 	channels, ok := m.collectionID2Channels[collectionID]
 	if ok {
 		return channels, nil

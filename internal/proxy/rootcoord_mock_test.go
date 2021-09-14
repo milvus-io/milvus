@@ -394,8 +394,6 @@ func (coord *RootCoordMock) ShowCollections(ctx context.Context, req *milvuspb.S
 			CollectionNames: nil,
 		}, nil
 	}
-	coord.collMtx.RLock()
-	defer coord.collMtx.RUnlock()
 
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
