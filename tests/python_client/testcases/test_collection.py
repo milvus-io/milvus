@@ -1981,7 +1981,8 @@ class TestCreateCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "Create collection failed: meta table add collection failed,error = collection %s exist" % collection
+            assert message == "Create collection failed: meta table add collection failed," \
+                              "error = collection %s exist" % collection
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_collection_after_insert_flush(self, connect, collection):
@@ -1998,7 +1999,8 @@ class TestCreateCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "Create collection failed: meta table add collection failed,error = collection %s exist" % collection
+            assert message == "Create collection failed: meta table add collection failed," \
+                              "error = collection %s exist" % collection
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_multithread(self, connect):
