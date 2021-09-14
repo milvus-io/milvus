@@ -75,7 +75,7 @@ type Manager interface {
 	ExpireAllocations(channel string, ts Timestamp) error
 }
 
-// allcation entry for segment Allocation record
+// Allocation records the allocation info
 type Allocation struct {
 	SegmentID  UniqueID
 	NumOfRows  int64
