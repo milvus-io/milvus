@@ -353,14 +353,24 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
+	var collID UniqueID
+	usingID := false
+	if req.CollectionName == "" {
+		usingID = true
+	}
+
 	collID, exist := coord.collName2ID[req.CollectionName]
-	if !exist {
+	if !exist && !usingID {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
 				Reason:    milvuserrors.MsgCollectionNotExist(req.CollectionName),
 			},
 		}, nil
+	}
+
+	if usingID {
+		collID = req.CollectionID
 	}
 
 	meta := coord.collID2Meta[collID]

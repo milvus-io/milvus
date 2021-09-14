@@ -1248,7 +1248,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		dataCoord: node.dataCoord,
 		req:       request,
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
