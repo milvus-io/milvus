@@ -110,6 +110,8 @@ func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 	assert.Nil(t, err)
 	defer rmq.DestroyTopic(topicName)
 
+	rmq.retentionInfo.startRetentionInfo()
+
 	rmq.retentionInfo.ackedInfo.Delete(topicName)
 
 	msgNum := 100

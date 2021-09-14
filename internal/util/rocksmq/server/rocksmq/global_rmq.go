@@ -90,7 +90,10 @@ func CloseRocksMQ() {
 				}
 				return true
 			})
-			Rmq.store.Close()
+			// FIXME(yukun): When close Rmq.store, there may be some goroutines in rocksmq.Consume() using the
+			// store instance, so this may cause crash. Needs to send a mutex to rocksmq to stop using store
+			// when Rmq needs to be closed.
+			// Rmq.store.Close()
 		}
 	}
 }

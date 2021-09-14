@@ -81,9 +81,6 @@ func prefixLoad(db *gorocksdb.DB, prefix string) ([]string, []string, error) {
 		values = append(values, string(value.Data()))
 		value.Free()
 	}
-	if err := iter.Err(); err != nil {
-		return nil, nil, err
-	}
 	return keys, values, nil
 }
 
