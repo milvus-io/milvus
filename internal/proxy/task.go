@@ -1350,7 +1350,7 @@ type searchTask struct {
 	result    *milvuspb.SearchResults
 	query     *milvuspb.SearchRequest
 	chMgr     channelsMgr
-	qc        queryCoordShowCollectionsInterface
+	qc        types.QueryCoord
 }
 
 func (st *searchTask) TraceCtx() context.Context {
@@ -1396,6 +1396,14 @@ func (st *searchTask) getChannels() ([]pChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
 	if err != nil {
 		return nil, err
+	}
+
+	_, err = st.chMgr.getChannels(collID)
+	if err != nil {
+		err := st.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return st.chMgr.getChannels(collID)
@@ -1474,10 +1482,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 
 	st.Base.MsgType = commonpb.MsgType_Search
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
+	schema, _ := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 
 	outputFields, err := translateOutputFields(st.query.OutputFields, schema, false)
 	if err != nil {
@@ -1575,11 +1580,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 
 	st.SearchRequest.ResultChannelID = Params.SearchResultChannelNames[0]
 	st.SearchRequest.DbID = 0 // todo
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
-	st.SearchRequest.CollectionID = collectionID
+	st.SearchRequest.CollectionID = collID
 	st.SearchRequest.PartitionIDs = make([]UniqueID, 0)
 
 	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
