@@ -85,7 +85,7 @@ $ git commit -s -m 'This is my commit message'
 
 Keeping a consistent style for code, code comments, commit messages, and PR descriptions will greatly accelerate your PR review process. We highly recommend you refer to and comply to the following style guides when you put together your pull requests:
 
-###GO
+### GO
 - Coding style: refer to the [Effictive Go Style Guide](https://golang.org/doc/effective_go)
 
 ###C++
