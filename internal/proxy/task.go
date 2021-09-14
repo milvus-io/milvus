@@ -2099,6 +2099,14 @@ func (qt *queryTask) getChannels() ([]pChan, error) {
 		return nil, err
 	}
 
+	_, err = qt.chMgr.getChannels(collID)
+	if err != nil {
+		err := qt.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return qt.chMgr.getChannels(collID)
 }
 
@@ -2119,6 +2127,7 @@ func (qt *queryTask) getVChannels() ([]vChan, error) {
 	return qt.chMgr.getVChannels(collID)
 }
 
+/* not used
 func parseIdsFromExpr(exprStr string, schema *typeutil.SchemaHelper) ([]int64, error) {
 	expr, err := parseQueryExpr(schema, exprStr)
 	if err != nil {
@@ -2146,6 +2155,7 @@ func parseIdsFromExpr(exprStr string, schema *typeutil.SchemaHelper) ([]int64, e
 		return nil, errors.New("not top level term")
 	}
 }
+*/
 
 func IDs2Expr(fieldName string, ids []int64) string {
 	idsStr := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids)), ", "), "[]")
@@ -2157,14 +2167,6 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	qt.Base.SourceID = Params.ProxyID
 
 	collectionName := qt.query.CollectionName
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
-	if err != nil {
-		log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
-			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
-		return err
-	}
-	log.Info("Get collection id by name.", zap.Any("collectionName", collectionName),
-		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
 	if err := ValidateCollectionName(qt.query.CollectionName); err != nil {
 		log.Debug("Invalid collection name.", zap.Any("collectionName", collectionName),
@@ -2172,6 +2174,15 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	log.Info("Validate collection name.", zap.Any("collectionName", collectionName),
+		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	if err != nil {
+		log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
+			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
+		return err
+	}
+	log.Info("Get collection id by name.", zap.Any("collectionName", collectionName),
 		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
 	for _, tag := range qt.query.PartitionNames {
@@ -2215,10 +2226,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("collection %v was not loaded into memory", collectionName)
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, qt.query.CollectionName)
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
+	schema, _ := globalMetaCache.GetCollectionSchema(ctx, qt.query.CollectionName)
 	// schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	// if err != nil {
 	// 	return err
