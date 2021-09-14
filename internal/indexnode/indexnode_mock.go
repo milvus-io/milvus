@@ -14,7 +14,6 @@ package indexnode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -96,7 +95,6 @@ func (inm *Mock) Start() error {
 	if inm.Err {
 		return errors.New("IndexNode start failed")
 	}
-	fmt.Println("haha")
 	inm.wg.Add(1)
 	go inm.buildIndexTask()
 	return nil
