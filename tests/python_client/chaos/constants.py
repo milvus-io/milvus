@@ -1,4 +1,3 @@
-# MONGO_SERVER = 'mongodb://192.168.1.234:27017/'
 MONGO_SERVER = 'mongodb://mongodb.test:27017/'
 
 SCHEDULER_DB = "scheduler"
