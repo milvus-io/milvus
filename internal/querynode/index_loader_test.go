@@ -46,7 +46,7 @@ func TestIndexLoader_setIndexInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 }
 

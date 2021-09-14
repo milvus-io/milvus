@@ -795,7 +795,7 @@ func genSimpleHistorical(ctx context.Context) (*historical, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := newHistorical(ctx, nil, nil, fac, kv)
+	h := newHistorical(ctx, newMockRootCoord(), newMockIndexCoord(), fac, kv)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -809,6 +809,7 @@ func genSimpleHistorical(ctx context.Context) (*historical, error) {
 		return nil, err
 	}
 	h.replica = r
+	h.loader.historicalReplica = r
 	col, err := h.replica.getCollectionByID(defaultCollectionID)
 	if err != nil {
 		return nil, err
