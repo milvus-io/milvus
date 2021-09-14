@@ -6,8 +6,16 @@ The following are a set of guidelines for contributing to Milvus. Following thes
 
 As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-
 ## What contributions can I make?
+
+| Suitable for                             | Projects                                                     | Resources                                                    |
+| ---------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| Go developers                            | [milvus](https://github.com/milvus-io/milvus)                |                                                              |
+| CPP developers                           | [milvus](https://github.com/milvus-io/milvus)                |                                                              |
+| Developers interested in other languages | [pymilvus](https://github.com/milvus-io/pymilvus), [milvus-sdk-go](https://github.com/milvus-io/milvus-sdk-go), [milvus-sdk-node](https://github.com/milvus-io/milvus-sdk-node), [milvus-sdk-java](https://github.com/milvus-io/milvus-sdk-java) | [Contributing to PyMilvus](https://github.com/milvus-io/pymilvus/blob/master/CONTRIBUTING.md) |
+| Kubernetes enthusiasts                   | [milvus-helm](https://github.com/milvus-io/milvus-helm)      |                                                              |
+| Tech writers and docs enthusiasts        | [milvus-docs](https://github.com/milvus-io/milvus-docs)      | [Contributing to milvus docs](https://github.com/milvus-io/milvus-docs/blob/v2.0.0/CONTRIBUTING.md) |
+| Web developers                           |                                                              |                                                              |
 
 Contributions to Milvus fall into the following categories.
 
@@ -30,7 +38,7 @@ Generally, we follow the "fork-and-pull" Git workflow.
 1.  [Fork](https://docs.github.com/en/github/getting-started-with-github/fork-a-repo) the repository on GitHub.
 2.  Clone your fork to your local machine with `git clone git@github.com:<yourname>/milvus.git`.
 3.  Create a branch with `git checkout -b my-topic-branch`.
-4.  [Commit](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/committing-changes-to-a-pull-request-branch-created-from-a-fork) changes to your own branch, then push to to GitHub with `git push --set-upstream origin my-topic-branch`. You must record your changes in [CHANGELOG.md](CHANGELOG.md) with issue numbers and descriptions.
+4.  [Commit](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/committing-changes-to-a-pull-request-branch-created-from-a-fork) changes to your own branch, then push to to GitHub with `git push origin my-topic-branch`.
 5.  Submit a [pull request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/about-pull-requests) so that we can review your changes.
 
 ![](docs/developer_guides/figs/fork-and-pull.png)
