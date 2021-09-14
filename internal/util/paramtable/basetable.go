@@ -309,11 +309,11 @@ func (gp *BaseTable) ParseInt64(key string) int64 {
 	if err != nil {
 		panic(err)
 	}
-	value, err := strconv.Atoi(valueStr)
+	value, err := strconv.ParseInt(valueStr, 10, 64)
 	if err != nil {
 		panic(err)
 	}
-	return int64(value)
+	return value
 }
 
 func (gp *BaseTable) ParseInt32(key string) int32 {
@@ -321,7 +321,7 @@ func (gp *BaseTable) ParseInt32(key string) int32 {
 	if err != nil {
 		panic(err)
 	}
-	value, err := strconv.Atoi(valueStr)
+	value, err := strconv.ParseInt(valueStr, 10, 32)
 	if err != nil {
 		panic(err)
 	}
