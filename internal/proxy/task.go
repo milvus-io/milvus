@@ -1178,7 +1178,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 				}
 			}
 			if !exist {
-				return errors.New("dimension is not defined in field type params")
+				return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
 			}
 			if field.DataType == schemapb.DataType_FloatVector {
 				if err := ValidateDimension(dim, false); err != nil {
