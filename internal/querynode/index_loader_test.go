@@ -46,7 +46,7 @@ func TestIndexLoader_setIndexInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 }
 
@@ -104,11 +104,11 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 		historical.loader.indexLoader.rootCoord = newMockRootCoord()
 		historical.loader.indexLoader.indexCoord = newMockIndexCoord()
 
-		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
+		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, simpleVecField.id)
 		assert.NoError(t, err)
 
-		err = historical.loader.indexLoader.loadIndex(segment, rowIDFieldID)
-		assert.Error(t, err)
+		err = historical.loader.indexLoader.loadIndex(segment, simpleVecField.id)
+		assert.NoError(t, err)
 	})
 
 	//t.Run("test get index failed", func(t *testing.T) {

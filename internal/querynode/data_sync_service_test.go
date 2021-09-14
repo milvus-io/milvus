@@ -65,14 +65,14 @@ func TestDataSyncService_Start(t *testing.T) {
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0,
-					Timestamp: uint64(i + 1000),
+					Timestamp: Timestamp(i + 1000),
 					SourceID:  0,
 				},
 				CollectionID: collectionID,
 				PartitionID:  defaultPartitionID,
-				SegmentID:    int64(0),
+				SegmentID:    UniqueID(0),
 				ChannelID:    "0",
-				Timestamps:   []uint64{uint64(i + 1000), uint64(i + 1000)},
+				Timestamps:   []Timestamp{Timestamp(i + 1000), Timestamp(i + 1000)},
 				RowIDs:       []int64{int64(i), int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},

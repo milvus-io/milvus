@@ -12,7 +12,6 @@
 package querynode
 
 import (
-	"context"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
@@ -30,8 +29,7 @@ type insertNode struct {
 }
 
 type InsertData struct {
-	insertContext    map[int64]context.Context
-	insertIDs        map[UniqueID][]UniqueID
+	insertIDs        map[UniqueID][]int64
 	insertTimestamps map[UniqueID][]Timestamp
 	insertRecords    map[UniqueID][]*commonpb.Blob
 	insertOffset     map[UniqueID]int64
@@ -56,10 +54,10 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	insertData := InsertData{
-		insertIDs:        make(map[int64][]int64),
-		insertTimestamps: make(map[int64][]uint64),
-		insertRecords:    make(map[int64][]*commonpb.Blob),
-		insertOffset:     make(map[int64]int64),
+		insertIDs:        make(map[UniqueID][]int64),
+		insertTimestamps: make(map[UniqueID][]Timestamp),
+		insertRecords:    make(map[UniqueID][]*commonpb.Blob),
+		insertOffset:     make(map[UniqueID]int64),
 	}
 
 	if iMsg == nil {
@@ -134,7 +132,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
-func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
+func (iNode *insertNode) insert(insertData *InsertData, segmentID UniqueID, wg *sync.WaitGroup) {
 	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
 	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
 	if err != nil {

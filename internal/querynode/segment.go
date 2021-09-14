@@ -85,7 +85,7 @@ type Segment struct {
 	segmentType segmentType
 
 	paramMutex sync.RWMutex // guards index
-	indexInfos map[int64]*indexInfo
+	indexInfos map[FieldID]*indexInfo
 
 	idBinlogRowSizes []int64
 
@@ -167,7 +167,7 @@ func (s *Segment) getVectorFieldInfo(fieldID UniqueID) (*VectorFieldInfo, error)
 	return nil, errors.New("Invalid fieldID " + strconv.Itoa(int(fieldID)))
 }
 
-func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) *Segment {
+func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) *Segment {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);

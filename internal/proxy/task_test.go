@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 
@@ -1467,8 +1470,22 @@ func TestSearchTask_all(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	assert.NoError(t, err)
 
-	qc := newMockQueryCoordShowCollectionsInterface()
-	qc.addCollection(collectionID, 100)
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_LoadCollection,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.ProxyID,
+		},
+		DbID:         0,
+		CollectionID: collectionID,
+		Schema:       nil,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 	req := constructSearchRequest(dbName, collectionName,
 		expr,
@@ -1603,4 +1620,341 @@ func TestSearchTask_all(t *testing.T) {
 
 	cancel()
 	wg.Wait()
+}
+
+func TestSearchTask_Type(t *testing.T) {
+	Params.Init()
+
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{
+			Base: nil,
+		},
+	}
+	assert.NoError(t, task.OnEnqueue())
+	assert.Equal(t, commonpb.MsgType_Search, task.Type())
+}
+
+func TestSearchTask_Ts(t *testing.T) {
+	Params.Init()
+
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{
+			Base: nil,
+		},
+	}
+	assert.NoError(t, task.OnEnqueue())
+
+	ts := Timestamp(time.Now().Nanosecond())
+	task.SetTs(ts)
+	assert.Equal(t, ts, task.BeginTs())
+	assert.Equal(t, ts, task.EndTs())
+}
+
+func TestSearchTask_Channels(t *testing.T) {
+	var err error
+
+	Params.Init()
+
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+
+	ctx := context.Background()
+
+	err = InitMetaCache(rc)
+	assert.NoError(t, err)
+
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	query := newMockGetChannelsService()
+	factory := newSimpleMockMsgStreamFactory()
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, query.GetChannels, nil, factory)
+	defer chMgr.removeAllDMLStream()
+	defer chMgr.removeAllDQLStream()
+
+	prefix := "TestSearchTask_Channels"
+	collectionName := prefix + funcutil.GenRandomStr()
+	shardsNum := int32(2)
+	dbName := ""
+	int64Field := "int64"
+	floatVecField := "fvec"
+	dim := 128
+
+	task := &searchTask{
+		ctx: ctx,
+		query: &milvuspb.SearchRequest{
+			CollectionName: collectionName,
+		},
+		chMgr: chMgr,
+	}
+
+	// collection not exist
+	_, err = task.getVChannels()
+	assert.Error(t, err)
+	_, err = task.getVChannels()
+	assert.Error(t, err)
+
+	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColT := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+			ShardsNum:      shardsNum,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+		schema:    nil,
+	}
+
+	assert.NoError(t, createColT.OnEnqueue())
+	assert.NoError(t, createColT.PreExecute(ctx))
+	assert.NoError(t, createColT.Execute(ctx))
+	assert.NoError(t, createColT.PostExecute(ctx))
+
+	_, err = task.getChannels()
+	assert.NoError(t, err)
+	_, err = task.getVChannels()
+	assert.NoError(t, err)
+
+	_ = chMgr.removeAllDMLStream()
+	chMgr.dmlChannelsMgr.getChannelsFunc = func(collectionID UniqueID) (map[vChan]pChan, error) {
+		return nil, errors.New("mock")
+	}
+	_, err = task.getChannels()
+	assert.Error(t, err)
+	_, err = task.getVChannels()
+	assert.Error(t, err)
+}
+
+func TestSearchTask_PreExecute(t *testing.T) {
+	var err error
+
+	Params.Init()
+	Params.SearchResultChannelNames = []string{funcutil.GenRandomStr()}
+
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+
+	ctx := context.Background()
+
+	err = InitMetaCache(rc)
+	assert.NoError(t, err)
+
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	query := newMockGetChannelsService()
+	factory := newSimpleMockMsgStreamFactory()
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, query.GetChannels, nil, factory)
+	defer chMgr.removeAllDMLStream()
+	defer chMgr.removeAllDQLStream()
+
+	prefix := "TestSearchTask_PreExecute"
+	collectionName := prefix + funcutil.GenRandomStr()
+	shardsNum := int32(2)
+	dbName := ""
+	int64Field := "int64"
+	floatVecField := "fvec"
+	dim := 128
+
+	task := &searchTask{
+		ctx:           ctx,
+		SearchRequest: &internalpb.SearchRequest{},
+		query: &milvuspb.SearchRequest{
+			CollectionName: collectionName,
+		},
+		chMgr: chMgr,
+		qc:    qc,
+	}
+	assert.NoError(t, task.OnEnqueue())
+
+	// collection not exist
+	assert.Error(t, task.PreExecute(ctx))
+
+	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColT := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+			ShardsNum:      shardsNum,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+		schema:    nil,
+	}
+
+	assert.NoError(t, createColT.OnEnqueue())
+	assert.NoError(t, createColT.PreExecute(ctx))
+	assert.NoError(t, createColT.Execute(ctx))
+	assert.NoError(t, createColT.PostExecute(ctx))
+
+	collectionID, _ := globalMetaCache.GetCollectionID(ctx, collectionName)
+
+	// ValidateCollectionName
+	task.query.CollectionName = "$"
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.CollectionName = collectionName
+
+	// Validate Partition
+	task.query.PartitionNames = []string{"$"}
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.PartitionNames = nil
+
+	// mock show collections of query coord
+	qc.SetShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+		return nil, errors.New("mock")
+	})
+	assert.Error(t, task.PreExecute(ctx))
+	qc.SetShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+		return &querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "mock",
+			},
+		}, nil
+	})
+	assert.Error(t, task.PreExecute(ctx))
+	qc.ResetShowCollectionsFunc()
+
+	// collection not loaded
+	assert.Error(t, task.PreExecute(ctx))
+	_, _ = qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_LoadCollection,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  0,
+		},
+		DbID:         0,
+		CollectionID: collectionID,
+		Schema:       nil,
+	})
+
+	// no anns field
+	task.query.DslType = commonpb.DslType_BoolExprV1
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.SearchParams = []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: floatVecField,
+		},
+	}
+
+	// no topk
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.SearchParams = []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: floatVecField,
+		},
+		{
+			Key:   TopKKey,
+			Value: "invalid",
+		},
+	}
+
+	// invalid topk
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.SearchParams = []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: floatVecField,
+		},
+		{
+			Key:   TopKKey,
+			Value: "10",
+		},
+	}
+
+	// no metric type
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.SearchParams = []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: floatVecField,
+		},
+		{
+			Key:   TopKKey,
+			Value: "10",
+		},
+		{
+			Key:   MetricTypeKey,
+			Value: distance.L2,
+		},
+	}
+
+	// no search params
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.SearchParams = []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: int64Field,
+		},
+		{
+			Key:   TopKKey,
+			Value: "10",
+		},
+		{
+			Key:   MetricTypeKey,
+			Value: distance.L2,
+		},
+		{
+			Key:   SearchParamsKey,
+			Value: `{"nprobe": 10}`,
+		},
+	}
+
+	// failed to create query plan
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.SearchParams = []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: floatVecField,
+		},
+		{
+			Key:   TopKKey,
+			Value: "10",
+		},
+		{
+			Key:   MetricTypeKey,
+			Value: distance.L2,
+		},
+		{
+			Key:   SearchParamsKey,
+			Value: `{"nprobe": 10}`,
+		},
+	}
+
+	// field not exist
+	task.query.OutputFields = []string{int64Field + funcutil.GenRandomStr()}
+	assert.Error(t, task.PreExecute(ctx))
+	// contain vector field
+	task.query.OutputFields = []string{floatVecField}
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.OutputFields = []string{int64Field}
+
+	// partition
+	rc.showPartitionsFunc = func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+		return nil, errors.New("mock")
+	}
+	assert.Error(t, task.PreExecute(ctx))
+	rc.showPartitionsFunc = nil
+
+	// TODO(dragondriver): test partition-related error
 }

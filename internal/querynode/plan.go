@@ -114,7 +114,7 @@ func (pg *searchRequest) delete() {
 
 type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
-	Timestamp     uint64
+	Timestamp     Timestamp
 }
 
 // func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timestamp uint64) (*RetrievePlan, error) {
@@ -132,7 +132,7 @@ type RetrievePlan struct {
 // 	return plan, nil
 // }
 
-func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp uint64) (*RetrievePlan, error) {
+func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp) (*RetrievePlan, error) {
 	var cPlan C.CRetrievePlan
 	status := C.CreateRetrievePlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])),
 		(C.int64_t)(len(expr)), &cPlan)

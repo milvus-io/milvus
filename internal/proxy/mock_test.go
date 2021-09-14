@@ -17,8 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -554,34 +552,4 @@ func generateHashKeys(numRows int) []uint32 {
 		ret = append(ret, rand.Uint32())
 	}
 	return ret
-}
-
-type mockQueryCoordShowCollectionsInterface struct {
-	collectionIDs       []int64
-	inMemoryPercentages []int64
-}
-
-func (ins *mockQueryCoordShowCollectionsInterface) ShowCollections(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	resp := &querypb.ShowCollectionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		CollectionIDs:       ins.collectionIDs,
-		InMemoryPercentages: ins.inMemoryPercentages,
-	}
-
-	return resp, nil
-}
-
-func (ins *mockQueryCoordShowCollectionsInterface) addCollection(collectionID int64, inMemoryPercentage int64) {
-	ins.collectionIDs = append(ins.collectionIDs, collectionID)
-	ins.inMemoryPercentages = append(ins.inMemoryPercentages, collectionID)
-}
-
-func newMockQueryCoordShowCollectionsInterface() *mockQueryCoordShowCollectionsInterface {
-	return &mockQueryCoordShowCollectionsInterface{
-		collectionIDs:       make([]int64, 0),
-		inMemoryPercentages: make([]int64, 0),
-	}
 }

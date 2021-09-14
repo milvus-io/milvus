@@ -73,11 +73,7 @@ type RootCoordMockOption func(mock *RootCoordMock)
 
 type describeCollectionFuncType func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 
-func SetDescribeCollectionFunc(f describeCollectionFuncType) RootCoordMockOption {
-	return func(mock *RootCoordMock) {
-		mock.SetDescribeCollectionFunc(f)
-	}
-}
+type showPartitionsFuncType func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 
 type RootCoordMock struct {
 	nodeID  typeutil.UniqueID
@@ -98,6 +94,7 @@ type RootCoordMock struct {
 	partitionMtx      sync.RWMutex
 
 	describeCollectionFunc describeCollectionFuncType
+	showPartitionsFunc     showPartitionsFuncType
 
 	// TODO(dragondriver): index-related
 
@@ -332,7 +329,7 @@ func (coord *RootCoordMock) SetDescribeCollectionFunc(f describeCollectionFuncTy
 	coord.describeCollectionFunc = f
 }
 
-func (coord *RootCoordMock) ResetDescribeCollectionFunc(f describeCollectionFuncType) {
+func (coord *RootCoordMock) ResetDescribeCollectionFunc() {
 	coord.describeCollectionFunc = nil
 }
 
@@ -560,6 +557,11 @@ func (coord *RootCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sh
 			PartitionIDs:   nil,
 		}, nil
 	}
+
+	if coord.showPartitionsFunc != nil {
+		return coord.showPartitionsFunc(ctx, req)
+	}
+
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 

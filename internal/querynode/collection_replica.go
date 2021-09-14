@@ -54,7 +54,7 @@ type ReplicaInterface interface {
 	hasCollection(collectionID UniqueID) bool
 	getCollectionNum() int
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
-	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]int64, error)
+	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error)
 
 	// partition
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
@@ -92,8 +92,6 @@ type collectionReplica struct {
 	collections map[UniqueID]*Collection
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
-
-	loadType
 
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
@@ -203,7 +201,7 @@ func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]U
 	return collection.partitionIDs, nil
 }
 
-func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]int64, error) {
+func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -212,7 +210,7 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID U
 		return nil, err
 	}
 
-	vecFields := make([]int64, 0)
+	vecFields := make([]FieldID, 0)
 	for _, field := range fields {
 		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
 			vecFields = append(vecFields, field.FieldID)

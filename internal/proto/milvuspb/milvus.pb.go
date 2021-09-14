@@ -157,13 +157,18 @@ func (m *CreateCollectionRequest) GetShardsNum() int32 {
 	return 0
 }
 
+//*
+// Drop collection in milvus, also will drop data in collection.
 type DropCollectionRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The unique collection name in milvus.(Required)
+	CollectionName       string   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *DropCollectionRequest) Reset()         { *m = DropCollectionRequest{} }
@@ -212,14 +217,20 @@ func (m *DropCollectionRequest) GetCollectionName() string {
 	return ""
 }
 
+//*
+// Check collection exist in milvus or not.
 type HasCollectionRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	TimeStamp            uint64            `protobuf:"varint,4,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name you want to check.
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// Not useful for now
+	TimeStamp            uint64   `protobuf:"varint,4,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *HasCollectionRequest) Reset()         { *m = HasCollectionRequest{} }

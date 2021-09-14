@@ -13,7 +13,7 @@ def get_tag(url):
     tags = [r["name"] for r in res]
     return tags
 
-latest_tag = get_tag(milvus_dev)[1]
+latest_tag = "master-latest"
 latest_rc_tag = [tag for tag in sorted(get_tag(milvus)) if "rc" and "v" in tag][-1]
 release_version = "-".join(latest_rc_tag.split("-")[:-2])
 print(release_version)

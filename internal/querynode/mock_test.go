@@ -40,7 +40,7 @@ import (
 
 // ---------- unittest util functions ----------
 // common definitions
-const ctxTimeInMillisecond = 5000
+const ctxTimeInMillisecond = 500
 const debug = false
 
 const (
@@ -71,6 +71,12 @@ const (
 )
 
 const defaultMsgLength = 100
+
+const (
+	buildID   = UniqueID(0)
+	indexID   = UniqueID(0)
+	indexName = "query-node-index-0"
+)
 
 // ---------- unittest util functions ----------
 // functions of init meta and generate meta
@@ -242,7 +248,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 
 	// serialize index params
 	var indexCodec storage.IndexCodec
-	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, "index_test_name", 1234)
+	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, indexName, indexID)
 	if err != nil {
 		return nil, err
 	}
@@ -789,7 +795,7 @@ func genSimpleHistorical(ctx context.Context) (*historical, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := newHistorical(ctx, nil, nil, fac, kv)
+	h := newHistorical(ctx, newMockRootCoord(), newMockIndexCoord(), fac, kv)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -803,6 +809,7 @@ func genSimpleHistorical(ctx context.Context) (*historical, error) {
 		return nil, err
 	}
 	h.replica = r
+	h.loader.historicalReplica = r
 	col, err := h.replica.getCollectionByID(defaultCollectionID)
 	if err != nil {
 		return nil, err
