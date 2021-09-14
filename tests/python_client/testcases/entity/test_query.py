@@ -216,19 +216,6 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr, output_fields=["int"])
 
-    # @pytest.mark.xfail(reason="#6074")
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_output_part_not_existed_field(self, connect, collection):
-        """
-        target: test query output part not existed field
-        method: query with part not existed field
-        expected: raise exception
-        """
-        entities, ids = init_data(connect, collection)
-        connect.load_collection(collection)
-        with pytest.raises(Exception):
-            connect.query(collection, default_term_expr, output_fields=[default_int_field_name, "int"])
-
     @pytest.mark.parametrize("fields", ut.gen_invalid_strs())
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_invalid_output_fields(self, connect, collection, fields):
@@ -264,47 +251,6 @@ class TestQueryPartition:
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
-  
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_partition_without_loading(self, connect, collection):
-        """
-        target: test query on partition without loading
-        method: query on partition and no loading
-        expected: raise exception
-        """
-        connect.create_partition(collection, ut.default_tag)
-        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
-        assert len(ids) == ut.default_nb
-        with pytest.raises(Exception):
-            connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_default_partition(self, connect, collection):
-        """
-        target: test query on default partition
-        method: query on default partition
-        expected: verify query result
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.load_collection(collection)
-        res = connect.query(collection, default_term_expr, partition_names=[ut.default_partition_name], output_fields=["*", "%"])
-        for _id, index in enumerate(ids[:default_pos]):
-            if res[index][default_int_field_name] == entities[0]["values"][index]:
-                assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_query_empty_partition(self, connect, collection):
-        """
-        target: test query on empty partition
-        method: query on a empty collection
-        expected: empty query result
-        """
-        connect.create_partition(collection, ut.default_tag)
-        connect.load_partitions(collection, [ut.default_partition_name])
-        res = connect.query(collection, default_term_expr, partition_names=[ut.default_partition_name])
-        assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_not_existed_partition(self, connect, collection):
