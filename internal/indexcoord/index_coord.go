@@ -44,13 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const (
-	reqTimeoutInterval = time.Second * 10
-	durationInterval   = time.Second * 10
-	assignTaskInterval = time.Second * 3
-	taskLimit          = 20
-)
-
 type IndexCoord struct {
 	stateCode atomic.Value
 
@@ -76,6 +69,11 @@ type IndexCoord struct {
 
 	nodeLock sync.RWMutex
 
+	reqTimeoutInterval time.Duration
+	durationInterval   time.Duration
+	assignTaskInterval time.Duration
+	taskLimit          int
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -88,8 +86,12 @@ func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	i := &IndexCoord{
-		loopCtx:    ctx1,
-		loopCancel: cancel,
+		loopCtx:            ctx1,
+		loopCancel:         cancel,
+		reqTimeoutInterval: time.Second * 10,
+		durationInterval:   time.Second * 10,
+		assignTaskInterval: time.Second * 3,
+		taskLimit:          20,
 	}
 	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return i, nil
@@ -325,7 +327,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 	}
 
 	var cancel func()
-	t.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	t.ctx, cancel = context.WithTimeout(ctx, i.reqTimeoutInterval)
 	defer cancel()
 
 	fn := func() error {
@@ -550,7 +552,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 	defer cancel()
 	defer i.loopWg.Done()
 
-	timeTicker := time.NewTicker(durationInterval)
+	timeTicker := time.NewTicker(i.durationInterval)
 	log.Debug("IndexCoord start recycleUnusedIndexFiles loop")
 
 	for {
@@ -558,7 +560,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 		case <-ctx.Done():
 			return
 		case <-timeTicker.C:
-			metas := i.metaTable.GetUnusedIndexFiles(taskLimit)
+			metas := i.metaTable.GetUnusedIndexFiles(i.taskLimit)
 			log.Debug("IndexCoord recycleUnusedIndexFiles", zap.Int("Need recycle tasks num", len(metas)))
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
@@ -670,7 +672,7 @@ func (i *IndexCoord) watchMetaLoop() {
 }
 
 func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.CreateIndexRequest) bool {
-	ctx, cancel := context.WithTimeout(i.loopCtx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(i.loopCtx, i.reqTimeoutInterval)
 	defer cancel()
 	resp, err := builderClient.CreateIndex(ctx, req)
 	if err != nil {
@@ -691,7 +693,7 @@ func (i *IndexCoord) assignTaskLoop() {
 	defer cancel()
 	defer i.loopWg.Done()
 
-	timeTicker := time.NewTicker(assignTaskInterval)
+	timeTicker := time.NewTicker(i.assignTaskInterval)
 	log.Debug("IndexCoord start assignTask loop")
 
 	for {
@@ -750,7 +752,7 @@ func (i *IndexCoord) assignTaskLoop() {
 				log.Debug("This task has been assigned", zap.Int64("indexBuildID", indexBuildID),
 					zap.Int64("The IndexNode execute this task", nodeID))
 				i.nodeManager.pq.IncPriority(nodeID, 1)
-				if index > taskLimit {
+				if index > i.taskLimit {
 					break
 				}
 			}
