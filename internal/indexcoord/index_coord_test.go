@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 
 	"github.com/milvus-io/milvus/internal/indexnode"
@@ -181,6 +183,15 @@ func TestIndexCoord(t *testing.T) {
 			indexMeta = ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
 			time.Sleep(time.Second)
 		}
+	})
+
+	t.Run("GetMetrics request without metricType", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{
+			Request: "GetIndexCoordMetrics",
+		}
+		resp, err := ic.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 
 	err = in.Stop()
