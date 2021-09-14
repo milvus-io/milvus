@@ -40,7 +40,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	kv, err := genEtcdKV()
 	assert.NoError(t, err)
 
-	schema, _ := genSimpleSchema()
+	schema := genSimpleInsertDataSchema()
 
 	fieldBinlog, err := saveSimpleBinLog(ctx)
 	assert.NoError(t, err)
@@ -124,7 +124,7 @@ func TestSegmentLoader_notOnService(t *testing.T) {
 	loader := newSegmentLoader(ctx, nil, nil, historical.replica, kv)
 	assert.NotNil(t, loader)
 
-	schema, _ := genSimpleSchema()
+	schema := genSimpleInsertDataSchema()
 
 	fieldBinlog, err := saveSimpleBinLog(ctx)
 	assert.NoError(t, err)
