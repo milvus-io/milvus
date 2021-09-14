@@ -47,9 +47,8 @@ Remember to [sync your forked repository](https://docs.github.com/en/github/gett
 
 ```shell
 git remote add upstream git@github.com:milvus-io/milvus.git
-git checkout master
-git pull upstream master
-git checkout -b my-topic-branch
+git fetch upstream
+git checkout upstream/master -b my-topic-branch
 ```
 
 ![](docs/developer_guides/figs/local-develop-steps.png)
