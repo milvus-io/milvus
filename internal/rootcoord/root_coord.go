@@ -840,8 +840,7 @@ func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *s
 		}
 	}
 	log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-		zap.String("field name", field.Name),
-		zap.Int64("segment id", segID))
+		zap.String("field name", field.Name), zap.Int64("segment id", segID), zap.Int64("num rows", rows))
 	return bldID, nil
 }
 
