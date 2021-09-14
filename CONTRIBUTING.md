@@ -88,7 +88,7 @@ Keeping a consistent style for code, code comments, commit messages, and PR desc
 ### GO
 - Coding style: refer to the [Effictive Go Style Guide](https://golang.org/doc/effective_go)
 
-###C++
+### C++
 The c++ coding style used in Milvus generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 And we made the following changes based on the guide:
 
@@ -101,12 +101,12 @@ And we made the following changes based on the guide:
 - Commit message and PR description style: refer to [good commit messages](https://chris.beams.io/posts/git-commit)
 
 ### Format code
-####GO
+#### GO
 ```shell
 $ make fmt
 ```
 
-####C++
+#### C++
 Install clang-format
 ```shell
 $ sudo apt-get install clang-format
@@ -125,12 +125,12 @@ $ make clang-format
 ## Run unit test with code coverage
 Before submitting your Pull Request, make sure you have run unit test, and your code coverage rate is >= 90%.
 
-###GO
+### GO
 ```shell
 $ go test -coverprofile fmtcoverage.html  ./internal/allocator
 ok  	github.com/milvus-io/milvus/internal/allocator 0.048s	coverage: 69.6% of statements
 ```
-###C++
+### C++
 Install lcov
 ```shell
 $ sudo apt-get install lcov
