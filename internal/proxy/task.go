@@ -113,7 +113,6 @@ type insertTask struct {
 	ctx context.Context
 
 	result         *milvuspb.MutationResult
-	dataCoord      types.DataCoord
 	rowIDAllocator *allocator.IDAllocator
 	segIDAssigner  *SegIDAssigner
 	chMgr          channelsMgr

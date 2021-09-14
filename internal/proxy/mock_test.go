@@ -277,7 +277,23 @@ func (ms *simpleMockMsgStream) AsConsumer(channels []string, subName string) {
 }
 
 func (ms *simpleMockMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 {
-	return nil
+	if len(tsMsgs) <= 0 {
+		return nil
+	}
+	reBucketValues := make([][]int32, len(tsMsgs))
+	channelNum := uint32(1)
+	if channelNum == 0 {
+		return nil
+	}
+	for idx, tsMsg := range tsMsgs {
+		hashValues := tsMsg.HashKeys()
+		bucketValues := make([]int32, len(hashValues))
+		for index, hashValue := range hashValues {
+			bucketValues[index] = int32(hashValue % channelNum)
+		}
+		reBucketValues[idx] = bucketValues
+	}
+	return reBucketValues
 }
 
 func (ms *simpleMockMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {
