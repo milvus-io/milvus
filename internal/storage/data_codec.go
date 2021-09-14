@@ -134,6 +134,7 @@ type InsertData struct {
 	Infos []BlobInfo
 }
 
+// InsertCodec serializes and deserializes the insert data
 // Blob key example:
 // ${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/${log_idx}
 type InsertCodec struct {
