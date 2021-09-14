@@ -1698,7 +1698,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                               search_params: "{\"nprobe\": 10}"
                                             >
                                             placeholder_tag: "$0"
-    >)";
+                                        >)";
 
     // create place_holder_group
     int num_queries = 5;
@@ -1952,39 +1952,38 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                           dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
-    const char* serialized_expr_plan = R"(
-vector_anns: <
-  field_id: 100
-  predicates: <
-    term_expr: <
-      column_info: <
-        field_id: 101
-        data_type: Int64
-      >
-      values: <
-        int64_val: 420000
-      >
-      values: <
-        int64_val: 420001
-      >
-      values: <
-        int64_val: 420002
-      >
-      values: <
-        int64_val: 420003
-      >
-      values: <
-        int64_val: 420004
-      >
-    >
-  >
-  query_info: <
-    topk: 5
-    metric_type: "JACCARD"
-    search_params: "{\"nprobe\": 10}"
-  >
-  placeholder_tag: "$0"
->)";
+    const char* serialized_expr_plan = R"(vector_anns: <
+                                            field_id: 100
+                                            predicates: <
+                                              term_expr: <
+                                                column_info: <
+                                                  field_id: 101
+                                                  data_type: Int64
+                                                >
+                                                values: <
+                                                  int64_val: 420000
+                                                >
+                                                values: <
+                                                  int64_val: 420001
+                                                >
+                                                values: <
+                                                  int64_val: 420002
+                                                >
+                                                values: <
+                                                  int64_val: 420003
+                                                >
+                                                values: <
+                                                  int64_val: 420004
+                                                >
+                                              >
+                                            >
+                                            query_info: <
+                                              topk: 5
+                                              metric_type: "JACCARD"
+                                              search_params: "{\"nprobe\": 10}"
+                                            >
+                                            placeholder_tag: "$0"
+                                        >)";
 
     // create place_holder_group
     int num_queries = 5;
@@ -2332,7 +2331,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                               search_params: "{\"nprobe\": 10}"
                                             >
                                             placeholder_tag: "$0"
-    >)";
+                                        >)";
 
     // create place_holder_group
     int num_queries = 10;
