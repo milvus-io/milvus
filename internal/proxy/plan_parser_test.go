@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"testing"
 
+	ant_ast "github.com/antonmedv/expr/ast"
 	ant_parser "github.com/antonmedv/expr/parser"
 
 	"github.com/golang/protobuf/proto"
@@ -148,6 +149,11 @@ func TestExprMultiRange_Str(t *testing.T) {
 		"0.1 ** 2 < FloatN < 2 ** 0.1",
 		"0.1 ** 1.1 < FloatN < 3.1 / 4",
 		"4.1 / 3 < FloatN < 0.0 / 5.0",
+		"BoolN1 == True",
+		"True == BoolN1",
+		"BoolN1 == False",
+		"BoolN1 == 1",
+		"BoolN1 == 0",
 	}
 
 	fields := []*schemapb.FieldSchema{
@@ -156,6 +162,7 @@ func TestExprMultiRange_Str(t *testing.T) {
 		{FieldID: 102, Name: "age2", DataType: schemapb.DataType_Int64},
 		{FieldID: 103, Name: "FloatN", DataType: schemapb.DataType_Float},
 		{FieldID: 104, Name: "FloatN2", DataType: schemapb.DataType_Float},
+		{FieldID: 105, Name: "BoolN1", DataType: schemapb.DataType_Bool},
 	}
 
 	schema := &schemapb.CollectionSchema{
@@ -213,4 +220,29 @@ func TestExprFieldCompare_Str(t *testing.T) {
 		dbgStr := proto.MarshalTextString(planProto)
 		println(dbgStr)
 	}
+}
+
+func Test_ParseBoolNode(t *testing.T) {
+	var nodeRaw1, nodeRaw2, nodeRaw3, nodeRaw4 ant_ast.Node
+	nodeRaw1 = &ant_ast.IdentifierNode{
+		Value: "True",
+	}
+	boolNode1 := parseBoolNode(&nodeRaw1)
+	assert.Equal(t, boolNode1.Value, true)
+
+	nodeRaw2 = &ant_ast.IdentifierNode{
+		Value: "False",
+	}
+	boolNode2 := parseBoolNode(&nodeRaw2)
+	assert.Equal(t, boolNode2.Value, false)
+
+	nodeRaw3 = &ant_ast.IdentifierNode{
+		Value: "abcd",
+	}
+	assert.Nil(t, parseBoolNode(&nodeRaw3))
+
+	nodeRaw4 = &ant_ast.BoolNode{
+		Value: true,
+	}
+	assert.Nil(t, parseBoolNode(&nodeRaw4))
 }

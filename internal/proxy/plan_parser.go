@@ -14,6 +14,7 @@ package proxy
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	ant_ast "github.com/antonmedv/expr/ast"
 	ant_parser "github.com/antonmedv/expr/parser"
@@ -256,7 +257,33 @@ func getLogicalOpType(opStr string) planpb.BinaryExpr_BinaryOp {
 	}
 }
 
+func parseBoolNode(nodeRaw *ant_ast.Node) *ant_ast.BoolNode {
+	switch node := (*nodeRaw).(type) {
+	case *ant_ast.IdentifierNode:
+		val := strings.ToLower(node.Value)
+		if val == "true" {
+			return &ant_ast.BoolNode{
+				Value: true,
+			}
+		} else if val == "false" {
+			return &ant_ast.BoolNode{
+				Value: false,
+			}
+		} else {
+			return nil
+		}
+	default:
+		return nil
+	}
+}
+
 func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string) (*planpb.Expr, error) {
+	if boolNode := parseBoolNode(&left); boolNode != nil {
+		left = boolNode
+	}
+	if boolNode := parseBoolNode(&right); boolNode != nil {
+		right = boolNode
+	}
 	idNodeLeft, leftIDNode := left.(*ant_ast.IdentifierNode)
 	idNodeRight, rightIDNode := right.(*ant_ast.IdentifierNode)
 
@@ -540,11 +567,20 @@ func (context *ParserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType sc
 					Int64Val: int64(node.Value),
 				},
 			}
+		} else if dataType == schemapb.DataType_Bool {
+			gv = &planpb.GenericValue{
+				Val: &planpb.GenericValue_BoolVal{},
+			}
+			if node.Value == 1 {
+				gv.Val.(*planpb.GenericValue_BoolVal).BoolVal = true
+			} else {
+				gv.Val.(*planpb.GenericValue_BoolVal).BoolVal = false
+			}
 		} else {
 			return nil, fmt.Errorf("type mismatch")
 		}
 	case *ant_ast.BoolNode:
-		if typeutil.IsFloatingType(dataType) {
+		if typeutil.IsBoolType(dataType) {
 			gv = &planpb.GenericValue{
 				Val: &planpb.GenericValue_BoolVal{
 					BoolVal: node.Value,
