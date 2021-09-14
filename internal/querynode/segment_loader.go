@@ -164,7 +164,7 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		}
 	}
 
-	indexedFieldIDs := make([]int64, 0)
+	indexedFieldIDs := make([]FieldID, 0)
 	for _, vecFieldID := range vectorFieldIDs {
 		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
 		if err != nil {

@@ -93,7 +93,7 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
-	timestamps := []uint64{0, 0, 0}
+	timestamps := []Timestamp{0, 0, 0}
 
 	const DIM = 16
 	const N = 3
@@ -207,7 +207,7 @@ func TestSegment_retrieve(t *testing.T) {
 				},
 			},
 		},
-		OutputFieldIds: []int64{101},
+		OutputFieldIds: []FieldID{101},
 	}
 	// reqIds := &segcorepb.RetrieveRequest{
 	// 	Ids: &schemapb.IDs{
