@@ -280,6 +280,8 @@ type Allocator struct {
 
 	CheckSyncFunc func(timeout bool) bool
 	PickCanDoFunc func()
+	SyncErr       error
+	Role          string
 }
 func (ta *Allocator) Start() error
 func (ta *Allocator) Init() error
@@ -307,11 +309,6 @@ type IDAllocator struct {
 }
 
 func (ia *IDAllocator) Start() error
-func (ia *IDAllocator) connectMaster() error
-func (ia *IDAllocator) syncID() bool
-func (ia *IDAllocator) checkSyncFunc(timeout bool) bool
-func (ia *IDAllocator) pickCanDoFunc()
-func (ia *IDAllocator) processFunc(req Request) error
 func (ia *IDAllocator) AllocOne() (UniqueID, error)
 func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error)
 
@@ -428,6 +425,7 @@ type BaseKV interface {
 	MultiSave(kvs map[string]string) error
 	Remove(key string) error
 	MultiRemove(keys []string) error
+	RemoveWithPrefix(key string) error
 
 	Close()
 }
@@ -445,9 +443,39 @@ type TxnKV interface {
 }
 ```
 
+###### A.7.3 MetaKv
 
+```go 
+type MetaKv interface {
+	TxnKV
+	GetPath(key string) string
+	LoadWithPrefix(key string) ([]string, []string, error)
+	LoadWithPrefix2(key string) ([]string, []string, []int64, error)
+	LoadWithRevision(key string) ([]string, []string, int64, error)
+	Watch(key string) clientv3.WatchChan
+	WatchWithPrefix(key string) clientv3.WatchChan
+	WatchWithRevision(key string, revision int64) clientv3.WatchChan
+	SaveWithLease(key, value string, id clientv3.LeaseID) error
+	Grant(ttl int64) (id clientv3.LeaseID, err error)
+	KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error)
+	CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error
+	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error
+}
 
-###### A.7.3 Etcd KV
+```
+
+###### A.7.4 MetaKv
+
+```go
+type SnapShotKV interface {
+	Save(key string, value string, ts typeutil.Timestamp) error
+	Load(key string, ts typeutil.Timestamp) (string, error)
+	MultiSave(kvs map[string]string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
+	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
+	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
+```
+
+###### A.7.5 Etcd KV
 
 ```go
 type EtcdKV struct {
@@ -475,7 +503,7 @@ func NewEtcdKV(etcdAddr string, rootPath string) *EtcdKV
 
 EtcdKV implements all *TxnKV* interfaces.
 
-###### A.7.4 Memory KV
+###### A.7.6 Memory KV
 
 ```go
 type MemoryKV struct {
@@ -500,7 +528,7 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remova
 
 MemoryKV implements all *TxnKV* interfaces.
 
-###### A.7.5 MinIO KV
+###### A.7.7 MinIO KV
 
 ```go
 type MinIOKV struct {
@@ -522,7 +550,7 @@ func (kv *MinIOKV) Close()
 
 MinIOKV implements all *KV* interfaces.
 
-###### A.7.6 RocksdbKV KV
+###### A.7.8 RocksdbKV KV
 
 ```go
 type RocksdbKV struct {
