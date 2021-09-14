@@ -139,14 +139,14 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         // write data under lock
         std::unique_lock lck(mutex_);
         update_row_count(info.row_count);
-        AssertInfo(field_datas_[field_offset.get()].empty(), "field data already exists");
+        AssertInfo(fields_data_[field_offset.get()].empty(), "field data already exists");
 
         if (field_meta.is_vector()) {
             AssertInfo(!vecindexs_.is_ready(field_offset), "field data can't be loaded when indexing exists");
-            field_datas_[field_offset.get()] = std::move(vec_data);
+            fields_data_[field_offset.get()] = std::move(vec_data);
         } else {
             AssertInfo(!scalar_indexings_[field_offset.get()], "scalar indexing not cleared");
-            field_datas_[field_offset.get()] = std::move(vec_data);
+            fields_data_[field_offset.get()] = std::move(vec_data);
             scalar_indexings_[field_offset.get()] = std::move(index);
         }
 
@@ -179,7 +179,7 @@ SegmentSealedImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) c
     Assert(get_bit(field_data_ready_bitset_, field_offset));
     auto& field_meta = schema_->operator[](field_offset);
     auto element_sizeof = field_meta.get_sizeof();
-    SpanBase base(field_datas_[field_offset.get()].data(), row_count_opt_.value(), element_sizeof);
+    SpanBase base(fields_data_[field_offset.get()].data(), row_count_opt_.value(), element_sizeof);
     return base;
 }
 
@@ -243,7 +243,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     Assert(get_bit(field_data_ready_bitset_, field_offset));
     Assert(row_count_opt_.has_value());
     auto row_count = row_count_opt_.value();
-    auto chunk_data = field_datas_[field_offset.get()].data();
+    auto chunk_data = fields_data_[field_offset.get()].data();
 
     auto sub_qr = [&] {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -281,7 +281,7 @@ SegmentSealedImpl::DropFieldData(const FieldId field_id) {
 
         std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_offset, false);
-        auto vec = std::move(field_datas_[field_offset.get()]);
+        auto vec = std::move(fields_data_[field_offset.get()]);
         lck.unlock();
 
         vec.clear();
@@ -323,7 +323,7 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
 
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema)
     : schema_(schema),
-      field_datas_(schema->size()),
+      fields_data_(schema->size()),
       field_data_ready_bitset_(schema->size()),
       vecindex_ready_bitset_(schema->size()),
       scalar_indexings_(schema->size()) {
@@ -379,7 +379,7 @@ SegmentSealedImpl::bulk_subscript(FieldOffset field_offset,
         return;
     }
     auto& field_meta = schema_->operator[](field_offset);
-    auto src_vec = field_datas_[field_offset.get()].data();
+    auto src_vec = fields_data_[field_offset.get()].data();
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             bulk_subscript_impl<bool>(src_vec, seg_offsets, count, output);

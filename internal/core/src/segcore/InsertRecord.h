@@ -30,7 +30,7 @@ struct InsertRecord {
     // return VectorBase type
     auto
     get_field_data_base(FieldOffset field_offset) const {
-        auto ptr = field_datas_[field_offset.get()].get();
+        auto ptr = fields_data_[field_offset.get()].get();
         return ptr;
     }
 
@@ -59,7 +59,7 @@ struct InsertRecord {
     void
     append_field_data(int64_t size_per_chunk) {
         static_assert(std::is_fundamental_v<Type>);
-        field_datas_.emplace_back(std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
+        fields_data_.emplace_back(std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
     }
 
     // append a column of vector type
@@ -67,10 +67,10 @@ struct InsertRecord {
     void
     append_field_data(int64_t dim, int64_t size_per_chunk) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        field_datas_.emplace_back(std::make_unique<ConcurrentVector<VectorType>>(dim, size_per_chunk));
+        fields_data_.emplace_back(std::make_unique<ConcurrentVector<VectorType>>(dim, size_per_chunk));
     }
 
  private:
-    std::vector<std::unique_ptr<VectorBase>> field_datas_;
+    std::vector<std::unique_ptr<VectorBase>> fields_data_;
 };
 }  // namespace milvus::segcore
