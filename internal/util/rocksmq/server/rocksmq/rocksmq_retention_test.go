@@ -87,7 +87,7 @@ func TestRmqRetention(t *testing.T) {
 	assert.Equal(t, len(newRes), 0)
 }
 
-func TestLoadRetentionInfo(t *testing.T) {
+func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqPageSize, 100)
@@ -164,7 +164,7 @@ func TestLoadRetentionInfo(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestComplexRmqRetention(t *testing.T) {
+func TestRmqRetention_Complex(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 1)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
@@ -228,7 +228,7 @@ func TestComplexRmqRetention(t *testing.T) {
 	// assert.NotEqual(t, newRes[0].MsgID, cMsgs[11].MsgID)
 }
 
-func TestRmqRetentionPageTimeExpire(t *testing.T) {
+func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
