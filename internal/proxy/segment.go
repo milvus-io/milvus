@@ -179,7 +179,6 @@ func (sa *SegIDAssigner) collectExpired() {
 }
 
 func (sa *SegIDAssigner) pickCanDoFunc() {
-	log.Debug("Proxy SegIDAssigner pickCanDoFunc", zap.Any("len(ToDoReqs)", len(sa.ToDoReqs)))
 	if sa.ToDoReqs == nil {
 		return
 	}
