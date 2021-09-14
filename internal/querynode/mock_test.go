@@ -40,7 +40,7 @@ import (
 
 // ---------- unittest util functions ----------
 // common definitions
-const ctxTimeInMillisecond = 5000
+const ctxTimeInMillisecond = 500
 const debug = false
 
 const (
@@ -71,6 +71,12 @@ const (
 )
 
 const defaultMsgLength = 100
+
+const (
+	buildID   = UniqueID(0)
+	indexID   = UniqueID(0)
+	indexName = "query-node-index-0"
+)
 
 // ---------- unittest util functions ----------
 // functions of init meta and generate meta
@@ -242,7 +248,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 
 	// serialize index params
 	var indexCodec storage.IndexCodec
-	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, "index_test_name", 1234)
+	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, indexName, indexID)
 	if err != nil {
 		return nil, err
 	}
