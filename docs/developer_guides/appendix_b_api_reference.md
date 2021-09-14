@@ -294,7 +294,7 @@ message Status {
 }
 ```
 
-**Status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 ###### 3.1.6 DescribeCollection
 
@@ -411,7 +411,7 @@ message ShowCollectionsResponse {
 }
 ```
 
-**status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 **collection_names**  is a list contains all collections' name.
 
@@ -457,7 +457,7 @@ message Status {
 }
 ```
 
-**Status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 
 
@@ -501,7 +501,7 @@ message Status {
 }
 ```
 
-**Status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 
 
@@ -545,7 +545,7 @@ message BoolResponse {
 }
 ```
 
-**status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 **value** represents whether the partition exists. If partition exists, value will be true. If partition doesn't exist, value will be false.
 
@@ -577,7 +577,7 @@ message LoadPartitionsRequest {
 }
 ```
 
-**parition_names** is a list of parition_name. These partitions in collection with the **collection_name** is going to be loaded to memory.
+**parition_names** is a list of parition_name. These partitions in collection with the **collection_name** are going to be loaded to memory.
 
 **Returns:**
 
@@ -590,7 +590,7 @@ message Status {
 }
 ```
 
-**Status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 ###### 3.1.13 ReleasePartitions
 
@@ -619,7 +619,7 @@ message ReleasePartitionsRequest {
 }
 ```
 
-**parition_names** is a list of parition_name. These partitions in collection with the **collection_name** is going to be released from memory.
+**parition_names** is a list of parition_name. These partitions in collection with the **collection_name** are going to be released from memory.
 
 **Returns:**
 
@@ -632,7 +632,7 @@ message Status {
 }
 ```
 
-**Status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 ###### 3.1.14 GetPartitionStatistics
 
@@ -674,7 +674,7 @@ message GetPartitionStatisticsResponse {
 }
 ```
 
-**status** represents the server error code. It doesn't contains grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is a enum type to distingush the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 **stats** is a map saving diffrent statistics. For example, you can get row_count of a partition with key 'row_count'.
 
