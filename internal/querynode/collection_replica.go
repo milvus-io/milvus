@@ -80,9 +80,6 @@ type ReplicaInterface interface {
 	addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) error
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
 
-	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
-	replaceGrowingSegmentBySealedSegment(segment *Segment) error
-
 	freeAll()
 	printReplica()
 }
@@ -469,50 +466,6 @@ func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.Segmen
 	}
 
 	return statisticData
-}
-
-func (colReplica *collectionReplica) getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	targetCollectionIDs := make([]UniqueID, 0)
-	targetPartitionIDs := make([]UniqueID, 0)
-	targetSegmentIDs := make([]UniqueID, 0)
-
-	for _, segment := range colReplica.segments {
-		if segment.getType() == segType {
-			if segType == segmentTypeSealed && !segment.getEnableIndex() {
-				continue
-			}
-
-			targetCollectionIDs = append(targetCollectionIDs, segment.collectionID)
-			targetPartitionIDs = append(targetPartitionIDs, segment.partitionID)
-			targetSegmentIDs = append(targetSegmentIDs, segment.segmentID)
-		}
-	}
-
-	return targetCollectionIDs, targetPartitionIDs, targetSegmentIDs
-}
-
-func (colReplica *collectionReplica) replaceGrowingSegmentBySealedSegment(segment *Segment) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	if segment.segmentType != segmentTypeSealed && segment.segmentType != segmentTypeIndexing {
-		deleteSegment(segment)
-		return errors.New("unexpected segment type")
-	}
-	targetSegment, err := colReplica.getSegmentByIDPrivate(segment.ID())
-	if err == nil && targetSegment != nil {
-		if targetSegment.segmentType != segmentTypeGrowing {
-			deleteSegment(segment)
-			// target segment has been a sealed segment
-			return nil
-		}
-		deleteSegment(targetSegment)
-	}
-
-	colReplica.segments[segment.ID()] = segment
-	return nil
 }
 
 func (colReplica *collectionReplica) initExcludedSegments(collectionID UniqueID) {
