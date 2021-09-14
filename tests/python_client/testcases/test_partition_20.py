@@ -501,7 +501,6 @@ class TestPartitionOperations(TestcaseBase):
         target: verify drop a partition which has data inserted
         method: 1.create a partition with default schema
                 2. insert some data
-                3. flush / not flush
                 3. drop the partition
         expected: drop successfully
         """
