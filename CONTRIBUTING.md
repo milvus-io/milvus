@@ -10,26 +10,43 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 | Suitable for                             | Projects                                                     | Resources                                                    |
 | ---------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| Go developers                            | [milvus](https://github.com/milvus-io/milvus)                |                                                              |
+| Go developers                            | [milvus](https://github.com/milvus-io/milvus), [milvus-sdk-go](https://github.com/milvus-io/milvus-sdk-go),       |                                                              |
 | CPP developers                           | [milvus](https://github.com/milvus-io/milvus)                |                                                              |
-| Developers interested in other languages | [pymilvus](https://github.com/milvus-io/pymilvus), [milvus-sdk-go](https://github.com/milvus-io/milvus-sdk-go), [milvus-sdk-node](https://github.com/milvus-io/milvus-sdk-node), [milvus-sdk-java](https://github.com/milvus-io/milvus-sdk-java) | [Contributing to PyMilvus](https://github.com/milvus-io/pymilvus/blob/master/CONTRIBUTING.md) |
+| Developers interested in other languages | [pymilvus](https://github.com/milvus-io/pymilvus), [milvus-sdk-node](https://github.com/milvus-io/milvus-sdk-node), [milvus-sdk-java](https://github.com/milvus-io/milvus-sdk-java) | [Contributing to PyMilvus](https://github.com/milvus-io/pymilvus/blob/master/CONTRIBUTING.md) |
 | Kubernetes enthusiasts                   | [milvus-helm](https://github.com/milvus-io/milvus-helm)      |                                                              |
 | Tech writers and docs enthusiasts        | [milvus-docs](https://github.com/milvus-io/milvus-docs)      | [Contributing to milvus docs](https://github.com/milvus-io/milvus-docs/blob/v2.0.0/CONTRIBUTING.md) |
 | Web developers                           |                                                              |                                                              |
 
-Contributions to Milvus fall into the following categories.
-
-1.  To report a bug or a problem with documentation, please file an [issue](https://github.com/milvus-io/milvus/issues/new/choose) providing the details of the problem. If you believe that the issue needs priority attention, please comment on the issue to notify the team.
-2.  To propose a new feature, please file a new feature request [issue](https://github.com/milvus-io/milvus/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees on the plan, you can follow the [Contributing code](CONTRIBUTING.md#contributing-code) to implement it.
-3.  To implement a feature or bug-fix for an existing outstanding issue, follow the [Contributing code](CONTRIBUTING.md#contributing-code). If you need more context on a particular issue, comment on the issue to let people know.
-
 ## How can I contribute?
-
 ### Contributing code
 
-If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow). Make sure to refer to the related issue in the ccomment of your pull request and update [CHANGELOG.md](CHANGELOG.md).
+**If you encountered a bug, you can**
+- (**Recommended**) File an issue about the bug.
+- (*Optional*) Provide clear and concrete ways/scripts to reproduce the bug.
+- (*Optional*) Provide possible solutions for the bug.
+- (*Optional*) Pull a request to fix the bug.
 
-All submissions will be reviewed as quickly as possible. Once it is accepted, the status of the project to which it is associated will be changed to **Reviewer approved**. This means we are working on submitting your pull request to the internal repository. After the change has been submitted internally, your pull request will be merged automatically on GitHub.
+**If you're interested in existing issues, you can**
+- (**Recommended**) Provide answers for issue labeled `question`.
+- Provide help for issues labeled `bug`, `improvement`, and `enhancement` by
+    - (**Recommended**) Asking questions, reproducing the issue, or providing solutions.
+    - Pulling a request to fix the issue.
+
+**If you require new feature or major enhancement, you can**
+- (**Recommended**) File an issue about the feature/enhancement with reasons.
+- (*Optional*) Provide a MEP for the feature/enhancement.
+- (*Optional*) Pull a request to implement the MEP.
+
+**If you are a reviewer/approver of Milvus, you can**
+- Participate in [PR review](CODE_REVIEW.md) process.
+- Instruct newcomers in the community to complete the PR process.
+
+If you want to become a contributor of Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow) below.
+
+All submissions will be reviewed as quickly as possible.
+There will be a reviewer to review the codes, and an approver to review everything aside the codes, see [code review](CODE_REVIEW.md) for details.
+If everything is perfect, the reviewer will label `/lgtm`, and the approver will label `/approve`. 
+Once the 2 labels are on your PR, and all actions pass, your PR will be merged into base branch automaticaly by our @sre-ci-robot
 
 ### GitHub workflow
 
