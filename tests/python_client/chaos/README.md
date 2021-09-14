@@ -61,5 +61,6 @@ pytest test_chaos.py --host x.x.x.x -v
 still in planning 
 
 ### Todo
-pod_failure
-container_kill
+* pod_failure
+* container_kill
+* network attack
