@@ -21,8 +21,31 @@ type rmqID struct {
 	messageID rocksmq.UniqueID
 }
 
+// Check if rmqID implements MessageID interface
+var _ MessageID = &rmqID{}
+
 func (rid *rmqID) Serialize() []byte {
 	return SerializeRmqID(rid.messageID)
+}
+
+func (rid *rmqID) LedgerID() int64 {
+	// TODO
+	return 0
+}
+
+func (rid *rmqID) EntryID() int64 {
+	// TODO
+	return 0
+}
+
+func (rid *rmqID) BatchIdx() int32 {
+	// TODO
+	return 0
+}
+
+func (rid *rmqID) PartitionIdx() int32 {
+	// TODO
+	return 0
 }
 
 func SerializeRmqID(messageID int64) []byte {

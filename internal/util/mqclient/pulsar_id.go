@@ -21,8 +21,28 @@ type pulsarID struct {
 	messageID pulsar.MessageID
 }
 
+// Check if pulsarID implements pulsar.MessageID and MessageID interface
+var _ pulsar.MessageID = &pulsarID{}
+var _ MessageID = &pulsarID{}
+
 func (pid *pulsarID) Serialize() []byte {
 	return pid.messageID.Serialize()
+}
+
+func (pid *pulsarID) LedgerID() int64 {
+	return pid.messageID.LedgerID()
+}
+
+func (pid *pulsarID) EntryID() int64 {
+	return pid.messageID.EntryID()
+}
+
+func (pid *pulsarID) BatchIdx() int32 {
+	return pid.messageID.BatchIdx()
+}
+
+func (pid *pulsarID) PartitionIdx() int32 {
+	return pid.messageID.PartitionIdx()
 }
 
 func SerializePulsarMsgID(messageID pulsar.MessageID) []byte {
