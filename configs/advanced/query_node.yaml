@@ -20,11 +20,11 @@ queryNode:
 
   msgStream:
     search:
-      recvBufSize: 512
-      pulsarBufSize: 512
+      recvBufSize: 512 # msgPack channel buffer size
+      pulsarBufSize: 512 # pulsar channel buffer size
 
     searchResult:
-      recvBufSize: 64
+      recvBufSize: 64 # msgPack channel buffer size
 
   segcore:
     chunkSize: 32768  # 32M
