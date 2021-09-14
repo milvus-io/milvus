@@ -19,5 +19,6 @@
 TEST(Init, Naive) {
     using namespace milvus;
     using namespace milvus::segcore;
-    SegcoreInit(NULL);
+    SegcoreInit();
+    SegcoreSetChunkSize(32768);
 }

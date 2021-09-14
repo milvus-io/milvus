@@ -70,7 +70,7 @@ class SegcoreConfig {
     }
 
  private:
-    int64_t size_per_chunk_ = 32768;
+    int64_t size_per_chunk_ = 32 * 1024;
     std::map<MetricType, SmallIndexConf> table_;
 };
 

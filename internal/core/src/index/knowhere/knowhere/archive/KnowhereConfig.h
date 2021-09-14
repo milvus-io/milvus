@@ -24,7 +24,7 @@ class KnowhereConfig {
      * set SIMD type
      */
     enum SimdType {
-        AUTO = 1,  // enable all and depend on the system
+        AUTO = 0,  // enable all and depend on the system
         SSE,       // only enable SSE
         AVX2,      // only enable AVX2
         AVX512,    // only enable AVX512

@@ -25,3 +25,6 @@ queryNode:
 
     searchResult:
       recvBufSize: 64
+
+  segcore:
+    chunkSize: 32768  # 32M
