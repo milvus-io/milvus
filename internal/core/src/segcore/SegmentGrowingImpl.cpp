@@ -140,7 +140,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_begin,
     }
     std::sort(ordering.begin(), ordering.end());
 
-    // step 3: and convert row-base data to column base accordingly
+    // step 3: and convert row-based data to column-based data accordingly
     auto sizeof_infos = schema_->get_sizeof_infos();
     std::vector<int> offset_infos(schema_->size() + 1, 0);
     std::partial_sum(sizeof_infos.begin(), sizeof_infos.end(), offset_infos.begin() + 1);
@@ -161,7 +161,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_begin,
         for (int fid = 0; fid < schema_->size(); ++fid) {
             auto len = sizeof_infos[fid];
             auto offset = offset_infos[fid];
-            auto src = raw_data + offset + order_index * len_per_row;
+            auto src = raw_data + order_index * len_per_row + offset;
             auto dst = entities[fid].data() + index * len;
             memcpy(dst, src, len);
         }
