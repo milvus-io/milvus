@@ -67,6 +67,28 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		insertNode.insert(insertData, defaultSegmentID, wg)
 	})
 
+	t.Run("test segment insert error", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultVChannel,
+			segmentTypeGrowing,
+			true)
+		assert.NoError(t, err)
+
+		insertData, err := genFlowGraphInsertData()
+		assert.NoError(t, err)
+
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		insertData.insertRecords[defaultSegmentID][0].Value = insertData.insertRecords[defaultSegmentID][0].Value[:len(insertData.insertRecords[defaultSegmentID][0].Value)/2]
+		insertNode.insert(insertData, defaultSegmentID, wg)
+	})
+
 	t.Run("test no target segment", func(t *testing.T) {
 		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
@@ -117,6 +139,30 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			},
 		}
 		msg := []flowgraph.Msg{&iMsg}
+		insertNode.Operate(msg)
+	})
+
+	t.Run("test invalid input length", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultVChannel,
+			segmentTypeGrowing,
+			true)
+		assert.NoError(t, err)
+
+		msgInsertMsg, err := genSimpleInsertMsg()
+		assert.NoError(t, err)
+		iMsg := insertMsg{
+			insertMessages: []*msgstream.InsertMsg{
+				msgInsertMsg,
+			},
+		}
+		msg := []flowgraph.Msg{&iMsg, &iMsg}
 		insertNode.Operate(msg)
 	})
 }
