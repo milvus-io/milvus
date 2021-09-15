@@ -14,7 +14,9 @@ package grpcindexcoord
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
@@ -23,4 +25,12 @@ func TestParamTable(t *testing.T) {
 
 	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
 	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
+
+	Params.Remove("indexCoord.grpc.ServerMaxSendSize")
+	Params.initServerMaxSendSize()
+	assert.Equal(t, Params.ServerMaxSendSize, grpcconfigs.DefaultServerMaxSendSize)
+
+	Params.Remove("indexCoord.grpc.ServerMaxRecvSize")
+	Params.initServerMaxRecvSize()
+	assert.Equal(t, Params.ServerMaxRecvSize, grpcconfigs.DefaultServerMaxRecvSize)
 }
