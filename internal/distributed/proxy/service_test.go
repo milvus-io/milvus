@@ -9,20 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package funcutil
+package grpcproxy
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_RandomString(t *testing.T) {
-	length := 10
-	str := RandomString(length)
-	assert.Equal(t, len(str), length)
-}
-
-func Test_GenRandomStr(t *testing.T) {
-	assert.True(t, len(GenRandomStr()) >= 1)
+func Test_NewServer(t *testing.T) {
+	server, err := NewServer(context.Background(), nil)
+	assert.NotNil(t, server)
+	assert.Nil(t, err)
 }
