@@ -22,6 +22,8 @@ import (
 )
 
 func TestBaseTaskQueue(t *testing.T) {
+	Params.Init()
+
 	var err error
 	var unissuedTask task
 	var activeTask task
@@ -108,8 +110,8 @@ func TestBaseTaskQueue(t *testing.T) {
 	assert.True(t, done)
 
 	// test utFull
-	queue.maxTaskNum = 10 // not accurate, full also means utBufChan block
-	for i := 0; i < int(queue.maxTaskNum); i++ {
+	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
+	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockTask())
 		assert.Nil(t, err)
 	}
@@ -119,6 +121,8 @@ func TestBaseTaskQueue(t *testing.T) {
 }
 
 func TestDdTaskQueue(t *testing.T) {
+	Params.Init()
+
 	var err error
 	var unissuedTask task
 	var activeTask task
@@ -205,8 +209,8 @@ func TestDdTaskQueue(t *testing.T) {
 	assert.True(t, done)
 
 	// test utFull
-	queue.maxTaskNum = 10 // not accurate, full also means utBufChan block
-	for i := 0; i < int(queue.maxTaskNum); i++ {
+	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
+	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDdlTask())
 		assert.Nil(t, err)
 	}
@@ -217,6 +221,8 @@ func TestDdTaskQueue(t *testing.T) {
 
 // test the logic of queue
 func TestDmTaskQueue_Basic(t *testing.T) {
+	Params.Init()
+
 	var err error
 	var unissuedTask task
 	var activeTask task
@@ -303,8 +309,8 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 	assert.True(t, done)
 
 	// test utFull
-	queue.maxTaskNum = 10 // not accurate, full also means utBufChan block
-	for i := 0; i < int(queue.maxTaskNum); i++ {
+	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
+	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDmlTask())
 		assert.Nil(t, err)
 	}
@@ -315,6 +321,8 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 
 // test the timestamp statistics
 func TestDmTaskQueue_TimestampStatistics(t *testing.T) {
+	Params.Init()
+
 	var err error
 	var unissuedTask task
 
@@ -353,6 +361,8 @@ func TestDmTaskQueue_TimestampStatistics(t *testing.T) {
 }
 
 func TestDqTaskQueue(t *testing.T) {
+	Params.Init()
+
 	var err error
 	var unissuedTask task
 	var activeTask task
@@ -439,8 +449,8 @@ func TestDqTaskQueue(t *testing.T) {
 	assert.True(t, done)
 
 	// test utFull
-	queue.maxTaskNum = 10 // not accurate, full also means utBufChan block
-	for i := 0; i < int(queue.maxTaskNum); i++ {
+	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
+	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDqlTask())
 		assert.Nil(t, err)
 	}
@@ -450,6 +460,8 @@ func TestDqTaskQueue(t *testing.T) {
 }
 
 func TestTaskScheduler(t *testing.T) {
+	Params.Init()
+
 	var err error
 
 	ctx := context.Background()
