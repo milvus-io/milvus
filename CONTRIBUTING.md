@@ -15,7 +15,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 | Developers interested in other languages | [pymilvus](https://github.com/milvus-io/pymilvus), [milvus-sdk-node](https://github.com/milvus-io/milvus-sdk-node), [milvus-sdk-java](https://github.com/milvus-io/milvus-sdk-java) | [Contributing to PyMilvus](https://github.com/milvus-io/pymilvus/blob/master/CONTRIBUTING.md) |
 | Kubernetes enthusiasts                   | [milvus-helm](https://github.com/milvus-io/milvus-helm)      |                                                              |
 | Tech writers and docs enthusiasts        | [milvus-docs](https://github.com/milvus-io/milvus-docs)      | [Contributing to milvus docs](https://github.com/milvus-io/milvus-docs/blob/v2.0.0/CONTRIBUTING.md) |
-| Web developers                           |                                                              |                                                              |
+| Web developers                           | [milvus-insight](https://github.com/milvus-io/milvus-insight)                                                         |                                                              |
 
 ## How can I contribute?
 ### Contributing code
