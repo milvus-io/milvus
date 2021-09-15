@@ -4,7 +4,7 @@
 
 #### A.1 System Component
 
-Milvus has 9 different components, and can be abstracted into basic Component.
+Milvus has 9 different components and can be abstracted into basic Component.
 
 ```go
 type Component interface {
@@ -62,7 +62,7 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 * Registration is achieved through etcd's lease mechanism.
 
-* The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
+* The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is available through the key.
 
 * key: metaRoot + "/session" + "/ServerName(-ServerID)(optional)"
 
@@ -242,7 +242,7 @@ type nodeCtx struct {
 func (nodeCtx *nodeCtx) Start(ctx context.Context) error
 ```
 
-*Start()* will enter a loop. In each iteration, it tries to collect input messges from *inputChan*, then prepare node's input. When input is ready, it will trigger *node.Operate*. When *node.Operate* returns, it sends the returned *Msg* to *outputChans*, which connects to the downstreams' *inputChans*.
+*Start()* will enter a loop. In each iteration, it tries to collect input messages from *inputChan*, then prepares the node's input. When the input is ready, it will trigger *node.Operate*. When *node.Operate* returns, it sends the returned *Msg* to *outputChans*, which connects to the downstreams' *inputChans*.
 
 ```go
 type TimeTickedFlowGraph struct {
@@ -323,26 +323,26 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 
 ###### A.6.1 Timestamp
 
-Let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and a 18-bits logical component (used to distinguish between events with the same physical component).
+Let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and an 18-bits logical component (used to distinguish between events with the same physical component).
 
 <img src="./figs/hlc.png" width=400>
 
-HLC's logical part is advanced on each request. The phsical part can be increased in two cases:
+HLC's logical part is advanced on each request. The physical part can be increased in two cases:
 
 A. when the local wall time is greater than HLC's physical part,
 
 B. or the logical part overflows.
 
-In either cases, the physical part will be updated, and the logical part will be set to 0.
+In either case, the physical part will be updated, and the logical part will be set to 0.
 
-Keep the physical part close to local wall time may face non-monotonic problems such as updates to POSIX time that could turn time backward. HLC avoids such problems, since if 'local wall time < HLC's physical part' holds, only case B is satisfied, thus montonicity is guaranteed.
+Keep the physical part close to local wall time may face non-monotonic problems such as updates to POSIX time that could turn time backward. HLC avoids such problems, since if 'local wall time < HLC's physical part' holds, only case B is satisfied, thus monotonicity is guaranteed.
 
-Milvus does not support transaction, but it should gurantee the deterministic execution of the multi-way WAL. The timestamp attached to each request should
+Milvus does not support transaction, but it should guarantee the deterministic execution of the multi-way WAL. The timestamp attached to each request should
 
-- have its physical part close to wall time (has an acceptable bounded error, a.k.a. uncertainty interval in transaction senarios),
+- have its physical part close to wall time (has an acceptable bounded error, a.k.a. uncertainty interval in transaction scenarios),
 - and be globally unique.
 
-HLC leverages on physical clocks at nodes that are synchronized using the NTP. NTP usually maintain time to within tens of milliseconds over local networks in datacenter. Asymmetric routes and network congestion occasionally cause errors of hundreds of milliseconds. Both the normal time error and the spike are acceptable for Milvus use cases.
+HLC leverages physical clocks at nodes that are synchronized using the NTP. NTP usually maintains time to within tens of milliseconds over local networks in the datacenter. Asymmetric routes and network congestion occasionally cause errors of hundreds of milliseconds. Both the normal time error and the spike are acceptable for Milvus use cases.
 
 The interface of Timestamp is as follows.
 
