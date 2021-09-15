@@ -17,7 +17,7 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
     auto res_ids = std::make_unique<IdArray>();
     // TODO: support string array
     static_assert(std::is_same_v<T, int64_t>);
-    Assert(ids.has_int_id());
+    AssertInfo(ids.has_int_id(), "ids doesn't have int_id field");
     auto src_ids = ids.int_id();
     auto dst_ids = res_ids->mutable_int_id();
     std::vector<SegOffset> dst_offsets;
@@ -39,7 +39,7 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
         }
         // TODO: for repeated key, decide the final offset with Timestamp
         // no repeated key, simplified logic
-        Assert(iter_beg + 1 == iter_end);
+        AssertInfo(iter_beg + 1 == iter_end, "There are no repeated keys in more than one results");
         auto [entry_id, entry_offset] = *iter_beg;
 
         dst_ids->add_data(entry_id);
