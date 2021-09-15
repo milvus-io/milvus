@@ -124,7 +124,11 @@ macro( build_arrow )
     target_link_libraries(parquet INTERFACE arrow thrift utf8proc)
 endmacro()
 
-build_arrow()
+if (MSYS)
+    message("Using system arrow in msys")
+else ()
+    build_arrow()
+endif ()
 
 add_library(wrapper STATIC)
 target_sources(wrapper PUBLIC ParquetWrapper.cpp PayloadStream.cpp
@@ -137,13 +141,23 @@ if(NOT CMAKE_INSTALL_PREFIX)
     set(CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
-get_target_property( THRIFT_LIB thrift LOCATION )
-get_target_property( ARROW_LIB  arrow LOCATION )
-get_target_property( PARQUET_LIB  parquet LOCATION )
-get_target_property( UTF8PROC_LIB  utf8proc LOCATION )
+if (MSYS)
+    message("Using system arrow in msys")
+else ()
+    get_target_property( THRIFT_LIB thrift LOCATION )
+    get_target_property( ARROW_LIB  arrow LOCATION )
+    get_target_property( PARQUET_LIB  parquet LOCATION )
+    get_target_property( UTF8PROC_LIB  utf8proc LOCATION )
+endif ()
+
 install(TARGETS wrapper DESTINATION ${CMAKE_INSTALL_PREFIX})
-install(
-    FILES ${ARROW_LIB} ${PARQUET_LIB} ${THRIFT_LIB} ${UTF8PROC_LIB} DESTINATION ${CMAKE_INSTALL_PREFIX})
+
+if (MSYS)
+    message("Using system arrow in msys")
+else ()
+    install(
+        FILES ${ARROW_LIB} ${PARQUET_LIB} ${THRIFT_LIB} ${UTF8PROC_LIB} DESTINATION ${CMAKE_INSTALL_PREFIX})
+endif ()
 
 if (BUILD_TESTING)
     add_subdirectory(test)

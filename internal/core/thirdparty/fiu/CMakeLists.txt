@@ -49,13 +49,18 @@ macro( build_fiu )
     add_dependencies(fiu fiu_ep)
 endmacro()
 
-build_fiu()
-
-install( FILES  ${INSTALL_DIR}/lib/libfiu.so
-                ${INSTALL_DIR}/lib/libfiu.so.0
-                ${INSTALL_DIR}/lib/libfiu.so.1.00
+if (WIN32)
+    # nothing
+    message("skip building fiu on windows")
+else ()
+    build_fiu()
+    install( FILES  ${INSTALL_DIR}/lib/libfiu.so
+        ${INSTALL_DIR}/lib/libfiu.so.0
+        ${INSTALL_DIR}/lib/libfiu.so.1.00
         DESTINATION lib )
+    get_target_property( var fiu INTERFACE_INCLUDE_DIRECTORIES )
+    message( STATUS ${var} )
+    set_directory_properties( PROPERTY INCLUDE_DIRECTORIES ${var} )
+endif ()
 
-get_target_property( var fiu INTERFACE_INCLUDE_DIRECTORIES )
-message( STATUS ${var} )
-set_directory_properties( PROPERTY INCLUDE_DIRECTORIES ${var} )
+
