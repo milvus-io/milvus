@@ -16,7 +16,6 @@ Your Milvus installation may fail when images are not properly loaded from publi
    &nbsp;&nbsp;&nbsp; or download Milvus cluster docker-compose.yml
 
    ```shell
-   # Download Milvus cluster docker-compose.yml
    wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/cluster/docker-compose.yml -O docker-compose.yml
    ```
 
