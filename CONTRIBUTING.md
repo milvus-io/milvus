@@ -101,7 +101,7 @@ $ git commit -s -m 'This is my commit message'
 
 Keeping a consistent style for code, code comments, commit messages, and PR descriptions will greatly accelerate your PR review process. We highly recommend you refer to and comply to the following style guides when you put together your pull requests:
 
-### GO
+### Go
 - Coding style: refer to the [Effictive Go Style Guide](https://golang.org/doc/effective_go)
 
 ###C++
@@ -117,7 +117,7 @@ And we made the following changes based on the guide:
 - Commit message and PR description style: refer to [good commit messages](https://chris.beams.io/posts/git-commit)
 
 ### Format code
-#### GO
+#### Go
 ```shell
 $ make fmt
 ```
@@ -141,7 +141,7 @@ $ make clang-format
 ## Run unit test with code coverage
 Before submitting your Pull Request, make sure you have run unit test, and your code coverage rate is >= 90%.
 
-### GO
+### Go
 ```shell
 $ go test -coverprofile fmtcoverage.html  ./internal/allocator
 ok  	github.com/milvus-io/milvus/internal/allocator 0.048s	coverage: 69.6% of statements
