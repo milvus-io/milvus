@@ -1355,7 +1355,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	dt := &DeleteTask{
+	dt := &deleteTask{
 		ctx:           ctx,
 		Condition:     NewTaskCondition(ctx),
 		DeleteRequest: request,
@@ -2210,7 +2210,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		log.Debug("failed to get system info metrics from cache, recompute instead",
 			zap.Error(err))
 
-		metrics, err := getSystemInfoMetrics(ctx, req, node, node.session.Address)
+		metrics, err := getSystemInfoMetrics(ctx, req, node)
 
 		log.Debug("Proxy.GetMetrics",
 			zap.Int64("node_id", Params.ProxyID),

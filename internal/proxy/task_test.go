@@ -2979,3 +2979,101 @@ func TestInsertTask_all(t *testing.T) {
 	assert.NoError(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
 }
+
+func TestDeleteTask_all(t *testing.T) {
+	Params.Init()
+
+	ctx := context.Background()
+
+	prefix := "TestDeleteTask_all"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	partitionName := prefix + funcutil.GenRandomStr()
+
+	task := &deleteTask{
+		Condition: NewTaskCondition(ctx),
+		DeleteRequest: &milvuspb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			Expr:           "",
+		},
+		ctx: ctx,
+		result: &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+			IDs:          nil,
+			SuccIndex:    nil,
+			ErrIndex:     nil,
+			Acknowledged: false,
+			InsertCnt:    0,
+			DeleteCnt:    0,
+			UpsertCnt:    0,
+			Timestamp:    0,
+		},
+	}
+
+	assert.NoError(t, task.OnEnqueue())
+
+	assert.NotNil(t, task.TraceCtx())
+
+	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	task.SetID(id)
+	assert.Equal(t, id, task.ID())
+
+	task.Base.MsgType = commonpb.MsgType_Delete
+	assert.Equal(t, commonpb.MsgType_Delete, task.Type())
+
+	ts := Timestamp(time.Now().UnixNano())
+	task.SetTs(ts)
+	assert.Equal(t, ts, task.BeginTs())
+	assert.Equal(t, ts, task.EndTs())
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.NoError(t, task.PostExecute(ctx))
+}
+
+func TestDeleteTask_PreExecute(t *testing.T) {
+	Params.Init()
+
+	ctx := context.Background()
+
+	prefix := "TestDeleteTask_all"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	partitionName := prefix + funcutil.GenRandomStr()
+
+	task := &deleteTask{
+		DeleteRequest: &milvuspb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			Expr:           "",
+		},
+	}
+
+	assert.NoError(t, task.PreExecute(ctx))
+
+	task.DeleteRequest.CollectionName = "" // empty
+	assert.Error(t, task.PreExecute(ctx))
+	task.DeleteRequest.CollectionName = collectionName
+
+	task.DeleteRequest.PartitionName = "" // empty
+	assert.Error(t, task.PreExecute(ctx))
+	task.DeleteRequest.PartitionName = partitionName
+}
