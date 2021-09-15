@@ -1,0 +1,27 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: test-proxy-partition
+  namespace: chaos-testing
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: chaos-milvus
+      app.kubernetes.io/name: milvus
+  duration: 5m
+  scheduler:
+    cron: '@every 5s'
+  direction: both
+  target:
+    selector:
+      namespaces:
+        - chaos-testing
+      labelSelectors:
+        app.kubernetes.io/instance: chaos-milvus
+        app.kubernetes.io/name: milvus
+        component: proxy
+    mode: one
