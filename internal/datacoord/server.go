@@ -58,8 +58,6 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
-var errNilKvClient = errors.New("kv client not initialized")
-
 // ServerState type alias, presents datacoord Server State
 type ServerState = int64
 
