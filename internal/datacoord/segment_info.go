@@ -9,10 +9,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
+// SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
 type SegmentsInfo struct {
 	segments map[UniqueID]*SegmentInfo
 }
 
+// SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
 type SegmentInfo struct {
 	*datapb.SegmentInfo
 	currRows      int64
@@ -32,10 +34,13 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	}
 }
 
+// NewSegmentsInfo create `SegmentsInfo` instance, which makes sure internal map is initialized
+// note that no mutex is wrapper so external concurrent control is needed
 func NewSegmentsInfo() *SegmentsInfo {
 	return &SegmentsInfo{segments: make(map[UniqueID]*SegmentInfo)}
 }
 
+// GetSegment returns SegmentInfo
 func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *SegmentInfo {
 	segment, ok := s.segments[segmentID]
 	if !ok {
@@ -44,6 +49,8 @@ func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *SegmentInfo {
 	return segment
 }
 
+// GetSegments iterates internal map and returns all SegmentInfo in a slice
+// no deep copy applied
 func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	segments := make([]*SegmentInfo, 0, len(s.segments))
 	for _, segment := range s.segments {
@@ -52,32 +59,43 @@ func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	return segments
 }
 
+// DropSegment deletes provided segmentID
+// no extra method is taken when segmentID not exists
 func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 	delete(s.segments, segmentID)
 }
 
+// SetSegment sets SegmentInfo with segmentID, perform overwrite if already exists
 func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	s.segments[segmentID] = segment
 }
 
+// SetRowCount sets rowCount info for SegmentInfo with provided segmentID
+// if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetRowCount(segmentID UniqueID, rowCount int64) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetRowCount(rowCount))
 	}
 }
 
+// SetStates sets Segment State info for SegmentInfo with provided segmentID
+// if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetState(segmentID UniqueID, state commonpb.SegmentState) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetState(state))
 	}
 }
 
+// SetDmlPosition sets DmlPosition info (checkpoint for recovery) for SegmentInfo with provided segmentID
+// if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetDmlPosition(segmentID UniqueID, pos *internalpb.MsgPosition) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(SetDmlPosition(pos))
 	}
 }
 
+// SetStartPosition sets StartPosition info (recovery info when no checkout point found) for SegmentInfo with provided segmentID
+// if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetStartPosition(segmentID UniqueID, pos *internalpb.MsgPosition) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(SetStartPosition(pos))
