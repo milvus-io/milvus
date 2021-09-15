@@ -172,24 +172,6 @@ class TestQueryBase:
         assert res[2][ut.default_float_vec_field_name] == binary_entities[2]["values"][0]
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_expr_all_term_array(self, connect, collection):
-        """
-        target: test query with all array term expr
-        method: query with all array value
-        expected: verify query result
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.load_collection(collection)
-        term_expr = f'{default_int_field_name} in {ids}'
-        res = connect.query(collection, term_expr, output_fields=["*", "%"])
-        assert len(res) == ut.default_nb
-        for _id, index in enumerate(ids):
-            if res[index][default_int_field_name] == entities[0]["values"][index]:
-                assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
-
-    @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_field_empty(self, connect, collection):
         """
         target: test query with none output field
