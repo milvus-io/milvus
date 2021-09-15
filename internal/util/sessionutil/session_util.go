@@ -79,7 +79,7 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 			zap.Error(err))
 		return nil
 	}
-	log.Debug("Sessiont connect to etcd success")
+	log.Debug("Session connect to etcd success")
 	return session
 }
 
@@ -148,7 +148,7 @@ func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error)
 		}
 
 		if !txnResp.Succeeded {
-			log.Debug("Session Txn unsuccess", zap.String("key", key))
+			log.Debug("Session Txn unsuccessful", zap.String("key", key))
 			continue
 		}
 		log.Debug("Session get serverID success")
