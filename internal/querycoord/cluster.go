@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -45,6 +46,7 @@ type Cluster interface {
 	getNumSegments(nodeID int64) (int, error)
 
 	watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error
+	//TODO:: removeDmChannel
 	getNumDmChannels(nodeID int64) (int, error)
 
 	hasWatchedQueryChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
@@ -55,20 +57,36 @@ type Cluster interface {
 	releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error
 	getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
 
-	registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID) error
+	registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error
 	getNodeByID(nodeID int64) (Node, error)
 	removeNodeInfo(nodeID int64) error
 	stopNode(nodeID int64)
-	onServiceNodes() (map[int64]Node, error)
-	isOnService(nodeID int64) (bool, error)
+	onlineNodes() (map[int64]Node, error)
+	isOnline(nodeID int64) (bool, error)
+	offlineNodes() (map[int64]Node, error)
 
-	printMeta()
+	getSessionVersion() int64
+
+	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse
 }
 
 type newQueryNodeFn func(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error)
 
+type nodeState int
+
+const (
+	disConnect nodeState = 0
+	online     nodeState = 1
+	offline    nodeState = 2
+)
+
 type queryNodeCluster struct {
+	ctx    context.Context
+	cancel context.CancelFunc
 	client *etcdkv.EtcdKV
+
+	session        *sessionutil.Session
+	sessionVersion int64
 
 	sync.RWMutex
 	clusterMeta Meta
@@ -76,10 +94,14 @@ type queryNodeCluster struct {
 	newNodeFn   newQueryNodeFn
 }
 
-func newQueryNodeCluster(clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQueryNodeFn) (*queryNodeCluster, error) {
+func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQueryNodeFn, session *sessionutil.Session) (*queryNodeCluster, error) {
+	childCtx, cancel := context.WithCancel(ctx)
 	nodes := make(map[int64]Node)
 	c := &queryNodeCluster{
+		ctx:         childCtx,
+		cancel:      cancel,
 		client:      kv,
+		session:     session,
 		clusterMeta: clusterMeta,
 		nodes:       nodes,
 		newNodeFn:   newNodeFn,
@@ -93,30 +115,55 @@ func newQueryNodeCluster(clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQuery
 }
 
 func (c *queryNodeCluster) reloadFromKV() error {
-	nodeIDs := make([]UniqueID, 0)
-	keys, values, err := c.client.LoadWithPrefix(queryNodeInfoPrefix)
+	toLoadMetaNodeIDs := make([]int64, 0)
+	// get current online session
+	onlineNodeSessions, version, _ := c.session.GetSessions(typeutil.QueryNodeRole)
+	onlineSessionMap := make(map[int64]*sessionutil.Session)
+	for _, session := range onlineNodeSessions {
+		nodeID := session.ServerID
+		onlineSessionMap[nodeID] = session
+	}
+	for nodeID, session := range onlineSessionMap {
+		log.Debug("ReloadFromKV: register a queryNode to cluster", zap.Any("nodeID", nodeID))
+		err := c.registerNode(c.ctx, session, nodeID, disConnect)
+		if err != nil {
+			log.Error("query node failed to register", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			return err
+		}
+		toLoadMetaNodeIDs = append(toLoadMetaNodeIDs, nodeID)
+	}
+	c.sessionVersion = version
+
+	// load node information before power off from etcd
+	oldStringNodeIDs, oldNodeSessions, err := c.client.LoadWithPrefix(queryNodeInfoPrefix)
 	if err != nil {
+		log.Error("reloadFromKV: get previous node info from etcd error", zap.Error(err))
 		return err
 	}
-	for index := range keys {
-		nodeID, err := strconv.ParseInt(filepath.Base(keys[index]), 10, 64)
+	for index := range oldStringNodeIDs {
+		nodeID, err := strconv.ParseInt(filepath.Base(oldStringNodeIDs[index]), 10, 64)
 		if err != nil {
+			log.Error("WatchNodeLoop: parse nodeID error", zap.Error(err))
 			return err
 		}
-
-		session := &sessionutil.Session{}
-		err = json.Unmarshal([]byte(values[index]), session)
-		if err != nil {
-			return err
+		if _, ok := onlineSessionMap[nodeID]; !ok {
+			session := &sessionutil.Session{}
+			err = json.Unmarshal([]byte(oldNodeSessions[index]), session)
+			if err != nil {
+				log.Error("WatchNodeLoop: unmarshal session error", zap.Error(err))
+				return err
+			}
+			err = c.registerNode(context.Background(), session, nodeID, offline)
+			if err != nil {
+				log.Debug("ReloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+				return err
+			}
+			toLoadMetaNodeIDs = append(toLoadMetaNodeIDs, nodeID)
 		}
-		err = c.registerNode(context.Background(), session, nodeID)
-		if err != nil {
-			log.Debug("ReloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
-			continue
-		}
-		nodeIDs = append(nodeIDs, nodeID)
 	}
-	for _, nodeID := range nodeIDs {
+
+	// load collection meta of queryNode from etcd
+	for _, nodeID := range toLoadMetaNodeIDs {
 		infoPrefix := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, nodeID)
 		_, collectionValues, err := c.client.LoadWithPrefix(infoPrefix)
 		if err != nil {
@@ -138,11 +185,15 @@ func (c *queryNodeCluster) reloadFromKV() error {
 	return nil
 }
 
+func (c *queryNodeCluster) getSessionVersion() int64 {
+	return c.sessionVersion
+}
+
 func (c *queryNodeCluster) getComponentInfos(ctx context.Context) ([]*internalpb.ComponentInfo, error) {
 	c.RLock()
 	defer c.RUnlock()
 	subComponentInfos := make([]*internalpb.ComponentInfo, 0)
-	nodes, err := c.getOnServiceNodes()
+	nodes, err := c.getOnlineNodes()
 	if err != nil {
 		log.Debug("GetComponentInfos: failed get on service nodes", zap.String("error info", err.Error()))
 		return nil, err
@@ -204,7 +255,7 @@ func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in
 	defer c.Unlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
-		if !node.isOnService() {
+		if !node.isOnline() {
 			return errors.New("node offline")
 		}
 
@@ -416,7 +467,7 @@ func (c *queryNodeCluster) getNumSegments(nodeID int64) (int, error) {
 	return numSegment, nil
 }
 
-func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID) error {
+func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -431,23 +482,17 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		if err != nil {
 			return err
 		}
-		c.nodes[id], err = c.newNodeFn(ctx, session.Address, id, c.client)
+		node, err := c.newNodeFn(ctx, session.Address, id, c.client)
 		if err != nil {
 			log.Debug("RegisterNode: create a new query node failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err
 		}
+		node.setState(state)
+		if state < online {
+			go node.start()
+		}
+		c.nodes[id] = node
 		log.Debug("RegisterNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
-
-		go func() {
-			err = c.nodes[id].start()
-			if err != nil {
-				log.Error("RegisterNode: start queryNode client failed", zap.Int64("nodeID", id), zap.String("error", err.Error()))
-				return
-			}
-			log.Debug("RegisterNode: start queryNode success, print cluster MetaReplica info", zap.Int64("nodeID", id))
-			c.printMeta()
-		}()
-
 		return nil
 	}
 	return fmt.Errorf("RegisterNode: node %d alredy exists in cluster", id)
@@ -496,56 +541,77 @@ func (c *queryNodeCluster) stopNode(nodeID int64) {
 	}
 }
 
-func (c *queryNodeCluster) onServiceNodes() (map[int64]Node, error) {
+func (c *queryNodeCluster) onlineNodes() (map[int64]Node, error) {
 	c.RLock()
 	defer c.RUnlock()
 
-	return c.getOnServiceNodes()
+	return c.getOnlineNodes()
 }
 
-func (c *queryNodeCluster) getOnServiceNodes() (map[int64]Node, error) {
+func (c *queryNodeCluster) getOnlineNodes() (map[int64]Node, error) {
 	nodes := make(map[int64]Node)
 	for nodeID, node := range c.nodes {
-		if node.isOnService() {
+		if node.isOnline() {
 			nodes[nodeID] = node
 		}
 	}
 	if len(nodes) == 0 {
-		return nil, errors.New("GetOnServiceNodes: no queryNode is alive")
+		return nil, errors.New("GetOnlineNodes: no queryNode is alive")
 	}
 
 	return nodes, nil
 }
 
-func (c *queryNodeCluster) isOnService(nodeID int64) (bool, error) {
+func (c *queryNodeCluster) offlineNodes() (map[int64]Node, error) {
+	c.RLock()
+	defer c.RUnlock()
+
+	return c.getOfflineNodes()
+}
+
+func (c *queryNodeCluster) getOfflineNodes() (map[int64]Node, error) {
+	nodes := make(map[int64]Node)
+	for nodeID, node := range c.nodes {
+		if node.isOffline() {
+			nodes[nodeID] = node
+		}
+	}
+	if len(nodes) == 0 {
+		return nil, errors.New("GetOfflineNodes: no queryNode is offline")
+	}
+
+	return nodes, nil
+}
+
+func (c *queryNodeCluster) isOnline(nodeID int64) (bool, error) {
 	c.Lock()
 	defer c.Unlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
-		return node.isOnService(), nil
+		return node.isOnline(), nil
 	}
 
 	return false, fmt.Errorf("IsOnService: query node %d not exist", nodeID)
 }
 
-func (c *queryNodeCluster) printMeta() {
-	c.RLock()
-	defer c.RUnlock()
-
-	for id, node := range c.nodes {
-		if node.isOnService() {
-			collectionInfos := node.showCollections()
-			for _, info := range collectionInfos {
-				log.Debug("PrintMeta: query coordinator cluster info: collectionInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", info.CollectionID), zap.Any("info", info))
-			}
-
-			queryChannelInfos := node.showWatchedQueryChannels()
-			for _, info := range queryChannelInfos {
-				log.Debug("PrintMeta: query coordinator cluster info: watchedQueryChannelInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", info.CollectionID), zap.Any("info", info))
-			}
-		}
-	}
-}
+//func (c *queryNodeCluster) printMeta() {
+//	c.RLock()
+//	defer c.RUnlock()
+//
+//	for id, node := range c.nodes {
+//		if node.isOnline() {
+//			collectionInfos := node.showCollections()
+//			for _, info := range collectionInfos {
+//				log.Debug("PrintMeta: query coordinator cluster info: collectionInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", info.CollectionID), zap.Any("info", info))
+//			}
+//
+//			queryChannelInfos := node.showWatchedQueryChannels()
+//			for _, info := range queryChannelInfos {
+//				log.Debug("PrintMeta: query coordinator cluster info: watchedQueryChannelInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", info.CollectionID), zap.Any("info", info))
+//			}
+//		}
+//	}
+//}
 
 func (c *queryNodeCluster) getCollectionInfosByID(ctx context.Context, nodeID int64) []*querypb.CollectionInfo {
 	c.RLock()

@@ -134,7 +134,7 @@ type LoadCollectionTask struct {
 	*querypb.LoadCollectionRequest
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
-	cluster   *queryNodeCluster
+	cluster   Cluster
 	meta      Meta
 }
 
@@ -323,7 +323,7 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 	}
 	if lct.result.ErrorCode != commonpb.ErrorCode_Success {
 		lct.childTasks = make([]task, 0)
-		nodes, err := lct.cluster.onServiceNodes()
+		nodes, err := lct.cluster.onlineNodes()
 		if err != nil {
 			log.Debug(err.Error())
 		}
@@ -362,7 +362,7 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 type ReleaseCollectionTask struct {
 	BaseTask
 	*querypb.ReleaseCollectionRequest
-	cluster   *queryNodeCluster
+	cluster   Cluster
 	meta      Meta
 	rootCoord types.RootCoord
 }
@@ -427,7 +427,7 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		nodes, err := rct.cluster.onServiceNodes()
+		nodes, err := rct.cluster.onlineNodes()
 		if err != nil {
 			log.Debug(err.Error())
 		}
@@ -477,7 +477,7 @@ type LoadPartitionTask struct {
 	BaseTask
 	*querypb.LoadPartitionsRequest
 	dataCoord types.DataCoord
-	cluster   *queryNodeCluster
+	cluster   Cluster
 	meta      Meta
 	addCol    bool
 }
@@ -606,7 +606,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 	if lpt.result.ErrorCode != commonpb.ErrorCode_Success {
 		lpt.childTasks = make([]task, 0)
 		if lpt.addCol {
-			nodes, err := lpt.cluster.onServiceNodes()
+			nodes, err := lpt.cluster.onlineNodes()
 			if err != nil {
 				log.Debug(err.Error())
 			}
@@ -635,7 +635,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 				log.Debug("loadPartitionTask: add a releaseCollectionTask to loadPartitionTask's childTask", zap.Any("task", releaseCollectionTask))
 			}
 		} else {
-			nodes, err := lpt.cluster.onServiceNodes()
+			nodes, err := lpt.cluster.onlineNodes()
 			if err != nil {
 				log.Debug(err.Error())
 			}
@@ -678,7 +678,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 type ReleasePartitionTask struct {
 	BaseTask
 	*querypb.ReleasePartitionsRequest
-	cluster *queryNodeCluster
+	cluster Cluster
 }
 
 func (rpt *ReleasePartitionTask) MsgBase() *commonpb.MsgBase {
@@ -717,7 +717,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 	}
 
 	if rpt.NodeID <= 0 {
-		nodes, err := rpt.cluster.onServiceNodes()
+		nodes, err := rpt.cluster.onlineNodes()
 		if err != nil {
 			log.Debug(err.Error())
 		}
@@ -772,7 +772,7 @@ type LoadSegmentTask struct {
 	BaseTask
 	*querypb.LoadSegmentsRequest
 	meta    Meta
-	cluster *queryNodeCluster
+	cluster Cluster
 }
 
 func (lst *LoadSegmentTask) MsgBase() *commonpb.MsgBase {
@@ -784,7 +784,7 @@ func (lst *LoadSegmentTask) Marshal() ([]byte, error) {
 }
 
 func (lst *LoadSegmentTask) IsValid() bool {
-	onService, err := lst.cluster.isOnService(lst.NodeID)
+	onService, err := lst.cluster.isOnline(lst.NodeID)
 	if err != nil {
 		return false
 	}
@@ -909,7 +909,7 @@ func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 type ReleaseSegmentTask struct {
 	BaseTask
 	*querypb.ReleaseSegmentsRequest
-	cluster *queryNodeCluster
+	cluster Cluster
 }
 
 func (rst *ReleaseSegmentTask) MsgBase() *commonpb.MsgBase {
@@ -921,7 +921,7 @@ func (rst *ReleaseSegmentTask) Marshal() ([]byte, error) {
 }
 
 func (rst *ReleaseSegmentTask) IsValid() bool {
-	onService, err := rst.cluster.isOnService(rst.NodeID)
+	onService, err := rst.cluster.isOnline(rst.NodeID)
 	if err != nil {
 		return false
 	}
@@ -979,7 +979,7 @@ type WatchDmChannelTask struct {
 	BaseTask
 	*querypb.WatchDmChannelsRequest
 	meta    Meta
-	cluster *queryNodeCluster
+	cluster Cluster
 }
 
 func (wdt *WatchDmChannelTask) MsgBase() *commonpb.MsgBase {
@@ -991,7 +991,7 @@ func (wdt *WatchDmChannelTask) Marshal() ([]byte, error) {
 }
 
 func (wdt *WatchDmChannelTask) IsValid() bool {
-	onService, err := wdt.cluster.isOnService(wdt.NodeID)
+	onService, err := wdt.cluster.isOnline(wdt.NodeID)
 	if err != nil {
 		return false
 	}
@@ -1120,7 +1120,7 @@ func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 type WatchQueryChannelTask struct {
 	BaseTask
 	*querypb.AddQueryChannelRequest
-	cluster *queryNodeCluster
+	cluster Cluster
 }
 
 func (wqt *WatchQueryChannelTask) MsgBase() *commonpb.MsgBase {
@@ -1132,7 +1132,7 @@ func (wqt *WatchQueryChannelTask) Marshal() ([]byte, error) {
 }
 
 func (wqt *WatchQueryChannelTask) IsValid() bool {
-	onService, err := wqt.cluster.isOnService(wqt.NodeID)
+	onService, err := wqt.cluster.isOnline(wqt.NodeID)
 	if err != nil {
 		return false
 	}
@@ -1201,7 +1201,7 @@ type LoadBalanceTask struct {
 	*querypb.LoadBalanceRequest
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
-	cluster   *queryNodeCluster
+	cluster   Cluster
 	meta      Meta
 }
 
@@ -1379,12 +1379,12 @@ func (lbt *LoadBalanceTask) PostExecute(context.Context) error {
 	return nil
 }
 
-func shuffleChannelsToQueryNode(dmChannels []string, cluster *queryNodeCluster) []int64 {
+func shuffleChannelsToQueryNode(dmChannels []string, cluster Cluster) []int64 {
 	maxNumChannels := 0
 	nodes := make(map[int64]Node)
 	var err error
 	for {
-		nodes, err = cluster.onServiceNodes()
+		nodes, err = cluster.onlineNodes()
 		if err != nil {
 			log.Debug(err.Error())
 			time.Sleep(1 * time.Second)
@@ -1435,12 +1435,12 @@ func shuffleChannelsToQueryNode(dmChannels []string, cluster *queryNodeCluster) 
 	}
 }
 
-func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster *queryNodeCluster) []int64 {
+func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster Cluster) []int64 {
 	maxNumSegments := 0
 	nodes := make(map[int64]Node)
 	var err error
 	for {
-		nodes, err = cluster.onServiceNodes()
+		nodes, err = cluster.onlineNodes()
 		if err != nil {
 			log.Debug(err.Error())
 			time.Sleep(1 * time.Second)
@@ -1526,7 +1526,7 @@ func assignInternalTask(ctx context.Context,
 	collectionID UniqueID,
 	parentTask task,
 	meta Meta,
-	cluster *queryNodeCluster,
+	cluster Cluster,
 	loadSegmentRequests []*querypb.LoadSegmentsRequest,
 	watchDmChannelRequests []*querypb.WatchDmChannelsRequest) {
 
