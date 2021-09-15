@@ -19,6 +19,11 @@ add_library(milvus_indexbuilder SHARED
         ${INDEXBUILDER_FILES}
         )
 
+set(PLATFORM_LIBS dl)
+if (MSYS)
+set(PLATFORM_LIBS )
+endif ()
+
 # link order matters
 target_link_libraries(milvus_indexbuilder
         milvus_config
@@ -28,7 +33,7 @@ target_link_libraries(milvus_indexbuilder
         knowhere
         tbb
         log
-        dl
+        ${PLATFORM_LIBS}
         pthread
         )
 

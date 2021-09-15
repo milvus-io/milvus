@@ -21,4 +21,9 @@ set(LOG_FILES   ${MILVUS_ENGINE_SRC}/log/Log.cpp
 add_library(log STATIC ${LOG_FILES})
 set_target_properties(log PROPERTIES RULE_LAUNCH_COMPILE "")
 set_target_properties(log PROPERTIES RULE_LAUNCH_LINK "")
+
+if(MSYS)
+target_link_libraries( log PRIVATE )
+else()
 target_link_libraries( log PRIVATE fiu )
+endif()

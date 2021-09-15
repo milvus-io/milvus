@@ -98,7 +98,7 @@ func parseSearchRequest(plan *SearchPlan, searchRequestBlob []byte) (*searchRequ
 		return nil, errors.New("empty search request")
 	}
 	var blobPtr = unsafe.Pointer(&searchRequestBlob[0])
-	blobSize := C.long(len(searchRequestBlob))
+	blobSize := C.int64_t(len(searchRequestBlob))
 	var cPlaceholderGroup C.CPlaceholderGroup
 	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
 

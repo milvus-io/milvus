@@ -571,8 +571,8 @@ func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 		return 0, nil
 	}
 	var offset int64
-	cOffset := (*C.long)(&offset)
-	status := C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)), cOffset)
+	cOffset := (*C.int64_t)(&offset)
+	status := C.PreInsert(s.segmentPtr, C.int64_t(int64(numOfRecords)), cOffset)
 	if err := HandleCStatus(&status, "PreInsert failed"); err != nil {
 		return 0, err
 	}
@@ -586,7 +586,7 @@ func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 	*/
 	s.segPtrMu.RLock()
 	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
-	var offset = C.PreDelete(s.segmentPtr, C.long(int64(numOfRecords)))
+	var offset = C.PreDelete(s.segmentPtr, C.int64_t(int64(numOfRecords)))
 
 	return int64(offset)
 }
@@ -630,10 +630,10 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		copyOffset += sizeofPerRow
 	}
 
-	var cOffset = C.long(offset)
-	var cNumOfRows = C.long(numOfRow)
-	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
-	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
+	var cOffset = C.int64_t(offset)
+	var cNumOfRows = C.int64_t(numOfRow)
+	var cEntityIdsPtr = (*C.int64_t)(&(*entityIDs)[0])
+	var cTimestampsPtr = (*C.uint64_t)(&(*timestamps)[0])
 	var cSizeofPerRow = C.int(sizeofPerRow)
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
 	log.Debug("QueryNode::Segment::InsertBegin", zap.Any("cNumOfRows", cNumOfRows))
@@ -672,10 +672,10 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 		return errors.New("length of entityIDs not equal to length of timestamps")
 	}
 
-	var cOffset = C.long(offset)
-	var cSize = C.long(len(*entityIDs))
-	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
-	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
+	var cOffset = C.int64_t(offset)
+	var cSize = C.int64_t(len(*entityIDs))
+	var cEntityIdsPtr = (*C.int64_t)(&(*entityIDs)[0])
+	var cTimestampsPtr = (*C.uint64_t)(&(*timestamps)[0])
 
 	status := C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
 	if err := HandleCStatus(&status, "Delete failed"); err != nil {
@@ -823,7 +823,7 @@ func (s *Segment) dropFieldData(fieldID int64) error {
 		return errors.New(errMsg)
 	}
 
-	status := C.DropFieldData(s.segmentPtr, C.long(fieldID))
+	status := C.DropFieldData(s.segmentPtr, C.int64_t(fieldID))
 	if err := HandleCStatus(&status, "DropFieldData failed"); err != nil {
 		return err
 	}
@@ -893,7 +893,7 @@ func (s *Segment) dropSegmentIndex(fieldID int64) error {
 		return errors.New(errMsg)
 	}
 
-	status := C.DropSealedSegmentIndex(s.segmentPtr, C.long(fieldID))
+	status := C.DropSealedSegmentIndex(s.segmentPtr, C.int64_t(fieldID))
 	if err := HandleCStatus(&status, "DropSealedSegmentIndex failed"); err != nil {
 		return err
 	}
