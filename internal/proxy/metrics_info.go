@@ -26,10 +26,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
+type getMetricsFuncType func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
 func getSystemInfoMetrics(
 	ctx context.Context,
 	request *milvuspb.GetMetricsRequest,
 	node *Proxy,
+	ip string,
 ) (*milvuspb.GetMetricsResponse, error) {
 
 	var err error
@@ -51,7 +54,7 @@ func getSystemInfoMetrics(
 				ErrorReason: "",
 				Name:        proxyRoleName,
 				HardwareInfos: metricsinfo.HardwareMetrics{
-					IP:           node.session.Address,
+					IP:           ip,
 					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
 					CPUCoreUsage: metricsinfo.GetCPUUsage(),
 					Memory:       metricsinfo.GetMemoryCount(),

@@ -2210,7 +2210,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		log.Debug("failed to get system info metrics from cache, recompute instead",
 			zap.Error(err))
 
-		metrics, err := getSystemInfoMetrics(ctx, req, node)
+		metrics, err := getSystemInfoMetrics(ctx, req, node, node.session.Address)
 
 		log.Debug("Proxy.GetMetrics",
 			zap.Int64("node_id", Params.ProxyID),
