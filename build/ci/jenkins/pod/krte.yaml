@@ -53,6 +53,8 @@ spec:
       value: "revision"
     - name: ETCD_AUTO_COMPACTION_RETENTION
       value: "1000"
+    - name: ETCD_SNAPSHOT_COUNT
+      value: "10000"
     command:
     - etcd
     - -advertise-client-urls=http://127.0.0.1:2379
