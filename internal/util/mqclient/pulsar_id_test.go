@@ -27,6 +27,11 @@ func TestPulsarID_Serialize(t *testing.T) {
 	binary := pid.Serialize()
 	assert.NotNil(t, binary)
 	assert.NotZero(t, len(binary))
+
+	pid.LedgerID()
+	pid.EntryID()
+	pid.BatchIdx()
+	pid.PartitionIdx()
 }
 
 func Test_SerializePulsarMsgID(t *testing.T) {
