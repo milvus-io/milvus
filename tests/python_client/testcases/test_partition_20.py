@@ -667,7 +667,6 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.release()
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name, data", [(ct.default_partition_name, cf.gen_default_dataframe_data())])
     def test_partition_insert_default_partition(self):
         """
         target: verify insert data into _default partition
