@@ -85,8 +85,10 @@ func (p *ParamTable) InitAlias(alias string) {
 func (p *ParamTable) Init() {
 	once.Do(func() {
 		p.BaseTable.Init()
-		err := p.LoadYaml("advanced/query_node.yaml")
-		if err != nil {
+		if err := p.LoadYaml("advanced/query_node.yaml"); err != nil {
+			panic(err)
+		}
+		if err := p.LoadYaml("advanced/knowhere.yaml"); err != nil {
 			panic(err)
 		}
 
@@ -116,7 +118,7 @@ func (p *ParamTable) Init() {
 		p.initStatsChannelName()
 
 		p.initSegcoreChunkRows()
-		p.initSegcoreSimdType()
+		p.initKnowhereSimdType()
 
 		p.initLogCfg()
 	})
@@ -265,8 +267,8 @@ func (p *ParamTable) initSegcoreChunkRows() {
 	p.ChunkRows = p.ParseInt64("queryNode.segcore.chunkRows")
 }
 
-func (p *ParamTable) initSegcoreSimdType() {
-	simdType, err := p.Load("queryNode.segcore.simdType")
+func (p *ParamTable) initKnowhereSimdType() {
+	simdType, err := p.LoadWithDefault("knowhere.simdType", "auto")
 	if err != nil {
 		panic(err)
 	}
