@@ -150,6 +150,18 @@ Collections:
           query: fail
   -
     testcase:
+      name: test_partition_proxy
+      chaos: chaos_pratition_proxy.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
       name: test_querynode_cpu100p
       chaos: chaos_querynode_cpu100p.yaml
     # and 10 more for the other pods
