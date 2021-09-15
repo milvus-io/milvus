@@ -42,3 +42,21 @@ SegcoreSetChunkSize(const int64_t value) {
     config.set_size_per_chunk(value);
     std::cout << "set config chunk_size: " << config.get_size_per_chunk() << std::endl;
 }
+
+extern "C" void
+SegcoreSetSimdType(const char* value) {
+    milvus::engine::KnowhereConfig::SimdType simd_type;
+    if (strcmp(value, "auto") == 0) {
+        simd_type = milvus::engine::KnowhereConfig::SimdType::AUTO;
+    } else if (strcmp(value, "avx512") == 0) {
+        simd_type = milvus::engine::KnowhereConfig::SimdType::AVX512;
+    } else if (strcmp(value, "avx2") == 0) {
+        simd_type = milvus::engine::KnowhereConfig::SimdType::AVX2;
+    } else if (strcmp(value, "sse") == 0) {
+        simd_type = milvus::engine::KnowhereConfig::SimdType::SSE;
+    } else {
+        PanicInfo("invalid SIMD type: " + std::string(value));
+    }
+    milvus::engine::KnowhereConfig::SetSimdType(simd_type);
+    std::cout << "set config simd_type: " << int(simd_type) << std::endl;
+}
