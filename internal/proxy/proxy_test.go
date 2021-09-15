@@ -1079,7 +1079,7 @@ func TestProxy(t *testing.T) {
 		}
 
 		// waiting for collection to be loaded
-		for f() {
+		for !f() {
 		}
 	})
 
