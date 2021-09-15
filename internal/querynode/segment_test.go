@@ -819,7 +819,7 @@ func TestSegment_indexInfoTest(t *testing.T) {
 }
 
 func TestSegment_BasicMetrics(t *testing.T) {
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
 	segment := newSegment(collection,
 		defaultSegmentID,
@@ -878,7 +878,7 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
 	segment := newSegment(collection,
 		defaultSegmentID,
@@ -931,7 +931,7 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 }
 
 func TestSegment_indexParam(t *testing.T) {
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
 	segment := newSegment(collection,
 		defaultSegmentID,
@@ -990,7 +990,7 @@ func TestSegment_dropFieldData(t *testing.T) {
 
 func TestSegment_updateSegmentIndex(t *testing.T) {
 	t.Run("test updateSegmentIndex invalid", func(t *testing.T) {
-		_, schema := genSimpleSchema()
+		schema := genSimpleSegCoreSchema()
 		collection := newCollection(defaultCollectionID, schema)
 		segment := newSegment(collection,
 			defaultSegmentID,
@@ -1029,7 +1029,7 @@ func TestSegment_updateSegmentIndex(t *testing.T) {
 
 func TestSegment_dropSegmentIndex(t *testing.T) {
 	t.Run("test dropSegmentIndex invalid segment type", func(t *testing.T) {
-		_, schema := genSimpleSchema()
+		schema := genSimpleSegCoreSchema()
 		collection := newCollection(defaultCollectionID, schema)
 		segment := newSegment(collection,
 			defaultSegmentID,
@@ -1045,7 +1045,7 @@ func TestSegment_dropSegmentIndex(t *testing.T) {
 	})
 
 	t.Run("test dropSegmentIndex nil segment ptr", func(t *testing.T) {
-		_, schema := genSimpleSchema()
+		schema := genSimpleSegCoreSchema()
 		collection := newCollection(defaultCollectionID, schema)
 		segment := newSegment(collection,
 			defaultSegmentID,
@@ -1062,7 +1062,7 @@ func TestSegment_dropSegmentIndex(t *testing.T) {
 	})
 
 	t.Run("test dropSegmentIndex nil index", func(t *testing.T) {
-		_, schema := genSimpleSchema()
+		schema := genSimpleSegCoreSchema()
 		collection := newCollection(defaultCollectionID, schema)
 		segment := newSegment(collection,
 			defaultSegmentID,

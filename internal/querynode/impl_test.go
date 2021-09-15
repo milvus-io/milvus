@@ -108,7 +108,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 
 	req := &queryPb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
@@ -137,7 +137,7 @@ func TestImpl_LoadSegments(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 
 	req := &queryPb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
