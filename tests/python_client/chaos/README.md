@@ -48,7 +48,7 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 ## Run
 ### Manually
 Run a single test scenario manually(take query node pod is killed as instance):
-1. update `ALL_CHAOS_YAMLS = 'chaos_querynode*.yaml'` in `constants.py`
+1. update `ALL_CHAOS_YAMLS = 'chaos_querynode_podkill.yaml'` in `constants.py`
 
 2. run the commands below:
 ```bash
