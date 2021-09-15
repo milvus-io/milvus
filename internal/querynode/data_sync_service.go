@@ -43,7 +43,7 @@ type dataSyncService struct {
 }
 
 // collection flow graph
-func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
+func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -66,7 +66,6 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", vChannel))
 	}
-	return nil
 }
 
 func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
@@ -119,7 +118,7 @@ func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueI
 }
 
 // partition flow graph
-func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) error {
+func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -137,7 +136,6 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 			dsService.msFactory)
 		dsService.partitionFlowGraphs[partitionID][vChannel] = newFlowGraph
 	}
-	return nil
 }
 
 func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {

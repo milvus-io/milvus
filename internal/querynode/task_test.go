@@ -287,6 +287,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 }
 
 func TestTask_releaseCollectionTask(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	genReleaseCollectionRequest := func() *querypb.ReleaseCollectionRequest {
 		req := &querypb.ReleaseCollectionRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments),
@@ -317,6 +320,33 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 		task.req.Base = nil
 		err = task.OnEnqueue()
 		assert.NoError(t, err)
+	})
+
+	t.Run("test execute", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := releaseCollectionTask{
+			req:  genReleaseCollectionRequest(),
+			node: node,
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute no collection in streaming", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.streaming.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		task := releaseCollectionTask{
+			req:  genReleaseCollectionRequest(),
+			node: node,
+		}
+		err = task.Execute(ctx)
+		assert.Error(t, err)
 	})
 }
 
@@ -365,11 +395,40 @@ func TestTask_releasePartitionTask(t *testing.T) {
 			req:  genReleasePartitionsRequest(),
 			node: node,
 		}
-		err = task.node.streaming.dataSyncService.addPartitionFlowGraph(defaultCollectionID,
+		task.node.streaming.dataSyncService.addPartitionFlowGraph(defaultCollectionID,
 			defaultPartitionID,
 			[]Channel{defaultVChannel})
-		assert.NoError(t, err)
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("test execute no collection in historical", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := releasePartitionsTask{
+			req:  genReleasePartitionsRequest(),
+			node: node,
+		}
+		err = node.historical.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		err = task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("test execute no collection in streaming", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := releasePartitionsTask{
+			req:  genReleasePartitionsRequest(),
+			node: node,
+		}
+		err = node.streaming.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		err = task.Execute(ctx)
+		assert.Error(t, err)
 	})
 }
