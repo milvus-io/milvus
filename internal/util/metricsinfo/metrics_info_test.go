@@ -79,12 +79,15 @@ func TestQueryNodeInfos_Codec(t *testing.T) {
 			Type:        typeutil.QueryNodeRole,
 		},
 		SystemConfigurations: QueryNodeConfiguration{
-			SearchReceiveBufSize:         1024,
-			SearchPulsarBufSize:          1024,
-			SearchResultReceiveBufSize:   1024,
+			SearchReceiveBufSize:       1024,
+			SearchPulsarBufSize:        1024,
+			SearchResultReceiveBufSize: 1024,
+
 			RetrieveReceiveBufSize:       1024,
 			RetrievePulsarBufSize:        1024,
 			RetrieveResultReceiveBufSize: 1024,
+
+			SimdType: "AVX",
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)

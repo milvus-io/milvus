@@ -79,6 +79,8 @@ type QueryNodeConfiguration struct {
 	RetrieveReceiveBufSize       int64 `json:"retrieve_receive_buf_size"`
 	RetrievePulsarBufSize        int64 `json:"retrieve_pulsar_buf_size"`
 	RetrieveResultReceiveBufSize int64 `json:"retrieve_result_receive_buf_size"`
+
+	SimdType string `json:"simd_type"`
 }
 
 // QueryNodeInfos implements ComponentInfos
