@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1631610154540,
+  "iteration": 1631693488837,
   "links": [],
   "panels": [
     {
@@ -452,6 +452,7 @@
           },
           "yaxes": [
             {
+              "$$hashKey": "object:164",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -460,6 +461,7 @@
               "show": true
             },
             {
+              "$$hashKey": "object:165",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -3015,6 +3017,7 @@
           },
           "yaxes": [
             {
+              "$$hashKey": "object:660",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -3023,6 +3026,7 @@
               "show": true
             },
             {
+              "$$hashKey": "object:661",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -3116,6 +3120,7 @@
           },
           "yaxes": [
             {
+              "$$hashKey": "object:584",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -3124,6 +3129,7 @@
               "show": true
             },
             {
+              "$$hashKey": "object:585",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -4061,6 +4067,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:269",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4069,6 +4076,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:270",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4157,6 +4165,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:345",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4165,6 +4174,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:346",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4254,6 +4264,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:421",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4262,6 +4273,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:422",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4447,6 +4459,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:92",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4455,6 +4468,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:93",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4639,6 +4653,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:51",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4647,6 +4662,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:52",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4734,6 +4750,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4742,6 +4759,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4830,6 +4848,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:455",
           "decimals": null,
           "format": "short",
           "label": null,
@@ -4839,6 +4858,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:456",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -5008,7 +5028,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Fds",
+      "title": "Process Opened Fds",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -5297,7 +5317,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "default",
           "value": "default"
         },
@@ -5359,13 +5379,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": [
-            "None"
-          ],
-          "value": [
-            ""
-          ]
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -5427,5 +5444,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 94
+  "version": 96
 }
