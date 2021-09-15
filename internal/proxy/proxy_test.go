@@ -1686,8 +1686,8 @@ func TestProxy(t *testing.T) {
 
 	// queue full
 
-	ddParallel := proxy.sched.ddQueue.maxTaskNum
-	proxy.sched.ddQueue.maxTaskNum = 0
+	ddParallel := proxy.sched.ddQueue.getMaxTaskNum()
+	proxy.sched.ddQueue.setMaxTaskNum(0)
 
 	t.Run("failed to create collection, dd queue full", func(t *testing.T) {
 		resp, err := proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{})
@@ -1697,7 +1697,7 @@ func TestProxy(t *testing.T) {
 
 	// TODO(dragondriver): other tasks
 
-	proxy.sched.ddQueue.maxTaskNum = ddParallel
+	proxy.sched.ddQueue.setMaxTaskNum(ddParallel)
 
 	// timeout
 
