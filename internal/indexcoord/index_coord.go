@@ -290,6 +290,10 @@ func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 	}, nil
 }
 
+// BuildIndex receives request from RootCoordinator to build an index.
+// Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task and
+// the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
+// execution.
 func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	log.Debug("IndexCoord building index ...",
 		zap.Int64("IndexBuildID", req.IndexBuildID),
@@ -546,6 +550,8 @@ func (i *IndexCoord) tsLoop() {
 	}
 }
 
+// recycleUnusedIndexFiles is used to delete useless index files, including lower version index files and index files
+// corresponding to the deleted index.
 func (i *IndexCoord) recycleUnusedIndexFiles() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
@@ -595,6 +601,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 	}
 }
 
+// watchNodeLoop is used to monitor IndexNode going online and offline.
 func (i *IndexCoord) watchNodeLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
@@ -631,6 +638,7 @@ func (i *IndexCoord) watchNodeLoop() {
 	}
 }
 
+// watchMetaLoop is used to monitor whether the Meta in ETCD has been changed.
 func (i *IndexCoord) watchMetaLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
@@ -671,6 +679,7 @@ func (i *IndexCoord) watchMetaLoop() {
 	}
 }
 
+// assignTaskLoop is used to assign index construction tasks.
 func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.CreateIndexRequest) bool {
 	ctx, cancel := context.WithTimeout(i.loopCtx, i.reqTimeoutInterval)
 	defer cancel()
