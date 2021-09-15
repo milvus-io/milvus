@@ -155,7 +155,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
-			zap.Any("schema", request.Schema))
+		)
 	}()
 
 	err = cct.WaitToFinish()

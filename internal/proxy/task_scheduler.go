@@ -372,9 +372,9 @@ func newDqTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInte
 }
 
 type taskScheduler struct {
-	ddQueue taskQueue
+	ddQueue *ddTaskQueue
 	dmQueue *dmTaskQueue
-	dqQueue taskQueue
+	dqQueue *dqTaskQueue
 
 	wg     sync.WaitGroup
 	ctx    context.Context
