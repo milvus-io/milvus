@@ -1,5 +1,4 @@
 import os
-from time import sleep
 
 from scale import constants
 from utils.util_log import test_log as log
@@ -69,7 +68,7 @@ class HelmEnv:
     def helm_uninstall_cluster_milvus(self):
         """
         helm uninstall and delete etcd pvc
-        :return: None
+        :return:
         """
         uninstall_cmd = f'helm uninstall {self.release_name}'
         if os.system(uninstall_cmd):
@@ -78,10 +77,12 @@ class HelmEnv:
         delete_pvc_cmd = f'kubectl delete pvc data-{self.release_name}-etcd-0'
         if os.system(delete_pvc_cmd):
             raise Exception(f'Failed to delete {self.release_name} etcd pvc')
-        # delete plusar
-        # delete_pvc_plusar_cmd = "kubectl delete pvc scale-test-milvus-pulsar"
 
     def get_service_ip(self):
+        """
+        get deployed milvus service host
+        :return: str ip
+        """
         from kubernetes import client, config
         # from kubernetes.client.rest import ApiException
         config.load_kube_config()
@@ -99,16 +100,18 @@ class HelmEnv:
             os.system(f'kubectl logs {pod} > {constants.MILVUS_LOGS_PATH}/{pod}.log 2>&1')
 
     def list_all_pods(self):
+        """
+        list all pods of this release
+        :return: list pods
+        """
         from kubernetes import client, config
         config.load_kube_config()
         v1 = client.CoreV1Api()
         label_selector = f'app.kubernetes.io/instance={self.release_name}'
         ret = v1.list_namespaced_pod(namespace=constants.NAMESPACE, label_selector=label_selector)
         pods = []
-        # # label_selector = 'release=zong-single'
         for i in ret.items:
             pods.append(i.metadata.name)
-        #     # print("%s\t%s\t%s" % (i.status.pod_ip, i.metadata.namespace, i.metadata.name))
         return pods
 
 
@@ -121,4 +124,3 @@ if __name__ == '__main__':
     # env.helm_upgrade_cluster_milvus(queryNode=2)
     # env.helm_uninstall_cluster_milvus()
     env.export_all_logs()
-    # sleep(5)
