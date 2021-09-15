@@ -16,10 +16,14 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/datanode"
+	"github.com/milvus-io/milvus/internal/distributed"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
@@ -39,6 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/naming/endpoints"
 )
 
 const connEtcdMaxRetryTime = 100000
@@ -70,7 +76,7 @@ const (
 	ServerStateHealthy ServerState = 2
 )
 
-type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+type dataNodeCreatorFunc func(ctx context.Context, addr string) (datapb.DataNodeClient, error)
 type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
 
 // Server implements `types.Datacoord`
@@ -83,6 +89,7 @@ type Server struct {
 	isServing        ServerState
 	helper           ServerHelper
 
+	etcdCli         *clientv3.Client
 	kvClient        *etcdkv.EtcdKV
 	meta            *meta
 	segmentManager  Manager
@@ -97,9 +104,8 @@ type Server struct {
 
 	session  *sessionutil.Session
 	activeCh <-chan bool
-	eventCh  <-chan *sessionutil.SessionEvent
+	eventCh  endpoints.WatchChannel
 
-	dataClientCreator      dataNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
 }
 
@@ -145,7 +151,6 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 		ctx:                    ctx,
 		msFactory:              factory,
 		flushCh:                make(chan UniqueID, 1024),
-		dataClientCreator:      defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		helper:                 defaultServerHelper(),
 
@@ -156,10 +161,6 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 		opt(s)
 	}
 	return s, nil
-}
-
-func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
-	return datanodeclient.NewClient(ctx, addr)
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
@@ -204,6 +205,10 @@ func (s *Server) Start() error {
 		return err
 	}
 
+	if err = s.initEtcd(); err != nil {
+		return err
+	}
+
 	if err = s.initMeta(); err != nil {
 		return err
 	}
@@ -231,42 +236,41 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) initCluster() error {
-	var err error
-	// cluster could be set by options
-	// by-pass default NewCluster process if already set
-	if s.cluster == nil {
-		s.cluster, err = NewCluster(s.ctx, s.kvClient, NewNodesInfo(), s)
+	datanode, err := datanodeclient.BuildClients(s.etcdCli, distributed.WithBalancer(datanode.BalancerName))
+	if err != nil {
+		return err
 	}
-	return err
+	s.cluster, err = NewCluster(s.ctx, s.kvClient, NewNodesInfo(), s, datanode)
+	if err != nil {
+		return err
+	}
+	s.cluster.Start()
+	return nil
 }
 
 func (s *Server) initServiceDiscovery() error {
-	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
+	em, err := endpoints.NewManager(s.etcdCli, distributed.EtcdServicePrefix+typeutil.DataNodeRole)
 	if err != nil {
-		log.Debug("dataCoord initMeta failed", zap.Error(err))
 		return err
 	}
-	log.Debug("registered sessions", zap.Any("sessions", sessions))
-
-	datanodes := make([]*NodeInfo, 0, len(sessions))
-	for _, session := range sessions {
-		info := &datapb.DataNodeInfo{
-			Address:  session.Address,
-			Version:  session.ServerID,
-			Channels: []*datapb.ChannelStatus{},
-		}
-		nodeInfo := NewNodeInfo(s.ctx, info)
-		datanodes = append(datanodes, nodeInfo)
+	s.eventCh, err = em.NewWatchChannel(s.ctx)
+	if err != nil {
+		return err
 	}
-
-	s.cluster.Startup(datanodes)
-
-	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1)
 	return nil
 }
 
 func (s *Server) startSegmentManager() {
 	s.segmentManager = newSegmentManager(s.meta, s.allocator)
+}
+
+func (s *Server) initEtcd() error {
+	var err error
+	s.etcdCli, err = clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) initMeta() error {
@@ -417,31 +421,35 @@ func (s *Server) startWatchService(ctx context.Context) {
 		case <-ctx.Done():
 			log.Debug("watch service shutdown")
 			return
-		case event := <-s.eventCh:
-			s.handleSessionEvent(ctx, event)
+		case events := <-s.eventCh:
+			for _, event := range events {
+				s.handleUpdateEvent(ctx, event)
+			}
 		}
 	}
 }
 
 // handles session events - DataNodes Add/Del
-func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) {
+func (s *Server) handleUpdateEvent(ctx context.Context, event *endpoints.Update) {
 	if event == nil {
 		return
 	}
+	idString := strings.Split(event.Key, "/")
+	id, _ := strconv.ParseInt(idString[len(idString)-1], 10, 64)
 	info := &datapb.DataNodeInfo{
-		Address:  event.Session.Address,
-		Version:  event.Session.ServerID,
+		Address:  event.Endpoint.Addr,
+		Version:  id,
 		Channels: []*datapb.ChannelStatus{},
 	}
 	node := NewNodeInfo(ctx, info)
-	switch event.EventType {
-	case sessionutil.SessionAddEvent:
+	switch event.Op {
+	case endpoints.Add:
 		log.Info("received datanode register",
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
 		s.cluster.Register(node)
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
-	case sessionutil.SessionDelEvent:
+	case endpoints.Delete:
 		log.Info("received datanode unregister",
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
@@ -449,7 +457,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	default:
 		log.Warn("receive unknown service event type",
-			zap.Any("type", event.EventType))
+			zap.Any("type", event.Op))
 	}
 }
 

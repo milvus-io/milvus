@@ -17,7 +17,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/types"
 )
 
 // ClusterStore is the interface stores DataNodes information
@@ -26,7 +25,6 @@ type ClusterStore interface {
 	SetNode(nodeID UniqueID, node *NodeInfo)
 	DeleteNode(nodeID UniqueID)
 	GetNode(nodeID UniqueID) *NodeInfo
-	SetClient(nodeID UniqueID, client types.DataNode)
 	SetWatched(nodeID UniqueID, channelsName []string)
 }
 
@@ -35,7 +33,6 @@ type ClusterStore interface {
 type NodeInfo struct {
 	Info    *datapb.DataNodeInfo
 	eventCh chan *NodeEvent
-	client  types.DataNode
 	ctx     context.Context
 	cancel  context.CancelFunc
 }
@@ -66,7 +63,6 @@ func (n *NodeInfo) ShadowClone(opts ...NodeOpt) *NodeInfo {
 	cloned := &NodeInfo{
 		Info:    n.Info,
 		eventCh: n.eventCh,
-		client:  n.client,
 		ctx:     n.ctx,
 		cancel:  n.cancel,
 	}
@@ -84,7 +80,6 @@ func (n *NodeInfo) Clone(opts ...NodeOpt) *NodeInfo {
 	cloned := &NodeInfo{
 		Info:    info,
 		eventCh: n.eventCh,
-		client:  n.client,
 		ctx:     n.ctx,
 		cancel:  n.cancel,
 	}
@@ -99,17 +94,9 @@ func (n *NodeInfo) GetEventChannel() chan *NodeEvent {
 	return n.eventCh
 }
 
-// GetClient returns client
-func (n *NodeInfo) GetClient() types.DataNode {
-	return n.client
-}
-
 // Dispose stops the data node client and calls cancel
 func (n *NodeInfo) Dispose() {
 	defer n.cancel()
-	if n.client != nil {
-		n.client.Stop()
-	}
 }
 
 // NodesInfo wraps a map UniqueID -> NodeInfo
@@ -160,14 +147,6 @@ func (c *NodesInfo) GetNode(nodeID UniqueID) *NodeInfo {
 	return node
 }
 
-// SetClient set DataNode client to specified UniqueID
-// do nothing if no Info is found
-func (c *NodesInfo) SetClient(nodeID UniqueID, client types.DataNode) {
-	if node, ok := c.nodes[nodeID]; ok {
-		c.nodes[nodeID] = node.ShadowClone(SetClient(client))
-	}
-}
-
 // SetWatched set specified channels watch state from Uncomplete to Complete
 // do nothing if no Info is found
 func (c *NodesInfo) SetWatched(nodeID UniqueID, channelsName []string) {
@@ -195,13 +174,6 @@ func SetWatched(channelsName []string) NodeOpt {
 				ch.State = datapb.ChannelWatchState_Complete
 			}
 		}
-	}
-}
-
-// SetClient returns NodeOpt update DataNode client
-func SetClient(client types.DataNode) NodeOpt {
-	return func(n *NodeInfo) {
-		n.client = client
 	}
 }
 

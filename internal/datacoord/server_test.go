@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/naming/endpoints"
 )
 
 func TestMain(m *testing.M) {
@@ -828,8 +829,6 @@ func TestDataNodeTtChannel(t *testing.T) {
 			},
 		}
 		node := NewNodeInfo(context.TODO(), info)
-		node.client, err = newMockDataNodeClient(1, ch)
-		assert.Nil(t, err)
 		svr.cluster.Register(node)
 
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
@@ -903,8 +902,6 @@ func TestDataNodeTtChannel(t *testing.T) {
 			},
 		}
 		node := NewNodeInfo(context.TODO(), info)
-		node.client, err = newMockDataNodeClient(1, ch)
-		assert.Nil(t, err)
 		svr.cluster.Register(node)
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
 			NodeID:   0,
@@ -988,8 +985,6 @@ func TestDataNodeTtChannel(t *testing.T) {
 			},
 		}
 		node := NewNodeInfo(context.TODO(), info)
-		node.client, err = newMockDataNodeClient(1, ch)
-		assert.Nil(t, err)
 		svr.cluster.Register(node)
 
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
@@ -1273,18 +1268,19 @@ func TestOptions(t *testing.T) {
 			NodesInfo: NewNodesInfo(),
 			ch:        ch,
 		}
-		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, withRegisterPolicy(registerPolicy))
+		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, &mockDataNodeClient{}, withRegisterPolicy(registerPolicy))
 		assert.Nil(t, err)
 		opt := SetCluster(cluster)
 		assert.NotNil(t, opt)
 		svr := newTestServer(t, nil, opt)
 		defer closeTestServer(t, svr)
 
+		log.Debug("cluster", zap.Any("cluster", cluster))
 		assert.Equal(t, cluster, svr.cluster)
 	})
 }
 
-func TestHandleSessionEvent(t *testing.T) {
+func TestHandleUpdateEvent(t *testing.T) {
 	registerPolicy := newEmptyRegisterPolicy()
 	unregisterPolicy := newEmptyUnregisterPolicy()
 	ch := make(chan interface{})
@@ -1294,54 +1290,38 @@ func TestHandleSessionEvent(t *testing.T) {
 		ch:        ch,
 	}
 	cluster, err := NewCluster(context.TODO(), kv, spyClusterStore,
-		dummyPosProvider{},
+		dummyPosProvider{}, &mockDataNodeClient{},
 		withRegisterPolicy(registerPolicy),
 		withUnregistorPolicy(unregisterPolicy))
 	assert.Nil(t, err)
 	defer cluster.Close()
 
-	cluster.Startup(nil)
+	cluster.Start()
 
 	svr := newTestServer(t, nil, SetCluster(cluster))
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
-		// None event
-		evt := &sessionutil.SessionEvent{
-			EventType: sessionutil.SessionNoneEvent,
-			Session: &sessionutil.Session{
-				ServerID:   0,
-				ServerName: "",
-				Address:    "",
-				Exclusive:  false,
+		evt := &endpoints.Update{
+			Op:  endpoints.Add,
+			Key: "milvus/services/datanode/101",
+			Endpoint: endpoints.Endpoint{
+				Addr: "DN127.0.0.101",
 			},
 		}
-		svr.handleSessionEvent(context.Background(), evt)
-
-		evt = &sessionutil.SessionEvent{
-			EventType: sessionutil.SessionAddEvent,
-			Session: &sessionutil.Session{
-				ServerID:   101,
-				ServerName: "DN101",
-				Address:    "DN127.0.0.101",
-				Exclusive:  false,
-			},
-		}
-		svr.handleSessionEvent(context.Background(), evt)
+		svr.handleUpdateEvent(context.Background(), evt)
 		<-ch
 		dataNodes := svr.cluster.GetNodes()
 		assert.EqualValues(t, 1, len(dataNodes))
 		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].Info.GetAddress())
 
-		evt = &sessionutil.SessionEvent{
-			EventType: sessionutil.SessionDelEvent,
-			Session: &sessionutil.Session{
-				ServerID:   101,
-				ServerName: "DN101",
-				Address:    "DN127.0.0.101",
-				Exclusive:  false,
+		evt = &endpoints.Update{
+			Op:  endpoints.Delete,
+			Key: "milvus/services/datanode/101",
+			Endpoint: endpoints.Endpoint{
+				Addr: "DN127.0.0.101",
 			},
 		}
-		svr.handleSessionEvent(context.Background(), evt)
+		svr.handleUpdateEvent(context.Background(), evt)
 		<-ch
 		dataNodes = svr.cluster.GetNodes()
 		assert.EqualValues(t, 0, len(dataNodes))
@@ -1349,7 +1329,7 @@ func TestHandleSessionEvent(t *testing.T) {
 
 	t.Run("nil evt", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			svr.handleSessionEvent(context.Background(), nil)
+			svr.handleUpdateEvent(context.Background(), nil)
 		})
 	})
 }
@@ -1431,11 +1411,15 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
+	if len(opts) == 0 {
+		kv := memkv.NewMemoryKV()
+		cluster, err := NewCluster(context.TODO(), kv, NewNodesInfo(), dummyPosProvider{}, newMockDataNodeClient(0, receiveCh))
+		assert.Nil(t, err)
+		opts = append(opts, SetCluster(cluster))
+	}
+
 	svr, err := CreateServer(context.TODO(), factory, opts...)
 	assert.Nil(t, err)
-	svr.dataClientCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
-		return newMockDataNodeClient(0, receiveCh)
-	}
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
@@ -1446,6 +1430,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	assert.Nil(t, err)
 	err = svr.Start()
 	assert.Nil(t, err)
+
 	return svr
 }
 

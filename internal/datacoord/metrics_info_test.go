@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -45,15 +46,12 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// nil client node
-	_, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{})
+	_, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{Info: &datapb.DataNodeInfo{}})
 	assert.NotNil(t, err)
 
-	client, err := newMockDataNodeClient(100, nil)
-	assert.Nil(t, err)
+	client := newMockDataNodeClient(100, nil)
 	// mock datanode client
-	info, err := svr.getDataNodeMetrics(ctx, req, &NodeInfo{
-		client: client,
-	})
+	info, err := svr.getDataNodeMetrics(ctx, req, &NodeInfo{Info: &datapb.DataNodeInfo{}})
 	assert.Nil(t, err)
 	assert.False(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, client.id), info.BaseComponentInfos.Name)
@@ -63,9 +61,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	mock.mock = func() (*milvuspb.GetMetricsResponse, error) {
 		return nil, errors.New("mocked fail")
 	}
-	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{
-		client: mock,
-	})
+	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{Info: &datapb.DataNodeInfo{}})
 	assert.Nil(t, err)
 	assert.True(t, info.HasError)
 
@@ -79,9 +75,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 		}, nil
 	}
 
-	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{
-		client: mock,
-	})
+	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{Info: &datapb.DataNodeInfo{}})
 	assert.Nil(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, "mocked error", info.ErrorReason)
@@ -96,9 +90,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 		}, nil
 	}
 
-	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{
-		client: mock,
-	})
+	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{Info: &datapb.DataNodeInfo{}})
 	assert.Nil(t, err)
 	assert.True(t, info.HasError)
 

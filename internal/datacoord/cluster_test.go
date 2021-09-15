@@ -13,7 +13,6 @@ package datacoord
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -76,7 +75,7 @@ func TestClusterCreate(t *testing.T) {
 		NodesInfo: NewNodesInfo(),
 		ch:        ch,
 	}
-	cluster, err := NewCluster(context.TODO(), memKv, spyClusterStore, dummyPosProvider{})
+	cluster, err := NewCluster(context.TODO(), memKv, spyClusterStore, dummyPosProvider{}, &mockDataNodeClient{})
 	assert.Nil(t, err)
 	defer cluster.Close()
 	addr := "localhost:8080"
@@ -85,8 +84,9 @@ func TestClusterCreate(t *testing.T) {
 		Version:  1,
 		Channels: []*datapb.ChannelStatus{},
 	}
-	nodes := []*NodeInfo{NewNodeInfo(context.TODO(), info)}
-	cluster.Startup(nodes)
+	node := NewNodeInfo(context.Background(), info)
+	cluster.Start()
+	cluster.Register(node)
 	<-ch
 	dataNodes := cluster.GetNodes()
 	assert.EqualValues(t, 1, len(dataNodes))
@@ -94,7 +94,7 @@ func TestClusterCreate(t *testing.T) {
 
 	t.Run("loadKv Fails", func(t *testing.T) {
 		fkv := &loadPrefixFailKV{TxnKV: memKv}
-		cluster, err := NewCluster(context.TODO(), fkv, spyClusterStore, dummyPosProvider{})
+		cluster, err := NewCluster(context.TODO(), fkv, spyClusterStore, dummyPosProvider{}, &mockDataNodeClient{})
 		assert.NotNil(t, err)
 		assert.Nil(t, cluster)
 	})
@@ -108,12 +108,12 @@ func TestRegister(t *testing.T) {
 		NodesInfo: NewNodesInfo(),
 		ch:        ch,
 	}
-	cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, withRegisterPolicy(registerPolicy))
+	cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, &mockDataNodeClient{}, withRegisterPolicy(registerPolicy))
 	assert.Nil(t, err)
 	defer cluster.Close()
 	addr := "localhost:8080"
 
-	cluster.Startup(nil)
+	cluster.Start()
 	info := &datapb.DataNodeInfo{
 		Address:  addr,
 		Version:  1,
@@ -136,7 +136,7 @@ func TestUnregister(t *testing.T) {
 			NodesInfo: NewNodesInfo(),
 			ch:        ch,
 		}
-		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, withUnregistorPolicy(unregisterPolicy))
+		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, &mockDataNodeClient{}, withUnregistorPolicy(unregisterPolicy))
 		assert.Nil(t, err)
 		defer cluster.Close()
 		addr := "localhost:8080"
@@ -145,13 +145,14 @@ func TestUnregister(t *testing.T) {
 			Version:  1,
 			Channels: []*datapb.ChannelStatus{},
 		}
-		nodes := []*NodeInfo{NewNodeInfo(context.TODO(), info)}
-		cluster.Startup(nodes)
+		node := NewNodeInfo(context.Background(), info)
+		cluster.Start()
+		cluster.Register(node)
 		<-ch
 		dataNodes := cluster.GetNodes()
 		assert.EqualValues(t, 1, len(dataNodes))
 		assert.EqualValues(t, "localhost:8080", dataNodes[0].Info.GetAddress())
-		cluster.UnRegister(nodes[0])
+		cluster.UnRegister(node)
 		<-ch
 		dataNodes = cluster.GetNodes()
 		assert.EqualValues(t, 0, len(dataNodes))
@@ -164,7 +165,7 @@ func TestUnregister(t *testing.T) {
 			NodesInfo: NewNodesInfo(),
 			ch:        ch,
 		}
-		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{})
+		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, &mockDataNodeClient{})
 		assert.Nil(t, err)
 		defer cluster.Close()
 		ch1 := &datapb.ChannelStatus{
@@ -184,14 +185,9 @@ func TestUnregister(t *testing.T) {
 		}
 		node1 := NewNodeInfo(context.TODO(), nodeInfo1)
 		node2 := NewNodeInfo(context.TODO(), nodeInfo2)
-		cli1, err := newMockDataNodeClient(1, make(chan interface{}))
-		assert.Nil(t, err)
-		cli2, err := newMockDataNodeClient(2, make(chan interface{}))
-		assert.Nil(t, err)
-		node1.client = cli1
-		node2.client = cli2
-		nodes := []*NodeInfo{node1, node2}
-		cluster.Startup(nodes)
+		cluster.Start()
+		cluster.Register(node1)
+		cluster.Register(node2)
 		<-ch
 		<-ch
 		dataNodes := cluster.GetNodes()
@@ -217,7 +213,7 @@ func TestUnregister(t *testing.T) {
 			NodesInfo: NewNodesInfo(),
 			ch:        ch,
 		}
-		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{})
+		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, &mockDataNodeClient{})
 		assert.Nil(t, err)
 		defer cluster.Close()
 		chstatus := &datapb.ChannelStatus{
@@ -231,10 +227,8 @@ func TestUnregister(t *testing.T) {
 			Channels: []*datapb.ChannelStatus{chstatus},
 		}
 		node := NewNodeInfo(context.TODO(), nodeInfo)
-		cli, err := newMockDataNodeClient(1, make(chan interface{}))
-		assert.Nil(t, err)
-		node.client = cli
-		cluster.Startup([]*NodeInfo{node})
+		cluster.Start()
+		cluster.Register(node)
 		<-ch
 		cluster.UnRegister(node)
 		<-ch
@@ -242,7 +236,7 @@ func TestUnregister(t *testing.T) {
 			NodesInfo: NewNodesInfo(),
 			ch:        ch,
 		}
-		cluster2, err := NewCluster(context.TODO(), kv, spyClusterStore2, dummyPosProvider{})
+		cluster2, err := NewCluster(context.TODO(), kv, spyClusterStore2, dummyPosProvider{}, &mockDataNodeClient{})
 		<-ch
 		assert.Nil(t, err)
 		nodes := cluster2.GetNodes()
@@ -262,7 +256,7 @@ func TestWatchIfNeeded(t *testing.T) {
 
 	pch := make(chan interface{})
 	spyPolicy := spyWatchPolicy(pch)
-	cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, withAssignPolicy(spyPolicy))
+	cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, &mockDataNodeClient{}, withAssignPolicy(spyPolicy))
 	assert.Nil(t, err)
 	defer cluster.Close()
 	addr := "localhost:8080"
@@ -272,15 +266,11 @@ func TestWatchIfNeeded(t *testing.T) {
 		Channels: []*datapb.ChannelStatus{},
 	}
 	node := NewNodeInfo(context.TODO(), info)
-	node.client, err = newMockDataNodeClient(1, make(chan interface{}))
-	assert.Nil(t, err)
-	nodes := []*NodeInfo{node}
-	cluster.Startup(nodes)
-	fmt.Println("11111")
+	cluster.Start()
+	cluster.Register(node)
 	<-ch
 	chName := "ch1"
 	cluster.Watch(chName, 0)
-	fmt.Println("222")
 	<-ch
 	dataNodes := cluster.GetNodes()
 	assert.EqualValues(t, 1, len(dataNodes[0].Info.GetChannels()))

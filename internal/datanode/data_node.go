@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,9 +28,11 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/naming/endpoints"
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/distributed"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
@@ -59,6 +62,9 @@ const (
 
 	// ConnectEtcdMaxRetryTime used to limit the max retry time for connection etcd
 	ConnectEtcdMaxRetryTime = 1000
+
+	// Balancer strategy of datanode
+	BalancerName = "specific"
 )
 
 const illegalRequestErrStr = "Illegal request"
@@ -152,13 +158,25 @@ func (node *DataNode) Register() error {
 	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
-	// Start node watch node
-	go node.StartWatchChannels(node.ctx)
-
 	Params.initMsgChannelSubName()
 	log.Debug("DataNode Init",
 		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
 	)
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second})
+	if err != nil {
+		return err
+	}
+	em, err := endpoints.NewManager(etcdCli, distributed.EtcdServicePrefix+typeutil.DataNodeRole)
+	if err != nil {
+		return err
+	}
+	err = em.AddEndpoint(context.TODO(), path.Join(distributed.EtcdServicePrefix+typeutil.DataNodeRole, fmt.Sprintf("%d", node.NodeID)),
+		endpoints.Endpoint{Addr: Params.IP + ":" + strconv.Itoa(Params.Port)})
+	if err != nil {
+		return err
+	}
+	// Start node watch node
+	go node.StartWatchChannels(node.ctx)
 
 	return nil
 }

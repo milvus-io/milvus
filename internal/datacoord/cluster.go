@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	"github.com/milvus-io/milvus/internal/distributed"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -90,6 +90,7 @@ type Cluster struct {
 	unregisterPolicy dataNodeUnregisterPolicy
 	assignPolicy     channelAssignPolicy
 	eventCh          chan *Event
+	dataNodeClient   types.DataNode
 }
 
 // ClusterOption helper function used when creating a Cluster
@@ -129,7 +130,7 @@ func defaultAssignPolicy() channelAssignPolicy {
 // triggers loadFromKV to load previous meta from KV if exists
 // returns error when loadFromKV fails
 func NewCluster(ctx context.Context, kv kv.TxnKV, store ClusterStore,
-	posProvider positionProvider, opts ...ClusterOption) (*Cluster, error) {
+	posProvider positionProvider, dataNodeClient types.DataNode, opts ...ClusterOption) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &Cluster{
 		ctx:              ctx,
@@ -141,6 +142,7 @@ func NewCluster(ctx context.Context, kv kv.TxnKV, store ClusterStore,
 		registerPolicy:   defaultRegisterPolicy(),
 		unregisterPolicy: defaultUnregisterPolicy(),
 		assignPolicy:     defaultAssignPolicy(),
+		dataNodeClient:   dataNodeClient,
 		eventCh:          make(chan *Event, nodeEventChBufferSize),
 	}
 
@@ -216,6 +218,10 @@ func (c *Cluster) UnRegister(node *NodeInfo) {
 	}
 }
 
+func (c *Cluster) GetClient() types.DataNode {
+	return c.dataNodeClient
+}
+
 // Watch triggers Watch event
 // put Event into buffered channel
 // function returns not guarantee event processed
@@ -254,22 +260,23 @@ func (c *Cluster) handleNodeEvent() {
 	}
 }
 
+type NodeAddr struct {
+	addr string
+}
+
+func (a *NodeAddr) Network() string { return "tcp" }
+
+func (a *NodeAddr) String() string { return a.addr }
+
 // handleEvent worker loop handles all events belongs to specified DataNode
 func (c *Cluster) handleEvent(node *NodeInfo) {
-	log.Debug("start handle event", zap.Any("node", node))
 	ctx := node.ctx
 	ch := node.GetEventChannel()
-	version := node.Info.GetVersion()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event := <-ch:
-			cli, err := c.getOrCreateClient(ctx, version)
-			if err != nil {
-				log.Warn("failed to get client", zap.Int64("nodeID", version), zap.Error(err))
-				continue
-			}
 			switch event.Type {
 			case Watch:
 				req, ok := event.Req.(*datapb.WatchDmChannelsRequest)
@@ -277,9 +284,8 @@ func (c *Cluster) handleEvent(node *NodeInfo) {
 					log.Warn("request type is not Watch")
 					continue
 				}
-				log.Debug("receive watch event", zap.Any("event", event), zap.Any("node", node))
 				tCtx, cancel := context.WithTimeout(ctx, eventTimeout)
-				resp, err := cli.WatchDmChannels(tCtx, req)
+				resp, err := c.dataNodeClient.WatchDmChannels(tCtx, req, distributed.WithAddress(node.Info.Address))
 				cancel()
 				if err = VerifyResponse(resp, err); err != nil {
 					log.Warn("failed to watch dm channels", zap.String("addr", node.Info.GetAddress()))
@@ -298,7 +304,7 @@ func (c *Cluster) handleEvent(node *NodeInfo) {
 					continue
 				}
 				tCtx, cancel := context.WithTimeout(ctx, eventTimeout)
-				resp, err := cli.FlushSegments(tCtx, req)
+				resp, err := c.dataNodeClient.FlushSegments(tCtx, req, distributed.WithAddress(node.Info.Address))
 				cancel()
 				if err = VerifyResponse(resp, err); err != nil {
 					log.Warn("failed to flush segments", zap.String("addr", node.Info.GetAddress()), zap.Error(err))
@@ -310,31 +316,6 @@ func (c *Cluster) handleEvent(node *NodeInfo) {
 	}
 }
 
-// getOrCreateClient get type.DataNode for specified data node
-// if not connected yet, try to connect
-func (c *Cluster) getOrCreateClient(ctx context.Context, id UniqueID) (types.DataNode, error) {
-	c.mu.Lock()
-	node := c.nodes.GetNode(id)
-	c.mu.Unlock()
-	if node == nil {
-		return nil, fmt.Errorf("node %d is not alive", id)
-	}
-	cli := node.GetClient()
-	if cli != nil {
-		return cli, nil
-	}
-	var err error
-	cli, err = createClient(ctx, node.Info.GetAddress())
-	if err != nil {
-		return nil, err
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.nodes.SetClient(node.Info.GetVersion(), cli)
-	return cli, nil
-}
-
-// parseChannelsFromReq map-reduce to fetch channel names
 func parseChannelsFromReq(req *datapb.WatchDmChannelsRequest) []string {
 	channels := make([]string, 0, len(req.GetVchannels()))
 	for _, vc := range req.GetVchannels() {
@@ -343,36 +324,10 @@ func parseChannelsFromReq(req *datapb.WatchDmChannelsRequest) []string {
 	return channels
 }
 
-// createClient create type.DataNode from specified address
-// needs to be deprecated, since this function hard-corded DataNode to be grpc client
-func createClient(ctx context.Context, addr string) (types.DataNode, error) {
-	cli, err := grpcdatanodeclient.NewClient(ctx, addr)
-	if err != nil {
-		return nil, err
-	}
-	if err := cli.Init(); err != nil {
-		return nil, err
-	}
-	if err := cli.Start(); err != nil {
-		return nil, err
-	}
-	return cli, nil
-}
-
 // Startup applies statup policy
-func (c *Cluster) Startup(nodes []*NodeInfo) {
+func (c *Cluster) Start() {
 	c.wg.Add(1)
 	go c.handleNodeEvent()
-	// before startup, we have restore all nodes recorded last time. We should
-	// find new created/offlined/restarted nodes and adjust channels allocation.
-	addNodes, deleteNodes := c.updateCluster(nodes)
-	for _, node := range addNodes {
-		c.Register(node)
-	}
-
-	for _, node := range deleteNodes {
-		c.UnRegister(node)
-	}
 }
 
 // updateCluster update nodes list
@@ -407,6 +362,7 @@ func (c *Cluster) updateCluster(nodes []*NodeInfo) (newNodes []*NodeInfo, offlin
 func (c *Cluster) handleRegister(n *NodeInfo) {
 	c.mu.Lock()
 	cNodes := c.nodes.GetNodes()
+	log.Debug("handleRegister", zap.Any("getNodes", cNodes))
 	var nodes []*NodeInfo
 	log.Debug("channels info before register policy applied",
 		zap.Any("n.Channels", n.Info.GetChannels()),
@@ -624,4 +580,5 @@ func (c *Cluster) Close() {
 	for _, node := range nodes {
 		node.Dispose()
 	}
+	c.dataNodeClient.Close()
 }

@@ -14,6 +14,7 @@ package types
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/distributed"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -39,12 +40,11 @@ type Component interface {
 }
 
 type DataNode interface {
-	Component
+	WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest, opts ...distributed.CallOption) (*commonpb.Status, error)
+	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest, opts ...distributed.CallOption) (*commonpb.Status, error)
+	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...distributed.CallOption) (*milvuspb.GetMetricsResponse, error)
 
-	WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error)
-	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
-
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	Close()
 }
 
 type DataCoord interface {

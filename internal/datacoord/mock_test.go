@@ -16,7 +16,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/distributed"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -104,30 +107,18 @@ type mockDataNodeClient struct {
 	id    int64
 	state internalpb.StateCode
 	ch    chan interface{}
+	types.DataNode
 }
 
-func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, error) {
+func newMockDataNodeClient(id int64, ch chan interface{}) *mockDataNodeClient {
 	return &mockDataNodeClient{
 		id:    id,
-		state: internalpb.StateCode_Initializing,
 		ch:    ch,
-	}, nil
+		state: internalpb.StateCode_Healthy,
+	}
 }
 
-func (c *mockDataNodeClient) Init() error {
-	return nil
-}
-
-func (c *mockDataNodeClient) Start() error {
-	c.state = internalpb.StateCode_Healthy
-	return nil
-}
-
-func (c *mockDataNodeClient) Register() error {
-	return nil
-}
-
-func (c *mockDataNodeClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (c *mockDataNodeClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...distributed.CallOption) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			NodeID:    c.id,
@@ -136,22 +127,23 @@ func (c *mockDataNodeClient) GetComponentStates(ctx context.Context) (*internalp
 	}, nil
 }
 
-func (c *mockDataNodeClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (c *mockDataNodeClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...distributed.CallOption) (*milvuspb.StringResponse, error) {
 	return nil, nil
 }
 
-func (c *mockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+func (c *mockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest, opts ...distributed.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegmentsRequest, opts ...distributed.CallOption) (*commonpb.Status, error) {
+	log.Debug("flush segments")
 	if c.ch != nil {
 		c.ch <- in
 	}
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...distributed.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): change the id, though it's not important in ut
 	nodeID := UniqueID(c.id)
 
@@ -182,9 +174,7 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}, nil
 }
 
-func (c *mockDataNodeClient) Stop() error {
-	c.state = internalpb.StateCode_Abnormal
-	return nil
+func (c *mockDataNodeClient) Close() {
 }
 
 type mockRootCoordService struct {

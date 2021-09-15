@@ -16,6 +16,7 @@ import (
 	"errors"
 	"os"
 
+	"github.com/milvus-io/milvus/internal/distributed"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"go.uber.org/zap"
@@ -120,11 +121,11 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 		return infos, errors.New("datanode is nil")
 	}
 
-	if node.GetClient() == nil {
+	if s.cluster.dataNodeClient == nil {
 		return infos, errors.New("datanode client is nil")
 	}
 
-	metrics, err := node.GetClient().GetMetrics(ctx, req)
+	metrics, err := s.cluster.dataNodeClient.GetMetrics(ctx, req, distributed.WithAddress(node.Info.Address))
 	if err != nil {
 		log.Warn("invalid metrics of data node was found",
 			zap.Error(err))
