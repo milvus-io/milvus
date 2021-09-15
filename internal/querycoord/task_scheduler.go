@@ -122,7 +122,7 @@ type TaskScheduler struct {
 	triggerTaskQueue *TaskQueue
 	activateTaskChan chan task
 	meta             Meta
-	cluster          *queryNodeCluster
+	cluster          Cluster
 	taskIDAllocator  func() (UniqueID, error)
 	client           *etcdkv.EtcdKV
 
@@ -134,7 +134,7 @@ type TaskScheduler struct {
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context, meta Meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataCoord types.DataCoord) (*TaskScheduler, error) {
+func NewTaskScheduler(ctx context.Context, meta Meta, cluster Cluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataCoord types.DataCoord) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{

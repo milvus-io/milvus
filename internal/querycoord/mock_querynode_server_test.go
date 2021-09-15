@@ -1,3 +1,13 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 package querycoord
 
 import (
@@ -11,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -31,12 +42,13 @@ type queryNodeServerMock struct {
 	queryNodePort int64
 	queryNodeID   int64
 
-	addQueryChannels  func() (*commonpb.Status, error)
-	watchDmChannels   func() (*commonpb.Status, error)
-	loadSegment       func() (*commonpb.Status, error)
-	releaseCollection func() (*commonpb.Status, error)
-	releasePartition  func() (*commonpb.Status, error)
-	releaseSegment    func() (*commonpb.Status, error)
+	addQueryChannels    func() (*commonpb.Status, error)
+	removeQueryChannels func() (*commonpb.Status, error)
+	watchDmChannels     func() (*commonpb.Status, error)
+	loadSegment         func() (*commonpb.Status, error)
+	releaseCollection   func() (*commonpb.Status, error)
+	releasePartition    func() (*commonpb.Status, error)
+	releaseSegments     func() (*commonpb.Status, error)
 }
 
 func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
@@ -46,12 +58,13 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 
-		addQueryChannels:  returnSuccessResult,
-		watchDmChannels:   returnSuccessResult,
-		loadSegment:       returnSuccessResult,
-		releaseCollection: returnSuccessResult,
-		releasePartition:  returnSuccessResult,
-		releaseSegment:    returnSuccessResult,
+		addQueryChannels:    returnSuccessResult,
+		removeQueryChannels: returnSuccessResult,
+		watchDmChannels:     returnSuccessResult,
+		loadSegment:         returnSuccessResult,
+		releaseCollection:   returnSuccessResult,
+		releasePartition:    returnSuccessResult,
+		releaseSegments:     returnSuccessResult,
 	}
 }
 
@@ -83,7 +96,7 @@ func (qs *queryNodeServerMock) init() error {
 				grpcPort = 0
 			}
 			return err
-		}, retry.Attempts(10))
+		}, retry.Attempts(2))
 		if err != nil {
 			qs.grpcErrChan <- err
 		}
@@ -133,8 +146,20 @@ func (qs *queryNodeServerMock) run() error {
 	return nil
 }
 
+func (qs *queryNodeServerMock) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return &internalpb.ComponentStates{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
+}
+
 func (qs *queryNodeServerMock) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	return qs.addQueryChannels()
+}
+
+func (qs *queryNodeServerMock) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
+	return qs.removeQueryChannels()
 }
 
 func (qs *queryNodeServerMock) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
@@ -154,7 +179,7 @@ func (qs *queryNodeServerMock) ReleasePartitions(ctx context.Context, req *query
 }
 
 func (qs *queryNodeServerMock) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
-	return qs.releaseSegment()
+	return qs.releaseSegments()
 }
 
 func (qs *queryNodeServerMock) GetSegmentInfo(context.Context, *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
