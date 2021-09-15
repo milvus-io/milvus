@@ -21,6 +21,9 @@ SegcoreInit();
 void
 SegcoreSetChunkSize(const int64_t);
 
+void
+SegcoreSetSimdType(const char*);
+
 #ifdef __cplusplus
 }
 #endif

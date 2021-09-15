@@ -70,6 +70,7 @@ type ParamTable struct {
 
 	// segcore
 	ChunkSize int64
+	SimdType  string
 
 	Log log.Config
 }
@@ -115,6 +116,7 @@ func (p *ParamTable) Init() {
 		p.initStatsChannelName()
 
 		p.initSegcoreChunkSize()
+		p.initSegcoreSimdType()
 
 		p.initLogCfg()
 	})
@@ -261,6 +263,14 @@ func (p *ParamTable) initStatsChannelName() {
 
 func (p *ParamTable) initSegcoreChunkSize() {
 	p.ChunkSize = p.ParseInt64("queryNode.segcore.chunkSize")
+}
+
+func (p *ParamTable) initSegcoreSimdType() {
+	simdType, err := p.Load("queryNode.segcore.simdType")
+	if err != nil {
+		panic(err)
+	}
+	p.SimdType = simdType
 }
 
 func (p *ParamTable) initLogCfg() {

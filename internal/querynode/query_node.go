@@ -29,6 +29,7 @@ import (
 	"errors"
 	"strconv"
 	"sync/atomic"
+	"unsafe"
 
 	"go.uber.org/zap"
 
@@ -104,6 +105,11 @@ func (node *QueryNode) InitSegcore() {
 	// override segcore chunk size
 	cChunkSize := C.int64_t(Params.ChunkSize)
 	C.SegcoreSetChunkSize(cChunkSize)
+
+	// override segcore SIMD type
+	cSimdType := C.CString(Params.SimdType)
+	C.SegcoreSetSimdType(cSimdType)
+	C.free(unsafe.Pointer(cSimdType))
 }
 
 func (node *QueryNode) Init() error {
