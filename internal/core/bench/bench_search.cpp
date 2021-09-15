@@ -68,9 +68,9 @@ Search_SmallIndex(benchmark::State& state) {
     }();
 
     auto is_small_index = state.range(0);
-    auto chunk_size = state.range(1) * 1024;
+    auto chunk_rows = state.range(1) * 1024;
     auto segconf = SegcoreConfig::default_config();
-    segconf.set_size_per_chunk(chunk_size);
+    segconf.set_chunk_rows(chunk_rows);
     auto segment = CreateGrowingSegment(schema, segconf);
     if (!is_small_index) {
         segment->disable_small_index();

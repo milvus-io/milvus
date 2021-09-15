@@ -27,5 +27,5 @@ queryNode:
       recvBufSize: 64
 
   segcore:
-    chunkSize: 32768  # 32M
+    chunkRows: 32768
     simdType: auto    # auto, avx512, avx2, sse
