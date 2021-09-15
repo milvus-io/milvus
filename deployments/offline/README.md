@@ -10,7 +10,6 @@ Your Milvus installation may fail when images are not properly loaded from publi
 
 1. Download Milvus standalone docker-compose.yml
    ```shell
-   # Download Milvus standalone docker-compose.yml
    wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/standalone/docker-compose.yml -O docker-compose.yml
    ```
 
