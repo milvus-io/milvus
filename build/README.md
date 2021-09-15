@@ -157,6 +157,59 @@ The scripts directly under [`build/`](.) are used to build and test. They will e
 
 The `builder.sh` is execute by first creating a “docker volume“ directory in `.docker/`. The `.docker/` directory is used to cache the third-party package and compiler cache data. It speeds up recompilation by caching previous compilations and detecting when the same compilation is being done again.
 
-## CROSS DEBUGGING
-Need detailed documentation about how to cross debugging between host machine IDE and Dev containers, TODO.
+## Debug on Host Machine
+
+### Integrate vscode with docker
+
+* Install [Visual Studio Code](https://code.visualstudio.com/)
+
+* Install [Remote Development extension pack](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.vscode-remote-extensionpack)
+
+* Integrate with VS Code 
+
+The working principle is as follows: mount the local file system to the workspace inside the container, or copy it to the container. The extension of vs code is installed inside the container and runs in it, so that the vs Code of the host can fully access the tools, platforms and file systems inside the container. This means that you just need to connect to different containers to switch the entire development environment seamlessly.
+
+![image](../docs/imgs/vscode.png)
+
+Taking the Milvus project as an example, there is a file named **.devcontainer.json** in the root directory of the project. This file describes how vs code accesses (or creates) a development container environment, and defines the container environment, working directory, extension tool set, etc.
+
+* The steps to configure the development environment are as follows:
+
+Start VS Code，in the command panel ( F1 ) input **“Remote-Containers: Open Folder in Container”** , then select the project folder which contains devcontainer.json file.
+
+or click right-bottom corner button > <  , choose **“Remote-Containers: Open Folder in Container”**，then select the project folder which contains devcontainer.json file.
+
+
+![image](../docs/imgs/remote.png)
+
+
+VS Code begin load and construct Devcontainer,  the progress bar display the construction state.
+
+
+![image](../docs/imgs/bar.png)
+
+After Construction finish, VS Code automatically connect to the container. Now you can coding and debugging in VS Code, just like developing in your host machine.
+
+You can also use terminal of VS Code to enter the Dev container to do something. Choose **Terminal >> New Terminal** in the navigation bar, then you can enter container:
+
+![image](../docs/imgs/terminal.png)
+
+Modify vscode go setups if necessary, the setting path is **code -> preference -> settings** 
+
+```shell
+"go.testFlags": ["-v"]  //if you want say detailed output when running unit test
+"go.coverOnSave": true  //if you want to show coverage
+"go.lintOnSave": true   //if you want to auto golint and check code style
+```
+
+![image](../docs/imgs/settings.png)
+
+Enable Code debug by remot debugging with dlv, you can enable debugging by run the following command inside your docker:
+
+```shell
+cp /go/bin/dlv /go/bin/dlv-dap
+```
+
+### Integrate goland with docker
+TBD
 
