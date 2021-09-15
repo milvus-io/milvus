@@ -27,12 +27,12 @@ DEFAULT_DIM = 512
 DEFAULT_METRIC_TYPE = "L2"
 
 RANDOM_SRC_DATA_DIR = config.RAW_DATA_DIR + 'random/'
-SIFT_SRC_DATA_DIR = config.RAW_DATA_DIR + 'sift1b/'
+SIFT_SRC_DATA_DIR = config.RAW_DATA_DIR + 'sift1b/'  # has organized the corresponding query.npy file
 DEEP_SRC_DATA_DIR = config.RAW_DATA_DIR + 'deep1b/'
-JACCARD_SRC_DATA_DIR = config.RAW_DATA_DIR + 'jaccard/'
-HAMMING_SRC_DATA_DIR = config.RAW_DATA_DIR + 'hamming/'
-STRUCTURE_SRC_DATA_DIR = config.RAW_DATA_DIR + 'structure/'
-BINARY_SRC_DATA_DIR = config.RAW_DATA_DIR + 'binary/'
+JACCARD_SRC_DATA_DIR = config.RAW_DATA_DIR + 'jaccard/'  # has organized the corresponding query.npy file
+HAMMING_SRC_DATA_DIR = config.RAW_DATA_DIR + 'hamming/'  # The current data set is not organized on the NAS
+STRUCTURE_SRC_DATA_DIR = config.RAW_DATA_DIR + 'structure/'  # The current data set is not organized on the NAS
+BINARY_SRC_DATA_DIR = config.RAW_DATA_DIR + 'binary/'  # has organized the corresponding query.npy file
 SIFT_SRC_GROUNDTRUTH_DATA_DIR = SIFT_SRC_DATA_DIR + 'gnd'
 
 DEFAULT_F_FIELD_NAME = 'float_vector'
