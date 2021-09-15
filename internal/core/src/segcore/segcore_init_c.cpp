@@ -19,7 +19,7 @@
 
 namespace milvus::segcore {
 static void
-SegcoreInitImpl(const char* config_dir) {
+SegcoreInitImpl() {
     namespace eg = milvus::engine;
     eg::KnowhereConfig::SetSimdType(eg::KnowhereConfig::SimdType::AUTO);
     eg::KnowhereConfig::SetBlasThreshold(16384);
@@ -28,23 +28,17 @@ SegcoreInitImpl(const char* config_dir) {
     eg::KnowhereConfig::SetStatisticsLevel(0);
     el::Configurations el_conf;
     el_conf.setGlobally(el::ConfigurationType::Enabled, std::to_string(false));
-
-    // initializing segcore config
-    try {
-        SegcoreConfig& config = SegcoreConfig::default_config();
-        if (config_dir != NULL) {
-            std::string config_file = std::string(config_dir) + "advanced/segcore.yaml";
-            config.parse_from(config_file);
-            std::cout << "Parse config file: " << config_file << ", chunk_size: " << config.get_size_per_chunk()
-                      << std::endl;
-        }
-    } catch (std::exception& e) {
-        PanicInfo("parse config fail: " + std::string(e.what()));
-    }
 }
 }  // namespace milvus::segcore
 
 extern "C" void
-SegcoreInit(const char* config_dir) {
-    milvus::segcore::SegcoreInitImpl(config_dir);
+SegcoreInit() {
+    milvus::segcore::SegcoreInitImpl();
+}
+
+extern "C" void
+SegcoreSetChunkSize(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
+    config.set_size_per_chunk(value);
+    std::cout << "set config chunk_size: " << config.get_size_per_chunk() << std::endl;
 }

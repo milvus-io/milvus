@@ -68,6 +68,9 @@ type ParamTable struct {
 	MsgChannelSubName string
 	SliceIndex        int
 
+	// segcore
+	ChunkSize int64
+
 	Log log.Config
 }
 
@@ -110,6 +113,8 @@ func (p *ParamTable) Init() {
 
 		p.initStatsPublishInterval()
 		p.initStatsChannelName()
+
+		p.initSegcoreChunkSize()
 
 		p.initLogCfg()
 	})
@@ -252,6 +257,10 @@ func (p *ParamTable) initStatsChannelName() {
 		panic(err)
 	}
 	p.StatsChannelName = channels
+}
+
+func (p *ParamTable) initSegcoreChunkSize() {
+	p.ChunkSize = p.ParseInt64("queryNode.segcore.chunkSize")
 }
 
 func (p *ParamTable) initLogCfg() {

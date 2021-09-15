@@ -16,7 +16,10 @@ extern "C" {
 #endif
 
 void
-SegcoreInit(const char* config_dir);
+SegcoreInit();
+
+void
+SegcoreSetChunkSize(const int64_t);
 
 #ifdef __cplusplus
 }
