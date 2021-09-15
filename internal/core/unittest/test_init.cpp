@@ -20,6 +20,6 @@ TEST(Init, Naive) {
     using namespace milvus;
     using namespace milvus::segcore;
     SegcoreInit();
-    SegcoreSetChunkSize(32768);
+    SegcoreSetChunkRows(32768);
     SegcoreSetSimdType("auto");
 }

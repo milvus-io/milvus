@@ -19,7 +19,7 @@ void
 SegcoreInit();
 
 void
-SegcoreSetChunkSize(const int64_t);
+SegcoreSetChunkRows(const int64_t);
 
 void
 SegcoreSetSimdType(const char*);

@@ -203,8 +203,8 @@ SegmentGrowingImpl::do_insert(int64_t reserved_begin,
 
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
     if (enable_small_index_) {
-        int64_t chunk_size = segcore_config_.get_size_per_chunk();
-        indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / chunk_size, record_);
+        int64_t chunk_rows = segcore_config_.get_chunk_rows();
+        indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / chunk_rows, record_);
     }
 }
 
@@ -243,10 +243,10 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
 int64_t
 SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     int64_t total_bytes = 0;
-    auto size_per_chunk = segcore_config_.get_size_per_chunk();
-    int64_t ins_n = upper_align(record_.reserved, size_per_chunk);
+    auto chunk_rows = segcore_config_.get_chunk_rows();
+    int64_t ins_n = upper_align(record_.reserved, chunk_rows);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = upper_align(deleted_record_.reserved, size_per_chunk);
+    int64_t del_n = upper_align(deleted_record_.reserved, chunk_rows);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
 }
@@ -260,7 +260,7 @@ SegmentGrowingImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) 
 int64_t
 SegmentGrowingImpl::num_chunk() const {
     auto size = get_insert_record().ack_responder_.GetAck();
-    return upper_div(size, segcore_config_.get_size_per_chunk());
+    return upper_div(size, segcore_config_.get_chunk_rows());
 }
 
 void

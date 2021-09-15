@@ -103,8 +103,8 @@ func (node *QueryNode) InitSegcore() {
 	C.SegcoreInit()
 
 	// override segcore chunk size
-	cChunkSize := C.int64_t(Params.ChunkSize)
-	C.SegcoreSetChunkSize(cChunkSize)
+	cChunkRows := C.int64_t(Params.ChunkRows)
+	C.SegcoreSetChunkRows(cChunkRows)
 
 	// override segcore SIMD type
 	cSimdType := C.CString(Params.SimdType)

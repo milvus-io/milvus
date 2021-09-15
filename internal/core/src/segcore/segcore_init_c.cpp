@@ -37,10 +37,10 @@ SegcoreInit() {
 }
 
 extern "C" void
-SegcoreSetChunkSize(const int64_t value) {
+SegcoreSetChunkRows(const int64_t value) {
     milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
-    config.set_size_per_chunk(value);
-    std::cout << "set config chunk_size: " << config.get_size_per_chunk() << std::endl;
+    config.set_chunk_rows(value);
+    std::cout << "set config chunk_size: " << config.get_chunk_rows() << std::endl;
 }
 
 extern "C" void
