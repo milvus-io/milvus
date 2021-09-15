@@ -21,7 +21,6 @@ Your Milvus installation may fail when images are not properly loaded from publi
 
 2. Pull and save Docker images
    ```shell
-   # Pull and save Docker images
    pip3 install -r requirements.txt
    python3 save_image.py --manifest docker-compose.yml
    ```
