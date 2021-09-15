@@ -319,6 +319,11 @@ class TestQueryBase(TestcaseBase):
 
     @pytest.mark.tag(CaseLabel.L1)
     def test_query_expr_not_in_random(self):
+        """
+        target: test query with fixed filter values
+        method: query with fixed filter values
+        expected: correct query result
+        """
         self._connect()
         df = cf.gen_default_dataframe_data(nb=50)
         log.debug(df.head(5))
