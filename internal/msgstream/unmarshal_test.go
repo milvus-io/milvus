@@ -33,7 +33,7 @@ func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
 	return insertMsg, nil
 }
 
-func TestStream_unmarshal_Insert(t *testing.T) {
+func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 	msgPack := MsgPack{}
 	insertMsg := &InsertMsg{
 		BaseMsg: BaseMsg{
