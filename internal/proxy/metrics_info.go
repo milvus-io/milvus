@@ -32,7 +32,6 @@ func getSystemInfoMetrics(
 	ctx context.Context,
 	request *milvuspb.GetMetricsRequest,
 	node *Proxy,
-	ip string,
 ) (*milvuspb.GetMetricsResponse, error) {
 
 	var err error
@@ -54,7 +53,7 @@ func getSystemInfoMetrics(
 				ErrorReason: "",
 				Name:        proxyRoleName,
 				HardwareInfos: metricsinfo.HardwareMetrics{
-					IP:           ip,
+					IP:           node.session.Address,
 					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
 					CPUCoreUsage: metricsinfo.GetCPUUsage(),
 					Memory:       metricsinfo.GetMemoryCount(),

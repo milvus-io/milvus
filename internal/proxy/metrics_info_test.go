@@ -15,6 +15,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -24,8 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func TestProxy_metrics(t *testing.T) {
@@ -54,6 +55,7 @@ func TestProxy_metrics(t *testing.T) {
 		queryCoord: qc,
 		dataCoord:  dc,
 		indexCoord: ic,
+		session:    &sessionutil.Session{Address: funcutil.GenRandomStr()},
 	}
 
 	rc.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
@@ -267,9 +269,8 @@ func TestProxy_metrics(t *testing.T) {
 
 	}
 
-	ip := funcutil.GenRandomStr()
 	req, _ := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-	resp, err := getSystemInfoMetrics(ctx, req, proxy, ip)
+	resp, err := getSystemInfoMetrics(ctx, req, proxy)
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 
