@@ -106,12 +106,17 @@ if (MILVUS_SUPPORT_SPTAG)
             )
 endif ()
 
+set(depend_fiu_libs "fiu")
+if (MSYS)
+set(depend_fiu_libs)
+endif ()
+
 set(depend_libs
         faiss
         gomp
         gfortran
         pthread
-        fiu
+        ${depend_fiu_libs}
         ngt
         index_log
         )

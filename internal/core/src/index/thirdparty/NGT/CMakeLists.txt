@@ -20,11 +20,14 @@ string(TOLOWER ${CMAKE_BUILD_TYPE} CMAKE_BUILD_TYPE_LOWER)
 message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 message(STATUS "CMAKE_BUILD_TYPE_LOWER: ${CMAKE_BUILD_TYPE_LOWER}")
 
-if(${UNIX})
+if(UNIX OR MSYS)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
 
     if(CMAKE_VERSION VERSION_LESS 3.1)
         set(BASE_OPTIONS "-Wall -std=gnu++0x -lrt")
+        if (MSYS)
+        set(BASE_OPTIONS "-Wall -std=gnu++0x")
+        endif()
 
         if(${NGT_AVX_DISABLED})
             message(STATUS "AVX will not be used to compute distances.")
@@ -76,4 +79,4 @@ if(${UNIX})
     endif() 
 
     add_subdirectory("${PROJECT_SOURCE_DIR}/lib")
-endif( ${UNIX} )
+endif()

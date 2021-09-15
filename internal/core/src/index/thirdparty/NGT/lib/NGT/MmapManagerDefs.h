@@ -25,7 +25,12 @@ namespace MemoryManager{
   
   const bool MMAP_DEFAULT_ALLOW_EXPAND = false; 
   const uint64_t MMAP_CNTL_FILE_RANGE = 16; 
-  const size_t MMAP_CNTL_FILE_SIZE = MMAP_CNTL_FILE_RANGE * sysconf(_SC_PAGESIZE); 
+  #ifdef WIN32
+  const size_t MMAP_CNTL_PAGE_SIZE = 65536;
+  #else
+  const size_t MMAP_CNTL_PAGE_SIZE = sysconf(_SC_PAGESIZE);
+  #endif
+  const size_t MMAP_CNTL_FILE_SIZE = MMAP_CNTL_FILE_RANGE * MMAP_CNTL_PAGE_SIZE;
   const uint64_t MMAP_MAX_FILE_NAME_LENGTH = 1024; 
   const std::string MMAP_CNTL_FILE_SUFFIX = "c"; 
   

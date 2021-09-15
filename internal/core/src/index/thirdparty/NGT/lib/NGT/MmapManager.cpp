@@ -75,7 +75,7 @@ namespace MemoryManager{
         std::cerr << "too long filepath" << std::endl;
         return false;
       }
-      if((size % sysconf(_SC_PAGESIZE) != 0) || ( size < MMAP_LOWER_SIZE )){
+      if((size % MMAP_CNTL_PAGE_SIZE != 0) || ( size < MMAP_LOWER_SIZE )){
         std::cerr << "input size error" << std::endl;
         return false;
       }
@@ -364,6 +364,9 @@ namespace MemoryManager{
 
   std::string getErrorStr(int32_t err_num){
     char err_msg[256];
+#ifdef WIN32
+    #define strerror_r(errno,buf,len) strerror_s(buf,len,errno)
+#endif
 #ifdef _GNU_SOURCE
     char *msg = strerror_r(err_num, err_msg, 256);
     return std::string(msg);

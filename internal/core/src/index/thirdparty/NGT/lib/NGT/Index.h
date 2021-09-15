@@ -543,7 +543,11 @@ public:
 #endif
     static void mkdir(const std::string & dir)
     {
+#ifdef WIN32
+        if (::mkdir(dir.c_str()))
+#else
         if (::mkdir(dir.c_str(), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0)
+#endif
         {
             std::stringstream msg;
             msg << "NGT::Index::mkdir: Cannot make the specified directory. " << dir;

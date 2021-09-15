@@ -17,6 +17,7 @@
 #pragma once
 
 #include	"NGT/defines.h"
+#include	"NGT/MmapManagerDefs.h"
 #include	"NGT/MmapManager.h"
 
 #include	<unistd.h>
@@ -111,8 +112,8 @@ class SharedMemoryAllocator {
     if (msize == 0) {
       msize = NGT_SHARED_MEMORY_MAX_SIZE;
     }
-    size_t bsize = msize * 1048576 / sysconf(_SC_PAGESIZE) + 1; // 1048576=1M
-    uint64_t size = bsize * sysconf(_SC_PAGESIZE);
+    size_t bsize = msize * 1048576 / MemoryManager::MMAP_CNTL_PAGE_SIZE + 1; // 1048576=1M
+    uint64_t size = bsize * MemoryManager::MMAP_CNTL_PAGE_SIZE;
     MemoryManager::init_option_st option;
     MemoryManager::MmapManager::setDefaultOptionValue(option);
     option.use_expand = true;
@@ -171,7 +172,7 @@ class SharedMemoryAllocator {
 #if defined(MMAP_MANAGER) && !defined(NOT_USE_MMAP_ALLOCATOR)
     return mmanager->getAbsAddr(oft); 
 #else
-    return (void*)oft;
+    return reinterpret_cast<void*>(oft);
 #endif
   }
   off_t getOffset(void *adr) { 
@@ -181,7 +182,7 @@ class SharedMemoryAllocator {
 #if defined(MMAP_MANAGER) && !defined(NOT_USE_MMAP_ALLOCATOR)
     return mmanager->getRelAddr(adr); 
 #else
-    return (off_t)adr;
+    return static_cast<off_t>(reinterpret_cast<int64_t>(adr));
 #endif
   }
   size_t getMemorySize(GetMemorySizeType t) {

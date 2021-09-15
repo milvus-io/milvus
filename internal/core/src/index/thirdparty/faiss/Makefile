@@ -32,7 +32,7 @@ NVCCFLAGS += -I.
 ############################
 # Building
 
-all: libfaiss.a libfaiss.$(SHAREDEXT)
+all: libfaiss.a
 
 libfaiss.a: $(OBJ)
 	$(AR) r $@ $^
@@ -55,15 +55,15 @@ libfaiss.$(SHAREDEXT): $(OBJ)
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@
 
 clean:
-	rm -f libfaiss.a libfaiss.$(SHAREDEXT)
+	rm -f libfaiss.a
 	rm -f $(OBJ)
 
 
 ############################
 # Installing
 
-install: libfaiss.a libfaiss.$(SHAREDEXT) installdirs
-	cp libfaiss.a libfaiss.$(SHAREDEXT) $(DESTDIR)$(libdir)
+install: libfaiss.a installdirs
+	cp libfaiss.a $(DESTDIR)$(libdir)
 	tar cf - $(HEADERS) | tar xf - -C $(DESTDIR)$(includedir)/faiss/
 
 installdirs:

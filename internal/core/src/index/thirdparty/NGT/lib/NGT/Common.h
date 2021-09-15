@@ -33,6 +33,7 @@
 #include	<algorithm>
 #include	<typeinfo>
 
+#include	<sys/stat.h>
 #include	<sys/time.h>
 #include	<fcntl.h>
 

@@ -17,6 +17,7 @@
 #include <iostream>
 #include <stack>
 #include <string>
+#include <random>
 #include <utility>
 
 #include "knowhere/common/Exception.h"
@@ -28,7 +29,8 @@ namespace milvus {
 namespace knowhere {
 namespace impl {
 
-unsigned int seed = 100;
+std::random_device seed_dev;
+std::mt19937 seed(seed_dev());
 
 NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, Metric_Type metric)
     : dimension(dimension), ntotal(n), metric_type(metric) {
@@ -111,7 +113,8 @@ NsgIndex::InitNavigationPoint(float* data) {
 
     // select navigation point
     std::vector<Neighbor> resset;
-    navigation_point = rand_r(&seed) % ntotal;  // random initialize navigating point
+    std::uniform_int_distribution<> distrib(0, ntotal - 1);
+    navigation_point = distrib(seed);  // random initialize navigating point
     GetNeighbors(center, data, resset, knng);
     navigation_point = resset[0].id;
 
@@ -162,7 +165,8 @@ NsgIndex::GetNeighbors(const float* query,
             ++count;
         }
         while (count < buffer_size) {
-            node_t id = rand_r(&seed) % ntotal;
+            std::uniform_int_distribution<> distrib(0, ntotal - 1);
+            node_t id = distrib(seed);
             if (has_calculated_dist[id]) {
                 continue;  // duplicate id
             }
@@ -268,7 +272,8 @@ NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& r
             ++count;
         }
         while (count < buffer_size) {
-            node_t id = rand_r(&seed) % ntotal;
+            std::uniform_int_distribution<> distrib(0, ntotal - 1);
+            node_t id = distrib(seed);
             if (has_calculated_dist[id]) {
                 continue;  // duplicate id
             }
@@ -366,7 +371,8 @@ NsgIndex::GetNeighbors(
             ++count;
         }
         while (count < buffer_size) {
-            node_t id = rand_r(&seed) % ntotal;
+            std::uniform_int_distribution<> distrib(0, ntotal - 1);
+            node_t id = distrib(seed);
             if (has_calculated_dist[id]) {
                 continue;  // duplicate id
             }
@@ -714,7 +720,8 @@ NsgIndex::FindUnconnectedNode(float* data, boost::dynamic_bitset<>& has_linked, 
     }
     if (found == 0) {
         while (true) {  // random a linked-node and add unlinked-node as its neighbor
-            size_t rid = rand_r(&seed) % ntotal;
+            std::uniform_int_distribution<> distrib(0, ntotal - 1);
+            size_t rid = distrib(seed);
             if (has_linked[rid]) {
                 root = rid;
                 break;
