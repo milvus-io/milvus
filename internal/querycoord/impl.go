@@ -14,9 +14,6 @@ package querycoord
 import (
 	"context"
 	"errors"
-	"fmt"
-
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"go.uber.org/zap"
 
@@ -25,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 func (qc *QueryCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
@@ -182,7 +180,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 
 	hasCollection := qc.meta.hasCollection(collectionID)
 	if !hasCollection {
-		log.Warn("release collection end, query coordinator don't have the log of", zap.String("collectionID", fmt.Sprintln(collectionID)))
+		log.Warn("release collection end, query coordinator don't have the log of", zap.Int64("collectionID", collectionID))
 		return status, nil
 	}
 
