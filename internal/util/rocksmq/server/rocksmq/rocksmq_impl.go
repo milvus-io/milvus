@@ -565,10 +565,6 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		key.Free()
 		val.Free()
 	}
-	if err := iter.Err(); err != nil {
-		log.Debug("RocksMQ: get error from iter.Err()")
-		return nil, err
-	}
 
 	// When already consume to last mes, an empty slice will be returned
 	if len(consumerMessage) == 0 {
