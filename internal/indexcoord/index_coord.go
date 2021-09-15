@@ -338,14 +338,13 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 			return i.sched.IndexAddQueue.Enqueue(t)
 		}
 	}
-
 	err := fn()
 	if err != nil {
 		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
-	log.Debug("IndexCoord BuildIndex Enqueue successfully", zap.Any("IndexBuildID", indexBuildID))
+	log.Debug("IndexCoord BuildIndex Enqueue successfully", zap.Any("IndexBuildID", t.indexBuildID))
 
 	err = t.WaitToFinish()
 	if err != nil {
@@ -353,6 +352,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
+	sp.SetTag("IndexCoord-IndexBuildID", strconv.FormatInt(t.indexBuildID, 10))
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	ret.IndexBuildID = t.indexBuildID
 	return ret, nil
