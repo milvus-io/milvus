@@ -51,7 +51,7 @@ $ sudo apt install -y build-essential ccache gfortran \
       libboost-filesystem-dev libboost-serialization-dev libboost-python-dev
 ```
 
-- CentOS
+- CentOS 7
 
 ```shell
 $ sudo yum install -y epel-release centos-release-scl-rh && \
@@ -81,6 +81,24 @@ $ wget -q https://boostorg.jfrog.io/artifactory/main/release/1.65.1/source/boost
       cd ../ && rm -rf ./boost_1_65_1*
 
 ```
+
+- CentOS 8
+
+```shell
+# Install dnf config-manager
+$ sudo dnf install -y dnf-plugins-core
+
+# Enable powertools
+$ sudo dnf config-manager --set-enabled powertools
+
+$ sudo dnf install -y epel-release
+$ sudo dnf install -y \
+      git make automake cmake ccache openssl-devel zlib-devel libcurl-devel python3-devel \
+      gcc gcc-c++ gcc-gfortran llvm-toolset clang-tools-extra \
+      tbb tbb-devel boost boost-static boost-devel \
+      golang
+```
+
 
 Once you have finished, confirm that `gcc` and `make` are installed:
 

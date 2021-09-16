@@ -4,6 +4,15 @@ if [[ -x "$(command -v apt)" ]]; then
     sudo apt install -y g++ gcc make ccache libssl-dev zlib1g-dev libboost-regex-dev \
     libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
     libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev
+elif [[ -x "$(command -v dnf)" && "$(rpm --eval '%{centos_ver}')" = "8" ]] ; then
+    sudo dnf install -y dnf-plugins-core
+    sudo dnf config-manager --set-enabled powertools
+    sudo dnf install -y epel-release
+    sudo dnf install -y \
+        git make automake cmake ccache openssl-devel zlib-devel libcurl-devel python3-devel \
+        gcc gcc-c++ gcc-gfortran llvm-toolset clang-tools-extra \
+        tbb tbb-devel boost boost-static boost-devel \
+        golang
 elif [[ -x "$(command -v yum)" ]]; then
     sudo yum install -y epel-release centos-release-scl-rh && \
 sudo yum install -y git make automake ccache openssl-devel zlib-devel \
