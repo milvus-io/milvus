@@ -26,7 +26,7 @@ mkdir -p internalpb
 mkdir -p milvuspb
 mkdir -p rootcoordpb
 
-mkdir -p milvuspb
+mkdir -p segcorepb
 mkdir -p proxypb
 
 mkdir -p indexpb
