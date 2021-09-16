@@ -82,5 +82,9 @@ profile.out
 cover.out
 coverage.html
 
+#cpp-codecov
+*.info
+lcov_out/
+
 # virtualenv
 venv/

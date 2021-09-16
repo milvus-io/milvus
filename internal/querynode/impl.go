@@ -124,11 +124,6 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	// message stream need to asConsumer before start
-	// add search collection
-	if !node.queryService.hasQueryCollection(collectionID) {
-		node.queryService.addQueryCollection(collectionID)
-		log.Debug("add query collection", zap.Any("collectionID", collectionID))
-	}
 	sc.start()
 	log.Debug("start query collection", zap.Any("collectionID", collectionID))
 
@@ -380,7 +375,6 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 	return status, nil
 }
 
-// ReleaseSegments deprecated
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {

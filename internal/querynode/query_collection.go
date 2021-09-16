@@ -165,9 +165,10 @@ func (q *queryCollection) addToUnsolvedMsg(msg queryMsg) {
 func (q *queryCollection) popAllUnsolvedMsg() []queryMsg {
 	q.unsolvedMsgMu.Lock()
 	defer q.unsolvedMsgMu.Unlock()
-	tmp := q.unsolvedMsg
+	ret := make([]queryMsg, 0, len(q.unsolvedMsg))
+	ret = append(ret, q.unsolvedMsg...)
 	q.unsolvedMsg = q.unsolvedMsg[:0]
-	return tmp
+	return ret
 }
 
 func (q *queryCollection) waitNewTSafe() Timestamp {

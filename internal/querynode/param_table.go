@@ -68,6 +68,10 @@ type ParamTable struct {
 	MsgChannelSubName string
 	SliceIndex        int
 
+	// segcore
+	ChunkRows int64
+	SimdType  string
+
 	Log log.Config
 }
 
@@ -110,6 +114,9 @@ func (p *ParamTable) Init() {
 
 		p.initStatsPublishInterval()
 		p.initStatsChannelName()
+
+		p.initSegcoreChunkRows()
+		p.initSegcoreSimdType()
 
 		p.initLogCfg()
 	})
@@ -252,6 +259,18 @@ func (p *ParamTable) initStatsChannelName() {
 		panic(err)
 	}
 	p.StatsChannelName = channels
+}
+
+func (p *ParamTable) initSegcoreChunkRows() {
+	p.ChunkRows = p.ParseInt64("queryNode.segcore.chunkRows")
+}
+
+func (p *ParamTable) initSegcoreSimdType() {
+	simdType, err := p.Load("queryNode.segcore.simdType")
+	if err != nil {
+		panic(err)
+	}
+	p.SimdType = simdType
 }
 
 func (p *ParamTable) initLogCfg() {

@@ -285,6 +285,11 @@ class TestQueryBase(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("pos", [0, ct.default_nb])
     def test_query_expr_not_in_empty_and_all(self, pos):
+        """
+        target: test query with `not in` expr
+        method: query with `not in` expr for (non)empty collection
+        expected: verify query result
+        """
         self._connect()
         df = cf.gen_default_dataframe_data()
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
@@ -297,7 +302,6 @@ class TestQueryBase(TestcaseBase):
         self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tag(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #7544")
     def test_query_expr_random_values(self):
         """
         target: test query with random filter values
@@ -313,13 +317,18 @@ class TestQueryBase(TestcaseBase):
         self.collection_wrap.load()
 
         # random_values = [random.randint(0, ct.default_nb) for _ in range(4)]
-        random_values = [0, 2, 4, 0]
-        term_expr = f'{ct.default_int64_field_name} not in {random_values}'
+        random_values = [0, 2, 4, 3]
+        term_expr = f'{ct.default_int64_field_name} in {random_values}'
         res = df.iloc[random_values, :1].to_dict('records')
         self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.xfail(reason="issue #7553")
+    @pytest.mark.tag(CaseLabel.L1)
     def test_query_expr_not_in_random(self):
+        """
+        target: test query with fixed filter values
+        method: query with fixed filter values
+        expected: correct query result
+        """
         self._connect()
         df = cf.gen_default_dataframe_data(nb=50)
         log.debug(df.head(5))

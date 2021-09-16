@@ -11,6 +11,8 @@
 
 package rootcoord
 
+import "github.com/milvus-io/milvus/internal/common"
+
 // system filed id:
 // 0: unique row id
 // 1: timestamp
@@ -19,9 +21,9 @@ package rootcoord
 // 102: ...
 
 const (
-	StartOfUserFieldID = 100
-	RowIDField         = 0
-	TimeStampField     = 1
-	RowIDFieldName     = "RowID"
-	TimeStampFieldName = "Timestamp"
+	StartOfUserFieldID = common.StartOfUserFieldID
+	RowIDField         = common.RowIDField
+	TimeStampField     = common.TimeStampField
+	RowIDFieldName     = common.RowIDFieldName
+	TimeStampFieldName = common.TimeStampFieldName
 )

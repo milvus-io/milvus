@@ -4,7 +4,7 @@ In order to quickly install and experience Milvus without docker or kubernetes, 
 
 Before installing etcd and MinIO, you can refer to [docker-compose.yml](https://github.com/milvus-io/milvus/blob/master/deployments/docker/standalone/docker-compose.yml) to check the versions required by etcd and MinIO.
 
-1. Start etcd service
+## 1. Start etcd service
 
 Refer: https://github.com/etcd-io/etcd/releases
 
@@ -18,7 +18,7 @@ cd etcd-v3.5.0-linux-amd64
 
 
 
-2. Start MinIO service
+## 2. Start MinIO service
 
 Refer: https://min.io/download#/linux
 
@@ -31,12 +31,12 @@ chmod +x minio
 
 
 
-3. Start Milvus standalone service
+## 3. Start Milvus standalone service
 
 - To start Milvus service, you need a Milvus binary file. Currently you can get the latest version of Milvus binary file through the Milvus docker image. (we will upload Milvus binary files in the future)
 
 ```bash
-docker run -itd --name milvus milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc /bin/bash
+docker run -itd --name milvus milvusdb/milvus:v2.0.0-rc6-20210910-020f109 /bin/bash
 # view the container_id
 docker ps
 docker cp container_id:/milvus .

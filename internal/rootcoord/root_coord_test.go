@@ -22,13 +22,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/retry"
 
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -43,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -316,7 +320,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	vchanNames := make([]string, t.ShardsNum)
 	chanNames := make([]string, t.ShardsNum)
 	for i := int32(0); i < t.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.dmlChannels.GetDmlMsgStreamName(), collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%d_%d_v%d", collName, collID, i, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
@@ -393,6 +397,110 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		return err
 	}
 	return nil
+}
+
+// a mock kv that always fail when LoadWithPrefix
+type loadPrefixFailKV struct {
+	kv.TxnKV
+}
+
+// LoadWithPrefix override behavior
+func (kv *loadPrefixFailKV) LoadWithPrefix(key string) ([]string, []string, error) {
+	return []string{}, []string{}, retry.NoRetryError(errors.New("mocked fail"))
+}
+
+func TestRootCoordInit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	coreFactory := msgstream.NewPmsFactory()
+	Params.Init()
+	Params.DmlChannelNum = TestDMLChannelNum
+	core, err := NewCore(ctx, coreFactory)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal := rand.Int()
+
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+
+	err = core.Register()
+	assert.Nil(t, err)
+	err = core.Init()
+	assert.Nil(t, err)
+
+	// inject kvBaseCreate fail
+	core, err = NewCore(ctx, coreFactory)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal = rand.Int()
+
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+
+	err = core.Register()
+	assert.Nil(t, err)
+	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
+		return nil, retry.NoRetryError(errors.New("injected"))
+	}
+	err = core.Init()
+	assert.NotNil(t, err)
+
+	// inject metaKV create fail
+	core, err = NewCore(ctx, coreFactory)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal = rand.Int()
+
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+
+	err = core.Register()
+	assert.Nil(t, err)
+	core.kvBaseCreate = func(root string) (kv.TxnKV, error) {
+		if root == Params.MetaRootPath {
+			return nil, retry.NoRetryError(errors.New("injected"))
+		}
+		return memkv.NewMemoryKV(), nil
+	}
+	err = core.Init()
+	assert.NotNil(t, err)
+
+	// inject newSuffixSnapshot failure
+	core, err = NewCore(ctx, coreFactory)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal = rand.Int()
+
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+
+	err = core.Register()
+	assert.Nil(t, err)
+	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
+		return nil, nil
+	}
+	err = core.Init()
+	assert.NotNil(t, err)
+
+	// inject newMetaTable failure
+	core, err = NewCore(ctx, coreFactory)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal = rand.Int()
+
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+
+	err = core.Register()
+	assert.Nil(t, err)
+	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
+		kv := memkv.NewMemoryKV()
+		return &loadPrefixFailKV{TxnKV: kv}, nil
+	}
+	err = core.Init()
+	assert.NotNil(t, err)
+
 }
 
 func TestRootCoord(t *testing.T) {
@@ -1613,10 +1721,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		cn0 := core.dmlChannels.GetDmlMsgStreamName()
-		cn1 := core.dmlChannels.GetDmlMsgStreamName()
-		cn2 := core.dmlChannels.GetDmlMsgStreamName()
-		core.dmlChannels.AddProducerChannels(cn0, cn1, cn2)
+		core.dmlChannels.AddProducerChannels("c0", "c1", "c2")
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -2046,9 +2151,9 @@ func TestRootCoord2(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, collName, rsp.Schema.Name)
 		assert.Equal(t, collMeta.ID, rsp.CollectionID)
-		assert.Equal(t, DefaultShardsNum, int32(len(rsp.VirtualChannelNames)))
-		assert.Equal(t, DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
-		assert.Equal(t, DefaultShardsNum, rsp.ShardsNum)
+		assert.Equal(t, common.DefaultShardsNum, int32(len(rsp.VirtualChannelNames)))
+		assert.Equal(t, common.DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
+		assert.Equal(t, common.DefaultShardsNum, rsp.ShardsNum)
 	})
 	err = core.Stop()
 	assert.Nil(t, err)

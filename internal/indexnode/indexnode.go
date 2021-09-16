@@ -91,6 +91,7 @@ func (i *IndexNode) Register() error {
 }
 
 func (i *IndexNode) Init() error {
+	Params.Init()
 	i.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
 	connectEtcdFn := func() error {
@@ -174,8 +175,9 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
 	defer sp.Finish()
+	sp.SetTag("IndexBuildID", strconv.FormatInt(request.IndexBuildID, 10))
 
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{

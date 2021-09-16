@@ -22,6 +22,7 @@ package querynode
 import "C"
 import (
 	"errors"
+	"fmt"
 	"unsafe"
 )
 
@@ -30,6 +31,10 @@ type SearchPlan struct {
 }
 
 func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
+	if col.collectionPtr == nil {
+		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
+	}
+
 	cDsl := C.CString(dsl)
 	defer C.free(unsafe.Pointer(cDsl))
 	var cPlan C.CSearchPlan
@@ -45,6 +50,10 @@ func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 }
 
 func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
+	if col.collectionPtr == nil {
+		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
+	}
+
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])), (C.int64_t)(len(expr)), &cPlan)
 
@@ -105,7 +114,7 @@ func (pg *searchRequest) delete() {
 
 type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
-	Timestamp     uint64
+	Timestamp     Timestamp
 }
 
 // func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timestamp uint64) (*RetrievePlan, error) {
@@ -123,7 +132,7 @@ type RetrievePlan struct {
 // 	return plan, nil
 // }
 
-func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp uint64) (*RetrievePlan, error) {
+func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp) (*RetrievePlan, error) {
 	var cPlan C.CRetrievePlan
 	status := C.CreateRetrievePlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])),
 		(C.int64_t)(len(expr)), &cPlan)

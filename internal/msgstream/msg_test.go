@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
@@ -358,6 +359,379 @@ func TestRetrieveResultMsg(t *testing.T) {
 func TestRetrieveResultMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	retrieveResultMsg := &RetrieveResultMsg{}
 	tsMsg, err := retrieveResultMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestTimeTickMsg(t *testing.T) {
+	timeTickMsg := &TimeTickMsg{
+		BaseMsg: generateBaseMsg(),
+		TimeTickMsg: internalpb.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+		},
+	}
+
+	assert.NotNil(t, timeTickMsg.TraceCtx())
+
+	ctx := context.Background()
+	timeTickMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, timeTickMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), timeTickMsg.ID())
+	assert.Equal(t, commonpb.MsgType_TimeTick, timeTickMsg.Type())
+	assert.Equal(t, int64(3), timeTickMsg.SourceID())
+
+	bytes, err := timeTickMsg.Marshal(timeTickMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := timeTickMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	timeTickMsg2, ok := tsMsg.(*TimeTickMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), timeTickMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_TimeTick, timeTickMsg2.Type())
+	assert.Equal(t, int64(3), timeTickMsg2.SourceID())
+}
+
+func TestTimeTickMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	timeTickMsg := &TimeTickMsg{}
+	tsMsg, err := timeTickMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestSegmentStatisticsMsg(t *testing.T) {
+	segmentStatisticsMsg := &SegmentStatisticsMsg{
+		BaseMsg: generateBaseMsg(),
+		SegmentStatistics: internalpb.SegmentStatistics{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_SegmentStatistics,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			SegStats: []*internalpb.SegmentStatisticsUpdates{},
+		},
+	}
+
+	assert.NotNil(t, segmentStatisticsMsg.TraceCtx())
+
+	ctx := context.Background()
+	segmentStatisticsMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, segmentStatisticsMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), segmentStatisticsMsg.ID())
+	assert.Equal(t, commonpb.MsgType_SegmentStatistics, segmentStatisticsMsg.Type())
+	assert.Equal(t, int64(3), segmentStatisticsMsg.SourceID())
+
+	bytes, err := segmentStatisticsMsg.Marshal(segmentStatisticsMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := segmentStatisticsMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	segmentStatisticsMsg2, ok := tsMsg.(*SegmentStatisticsMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), segmentStatisticsMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_SegmentStatistics, segmentStatisticsMsg2.Type())
+	assert.Equal(t, int64(3), segmentStatisticsMsg2.SourceID())
+}
+
+func TestSegmentStatisticsMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	segmentStatisticsMsg := &SegmentStatisticsMsg{}
+	tsMsg, err := segmentStatisticsMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestCreateCollectionMsg(t *testing.T) {
+	createCollectionMsg := &CreateCollectionMsg{
+		BaseMsg: generateBaseMsg(),
+		CreateCollectionRequest: internalpb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			DbName:               "test_db",
+			CollectionName:       "test_collection",
+			PartitionName:        "test_partition",
+			DbID:                 4,
+			CollectionID:         5,
+			PartitionID:          6,
+			Schema:               []byte{},
+			VirtualChannelNames:  []string{},
+			PhysicalChannelNames: []string{},
+		},
+	}
+
+	assert.NotNil(t, createCollectionMsg.TraceCtx())
+
+	ctx := context.Background()
+	createCollectionMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, createCollectionMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), createCollectionMsg.ID())
+	assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionMsg.Type())
+	assert.Equal(t, int64(3), createCollectionMsg.SourceID())
+
+	bytes, err := createCollectionMsg.Marshal(createCollectionMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := createCollectionMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	createCollectionMsg2, ok := tsMsg.(*CreateCollectionMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), createCollectionMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionMsg2.Type())
+	assert.Equal(t, int64(3), createCollectionMsg2.SourceID())
+}
+
+func TestCreateCollectionMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	createCollectionMsg := &CreateCollectionMsg{}
+	tsMsg, err := createCollectionMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestDropCollectionMsg(t *testing.T) {
+	dropCollectionMsg := &DropCollectionMsg{
+		BaseMsg: generateBaseMsg(),
+		DropCollectionRequest: internalpb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropCollection,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			DbID:           4,
+			CollectionID:   5,
+		},
+	}
+
+	assert.NotNil(t, dropCollectionMsg.TraceCtx())
+
+	ctx := context.Background()
+	dropCollectionMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, dropCollectionMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), dropCollectionMsg.ID())
+	assert.Equal(t, commonpb.MsgType_DropCollection, dropCollectionMsg.Type())
+	assert.Equal(t, int64(3), dropCollectionMsg.SourceID())
+
+	bytes, err := dropCollectionMsg.Marshal(dropCollectionMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := dropCollectionMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	dropCollectionMsg2, ok := tsMsg.(*DropCollectionMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), dropCollectionMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_DropCollection, dropCollectionMsg2.Type())
+	assert.Equal(t, int64(3), dropCollectionMsg2.SourceID())
+}
+
+func TestDropCollectionMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	dropCollectionMsg := &DropCollectionMsg{}
+	tsMsg, err := dropCollectionMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestCreatePartitionMsg(t *testing.T) {
+	createPartitionMsg := &CreatePartitionMsg{
+		BaseMsg: generateBaseMsg(),
+		CreatePartitionRequest: internalpb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreatePartition,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			PartitionName:  "test_partition",
+			DbID:           4,
+			CollectionID:   5,
+			PartitionID:    6,
+		},
+	}
+
+	assert.NotNil(t, createPartitionMsg.TraceCtx())
+
+	ctx := context.Background()
+	createPartitionMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, createPartitionMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), createPartitionMsg.ID())
+	assert.Equal(t, commonpb.MsgType_CreatePartition, createPartitionMsg.Type())
+	assert.Equal(t, int64(3), createPartitionMsg.SourceID())
+
+	bytes, err := createPartitionMsg.Marshal(createPartitionMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := createPartitionMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	createPartitionMsg2, ok := tsMsg.(*CreatePartitionMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), createPartitionMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_CreatePartition, createPartitionMsg2.Type())
+	assert.Equal(t, int64(3), createPartitionMsg2.SourceID())
+}
+
+func TestCreatePartitionMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	createPartitionMsg := &CreatePartitionMsg{}
+	tsMsg, err := createPartitionMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestDropPartitionMsg(t *testing.T) {
+	dropPartitionMsg := &DropPartitionMsg{
+		BaseMsg: generateBaseMsg(),
+		DropPartitionRequest: internalpb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropPartition,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			PartitionName:  "test_partition",
+			DbID:           4,
+			CollectionID:   5,
+			PartitionID:    6,
+		},
+	}
+
+	assert.NotNil(t, dropPartitionMsg.TraceCtx())
+
+	ctx := context.Background()
+	dropPartitionMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, dropPartitionMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), dropPartitionMsg.ID())
+	assert.Equal(t, commonpb.MsgType_DropPartition, dropPartitionMsg.Type())
+	assert.Equal(t, int64(3), dropPartitionMsg.SourceID())
+
+	bytes, err := dropPartitionMsg.Marshal(dropPartitionMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := dropPartitionMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	dropPartitionMsg2, ok := tsMsg.(*DropPartitionMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), dropPartitionMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_DropPartition, dropPartitionMsg2.Type())
+	assert.Equal(t, int64(3), dropPartitionMsg2.SourceID())
+}
+
+func TestDropPartitionMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	dropPartitionMsg := &DropPartitionMsg{}
+	tsMsg, err := dropPartitionMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestLoadBalanceSegmentsMsg(t *testing.T) {
+	loadBalanceSegmentsMsg := &LoadBalanceSegmentsMsg{
+		BaseMsg: generateBaseMsg(),
+		LoadBalanceSegmentsRequest: internalpb.LoadBalanceSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_LoadBalanceSegments,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			SegmentIDs: []int64{},
+		},
+	}
+
+	assert.NotNil(t, loadBalanceSegmentsMsg.TraceCtx())
+
+	ctx := context.Background()
+	loadBalanceSegmentsMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, loadBalanceSegmentsMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), loadBalanceSegmentsMsg.ID())
+	assert.Equal(t, commonpb.MsgType_LoadBalanceSegments, loadBalanceSegmentsMsg.Type())
+	assert.Equal(t, int64(3), loadBalanceSegmentsMsg.SourceID())
+
+	bytes, err := loadBalanceSegmentsMsg.Marshal(loadBalanceSegmentsMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := loadBalanceSegmentsMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	loadBalanceSegmentsMsg2, ok := tsMsg.(*LoadBalanceSegmentsMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), loadBalanceSegmentsMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_LoadBalanceSegments, loadBalanceSegmentsMsg2.Type())
+	assert.Equal(t, int64(3), loadBalanceSegmentsMsg2.SourceID())
+}
+
+func TestLoadBalanceSegmentsMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	loadBalanceSegmentsMsg := &LoadBalanceSegmentsMsg{}
+	tsMsg, err := loadBalanceSegmentsMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestDataNodeTtMsg(t *testing.T) {
+	dataNodeTtMsg := &DataNodeTtMsg{
+		BaseMsg: generateBaseMsg(),
+		DataNodeTtMsg: datapb.DataNodeTtMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DataNodeTt,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			ChannelName: "test-channel",
+			Timestamp:   4,
+		},
+	}
+
+	assert.NotNil(t, dataNodeTtMsg.TraceCtx())
+
+	ctx := context.Background()
+	dataNodeTtMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, dataNodeTtMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), dataNodeTtMsg.ID())
+	assert.Equal(t, commonpb.MsgType_DataNodeTt, dataNodeTtMsg.Type())
+	assert.Equal(t, int64(3), dataNodeTtMsg.SourceID())
+
+	bytes, err := dataNodeTtMsg.Marshal(dataNodeTtMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := dataNodeTtMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	dataNodeTtMsg2, ok := tsMsg.(*DataNodeTtMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), dataNodeTtMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_DataNodeTt, dataNodeTtMsg2.Type())
+	assert.Equal(t, int64(3), dataNodeTtMsg2.SourceID())
+}
+
+func TestDataNodeTtMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	dataNodeTtMsg := &DataNodeTtMsg{}
+	tsMsg, err := dataNodeTtMsg.Unmarshal(10)
 	assert.NotNil(t, err)
 	assert.Nil(t, tsMsg)
 }

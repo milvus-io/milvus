@@ -30,7 +30,7 @@ using boost::algorithm::starts_with;
 namespace milvus::segcore {
 
 struct GeneratedData {
-    std::vector<char> rows_;
+    std::vector<uint8_t> rows_;
     std::vector<aligned_vector<uint8_t>> cols_;
     std::vector<idx_t> row_ids_;
     std::vector<Timestamp> timestamps_;
@@ -68,13 +68,14 @@ GeneratedData::generate_rows(int64_t N, SchemaPtr schema) {
     int64_t len_per_row = offset_infos.back();
     assert(len_per_row == schema->get_total_sizeof());
 
-    std::vector<char> result(len_per_row * N);
+    // change column-based data to row-based data
+    std::vector<uint8_t> result(len_per_row * N);
     for (int index = 0; index < N; ++index) {
         for (int fid = 0; fid < schema->size(); ++fid) {
             auto len = sizeof_infos[fid];
             auto offset = offset_infos[fid];
             auto src = cols_[fid].data() + index * len;
-            auto dst = result.data() + offset + index * len_per_row;
+            auto dst = result.data() + index * len_per_row + offset;
             memcpy(dst, src, len);
         }
     }

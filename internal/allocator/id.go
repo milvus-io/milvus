@@ -34,12 +34,12 @@ type idAllocatorInterface interface {
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 }
 
+// ID Allocator allocate Unique and monotonically increasing IDs from Root Coord.
+// It could also batch allocate for less root coord server access
 type IDAllocator struct {
 	Allocator
 
-	etcdEndpoints []string
-	metaRoot      string
-	idAllocator   idAllocatorInterface
+	idAllocator idAllocatorInterface
 
 	countPerRPC uint32
 

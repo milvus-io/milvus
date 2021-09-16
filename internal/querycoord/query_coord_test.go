@@ -13,17 +13,21 @@ package querycoord
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/log"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 func setup() {
@@ -46,29 +50,158 @@ func TestMain(m *testing.M) {
 }
 
 func NewQueryCoordTest(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
-	refreshParams()
-	rand.Seed(time.Now().UnixNano())
-	queryChannels := make([]*queryChannelInfo, 0)
-	channelID := len(queryChannels)
-	searchPrefix := Params.SearchChannelPrefix
-	searchResultPrefix := Params.SearchResultChannelPrefix
-	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
-	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+	queryCoord, err := NewQueryCoord(ctx, factory)
+	if err != nil {
+		return nil, err
+	}
+	queryCoord.newNodeFn = newQueryNodeTest
+	return queryCoord, nil
+}
 
-	queryChannels = append(queryChannels, &queryChannelInfo{
-		requestChannel:  allocatedQueryChannel,
-		responseChannel: allocatedQueryResultChannel,
-	})
+func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
+	factory := msgstream.NewPmsFactory()
 
-	ctx1, cancel := context.WithCancel(ctx)
-	service := &QueryCoord{
-		loopCtx:    ctx1,
-		loopCancel: cancel,
-		msFactory:  factory,
-		newNodeFn:  newQueryNodeTest,
+	coord, err := NewQueryCoordTest(ctx, factory)
+	if err != nil {
+		return nil, err
 	}
 
-	service.UpdateStateCode(internalpb.StateCode_Abnormal)
-	log.Debug("query coordinator", zap.Any("queryChannels", queryChannels))
-	return service, nil
+	rootCoord := newRootCoordMock()
+	rootCoord.createCollection(defaultCollectionID)
+	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
+
+	dataCoord, err := newDataCoordMock(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	coord.SetRootCoord(rootCoord)
+	coord.SetDataCoord(dataCoord)
+
+	err = coord.Register()
+	if err != nil {
+		return nil, err
+	}
+	err = coord.Init()
+	if err != nil {
+		return nil, err
+	}
+	err = coord.Start()
+	if err != nil {
+		return nil, err
+	}
+	return coord, nil
+}
+
+func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
+	factory := msgstream.NewPmsFactory()
+
+	coord, err := NewQueryCoordTest(ctx, factory)
+	if err != nil {
+		return nil, err
+	}
+
+	rootCoord := newRootCoordMock()
+	rootCoord.createCollection(defaultCollectionID)
+	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
+
+	dataCoord, err := newDataCoordMock(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	coord.SetRootCoord(rootCoord)
+	coord.SetDataCoord(dataCoord)
+
+	err = coord.Register()
+	if err != nil {
+		return nil, err
+	}
+	err = coord.Init()
+	if err != nil {
+		return nil, err
+	}
+
+	return coord, nil
+}
+
+func TestWatchNodeLoop(t *testing.T) {
+	baseCtx := context.Background()
+
+	t.Run("Test OfflineNodes", func(t *testing.T) {
+		refreshParams()
+		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		assert.Nil(t, err)
+
+		kvs := make(map[string]string)
+		session := &sessionutil.Session{
+			ServerID: 100,
+			Address:  "localhost",
+		}
+		sessionBlob, err := json.Marshal(session)
+		assert.Nil(t, err)
+		sessionKey := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, 100)
+		kvs[sessionKey] = string(sessionBlob)
+
+		collectionInfo := &querypb.CollectionInfo{
+			CollectionID: defaultCollectionID,
+		}
+		collectionBlobs := proto.MarshalTextString(collectionInfo)
+		nodeKey := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, 100)
+		kvs[nodeKey] = collectionBlobs
+
+		err = kv.MultiSave(kvs)
+		assert.Nil(t, err)
+
+		queryCoord, err := startQueryCoord(baseCtx)
+		assert.Nil(t, err)
+
+		for {
+			_, err = queryCoord.cluster.offlineNodes()
+			if err == nil {
+				break
+			}
+		}
+
+		queryCoord.Stop()
+	})
+
+	t.Run("Test RegisterNewNode", func(t *testing.T) {
+		refreshParams()
+		queryCoord, err := startQueryCoord(baseCtx)
+		assert.Nil(t, err)
+
+		queryNode1, err := startQueryNodeServer(baseCtx)
+		assert.Nil(t, err)
+
+		nodeID := queryNode1.queryNodeID
+		for {
+			_, err = queryCoord.cluster.getNodeByID(nodeID)
+			if err == nil {
+				break
+			}
+		}
+
+		queryCoord.Stop()
+		queryNode1.stop()
+	})
+
+	t.Run("Test RemoveNode", func(t *testing.T) {
+		refreshParams()
+		queryNode1, err := startQueryNodeServer(baseCtx)
+		assert.Nil(t, err)
+
+		queryCoord, err := startQueryCoord(baseCtx)
+		assert.Nil(t, err)
+
+		nodeID := queryNode1.queryNodeID
+		queryNode1.stop()
+		for {
+			_, err = queryCoord.cluster.getNodeByID(nodeID)
+			if err != nil {
+				break
+			}
+		}
+		queryCoord.Stop()
+	})
 }

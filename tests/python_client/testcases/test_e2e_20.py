@@ -5,6 +5,7 @@ from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel
+from utils.util_log import test_log as log
 
 prefix = "e2e_"
 
@@ -12,9 +13,7 @@ prefix = "e2e_"
 class TestE2e(TestcaseBase):
     """ Test case of end to end"""
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("name", [(cf.gen_unique_str(prefix))])
     def test_milvus_default(self):
-        from utils.util_log import test_log as log
         # create
         name = cf.gen_unique_str(prefix)
         t0 = time.time()
@@ -77,9 +76,9 @@ class TestE2e(TestcaseBase):
         log.debug(f"assert search: {tt}")
 
         # query
-        term_expr = f'{ct.default_int64_field_name} in [3001,4001,4999,2999]'
+        term_expr = f'{ct.default_int64_field_name} in [1001,1201,4999,2999]'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
-        log.debug(f"assert query: {tt}")
+        log.debug(f"assert query result {len(res)}: {tt}")
         # assert len(res) == 4

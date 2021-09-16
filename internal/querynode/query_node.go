@@ -29,6 +29,7 @@ import (
 	"errors"
 	"strconv"
 	"sync/atomic"
+	"unsafe"
 
 	"go.uber.org/zap"
 
@@ -98,6 +99,19 @@ func (node *QueryNode) Register() error {
 	return nil
 }
 
+func (node *QueryNode) InitSegcore() {
+	C.SegcoreInit()
+
+	// override segcore chunk size
+	cChunkRows := C.int64_t(Params.ChunkRows)
+	C.SegcoreSetChunkRows(cChunkRows)
+
+	// override segcore SIMD type
+	cSimdType := C.CString(Params.SimdType)
+	C.SegcoreSetSimdType(cSimdType)
+	C.free(unsafe.Pointer(cSimdType))
+}
+
 func (node *QueryNode) Init() error {
 	//ctx := context.Background()
 	connectEtcdFn := func() error {
@@ -123,7 +137,7 @@ func (node *QueryNode) Init() error {
 		node.etcdKV)
 	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV)
 
-	C.SegcoreInit()
+	node.InitSegcore()
 
 	if node.rootCoord == nil {
 		log.Error("null root coordinator detected")

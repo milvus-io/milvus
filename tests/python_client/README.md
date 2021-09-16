@@ -1,4 +1,4 @@
-# Guidelines for Test Framewrok
+# Guidelines for Test Framework
 
 This document guides you through the Pytest-based PyMilvus test framework.
 
@@ -113,7 +113,7 @@ where `host` should be set as the IP address of the Milvus service, and `*.html`
 
 ### Module Overview
 
-![Module Overview](https://github.com/milvus-io/milvus/blob/master/tests/python_client/graphs/module_call_diagram.jpg)
+![Module Overview](./graphs/module_call_diagram.jpg)
 
 ### Working directories and files
 

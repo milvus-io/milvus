@@ -146,6 +146,12 @@ Pull requests need to pass all unit tests. To run every unit test, use this comm
 make unittest
 ```
 
+To run single test case, for instance, run TestSearchTask in /internal/proxy directory, use
+```shell
+go test -v ./internal/proxy/ -test.run TestSearchTask
+```
+
+
 ### E2E Tests
 
 Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:

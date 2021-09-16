@@ -33,21 +33,90 @@ func TestStreaming_search(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	streaming, err := genSimpleStreaming(ctx)
-	assert.NoError(t, err)
-	defer streaming.close()
+	t.Run("test search", func(t *testing.T) {
+		streaming, err := genSimpleStreaming(ctx)
+		assert.NoError(t, err)
+		defer streaming.close()
 
-	plan, searchReqs, err := genSimpleSearchPlanAndRequests()
-	assert.NoError(t, err)
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
 
-	res, err := streaming.search(searchReqs,
-		defaultCollectionID,
-		[]UniqueID{defaultPartitionID},
-		defaultVChannel,
-		plan,
-		Timestamp(0))
-	assert.NoError(t, err)
-	assert.Len(t, res, 1)
+		res, err := streaming.search(searchReqs,
+			defaultCollectionID,
+			[]UniqueID{defaultPartitionID},
+			defaultVChannel,
+			plan,
+			Timestamp(0))
+		assert.NoError(t, err)
+		assert.Len(t, res, 1)
+	})
+
+	t.Run("test run empty partition", func(t *testing.T) {
+		streaming, err := genSimpleStreaming(ctx)
+		assert.NoError(t, err)
+		defer streaming.close()
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		res, err := streaming.search(searchReqs,
+			defaultCollectionID,
+			[]UniqueID{},
+			defaultVChannel,
+			plan,
+			Timestamp(0))
+		assert.NoError(t, err)
+		assert.Len(t, res, 1)
+	})
+
+	t.Run("test run empty partition and loadCollection", func(t *testing.T) {
+		streaming, err := genSimpleStreaming(ctx)
+		assert.NoError(t, err)
+		defer streaming.close()
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		col, err := streaming.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.setLoadType(loadTypeCollection)
+
+		err = streaming.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		res, err := streaming.search(searchReqs,
+			defaultCollectionID,
+			[]UniqueID{defaultPartitionID},
+			defaultVChannel,
+			plan,
+			Timestamp(0))
+		assert.NoError(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test run empty partition and loadPartition", func(t *testing.T) {
+		streaming, err := genSimpleStreaming(ctx)
+		assert.NoError(t, err)
+		defer streaming.close()
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		col, err := streaming.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.setLoadType(loadTypePartition)
+
+		err = streaming.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		_, err = streaming.search(searchReqs,
+			defaultCollectionID,
+			[]UniqueID{defaultPartitionID},
+			defaultVChannel,
+			plan,
+			Timestamp(0))
+		assert.Error(t, err)
+	})
 }
 
 func TestStreaming_retrieve(t *testing.T) {
@@ -73,11 +142,24 @@ func TestStreaming_retrieve(t *testing.T) {
 	err = segment.segmentInsert(offset, &insertMsg.RowIDs, &insertMsg.Timestamps, &insertMsg.RowData)
 	assert.NoError(t, err)
 
-	res, ids, err := streaming.retrieve(defaultCollectionID, []UniqueID{defaultPartitionID}, plan)
-	assert.NoError(t, err)
-	assert.Len(t, res, 1)
-	assert.Len(t, ids, 1)
-	//assert.Error(t, err)
-	//assert.Len(t, res, 0)
-	//assert.Len(t, ids, 0)
+	t.Run("test retrieve", func(t *testing.T) {
+		res, ids, err := streaming.retrieve(defaultCollectionID,
+			[]UniqueID{defaultPartitionID},
+			plan)
+		assert.NoError(t, err)
+		assert.Len(t, res, 1)
+		assert.Len(t, ids, 1)
+		//assert.Error(t, err)
+		//assert.Len(t, res, 0)
+		//assert.Len(t, ids, 0)
+	})
+
+	t.Run("test empty partition", func(t *testing.T) {
+		res, ids, err := streaming.retrieve(defaultCollectionID,
+			[]UniqueID{},
+			plan)
+		assert.NoError(t, err)
+		assert.Len(t, res, 1)
+		assert.Len(t, ids, 1)
+	})
 }

@@ -54,7 +54,7 @@ type ReplicaInterface interface {
 	hasCollection(collectionID UniqueID) bool
 	getCollectionNum() int
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
-	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]int64, error)
+	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error)
 
 	// partition
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
@@ -80,9 +80,6 @@ type ReplicaInterface interface {
 	addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) error
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
 
-	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
-	replaceGrowingSegmentBySealedSegment(segment *Segment) error
-
 	freeAll()
 	printReplica()
 }
@@ -92,8 +89,6 @@ type collectionReplica struct {
 	collections map[UniqueID]*Collection
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
-
-	loadType
 
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
@@ -203,7 +198,7 @@ func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]U
 	return collection.partitionIDs, nil
 }
 
-func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]int64, error) {
+func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -212,7 +207,7 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID U
 		return nil, err
 	}
 
-	vecFields := make([]int64, 0)
+	vecFields := make([]FieldID, 0)
 	for _, field := range fields {
 		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
 			vecFields = append(vecFields, field.FieldID)
@@ -471,50 +466,6 @@ func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.Segmen
 	}
 
 	return statisticData
-}
-
-func (colReplica *collectionReplica) getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	targetCollectionIDs := make([]UniqueID, 0)
-	targetPartitionIDs := make([]UniqueID, 0)
-	targetSegmentIDs := make([]UniqueID, 0)
-
-	for _, segment := range colReplica.segments {
-		if segment.getType() == segType {
-			if segType == segmentTypeSealed && !segment.getEnableIndex() {
-				continue
-			}
-
-			targetCollectionIDs = append(targetCollectionIDs, segment.collectionID)
-			targetPartitionIDs = append(targetPartitionIDs, segment.partitionID)
-			targetSegmentIDs = append(targetSegmentIDs, segment.segmentID)
-		}
-	}
-
-	return targetCollectionIDs, targetPartitionIDs, targetSegmentIDs
-}
-
-func (colReplica *collectionReplica) replaceGrowingSegmentBySealedSegment(segment *Segment) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	if segment.segmentType != segmentTypeSealed && segment.segmentType != segmentTypeIndexing {
-		deleteSegment(segment)
-		return errors.New("unexpected segment type")
-	}
-	targetSegment, err := colReplica.getSegmentByIDPrivate(segment.ID())
-	if err == nil && targetSegment != nil {
-		if targetSegment.segmentType != segmentTypeGrowing {
-			deleteSegment(segment)
-			// target segment has been a sealed segment
-			return nil
-		}
-		deleteSegment(targetSegment)
-	}
-
-	colReplica.segments[segment.ID()] = segment
-	return nil
 }
 
 func (colReplica *collectionReplica) initExcludedSegments(collectionID UniqueID) {

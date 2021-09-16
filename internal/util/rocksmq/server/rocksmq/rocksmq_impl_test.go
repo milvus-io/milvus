@@ -41,7 +41,7 @@ func InitIDAllocator(kvPath string) *allocator.GlobalIDAllocator {
 	return idAllocator
 }
 
-func TestFixChannelName(t *testing.T) {
+func Test_FixChannelName(t *testing.T) {
 	name := "abcd"
 	fixName, err := fixChannelName(name)
 	assert.Nil(t, err)
@@ -57,7 +57,7 @@ func etcdEndpoints() []string {
 	return etcdEndpoints
 }
 
-func TestInitRmq(t *testing.T) {
+func Test_InitRmq(t *testing.T) {
 	name := "/tmp/rmq_init"
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
@@ -77,7 +77,7 @@ func TestInitRmq(t *testing.T) {
 	defer CloseRocksMQ()
 }
 
-func TestGlobalRmq(t *testing.T) {
+func Test_InitRocksMQ(t *testing.T) {
 	// Params.Init()
 	rmqPath := "/tmp/milvus/rdb_data_global"
 	os.Setenv("ROCKSMQ_PATH", rmqPath)
@@ -86,9 +86,24 @@ func TestGlobalRmq(t *testing.T) {
 	defer Rmq.stopRetention()
 	assert.NoError(t, err)
 	defer CloseRocksMQ()
+
+	topicName := "topic_register"
+	err = Rmq.CreateTopic(topicName)
+	assert.NoError(t, err)
+	groupName := "group_register"
+	_ = Rmq.DestroyConsumerGroup(topicName, groupName)
+	err = Rmq.CreateConsumerGroup(topicName, groupName)
+	assert.Nil(t, err)
+
+	consumer := &Consumer{
+		Topic:     topicName,
+		GroupName: groupName,
+		MsgMutex:  make(chan struct{}),
+	}
+	Rmq.RegisterConsumer(consumer)
 }
 
-func TestRegisterConsumer(t *testing.T) {
+func TestRocksmq_RegisterConsumer(t *testing.T) {
 	kvPath := rmqPath + "_kv_register"
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
@@ -147,10 +162,10 @@ func TestRegisterConsumer(t *testing.T) {
 	rmq.RegisterConsumer(consumer2)
 
 	err = rmq.DestroyConsumerGroup(topicName, groupName)
-	assert.NoError(t, err)
+	assert.Error(t, err)
 }
 
-func TestRocksMQ(t *testing.T) {
+func TestRocksmq(t *testing.T) {
 	kvPath := rmqPath + "_kv_rmq"
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
@@ -203,7 +218,7 @@ func TestRocksMQ(t *testing.T) {
 	assert.Equal(t, string(cMsgs[1].Payload), "c_message")
 }
 
-func TestRocksMQDummy(t *testing.T) {
+func TestRocksmq_Dummy(t *testing.T) {
 	kvPath := rmqPath + "_kv_dummy"
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
@@ -253,7 +268,7 @@ func TestRocksMQDummy(t *testing.T) {
 	pMsgs[0] = pMsgA
 }
 
-func TestRocksMQ_Loop(t *testing.T) {
+func TestRocksmq_Loop(t *testing.T) {
 	ep := etcdEndpoints()
 	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
@@ -321,7 +336,7 @@ func TestRocksMQ_Loop(t *testing.T) {
 	assert.Equal(t, len(cMsgs), 0)
 }
 
-func TestRocksMQ_Goroutines(t *testing.T) {
+func TestRocksmq_Goroutines(t *testing.T) {
 	ep := etcdEndpoints()
 	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
@@ -392,7 +407,7 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 	  	Produce: 190000 message / s
 		Consume: 90000 message / s
 */
-func TestRocksMQ_Throughout(t *testing.T) {
+func TestRocksmq_Throughout(t *testing.T) {
 	ep := etcdEndpoints()
 	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
@@ -446,7 +461,7 @@ func TestRocksMQ_Throughout(t *testing.T) {
 	log.Printf("Total consume %d item, cost %v ms, throughout %v / s", entityNum, cDuration, int64(entityNum)*1000/cDuration)
 }
 
-func TestRocksMQ_MultiChan(t *testing.T) {
+func TestRocksmq_MultiChan(t *testing.T) {
 	ep := etcdEndpoints()
 	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
@@ -495,7 +510,7 @@ func TestRocksMQ_MultiChan(t *testing.T) {
 	assert.Equal(t, string(cMsgs[0].Payload), "for_chann1_"+strconv.Itoa(0))
 }
 
-func TestRocksMQ_CopyData(t *testing.T) {
+func TestRocksmq_CopyData(t *testing.T) {
 	ep := etcdEndpoints()
 	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)

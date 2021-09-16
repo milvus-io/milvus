@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
+type getMetricsFuncType func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
 func getSystemInfoMetrics(
 	ctx context.Context,
 	request *milvuspb.GetMetricsRequest,

@@ -81,6 +81,10 @@ func TestParamTable_Normal(t *testing.T) {
 	t.Run("RoleName", func(t *testing.T) {
 		t.Logf("RoleName: %s", Params.RoleName)
 	})
+
+	t.Run("MaxTaskNum", func(t *testing.T) {
+		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum)
+	})
 }
 
 func shouldPanic(t *testing.T, name string, f func()) {
@@ -148,5 +152,15 @@ func TestParamTable_Panics(t *testing.T) {
 	shouldPanic(t, "proxy.maxDimension", func() {
 		Params.Save("proxy.maxDimension", "-asdf")
 		Params.initMaxDimension()
+	})
+
+	shouldPanic(t, "proxy.maxTaskNum", func() {
+		Params.Remove("proxy.maxTaskNum")
+		Params.initMaxTaskNum()
+	})
+
+	shouldPanic(t, "proxy.maxTaskNum", func() {
+		Params.Save("proxy.maxTaskNum", "-asdf")
+		Params.initMaxTaskNum()
 	})
 }

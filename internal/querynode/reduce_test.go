@@ -106,3 +106,9 @@ func TestReduce_AllFunc(t *testing.T) {
 	deleteSegment(segment)
 	deleteCollection(collection)
 }
+
+func TestReduce_nilPlan(t *testing.T) {
+	plan := &SearchPlan{}
+	err := reduceSearchResultsAndFillData(plan, nil, 1)
+	assert.Error(t, err)
+}

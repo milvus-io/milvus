@@ -79,12 +79,19 @@ func (PlaceholderType) EnumDescriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{1}
 }
 
+//*
+// Create collection in milvus
 type CreateCollectionRequest struct {
-	Base           *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName         string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	// `schema` is the serialized `schema.CollectionSchema`
-	Schema               []byte   `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The unique collection name in milvus.(Required)
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// The serialized `schema.CollectionSchema`(Required)
+	Schema []byte `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
+	// Once set, no modification is allowed (Optional)
+	// https://github.com/milvus-io/milvus/issues/6690
 	ShardsNum            int32    `protobuf:"varint,5,opt,name=shards_num,json=shardsNum,proto3" json:"shards_num,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
@@ -151,13 +158,18 @@ func (m *CreateCollectionRequest) GetShardsNum() int32 {
 	return 0
 }
 
+//*
+// Drop collection in milvus, also will drop data in collection.
 type DropCollectionRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The unique collection name in milvus.(Required)
+	CollectionName       string   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *DropCollectionRequest) Reset()         { *m = DropCollectionRequest{} }
@@ -206,14 +218,20 @@ func (m *DropCollectionRequest) GetCollectionName() string {
 	return ""
 }
 
+//*
+// Check collection exist in milvus or not.
 type HasCollectionRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	TimeStamp            uint64            `protobuf:"varint,4,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name you want to check.
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// Not useful for now
+	TimeStamp            uint64   `protobuf:"varint,4,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *HasCollectionRequest) Reset()         { *m = HasCollectionRequest{} }
@@ -363,15 +381,22 @@ func (m *StringResponse) GetValue() string {
 	return ""
 }
 
+//*
+// Get collection meta datas like: schema, collectionID, shards number ...
 type DescribeCollectionRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	CollectionID         int64             `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	TimeStamp            uint64            `protobuf:"varint,5,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name you want to describe
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// Not useful for now
+	CollectionID int64 `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	// Not useful for now
+	TimeStamp            uint64   `protobuf:"varint,5,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *DescribeCollectionRequest) Reset()         { *m = DescribeCollectionRequest{} }
@@ -434,18 +459,28 @@ func (m *DescribeCollectionRequest) GetTimeStamp() uint64 {
 	return 0
 }
 
+//*
+// DescribeCollection Response
 type DescribeCollectionResponse struct {
-	Status               *commonpb.Status           `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Schema               *schemapb.CollectionSchema `protobuf:"bytes,2,opt,name=schema,proto3" json:"schema,omitempty"`
-	CollectionID         int64                      `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	VirtualChannelNames  []string                   `protobuf:"bytes,4,rep,name=virtual_channel_names,json=virtualChannelNames,proto3" json:"virtual_channel_names,omitempty"`
-	PhysicalChannelNames []string                   `protobuf:"bytes,5,rep,name=physical_channel_names,json=physicalChannelNames,proto3" json:"physical_channel_names,omitempty"`
-	CreatedTimestamp     uint64                     `protobuf:"varint,6,opt,name=created_timestamp,json=createdTimestamp,proto3" json:"created_timestamp,omitempty"`
-	CreatedUtcTimestamp  uint64                     `protobuf:"varint,7,opt,name=created_utc_timestamp,json=createdUtcTimestamp,proto3" json:"created_utc_timestamp,omitempty"`
-	ShardsNum            int32                      `protobuf:"varint,8,opt,name=shards_num,json=shardsNum,proto3" json:"shards_num,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                   `json:"-"`
-	XXX_unrecognized     []byte                     `json:"-"`
-	XXX_sizecache        int32                      `json:"-"`
+	// Contain error_code and reason
+	Status *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// The schema param when you created collection.
+	Schema *schemapb.CollectionSchema `protobuf:"bytes,2,opt,name=schema,proto3" json:"schema,omitempty"`
+	// The collection id
+	CollectionID int64 `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	// System design related, users should not perceive
+	VirtualChannelNames []string `protobuf:"bytes,4,rep,name=virtual_channel_names,json=virtualChannelNames,proto3" json:"virtual_channel_names,omitempty"`
+	// System design related, users should not perceive
+	PhysicalChannelNames []string `protobuf:"bytes,5,rep,name=physical_channel_names,json=physicalChannelNames,proto3" json:"physical_channel_names,omitempty"`
+	// Hybrid timestamp in milvus
+	CreatedTimestamp uint64 `protobuf:"varint,6,opt,name=created_timestamp,json=createdTimestamp,proto3" json:"created_timestamp,omitempty"`
+	// The utc timestamp calculated by created_timestamp
+	CreatedUtcTimestamp uint64 `protobuf:"varint,7,opt,name=created_utc_timestamp,json=createdUtcTimestamp,proto3" json:"created_utc_timestamp,omitempty"`
+	// The shards number you set.
+	ShardsNum            int32    `protobuf:"varint,8,opt,name=shards_num,json=shardsNum,proto3" json:"shards_num,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *DescribeCollectionResponse) Reset()         { *m = DescribeCollectionResponse{} }

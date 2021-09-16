@@ -96,6 +96,10 @@ class BaseRunner(object):
         ni_time = 0.0
         vectors_per_file = utils.get_len_vectors_per_file(data_type, dimension)
         if size % vectors_per_file or size % ni:
+            """ 
+            An error is reported when 
+            the amount of data inserted in a single time cannot divide the total amount of data 
+            """
             logger.error("Not invalid collection size or ni")
             return False
         i = 0

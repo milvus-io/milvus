@@ -68,7 +68,7 @@ func TestInputNode(t *testing.T) {
 	waitGroup.Wait()
 }
 
-func TestNewInputNode(t *testing.T) {
+func Test_NewInputNode(t *testing.T) {
 	nodeName := "input_node"
 	var maxQueueLength int32 = 0
 	var maxParallelism int32 = 100

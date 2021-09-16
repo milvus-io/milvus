@@ -17,8 +17,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -27,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -46,15 +45,17 @@ type Node interface {
 	releasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) error
 
 	watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error
-	removeDmChannel(collectionID UniqueID, channels []string) error
+	//removeDmChannel(collectionID UniqueID, channels []string) error
 
 	hasWatchedQueryChannel(collectionID UniqueID) bool
-	showWatchedQueryChannels() []*querypb.QueryChannelInfo
+	//showWatchedQueryChannels() []*querypb.QueryChannelInfo
 	addQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest) error
 	removeQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelRequest) error
 
-	setNodeState(onService bool)
-	isOnService() bool
+	setState(state nodeState)
+	getState() nodeState
+	isOnline() bool
+	isOffline() bool
 
 	getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 	loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error
@@ -75,8 +76,8 @@ type queryNode struct {
 	sync.RWMutex
 	collectionInfos      map[UniqueID]*querypb.CollectionInfo
 	watchedQueryChannels map[UniqueID]*querypb.QueryChannelInfo
-	onService            bool
-	serviceLock          sync.RWMutex
+	state                nodeState
+	stateLock            sync.RWMutex
 }
 
 func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
@@ -97,7 +98,7 @@ func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.E
 		kvClient:             kv,
 		collectionInfos:      collectionInfo,
 		watchedQueryChannels: watchedChannels,
-		onService:            false,
+		state:                disConnect,
 	}
 
 	return node, nil
@@ -105,23 +106,27 @@ func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.E
 
 func (qn *queryNode) start() error {
 	if err := qn.client.Init(); err != nil {
+		log.Error("Start: init queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
 		return err
 	}
 	if err := qn.client.Start(); err != nil {
+		log.Error("Start: start queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
 		return err
 	}
 
-	qn.serviceLock.Lock()
-	qn.onService = true
-	qn.serviceLock.Unlock()
+	qn.stateLock.Lock()
+	if qn.state < online {
+		qn.state = online
+	}
+	qn.stateLock.Unlock()
 	log.Debug("Start: queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
 	return nil
 }
 
 func (qn *queryNode) stop() {
-	qn.serviceLock.Lock()
-	defer qn.serviceLock.Unlock()
-	qn.onService = false
+	qn.stateLock.Lock()
+	defer qn.stateLock.Unlock()
+	qn.state = offline
 	if qn.client != nil {
 		qn.client.Stop()
 	}
@@ -272,37 +277,37 @@ func (qn *queryNode) addDmChannel(collectionID UniqueID, channels []string) erro
 	return errors.New("AddDmChannels: can't find collection in watchedQueryChannel")
 }
 
-func (qn *queryNode) removeDmChannel(collectionID UniqueID, channels []string) error {
-	qn.Lock()
-	defer qn.Unlock()
-
-	if info, ok := qn.collectionInfos[collectionID]; ok {
-		for _, channelInfo := range info.ChannelInfos {
-			if channelInfo.NodeIDLoaded == qn.id {
-				newChannelIDs := make([]string, 0)
-				for _, channelID := range channelInfo.ChannelIDs {
-					findChannel := false
-					for _, channel := range channels {
-						if channelID == channel {
-							findChannel = true
-						}
-					}
-					if !findChannel {
-						newChannelIDs = append(newChannelIDs, channelID)
-					}
-				}
-				channelInfo.ChannelIDs = newChannelIDs
-			}
-		}
-
-		err := saveNodeCollectionInfo(collectionID, info, qn.id, qn.kvClient)
-		if err != nil {
-			log.Error("RemoveDmChannel: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-		}
-	}
-
-	return errors.New("RemoveDmChannel: can't find collection in watchedQueryChannel")
-}
+//func (qn *queryNode) removeDmChannel(collectionID UniqueID, channels []string) error {
+//	qn.Lock()
+//	defer qn.Unlock()
+//
+//	if info, ok := qn.collectionInfos[collectionID]; ok {
+//		for _, channelInfo := range info.ChannelInfos {
+//			if channelInfo.NodeIDLoaded == qn.id {
+//				newChannelIDs := make([]string, 0)
+//				for _, channelID := range channelInfo.ChannelIDs {
+//					findChannel := false
+//					for _, channel := range channels {
+//						if channelID == channel {
+//							findChannel = true
+//						}
+//					}
+//					if !findChannel {
+//						newChannelIDs = append(newChannelIDs, channelID)
+//					}
+//				}
+//				channelInfo.ChannelIDs = newChannelIDs
+//			}
+//		}
+//
+//		err := saveNodeCollectionInfo(collectionID, info, qn.id, qn.kvClient)
+//		if err != nil {
+//			log.Error("RemoveDmChannel: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+//		}
+//	}
+//
+//	return errors.New("RemoveDmChannel: can't find collection in watchedQueryChannel")
+//}
 
 func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
 	qn.RLock()
@@ -315,17 +320,17 @@ func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
 	return false
 }
 
-func (qn *queryNode) showWatchedQueryChannels() []*querypb.QueryChannelInfo {
-	qn.RLock()
-	defer qn.RUnlock()
-
-	results := make([]*querypb.QueryChannelInfo, 0)
-	for _, info := range qn.watchedQueryChannels {
-		results = append(results, proto.Clone(info).(*querypb.QueryChannelInfo))
-	}
-
-	return results
-}
+//func (qn *queryNode) showWatchedQueryChannels() []*querypb.QueryChannelInfo {
+//	qn.RLock()
+//	defer qn.RUnlock()
+//
+//	results := make([]*querypb.QueryChannelInfo, 0)
+//	for _, info := range qn.watchedQueryChannels {
+//		results = append(results, proto.Clone(info).(*querypb.QueryChannelInfo))
+//	}
+//
+//	return results
+//}
 
 func (qn *queryNode) setQueryChannelInfo(info *querypb.QueryChannelInfo) {
 	qn.Lock()
@@ -354,26 +359,37 @@ func (qn *queryNode) clearNodeInfo() error {
 	return nil
 }
 
-func (qn *queryNode) setNodeState(onService bool) {
-	qn.serviceLock.Lock()
-	defer qn.serviceLock.Unlock()
+func (qn *queryNode) setState(state nodeState) {
+	qn.stateLock.Lock()
+	defer qn.stateLock.Unlock()
 
-	qn.onService = onService
+	qn.state = state
 }
 
-func (qn *queryNode) isOnService() bool {
-	qn.serviceLock.RLock()
-	defer qn.serviceLock.RUnlock()
+func (qn *queryNode) getState() nodeState {
+	qn.stateLock.RLock()
+	defer qn.stateLock.RUnlock()
 
-	return qn.onService
+	return qn.state
+}
+
+func (qn *queryNode) isOnline() bool {
+	qn.stateLock.RLock()
+	defer qn.stateLock.RUnlock()
+
+	return qn.state == online
+}
+
+func (qn *queryNode) isOffline() bool {
+	qn.stateLock.RLock()
+	defer qn.stateLock.RUnlock()
+
+	return qn.state == offline
 }
 
 //***********************grpc req*************************//
 func (qn *queryNode) watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error {
-	qn.serviceLock.RLock()
-	onService := qn.onService
-	qn.serviceLock.RUnlock()
-	if !onService {
+	if !qn.isOnline() {
 		return errors.New("WatchDmChannels: queryNode is offline")
 	}
 
@@ -397,10 +413,7 @@ func (qn *queryNode) watchDmChannels(ctx context.Context, in *querypb.WatchDmCha
 }
 
 func (qn *queryNode) addQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest) error {
-	qn.serviceLock.RLock()
-	onService := qn.onService
-	qn.serviceLock.RUnlock()
-	if !onService {
+	if !qn.isOnline() {
 		return errors.New("AddQueryChannel: queryNode is offline")
 	}
 
@@ -422,10 +435,7 @@ func (qn *queryNode) addQueryChannel(ctx context.Context, in *querypb.AddQueryCh
 }
 
 func (qn *queryNode) removeQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelRequest) error {
-	qn.serviceLock.RLock()
-	onService := qn.onService
-	qn.serviceLock.RUnlock()
-	if !onService {
+	if !qn.isOnline() {
 		return nil
 	}
 
@@ -442,10 +452,7 @@ func (qn *queryNode) removeQueryChannel(ctx context.Context, in *querypb.RemoveQ
 }
 
 func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) error {
-	qn.serviceLock.RLock()
-	onService := qn.onService
-	qn.serviceLock.RUnlock()
-	if !onService {
+	if qn.isOnline() {
 		return nil
 	}
 
@@ -466,10 +473,7 @@ func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseC
 }
 
 func (qn *queryNode) releasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) error {
-	qn.serviceLock.RLock()
-	onService := qn.onService
-	qn.serviceLock.RUnlock()
-	if !onService {
+	if !qn.isOnline() {
 		return nil
 	}
 
@@ -489,11 +493,9 @@ func (qn *queryNode) releasePartitions(ctx context.Context, in *querypb.ReleaseP
 }
 
 func (qn *queryNode) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	qn.serviceLock.RLock()
-	if !qn.onService {
+	if !qn.isOnline() {
 		return nil, nil
 	}
-	qn.serviceLock.RUnlock()
 
 	res, err := qn.client.GetSegmentInfo(ctx, in)
 	if err == nil && res.Status.ErrorCode == commonpb.ErrorCode_Success {
@@ -504,14 +506,12 @@ func (qn *queryNode) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentI
 }
 
 func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.ComponentInfo {
-	qn.serviceLock.RLock()
-	if !qn.onService {
+	if !qn.isOnline() {
 		return &internalpb.ComponentInfo{
 			NodeID:    qn.id,
 			StateCode: internalpb.StateCode_Abnormal,
 		}
 	}
-	qn.serviceLock.RUnlock()
 
 	res, err := qn.client.GetComponentStates(ctx)
 	if err != nil || res.Status.ErrorCode != commonpb.ErrorCode_Success {
@@ -525,20 +525,15 @@ func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.Component
 }
 
 func (qn *queryNode) getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	qn.serviceLock.RLock()
-	if !qn.onService {
+	if !qn.isOnline() {
 		return nil, errQueryNodeIsNotOnService(qn.id)
 	}
-	qn.serviceLock.RUnlock()
 
 	return qn.client.GetMetrics(ctx, in)
 }
 
 func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error {
-	qn.serviceLock.RLock()
-	onService := qn.onService
-	qn.serviceLock.RUnlock()
-	if !onService {
+	if !qn.isOnline() {
 		return errors.New("LoadSegments: queryNode is offline")
 	}
 
@@ -564,10 +559,7 @@ func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsR
 }
 
 func (qn *queryNode) releaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) error {
-	qn.serviceLock.RLock()
-	onService := qn.onService
-	qn.serviceLock.RUnlock()
-	if !onService {
+	if !qn.isOnline() {
 		return errors.New("ReleaseSegments: queryNode is offline")
 	}
 

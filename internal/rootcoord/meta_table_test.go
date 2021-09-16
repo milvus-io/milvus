@@ -511,7 +511,7 @@ func TestMetaTable(t *testing.T) {
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
 		_, err = mt.GetCollectionByName(collInfo.Schema.Name, 0)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("can't find collection: %s", collInfo.Schema.Name))
+		assert.EqualError(t, err, fmt.Sprintf("can't find collection %s with id %d", collInfo.Schema.Name, collInfo.ID))
 
 	})
 

@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
@@ -40,7 +41,6 @@ const (
 	defaultCollectionID = UniqueID(2021)
 	defaultPartitionID  = UniqueID(2021)
 	defaultSegmentID    = UniqueID(2021)
-	defaultShardsNum    = 2
 )
 
 func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.CollectionSchema {
@@ -330,7 +330,7 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 		channelInfos := make([]*datapb.VchannelInfo, 0)
 		data.collections = append(data.collections, collectionID)
 		collectionName := funcutil.RandomString(8)
-		for i := 0; i < defaultShardsNum; i++ {
+		for i := int32(0); i < common.DefaultShardsNum; i++ {
 			vChannel := fmt.Sprintf("%s_%d_%d_v", collectionName, collectionID, i)
 			channelInfo := &datapb.VchannelInfo{
 				CollectionID: collectionID,

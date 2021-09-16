@@ -12,6 +12,7 @@
 package proxy
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
@@ -22,7 +23,7 @@ import (
 func TestChannelsMgrImpl_getChannels(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -40,7 +41,7 @@ func TestChannelsMgrImpl_getChannels(t *testing.T) {
 func TestChannelsMgrImpl_getVChannels(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -58,7 +59,7 @@ func TestChannelsMgrImpl_getVChannels(t *testing.T) {
 func TestChannelsMgrImpl_createDMLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -80,7 +81,7 @@ func TestChannelsMgrImpl_createDMLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_getDMLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -98,7 +99,7 @@ func TestChannelsMgrImpl_getDMLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_removeDMLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -125,7 +126,7 @@ func TestChannelsMgrImpl_removeDMLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_removeAllDMLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -140,7 +141,7 @@ func TestChannelsMgrImpl_removeAllDMLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_createDQLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -153,7 +154,7 @@ func TestChannelsMgrImpl_createDQLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_getDQLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -171,7 +172,7 @@ func TestChannelsMgrImpl_getDQLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_removeDQLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -198,7 +199,7 @@ func TestChannelsMgrImpl_removeDQLMsgStream(t *testing.T) {
 func TestChannelsMgrImpl_removeAllDQLMsgStream(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 	mgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
 	defer mgr.removeAllDMLStream()
 
@@ -208,4 +209,31 @@ func TestChannelsMgrImpl_removeAllDQLMsgStream(t *testing.T) {
 		err := mgr.createDQLStream(collID)
 		assert.Equal(t, nil, err)
 	}
+}
+
+func TestGetAllKeysAndGetAllValues(t *testing.T) {
+	chanMapping := make(map[vChan]pChan)
+	chanMapping["v1"] = "p1"
+	chanMapping["v2"] = "p2"
+
+	t.Run("getAllKeys", func(t *testing.T) {
+		vChans := getAllKeys(chanMapping)
+		assert.Equal(t, 2, len(vChans))
+	})
+
+	t.Run("getAllValues", func(t *testing.T) {
+		pChans := getAllValues(chanMapping)
+		assert.Equal(t, 2, len(pChans))
+	})
+}
+
+func TestDeleteVChansByVID(t *testing.T) {
+	mgr := singleTypeChannelsMgr{
+		id2vchansMtx: sync.RWMutex{},
+		id2vchans: map[int][]vChan{
+			10: {"v1"},
+		},
+	}
+
+	mgr.deleteVChansByVID(10)
 }

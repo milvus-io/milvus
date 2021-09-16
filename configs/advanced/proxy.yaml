@@ -30,3 +30,5 @@ proxy:
   maxFieldNum: 64
   maxDimension: 32768
   maxShardNum: 256
+
+  maxTaskNum: 1024

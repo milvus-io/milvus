@@ -40,7 +40,7 @@ import (
 
 // ---------- unittest util functions ----------
 // common definitions
-const ctxTimeInMillisecond = 5000
+const ctxTimeInMillisecond = 500
 const debug = false
 
 const (
@@ -71,6 +71,12 @@ const (
 )
 
 const defaultMsgLength = 100
+
+const (
+	buildID   = UniqueID(0)
+	indexID   = UniqueID(0)
+	indexName = "query-node-index-0"
+)
 
 // ---------- unittest util functions ----------
 // functions of init meta and generate meta
@@ -190,13 +196,98 @@ func genIndexBinarySet() ([][]byte, error) {
 	return bytesSet, nil
 }
 
-func genSimpleSchema() (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
+func generateIndex(segmentID UniqueID) ([]string, error) {
+	indexParams := genSimpleIndexParams()
+
+	var indexParamsKV []*commonpb.KeyValuePair
+	for key, value := range indexParams {
+		indexParamsKV = append(indexParamsKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	typeParams := make(map[string]string)
+	typeParams["dim"] = strconv.Itoa(defaultDim)
+	var indexRowData []float32
+	for n := 0; n < defaultMsgLength; n++ {
+		for i := 0; i < defaultDim; i++ {
+			indexRowData = append(indexRowData, float32(n*i))
+		}
+	}
+
+	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	if err != nil {
+		return nil, err
+	}
+
+	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	if err != nil {
+		return nil, err
+	}
+
+	option := &minioKV.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		BucketName:        Params.MinioBucketName,
+		CreateBucket:      true,
+	}
+
+	kv, err := minioKV.NewMinIOKV(context.Background(), option)
+	if err != nil {
+		return nil, err
+	}
+
+	// save index to minio
+	binarySet, err := index.Serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	// serialize index params
+	var indexCodec storage.IndexCodec
+	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, indexName, indexID)
+	if err != nil {
+		return nil, err
+	}
+
+	indexPaths := make([]string, 0)
+	for _, index := range serializedIndexBlobs {
+		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
+		indexPaths = append(indexPaths, p)
+		err := kv.Save(p, string(index.Value))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return indexPaths, nil
+}
+
+func genSimpleSegCoreSchema() *schemapb.CollectionSchema {
+	fieldVec := genFloatVectorField(simpleVecField)
+	fieldInt := genConstantField(simpleConstField)
+
+	schema := schemapb.CollectionSchema{ // schema for segCore
+		Name:   defaultCollectionName,
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			fieldVec,
+			fieldInt,
+		},
+	}
+	return &schema
+}
+
+func genSimpleInsertDataSchema() *schemapb.CollectionSchema {
 	fieldUID := genConstantField(uidField)
 	fieldTimestamp := genConstantField(timestampField)
 	fieldVec := genFloatVectorField(simpleVecField)
 	fieldInt := genConstantField(simpleConstField)
 
-	schema1 := schemapb.CollectionSchema{ // schema for insertData
+	schema := schemapb.CollectionSchema{ // schema for insertData
 		Name:   defaultCollectionName,
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
@@ -206,15 +297,7 @@ func genSimpleSchema() (*schemapb.CollectionSchema, *schemapb.CollectionSchema) 
 			fieldInt,
 		},
 	}
-	schema2 := schemapb.CollectionSchema{ // schema for segCore
-		Name:   defaultCollectionName,
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			fieldVec,
-			fieldInt,
-		},
-	}
-	return &schema1, &schema2
+	return &schema
 }
 
 func genCollectionMeta(collectionID UniqueID, schema *schemapb.CollectionSchema) *etcdpb.CollectionMeta {
@@ -227,7 +310,7 @@ func genCollectionMeta(collectionID UniqueID, schema *schemapb.CollectionSchema)
 }
 
 func genSimpleCollectionMeta() *etcdpb.CollectionMeta {
-	simpleSchema, _ := genSimpleSchema()
+	simpleSchema := genSimpleInsertDataSchema()
 	return genCollectionMeta(defaultCollectionID, simpleSchema)
 }
 
@@ -313,7 +396,7 @@ func genVectorChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	}
 	rcm := storage.NewMinioChunkManager(client)
 
-	schema, _ := genSimpleSchema()
+	schema := genSimpleInsertDataSchema()
 	vcm := storage.NewVectorChunkManager(lcm, rcm, &etcdpb.CollectionMeta{
 		ID:     defaultCollectionID,
 		Schema: schema,
@@ -425,7 +508,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 }
 
 func genSimpleInsertData() (*storage.InsertData, error) {
-	schema, _ := genSimpleSchema()
+	schema := genSimpleInsertDataSchema()
 	return genInsertData(defaultMsgLength, schema)
 }
 
@@ -440,18 +523,29 @@ func genKey(collectionID, partitionID, segmentID UniqueID, fieldID int64) string
 	return path.Join(ids...)
 }
 
-func genSimpleStorageBlob() ([]*storage.Blob, error) {
-	collMeta := genSimpleCollectionMeta()
+func genStorageBlob(collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	msgLength int,
+	schema *schemapb.CollectionSchema) ([]*storage.Blob, error) {
+	collMeta := genCollectionMeta(collectionID, schema)
 	inCodec := storage.NewInsertCodec(collMeta)
-	insertData, err := genSimpleInsertData()
+	insertData, err := genInsertData(msgLength, schema)
 	if err != nil {
 		return nil, err
 	}
 	// timestamp field not allowed 0 timestamp
-	insertData.Data[timestampFieldID].(*storage.Int64FieldData).Data[0] = 1
-	binLogs, _, err := inCodec.Serialize(defaultPartitionID, defaultSegmentID, insertData)
+	if _, ok := insertData.Data[timestampFieldID]; ok {
+		insertData.Data[timestampFieldID].(*storage.Int64FieldData).Data[0] = 1
+	}
+	binLogs, _, err := inCodec.Serialize(partitionID, segmentID, insertData)
 
 	return binLogs, err
+}
+
+func genSimpleStorageBlob() ([]*storage.Blob, error) {
+	schema := genSimpleInsertDataSchema()
+	return genStorageBlob(defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 }
 
 func genSimpleFloatVectors() []float32 {
@@ -512,12 +606,21 @@ func genCommonBlob(msgLength int, schema *schemapb.CollectionSchema) ([]*commonp
 }
 
 func genSimpleCommonBlob() ([]*commonpb.Blob, error) {
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	return genCommonBlob(defaultMsgLength, schema)
 }
 
-func saveSimpleBinLog(ctx context.Context) ([]*datapb.FieldBinlog, error) {
-	binLogs, err := genSimpleStorageBlob()
+func saveBinLog(ctx context.Context,
+	collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	msgLength int,
+	schema *schemapb.CollectionSchema) ([]*datapb.FieldBinlog, error) {
+	binLogs, err := genStorageBlob(collectionID,
+		partitionID,
+		segmentID,
+		msgLength,
+		schema)
 	if err != nil {
 		return nil, err
 	}
@@ -534,7 +637,7 @@ func saveSimpleBinLog(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			return nil, err
 		}
 
-		key := genKey(defaultCollectionID, defaultPartitionID, defaultSegmentID, fieldID)
+		key := genKey(collectionID, partitionID, segmentID, fieldID)
 		kvs[key] = string(blob.Value[:])
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -549,6 +652,11 @@ func saveSimpleBinLog(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	}
 	err = kv.MultiSave(kvs)
 	return fieldBinlog, err
+}
+
+func saveSimpleBinLog(ctx context.Context) ([]*datapb.FieldBinlog, error) {
+	schema := genSimpleInsertDataSchema()
+	return saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 }
 
 func genSimpleTimestampFieldData() []Timestamp {
@@ -608,7 +716,7 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 // ---------- unittest util functions ----------
 // functions of replica
 func genSimpleSealedSegment() (*Segment, error) {
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	col := newCollection(defaultCollectionID, schema)
 	seg := newSegment(col,
 		defaultSegmentID,
@@ -676,7 +784,7 @@ func genSimpleReplica() (ReplicaInterface, error) {
 		return nil, err
 	}
 	r := newCollectionReplica(kv)
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	err = r.addCollection(defaultCollectionID, schema)
 	if err != nil {
 		return nil, err
@@ -694,7 +802,7 @@ func genSimpleHistorical(ctx context.Context) (*historical, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := newHistorical(ctx, nil, nil, fac, kv)
+	h := newHistorical(ctx, newMockRootCoord(), newMockIndexCoord(), fac, kv)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -708,6 +816,7 @@ func genSimpleHistorical(ctx context.Context) (*historical, error) {
 		return nil, err
 	}
 	h.replica = r
+	h.loader.historicalReplica = r
 	col, err := h.replica.getCollectionByID(defaultCollectionID)
 	if err != nil {
 		return nil, err
@@ -785,7 +894,7 @@ func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int64) (string, e
 }
 
 func genSimpleDSL() (string, error) {
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	return genDSL(schema, defaultNProb, defaultTopK)
 }
 
@@ -821,7 +930,7 @@ func genSimplePlaceHolderGroup() ([]byte, error) {
 }
 
 func genSimpleSearchPlanAndRequests() (*SearchPlan, []*searchRequest, error) {
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
 
 	var plan *SearchPlan
@@ -898,7 +1007,7 @@ func genSimpleRetrievePlan() (*RetrievePlan, error) {
 	}
 	timestamp := retrieveMsg.RetrieveRequest.TravelTimestamp
 
-	_, schema := genSimpleSchema()
+	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
 
 	planExpr, err := genSimpleRetrievePlanExpr()

@@ -15,7 +15,7 @@ class ApiUtilityWrapper:
 
     ut = utility
 
-    def loading_progress(self, collection_name, partition_names=[],
+    def loading_progress(self, collection_name, partition_names=None,
                          using="default", check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.loading_progress, collection_name, partition_names, using])
@@ -24,7 +24,7 @@ class ApiUtilityWrapper:
                                        partition_names=partition_names, using=using).run()
         return res, check_result
 
-    def wait_for_loading_complete(self, collection_name, partition_names=[], timeout=None, using="default",
+    def wait_for_loading_complete(self, collection_name, partition_names=None, timeout=None, using="default",
                                   check_task=None, check_items=None):
         timeout = TIMEOUT if timeout is None else timeout
 
@@ -71,6 +71,16 @@ class ApiUtilityWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        collection_name=collection_name,
                                        partition_name=partition_name, using=using).run()
+        return res, check_result
+
+    def drop_collection(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.drop_collection, collection_name, timeout, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       collection_name=collection_name,
+                                       timeout=timeout, using=using).run()
+        log.debug(res)
+        log.debug(check_result)
         return res, check_result
 
     def list_collections(self, timeout=None, using="default", check_task=None, check_items=None):

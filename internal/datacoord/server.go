@@ -41,11 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-const (
-	rootCoordClientTimout = 20 * time.Second
-	connEtcdMaxRetryTime  = 100000
-	connEtcdRetryInterval = 200 * time.Millisecond
-)
+const connEtcdMaxRetryTime = 100000
 
 var (
 	// TODO: sunby put to config
@@ -61,8 +57,6 @@ type (
 	// Timestamp shortcurt for typeutil.Timestamp
 	Timestamp = typeutil.Timestamp
 )
-
-var errNilKvClient = errors.New("kv client not initialized")
 
 // ServerState type alias, presents datacoord Server State
 type ServerState = int64
@@ -95,7 +89,6 @@ type Server struct {
 	allocator       allocator
 	cluster         *Cluster
 	rootCoordClient types.RootCoord
-	ddChannelName   string
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -359,6 +352,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	if enableTtChecker {
 		checker = NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
 		checker.Start()
+		defer checker.Stop()
 	}
 	for {
 		select {

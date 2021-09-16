@@ -144,8 +144,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 	}
 	setSegments()
 
-	// sendQueryNodeStats
-	return loader.indexLoader.sendQueryNodeStats()
+	return nil
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
@@ -165,7 +164,7 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		}
 	}
 
-	indexedFieldIDs := make([]int64, 0)
+	indexedFieldIDs := make([]FieldID, 0)
 	for _, vecFieldID := range vectorFieldIDs {
 		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
 		if err != nil {

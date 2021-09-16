@@ -13,8 +13,8 @@ dataNode:
 
   dataSync:
     flowGraph:
-      maxQueueLength: 1024
-      maxParallelism: 1024
+      maxQueueLength: 1024 # Maximum length of task queue in flowgraph
+      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
 
   flush:
     # max buffer size to flush

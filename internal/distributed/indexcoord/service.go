@@ -69,7 +69,7 @@ func (s *Server) init() error {
 	indexcoord.Params.Address = Params.ServiceAddress
 	indexcoord.Params.Port = Params.ServicePort
 
-	closer := trace.InitTracing("index_coord")
+	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
 
 	if err := s.indexcoord.Register(); err != nil {

@@ -40,26 +40,27 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 
 ## How it works
 - Test scenarios are designed by different chaos objects
-- Every chaos object is defined in one yaml file locates in  folder <code>chaos_objects</code>
-- Every chaos yaml file specified by <code>ALL_CHAOS_YAMLS</code> in <code>constants.py</code> would be parsed as a parameter and be passed into <code>test_chaos.py</code>
-- All expectations of every scenario are defined in <code>testcases.yaml</code> locates in folder <code>chaos_objects</code>
-- [Chaos Mesh](https://chaos-mesh.org/) is used to inject chaos into Milvus in <code>test_chaos.py</code>
+- Every chaos object is defined in one yaml file locates in  folder `chaos_objects`
+- Every chaos yaml file specified by `ALL_CHAOS_YAMLS` in `constants.py` would be parsed as a parameter and be passed into `test_chaos.py`
+- All expectations of every scenario are defined in `testcases.yaml` locates in folder `chaos_objects`
+- [Chaos Mesh](https://chaos-mesh.org/) is used to inject chaos into Milvus in `test_chaos.py`
 
 ## Run
 ### Manually
 Run a single test scenario manually(take query node pod is killed as instance):
-1. update <code>ALL_CHAOS_YAMLS = 'chaos_querynode*.yaml'</code> in <code>constants.py</code>
+1. update `ALL_CHAOS_YAMLS = 'chaos_querynode_podkill.yaml'` in `constants.py`
 
 2. run the commands below:
 ```bash
 cd /milvus/tests/python_client/chaos
 
-pytest test_chaos.py --host x.x.x.x -v
+pytest test_chaos.py --host ${Milvus_IP} -v
 ```
 
 ### Nightly 
 still in planning 
 
 ### Todo
-pod_failure
-container_kill
+* pod_failure
+* container_kill
+* network attack

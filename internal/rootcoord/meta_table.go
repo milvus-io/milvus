@@ -174,7 +174,6 @@ func (mt *metaTable) reloadFromKV() error {
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
 
-	log.Debug("reload meta table from KV successfully")
 	return nil
 }
 
@@ -377,7 +376,7 @@ func (mt *metaTable) GetCollectionByName(collectionName string, ts typeutil.Time
 		}
 		col, ok := mt.collID2Meta[vid]
 		if !ok {
-			return nil, fmt.Errorf("can't find collection: " + collectionName)
+			return nil, fmt.Errorf("can't find collection %s with id %d", collectionName, vid)
 		}
 		colCopy := proto.Clone(&col)
 		return colCopy.(*pb.CollectionInfo), nil

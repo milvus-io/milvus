@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/golang/protobuf/proto"
@@ -65,8 +66,6 @@ const (
 
 	// MetricRequestsSuccess used to count the num of successful requests
 	MetricRequestsSuccess = "success"
-
-	DefaultShardsNum = int32(2)
 )
 
 func metricProxy(v int64) string {
@@ -88,10 +87,12 @@ type Core struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	etcdCli *clientv3.Client
-	kvBase  *etcdkv.EtcdKV
+	kvBase  kv.TxnKV //*etcdkv.EtcdKV
 
 	//DDL lock
 	ddlLock sync.Mutex
+
+	kvBaseCreate func(root string) (kv.TxnKV, error)
 
 	//setMsgStreams, send time tick into dd channel and time tick channel
 	SendTimeTick func(t typeutil.Timestamp, reason string) error
@@ -342,6 +343,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 						}
 					}
 					for _, idxInfo := range indexInfos {
+						/* #nosec G601 */
 						field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
 						if err != nil {
 							log.Debug("GetFieldSchemaByID",
@@ -507,7 +509,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
 	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
@@ -523,7 +525,7 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
 	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error {
@@ -539,7 +541,7 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
 	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error {
@@ -555,7 +557,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
 	return nil
@@ -840,8 +842,7 @@ func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *s
 		}
 	}
 	log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-		zap.String("field name", field.Name),
-		zap.Int64("segment id", segID))
+		zap.String("field name", field.Name), zap.Int64("segment id", segID), zap.Int64("num rows", rows))
 	return bldID, nil
 }
 
@@ -857,24 +858,34 @@ func (c *Core) Register() error {
 
 func (c *Core) Init() error {
 	var initError error = nil
+	if c.kvBaseCreate == nil {
+		c.kvBaseCreate = func(root string) (kv.TxnKV, error) {
+			return etcdkv.NewEtcdKV(Params.EtcdEndpoints, root)
+		}
+	}
 	c.initOnce.Do(func() {
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second}); initError != nil {
 				log.Error("RootCoord, Failed to new Etcd client", zap.Any("reason", initError))
 				return initError
 			}
-			var ms *metaSnapshot
-			ms, initError = newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024)
-			if initError != nil {
-				log.Error("RootCoord, Failed to new MetaSnapshot", zap.Any("reason", initError))
-				return initError
-			}
-			if c.MetaTable, initError = NewMetaTable(ms); initError != nil {
-				log.Error("RootCoord, Failed to new MetaTable", zap.Any("reason", initError))
-				return initError
-			}
-			if c.kvBase, initError = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.KvRootPath); initError != nil {
+			if c.kvBase, initError = c.kvBaseCreate(Params.KvRootPath); initError != nil {
 				log.Error("RootCoord, Failed to new EtcdKV", zap.Any("reason", initError))
+				return initError
+			}
+			var metaKV kv.TxnKV
+			metaKV, initError = c.kvBaseCreate(Params.MetaRootPath)
+			if initError != nil {
+				log.Error("RootCoord, Failed to new EtcdKV", zap.Any("reason", initError))
+				return initError
+			}
+			var ss *suffixSnapshot
+			if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.MetaRootPath, "snapshots"); initError != nil {
+				log.Error("RootCoord, Failed to new suffixSnapshot", zap.Error(initError))
+				return initError
+			}
+			if c.MetaTable, initError = NewMetaTable(ss); initError != nil {
+				log.Error("RootCoord, Failed to new MetaTable", zap.Any("reason", initError))
 				return initError
 			}
 
@@ -925,12 +936,9 @@ func (c *Core) Init() error {
 			return
 		}
 
-		c.dmlChannels = newDmlChannels(c, Params.DmlChannelName, Params.DmlChannelNum)
-
-		// recover physical channels for all collections
+		c.dmlChannels = newDMLChannels(c)
 		pc := c.MetaTable.ListCollectionPhysicalChannels()
 		c.dmlChannels.AddProducerChannels(pc...)
-		log.Debug("recover all physical channels", zap.Any("chanNames", pc))
 
 		c.chanTimeTick = newTimeTickSync(c)
 		c.chanTimeTick.AddProxy(c.session)
@@ -1207,7 +1215,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("DropCollection Failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
+		log.Debug("DropCollection Failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Drop collection failed: " + err.Error(),

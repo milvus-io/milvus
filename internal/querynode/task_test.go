@@ -17,7 +17,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -28,7 +27,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	defer cancel()
 
 	genWatchDMChannelsRequest := func() *querypb.WatchDmChannelsRequest {
-		schema, _ := genSimpleSchema()
+		schema := genSimpleSegCoreSchema()
 		req := &querypb.WatchDmChannelsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_WatchDmChannels),
 			CollectionID: defaultCollectionID,
@@ -99,8 +98,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	// TODO: time consuming, reduce seek error time
-	t.Run("test execute seek error", func(t *testing.T) {
+	t.Run("test execute loadPartition without init collection and partition", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -112,25 +110,46 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			{
 				CollectionID: defaultCollectionID,
 				ChannelName:  defaultVChannel,
-				SeekPosition: &msgstream.MsgPosition{
-					ChannelName: defaultVChannel,
-					MsgID:       []byte{1, 2, 3},
-					MsgGroup:    defaultSubName,
-					Timestamp:   0,
-				},
 			},
 		}
+		task.req.CollectionID++
+		task.req.PartitionID++
 		err = task.Execute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
+
+	//t.Run("test execute seek error", func(t *testing.T) {
+	//
+	//	node, err := genSimpleQueryNode(ctx)
+	//	assert.NoError(t, err)
+	//
+	//	task := watchDmChannelsTask{
+	//		req:  genWatchDMChannelsRequest(),
+	//		node: node,
+	//	}
+	//	task.req.Infos = []*datapb.VchannelInfo{
+	//		{
+	//			CollectionID: defaultCollectionID,
+	//			ChannelName:  defaultVChannel,
+	//			SeekPosition: &msgstream.MsgPosition{
+	//				ChannelName: defaultVChannel,
+	//				MsgID:       []byte{1, 2, 3},
+	//				MsgGroup:    defaultSubName,
+	//				Timestamp:   0,
+	//			},
+	//		},
+	//	}
+	//	err = task.Execute(ctx)
+	//	assert.Error(t, err)
+	//})
 }
 
 func TestTask_loadSegmentsTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	genLoadSegmentsRequest := func() *querypb.LoadSegmentsRequest {
-		_, schema := genSimpleSchema()
+	genLoadEmptySegmentsRequest := func() *querypb.LoadSegmentsRequest {
+		schema := genSimpleSegCoreSchema()
 		req := &querypb.LoadSegmentsRequest{
 			Base:          genCommonMsgBase(commonpb.MsgType_LoadSegments),
 			Schema:        schema,
@@ -141,7 +160,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 	t.Run("test timestamp", func(t *testing.T) {
 		task := loadSegmentsTask{
-			req: genLoadSegmentsRequest(),
+			req: genLoadEmptySegmentsRequest(),
 		}
 		timestamp := Timestamp(1000)
 		task.req.Base.Timestamp = timestamp
@@ -154,7 +173,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 	t.Run("test OnEnqueue", func(t *testing.T) {
 		task := loadSegmentsTask{
-			req: genLoadSegmentsRequest(),
+			req: genLoadEmptySegmentsRequest(),
 		}
 		err := task.OnEnqueue()
 		assert.NoError(t, err)
@@ -167,8 +186,39 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
+		schema := genSimpleInsertDataSchema()
+
+		fieldBinlog, err := saveSimpleBinLog(ctx)
+		assert.NoError(t, err)
+
+		req := &querypb.LoadSegmentsRequest{
+			Base:          genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Schema:        schema,
+			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:    defaultSegmentID,
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+					BinlogPaths:  fieldBinlog,
+				},
+			},
+		}
+
 		task := loadSegmentsTask{
-			req:  genLoadSegmentsRequest(),
+			req:  req,
+			node: node,
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute grpc error", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := loadSegmentsTask{
+			req:  genLoadEmptySegmentsRequest(),
 			node: node,
 		}
 		task.req.Infos = []*querypb.SegmentLoadInfo{
@@ -187,7 +237,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := loadSegmentsTask{
-			req:  genLoadSegmentsRequest(),
+			req:  genLoadEmptySegmentsRequest(),
 			node: node,
 		}
 		task.req.Infos = []*querypb.SegmentLoadInfo{
@@ -207,7 +257,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := loadSegmentsTask{
-			req:  genLoadSegmentsRequest(),
+			req:  genLoadEmptySegmentsRequest(),
 			node: node,
 		}
 		task.req.Infos = []*querypb.SegmentLoadInfo{
@@ -218,6 +268,19 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			},
 		}
 		task.req.LoadCondition = querypb.TriggerCondition_loadBalance
+		err = task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("test execute load hand-off", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := loadSegmentsTask{
+			req:  genLoadEmptySegmentsRequest(),
+			node: node,
+		}
+		task.req.LoadCondition = querypb.TriggerCondition_handoff
 		err = task.Execute(ctx)
 		assert.Error(t, err)
 	})

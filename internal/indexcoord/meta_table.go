@@ -494,3 +494,16 @@ func (mt *metaTable) GetNodeTaskStats() map[UniqueID]int {
 	}
 	return nodePriority
 }
+
+func (mt *metaTable) GetIndexMetaByIndexBuildID(indexBuildID UniqueID) *indexpb.IndexMeta {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
+
+	log.Debug("IndexCoord MetaTable GetIndexMeta", zap.Int64("IndexBuildID", indexBuildID))
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if !ok {
+		log.Error("IndexCoord MetaTable GetIndexMeta not exist", zap.Int64("IndexBuildID", indexBuildID))
+		return nil
+	}
+	return meta.indexMeta
+}

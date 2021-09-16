@@ -20,12 +20,14 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 
 	"go.uber.org/zap"
 )
 
+// dataSyncService controls a flowgraph for a specific collection
 type dataSyncService struct {
 	ctx          context.Context
 	cancelFn     context.CancelFunc
@@ -77,6 +79,7 @@ func newDataSyncService(ctx context.Context,
 	return service, nil
 }
 
+// start starts the flowgraph in datasyncservice
 func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
 		log.Debug("Data Sync Service starting flowgraph")
@@ -95,6 +98,7 @@ func (dsService *dataSyncService) close() {
 	dsService.cancelFn()
 }
 
+// initNodes inits a TimetickedFlowGraph
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
 	// TODO: add delete pipeline support
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
@@ -156,11 +160,11 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 	dsService.saveBinlog = saveBinlog
 
+	pchan := rootcoord.ToPhysicalChannel(vchanInfo.GetChannelName())
 	var dmStreamNode Node = newDmInputNode(
 		dsService.ctx,
 		dsService.msFactory,
-		vchanInfo.CollectionID,
-		vchanInfo.GetChannelName(),
+		pchan,
 		vchanInfo.GetSeekPosition(),
 	)
 	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)

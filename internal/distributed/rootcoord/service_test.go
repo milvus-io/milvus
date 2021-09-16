@@ -44,52 +44,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func GenSegInfoMsgPack(seg *datapb.SegmentInfo) *msgstream.MsgPack {
-	msgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{0},
-	}
-	segMsg := &msgstream.SegmentInfoMsg{
-		BaseMsg: baseMsg,
-		SegmentMsg: datapb.SegmentMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_SegmentInfo,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			Segment: seg,
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, segMsg)
-	return &msgPack
-}
-
-func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
-	msgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{0},
-	}
-	segMsg := &msgstream.FlushCompletedMsg{
-		BaseMsg: baseMsg,
-		SegmentFlushCompletedMsg: datapb.SegmentFlushCompletedMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_SegmentFlushDone,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			Segment: &datapb.SegmentInfo{ID: segID},
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, segMsg)
-	return &msgPack
-}
-
 type proxyMock struct {
 	types.Proxy
 	invalidateCollectionMetaCache func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
