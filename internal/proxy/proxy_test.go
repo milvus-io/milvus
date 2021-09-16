@@ -1689,15 +1689,167 @@ func TestProxy(t *testing.T) {
 	ddParallel := proxy.sched.ddQueue.getMaxTaskNum()
 	proxy.sched.ddQueue.setMaxTaskNum(0)
 
-	t.Run("failed to create collection, dd queue full", func(t *testing.T) {
+	t.Run("CreateCollection fail, dd queue full", func(t *testing.T) {
 		resp, err := proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
-	// TODO(dragondriver): other tasks
+	t.Run("DropCollection fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("HasCollection fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("LoadCollection fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("ReleaseCollection fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("DescribeCollection fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetCollectionStatistics fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("ShowCollections fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("CreatePartition fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("DropPartition fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.DropPartition(ctx, &milvuspb.DropPartitionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("HasPartition fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.HasPartition(ctx, &milvuspb.HasPartitionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("LoadPartitions fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("ReleasePartitions fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.ReleasePartitions(ctx, &milvuspb.ReleasePartitionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("GetPartitionStatistics fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("ShowPartitions fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("CreateIndex fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("DescribeIndex fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("DropIndex fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.DropIndex(ctx, &milvuspb.DropIndexRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("GetIndexBuildProgress fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.GetIndexBuildProgress(ctx, &milvuspb.GetIndexBuildProgressRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetIndexState fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.GetIndexState(ctx, &milvuspb.GetIndexStateRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("Flush fail, dd queue full", func(t *testing.T) {
+		resp, err := proxy.Flush(ctx, &milvuspb.FlushRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
 
 	proxy.sched.ddQueue.setMaxTaskNum(ddParallel)
+
+	dmParallelism := proxy.sched.dmQueue.getMaxTaskNum()
+	proxy.sched.dmQueue.setMaxTaskNum(0)
+
+	t.Run("Insert fail, dm queue full", func(t *testing.T) {
+		resp, err := proxy.Insert(ctx, &milvuspb.InsertRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("Delete fail, dm queue full", func(t *testing.T) {
+		resp, err := proxy.Delete(ctx, &milvuspb.DeleteRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	proxy.sched.dmQueue.setMaxTaskNum(dmParallelism)
+
+	dqParallelism := proxy.sched.dqQueue.getMaxTaskNum()
+	proxy.sched.dqQueue.setMaxTaskNum(0)
+
+	t.Run("Search fail, dq queue full", func(t *testing.T) {
+		resp, err := proxy.Search(ctx, &milvuspb.SearchRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("Query fail, dq queue full", func(t *testing.T) {
+		resp, err := proxy.Query(ctx, &milvuspb.QueryRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	proxy.sched.dqQueue.setMaxTaskNum(dqParallelism)
 
 	// timeout
 
