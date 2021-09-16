@@ -53,12 +53,11 @@ class TestIndexParams(TestcaseBase):
 
         collection_w = self.init_collection_wrap(name=collection_name)
 
-        log.error(iem.WrongFieldName % (str(field_name), type(field_name)))
+        log.error(iem.WrongFieldName % str(field_name))
         self.index_wrap.init_index(collection_w.collection, field_name, default_index_params,
                                    check_task=CheckTasks.err_res,
                                    check_items={ct.err_code: 1,
-                                                ct.err_msg: iem.WrongFieldName % (str(field_name),
-                                                                                  type(field_name).__name__)})
+                                                ct.err_msg: iem.WrongFieldName % str(field_name)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_not_existed(self):
@@ -71,7 +70,8 @@ class TestIndexParams(TestcaseBase):
         f_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"})
+                                   check_items={ct.err_code: 1,
+                                                ct.err_msg: f"cannot create index on non-existed field: {f_name}"})
 
     @pytest.mark.tags(CaseLabel.L1)
     # TODO (reason="pymilvus issue #677", raises=TypeError)
