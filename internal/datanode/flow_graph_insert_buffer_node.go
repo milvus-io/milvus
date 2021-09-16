@@ -65,9 +65,7 @@ type insertBufferNode struct {
 	timeTickStream          msgstream.MsgStream
 	segmentStatisticsStream msgstream.MsgStream
 
-	dsSaveBinlog          func(fu *segmentFlushUnit) error
-	segmentCheckPoints    map[UniqueID]segmentCheckPoint
-	segmentCheckPointLock sync.Mutex
+	dsSaveBinlog func(fu *segmentFlushUnit) error
 }
 
 type segmentCheckPoint struct {
@@ -891,11 +889,10 @@ func newInsertBufferNode(
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,
 
-		replica:            replica,
-		flushMap:           sync.Map{},
-		flushChan:          flushCh,
-		idAllocator:        idAllocator,
-		dsSaveBinlog:       saveBinlog,
-		segmentCheckPoints: make(map[UniqueID]segmentCheckPoint),
+		replica:      replica,
+		flushMap:     sync.Map{},
+		flushChan:    flushCh,
+		idAllocator:  idAllocator,
+		dsSaveBinlog: saveBinlog,
 	}, nil
 }
