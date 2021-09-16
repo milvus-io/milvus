@@ -18,7 +18,7 @@ While it is possible to build Milvus using a local golang installation, we have 
 
 ## Before You Begin
 
-Before building Milvus, you must check the eligibility of your Docker, Docker Compose, and hardware in line with Milvus' requirement.
+Before building Milvus, you must check the eligibility of your Docker, Docker Compose, and hardware in line with Milvus' requirements.
 
 <details><summary>Check your Docker and Docker Compose version</summary>
 
