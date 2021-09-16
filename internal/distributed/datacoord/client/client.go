@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -39,8 +40,9 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	grpcClient datapb.DataCoordClient
-	conn       *grpc.ClientConn
+	grpcClient   datapb.DataCoordClient
+	grpcClientMu sync.RWMutex
+	conn         *grpc.ClientConn
 
 	sess *sessionutil.Session
 	addr string
@@ -126,8 +128,18 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		log.Debug("DataCoord try reconnect failed", zap.Error(err))
 		return err
 	}
+
+	c.grpcClientMu.Lock()
 	c.grpcClient = datapb.NewDataCoordClient(c.conn)
+	c.grpcClientMu.Unlock()
 	return nil
+}
+
+func (c *Client) getGrpcClient() datapb.DataCoordClient {
+	c.grpcClientMu.RLock()
+	defer c.grpcClientMu.RUnlock()
+
+	return c.grpcClient
 }
 
 func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {
@@ -163,102 +175,102 @@ func (c *Client) Register() error {
 
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		return c.getGrpcClient().GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	return ret.(*internalpb.ComponentStates), err
 }
 
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		return c.getGrpcClient().GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return c.getGrpcClient().GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.Flush(ctx, req)
+		return c.getGrpcClient().Flush(ctx, req)
 	})
 	return ret.(*datapb.FlushResponse), err
 }
 
 func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.AssignSegmentID(ctx, req)
+		return c.getGrpcClient().AssignSegmentID(ctx, req)
 	})
 	return ret.(*datapb.AssignSegmentIDResponse), err
 }
 
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetSegmentStates(ctx, req)
+		return c.getGrpcClient().GetSegmentStates(ctx, req)
 	})
 	return ret.(*datapb.GetSegmentStatesResponse), err
 }
 
 func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetInsertBinlogPaths(ctx, req)
+		return c.getGrpcClient().GetInsertBinlogPaths(ctx, req)
 	})
 	return ret.(*datapb.GetInsertBinlogPathsResponse), err
 }
 
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetCollectionStatistics(ctx, req)
+		return c.getGrpcClient().GetCollectionStatistics(ctx, req)
 	})
 	return ret.(*datapb.GetCollectionStatisticsResponse), err
 }
 
 func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetPartitionStatistics(ctx, req)
+		return c.getGrpcClient().GetPartitionStatistics(ctx, req)
 	})
 	return ret.(*datapb.GetPartitionStatisticsResponse), err
 }
 
 func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
+		return c.getGrpcClient().GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
 	})
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetSegmentInfo(ctx, req)
+		return c.getGrpcClient().GetSegmentInfo(ctx, req)
 	})
 	return ret.(*datapb.GetSegmentInfoResponse), err
 }
 
 func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	return c.grpcClient.SaveBinlogPaths(ctx, req)
+	return c.getGrpcClient().SaveBinlogPaths(ctx, req)
 }
 
 func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetRecoveryInfo(ctx, req)
+		return c.getGrpcClient().GetRecoveryInfo(ctx, req)
 	})
 	return ret.(*datapb.GetRecoveryInfoResponse), err
 }
 
 func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetFlushedSegments(ctx, req)
+		return c.getGrpcClient().GetFlushedSegments(ctx, req)
 	})
 	return ret.(*datapb.GetFlushedSegmentsResponse), err
 }
 
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetMetrics(ctx, req)
+		return c.getGrpcClient().GetMetrics(ctx, req)
 	})
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
