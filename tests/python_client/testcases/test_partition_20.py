@@ -15,8 +15,6 @@ class TestPartitionParams(TestcaseBase):
     """ Test case of partition interface in parameters"""
 
     @pytest.mark.tags(CaseLabel.L0)
-    # @pytest.mark.parametrize("partition_name, description",
-                             # [(cf.gen_unique_str(prefix), cf.gen_unique_str("desc_"))])
     def test_partition_default(self):
         """
         target: verify create a partition
@@ -40,7 +38,6 @@ class TestPartitionParams(TestcaseBase):
         assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.xfail(reason="issue #5375")
     @pytest.mark.parametrize("partition_name", [""])
     def test_partition_empty_name(self, partition_name):
         """
@@ -57,7 +54,6 @@ class TestPartitionParams(TestcaseBase):
                                            check_items={ct.err_code: 1, ct.err_msg: "Partition name should not be empty"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name, description", [(cf.gen_unique_str(prefix), "")])
     def test_partition_empty_description(self):
         """
         target: verify create a partition with empty description
