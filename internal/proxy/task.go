@@ -2127,36 +2127,6 @@ func (qt *queryTask) getVChannels() ([]vChan, error) {
 	return qt.chMgr.getVChannels(collID)
 }
 
-/* not used
-func parseIdsFromExpr(exprStr string, schema *typeutil.SchemaHelper) ([]int64, error) {
-	expr, err := parseQueryExpr(schema, exprStr)
-	if err != nil {
-		return nil, err
-	}
-
-	switch xExpr := expr.Expr.(type) {
-	case *planpb.Expr_TermExpr:
-		var ids []int64
-		for _, value := range xExpr.TermExpr.Values {
-			switch v := value.Val.(type) {
-			case *planpb.GenericValue_Int64Val:
-				ids = append(ids, v.Int64Val)
-			default:
-				return nil, errors.New("column is not int64")
-			}
-		}
-
-		if !xExpr.TermExpr.ColumnInfo.IsPrimaryKey {
-			return nil, errors.New("column is not primary key")
-		}
-
-		return ids, nil
-	default:
-		return nil, errors.New("not top level term")
-	}
-}
-*/
-
 func IDs2Expr(fieldName string, ids []int64) string {
 	idsStr := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids)), ", "), "[]")
 	return fieldName + " in [ " + idsStr + " ]"
@@ -2227,32 +2197,6 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	schema, _ := globalMetaCache.GetCollectionSchema(ctx, qt.query.CollectionName)
-	// schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// TODO(dragondriver): necessary to check if partition was loaded into query node?
-
-	// if qt.Ids == nil {
-	// 	if qt.query.Expr == "" {
-	// 		errMsg := "Query expression is empty"
-	// 		return fmt.Errorf(errMsg)
-	// 	}
-
-	// 	ids, err := parseIdsFromExpr(qt.query.Expr, schemaHelper)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	qt.Base.MsgType = commonpb.MsgType_Retrieve
-	// 	qt.Ids = &schemapb.IDs{
-	// 		IdField: &schemapb.IDs_IntId{
-	// 			IntId: &schemapb.LongArray{
-	// 				Data: ids,
-	// 			},
-	// 		},
-	// 	}
-	// }
 
 	if qt.ids != nil {
 		pkField := ""
@@ -2271,7 +2215,6 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 
 	plan, err := CreateExprQueryPlan(schema, qt.query.Expr)
 	if err != nil {
-		//return errors.New("invalid expression: " + st.query.Dsl)
 		return err
 	}
 	qt.query.OutputFields, err = translateOutputFields(qt.query.OutputFields, schema, true)
@@ -2502,7 +2445,6 @@ func (qt *queryTask) PostExecute(ctx context.Context) error {
 						}
 					}
 				}
-				// rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
 			}
 		}
 
