@@ -499,6 +499,10 @@ SegmentSealedImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, T
         // just skip
         return;
     }
+    if (range.first == range.second && range.first == 0) {
+        bitset_chunk.reset();
+        return;
+    }
     auto mask = TimestampIndex::GenerateBitset(timestamp, range, this->timestamps_.data(), this->timestamps_.size());
     bitset_chunk &= mask;
 }
