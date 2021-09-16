@@ -564,13 +564,18 @@ func (m *DescribeCollectionResponse) GetShardsNum() int32 {
 	return 0
 }
 
+//*
+// Load collection data into query nodes, then you can do vector search on this collection.
 type LoadCollectionRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name you want to load
+	CollectionName       string   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *LoadCollectionRequest) Reset()         { *m = LoadCollectionRequest{} }
@@ -619,13 +624,18 @@ func (m *LoadCollectionRequest) GetCollectionName() string {
 	return ""
 }
 
+//*
+// Release collection data from query nodes, then you can't do vector search on this collection.
 type ReleaseCollectionRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name you want to release
+	CollectionName       string   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *ReleaseCollectionRequest) Reset()         { *m = ReleaseCollectionRequest{} }
@@ -674,13 +684,18 @@ func (m *ReleaseCollectionRequest) GetCollectionName() string {
 	return ""
 }
 
+//*
+// Get collection statistics like row_count.
 type GetCollectionStatisticsRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name you want get statistics
+	CollectionName       string   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *GetCollectionStatisticsRequest) Reset()         { *m = GetCollectionStatisticsRequest{} }
@@ -729,8 +744,12 @@ func (m *GetCollectionStatisticsRequest) GetCollectionName() string {
 	return ""
 }
 
+//*
+// Will return collection statistics in stats field like [{key:"row_count",value:"1"}]
 type GetCollectionStatisticsResponse struct {
-	Status               *commonpb.Status         `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// Contain error_code and reason
+	Status *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// Collection statistics data
 	Stats                []*commonpb.KeyValuePair `protobuf:"bytes,2,rep,name=stats,proto3" json:"stats,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
 	XXX_unrecognized     []byte                   `json:"-"`
