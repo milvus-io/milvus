@@ -262,39 +262,6 @@ class TestQueryPartition:
         assert res_one == res_two
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_another_partition(self, connect, collection):
-        """
-        target: test query another partition
-        method: 1. insert entities into two partitions
-                2. query on one partition and query result empty
-        expected: query result is empty
-        """
-        insert_entities_into_two_partitions_in_half(connect, collection)
-        half = ut.default_nb // 2
-        term_expr = f'{default_int_field_name} in [{half}]'
-        res = connect.query(collection, term_expr, partition_names=[ut.default_tag])
-        assert len(res) == 0
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_multi_partitions_multi_results(self, connect, collection):
-        """
-        target: test query on multi partitions and get multi results
-        method: 1.insert entities into two partitions
-                2.query on two partitions and query multi result
-        expected: query results from two partitions
-        """
-        entities, entities_2 = insert_entities_into_two_partitions_in_half(connect, collection)
-        half = ut.default_nb // 2
-        term_expr = f'{default_int_field_name} in [{half - 1}]'
-        res = connect.query(collection, term_expr, partition_names=[ut.default_tag, ut.default_partition_name])
-        assert len(res) == 1
-        assert res[0][default_int_field_name] == entities[0]["values"][-1]
-        term_expr = f'{default_int_field_name} in [{half}]'
-        res = connect.query(collection, term_expr, partition_names=[ut.default_tag, ut.default_partition_name])
-        assert len(res) == 1
-        assert res[0][default_int_field_name] == entities_2[0]["values"][0]
-
-    @pytest.mark.tags(CaseLabel.L0)
     def test_query_multi_partitions_single_result(self, connect, collection):
         """
         target: test query on multi partitions and get single result
