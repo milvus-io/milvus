@@ -16,16 +16,17 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -62,31 +63,73 @@ func (inm *Mock) buildIndexTask() {
 			return
 		case req := <-inm.buildIndex:
 			if inm.Failure {
-				indexMeta := indexpb.IndexMeta{}
+				saveIndexMeta := func() error {
+					indexMeta := indexpb.IndexMeta{}
 
-				_, values, versions, _ := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
-				_ = proto.UnmarshalText(values[0], &indexMeta)
-				indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
-				indexMeta.State = commonpb.IndexState_Failed
-				_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-					proto.MarshalTextString(&indexMeta))
-				continue
+					_, values, versions, err := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
+					if err != nil {
+						return err
+					}
+					err = proto.UnmarshalText(values[0], &indexMeta)
+					if err != nil {
+						return err
+					}
+					indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
+					indexMeta.State = commonpb.IndexState_Failed
+					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
+						proto.MarshalTextString(&indexMeta))
+					if err != nil {
+						return err
+					}
+					return nil
+				}
+				err := retry.Do(context.Background(), saveIndexMeta, retry.Attempts(3))
+				if err != nil {
+					log.Debug("IndexNode Mock saveIndexMeta error", zap.Error(err))
+				}
+			} else {
+				saveIndexMeta := func() error {
+					indexMeta := indexpb.IndexMeta{}
+					_, values, versions, err := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
+					if err != nil {
+						return err
+					}
+					err = proto.UnmarshalText(values[0], &indexMeta)
+					if err != nil {
+						return err
+					}
+					indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
+					indexMeta.State = commonpb.IndexState_Failed
+					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
+						proto.MarshalTextString(&indexMeta))
+					if err != nil {
+						return err
+					}
+
+					indexMeta2 := indexpb.IndexMeta{}
+					_, values2, versions2, err := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
+					if err != nil {
+						return err
+					}
+					err = proto.UnmarshalText(values2[0], &indexMeta2)
+					if err != nil {
+						return err
+					}
+					indexMeta2.Version = indexMeta.Version + 1
+					indexMeta2.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
+					indexMeta2.State = commonpb.IndexState_Finished
+					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions2[0],
+						proto.MarshalTextString(&indexMeta2))
+					if err != nil {
+						return err
+					}
+					return nil
+				}
+				err := retry.Do(context.Background(), saveIndexMeta, retry.Attempts(3))
+				if err != nil {
+					log.Debug("IndexNode Mock saveIndexMeta error", zap.Error(err))
+				}
 			}
-			indexMeta := indexpb.IndexMeta{}
-			_, values, versions, _ := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
-			_ = proto.UnmarshalText(values[0], &indexMeta)
-			indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
-			indexMeta.State = commonpb.IndexState_Failed
-			_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-				proto.MarshalTextString(&indexMeta))
-			indexMeta2 := indexpb.IndexMeta{}
-			_, values2, versions2, _ := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
-			_ = proto.UnmarshalText(values2[0], &indexMeta2)
-			indexMeta2.Version = indexMeta.Version + 1
-			indexMeta2.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
-			indexMeta2.State = commonpb.IndexState_Finished
-			_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions2[0],
-				proto.MarshalTextString(&indexMeta2))
 		}
 	}
 }
