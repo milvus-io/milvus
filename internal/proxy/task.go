@@ -2464,13 +2464,14 @@ func (qt *queryTask) PostExecute(ctx context.Context) error {
 			},
 			FieldsData: make([]*schemapb.FieldData, 0),
 		}
-		for idx, partialRetrieveResult := range retrieveResult {
+		for _, partialRetrieveResult := range retrieveResult {
 			availableQueryNodeNum++
 			if partialRetrieveResult.Ids == nil {
 				reason += "ids is nil\n"
 				continue
 			} else {
-				if idx == 0 {
+				// handles initialization, cannot use idx==0 since first result may be empty
+				if len(qt.result.FieldsData) == 0 {
 					qt.result.FieldsData = append(qt.result.FieldsData, partialRetrieveResult.FieldsData...)
 				} else {
 					for k, fieldData := range partialRetrieveResult.FieldsData {
