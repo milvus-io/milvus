@@ -286,7 +286,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.rootCoord.GetStatisticsChannel(ctx)
 }
 
-//DDL request
+// CreateCollection creates a collection
 func (s *Server) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreateCollection(ctx, in)
 }
