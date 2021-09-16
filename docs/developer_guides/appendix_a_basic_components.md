@@ -96,7 +96,7 @@ const (
 	DefaultServiceRoot = "session/"
 	DefaultIDKey       = "id"
 	DefaultRetryTimes  = 30
-	DefaultTTL         = 10
+	DefaultTTL         = 60 
 )
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -108,11 +108,6 @@ type Session struct {
 	ServerName string `json:"ServerName,omitempty"`
 	Address    string `json:"Address,omitempty"`
 	Exclusive  bool   `json:"Exclusive,omitempty"`
-
-	etcdCli  *clientv3.Client
-	leaseID  clientv3.LeaseID
-	cancel   context.CancelFunc
-	metaRoot string
 }
 
 // NewSession is a helper to build Session object.
