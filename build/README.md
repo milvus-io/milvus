@@ -104,7 +104,7 @@ milvus_minio_1     /usr/bin/docker-entrypoint ...   Up (healthy)   9000/tcp
 milvus_pulsar_1    bin/pulsar standalone --no ...   Up
 ```
 
-`milvus_builder_1` is the docker of milvus dev, other containers are used as unit test dependencies. you can run compilation and unit inside the container, enter it:
+`milvus_builder_1` is the docker of milvus dev, other containers are used as unit test dependencies. you can run compilation and unit test inside the container, enter it:
 
 ```shell
 docker exec -ti milvus_builder_1 bash
