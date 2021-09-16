@@ -40,7 +40,6 @@ Your Milvus installation may fail when images are not properly loaded from publi
    &nbsp;&nbsp;&nbsp;or get Kubernetes manifest of Milvus cluster
 
    ```shell
-   # Get Kubernetes manifest of Milvus cluster
    helm template --set cluster.enabled=true my-release milvus/milvus > milvus_manifest.yaml
    ```
 
