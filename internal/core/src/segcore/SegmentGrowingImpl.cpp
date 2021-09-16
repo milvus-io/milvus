@@ -71,7 +71,7 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
             for (auto iter = iter_b; iter != iter_e; ++iter) {
                 auto offset = iter->second;
                 if (record_.timestamps_[offset] < query_timestamp) {
-                    Assert(offset < insert_barrier);
+                    AssertInfo(offset < insert_barrier, "Timestamp offset is larger than insert barrier");
                     the_offset = std::max(the_offset, offset);
                 }
             }
@@ -97,7 +97,7 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
                     continue;
                 }
                 if (record_.timestamps_[offset] < query_timestamp) {
-                    Assert(offset < insert_barrier);
+                    AssertInfo(offset < insert_barrier, "Timestamp offset is larger than insert barrier");
                     the_offset = std::max(the_offset, offset);
                 }
             }
@@ -121,7 +121,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_begin,
                            const int64_t* uids_raw,
                            const Timestamp* timestamps_raw,
                            const RowBasedRawData& entities_raw) {
-    Assert(entities_raw.count == size);
+    AssertInfo(entities_raw.count == size, "Entities_raw count not equal to insert size");
     // step 1: check schema if valid
     if (entities_raw.sizeof_per_row != schema_->get_total_sizeof()) {
         std::string msg = "entity length = " + std::to_string(entities_raw.sizeof_per_row) +
@@ -193,7 +193,7 @@ SegmentGrowingImpl::do_insert(int64_t reserved_begin,
         }
     } else {
         auto offset = schema_->get_primary_key_offset().value_or(FieldOffset(-1));
-        Assert(offset.get() != -1);
+        AssertInfo(offset.get() != -1, "Primary key offset is -1");
         auto& row = columns_data[offset.get()];
         auto row_ptr = reinterpret_cast<const int64_t*>(row.data());
         for (int i = 0; i < size; ++i) {
@@ -203,8 +203,8 @@ SegmentGrowingImpl::do_insert(int64_t reserved_begin,
 
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
     if (enable_small_index_) {
-        int64_t chunk_size = segcore_config_.get_size_per_chunk();
-        indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / chunk_size, record_);
+        int64_t chunk_rows = segcore_config_.get_chunk_rows();
+        indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / chunk_rows, record_);
     }
 }
 
@@ -243,10 +243,10 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
 int64_t
 SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     int64_t total_bytes = 0;
-    auto size_per_chunk = segcore_config_.get_size_per_chunk();
-    int64_t ins_n = upper_align(record_.reserved, size_per_chunk);
+    auto chunk_rows = segcore_config_.get_chunk_rows();
+    int64_t ins_n = upper_align(record_.reserved, chunk_rows);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = upper_align(deleted_record_.reserved, size_per_chunk);
+    int64_t del_n = upper_align(deleted_record_.reserved, chunk_rows);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
 }
@@ -260,7 +260,7 @@ SegmentGrowingImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) 
 int64_t
 SegmentGrowingImpl::num_chunk() const {
     auto size = get_insert_record().ack_responder_.GetAck();
-    return upper_div(size, segcore_config_.get_size_per_chunk());
+    return upper_div(size, segcore_config_.get_chunk_rows());
 }
 
 void
@@ -299,7 +299,7 @@ SegmentGrowingImpl::bulk_subscript(FieldOffset field_offset,
         return;
     }
 
-    Assert(!field_meta.is_vector());
+    AssertInfo(!field_meta.is_vector(), "Scalar field meta type is vector type");
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             bulk_subscript_impl<bool>(*vec_ptr, seg_offsets, count, false, output);
@@ -344,7 +344,7 @@ SegmentGrowingImpl::bulk_subscript_impl(int64_t element_sizeof,
                                         void* output_raw) const {
     static_assert(IsVector<T>);
     auto vec_ptr = dynamic_cast<const ConcurrentVector<T>*>(&vec_raw);
-    Assert(vec_ptr);
+    AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
     std::vector<uint8_t> empty(element_sizeof, 0);
     auto output_base = reinterpret_cast<char*>(output_raw);
@@ -362,7 +362,7 @@ SegmentGrowingImpl::bulk_subscript_impl(
     const VectorBase& vec_raw, const int64_t* seg_offsets, int64_t count, T default_value, void* output_raw) const {
     static_assert(IsScalar<T>);
     auto vec_ptr = dynamic_cast<const ConcurrentVector<T>*>(&vec_raw);
-    Assert(vec_ptr);
+    AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
     auto output = reinterpret_cast<T*>(output_raw);
     for (int64_t i = 0; i < count; ++i) {
@@ -413,7 +413,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     auto indexes = sort_indexes(timestamps_raw, size);
     std::vector<Timestamp> timestamps(size);
     std::vector<idx_t> row_ids(size);
-    Assert(values.count == size);
+    AssertInfo(values.count == size, "Insert values count not equal to insert size");
     for (int64_t i = 0; i < size; ++i) {
         auto offset = indexes[i];
         timestamps[i] = timestamps_raw[offset];
@@ -426,7 +426,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         aligned_vector<uint8_t> column;
         auto element_sizeof = field_meta.get_sizeof();
         auto& src_vec = values.columns_[field_offset];
-        Assert(src_vec.size() == element_sizeof * size);
+        AssertInfo(src_vec.size() == element_sizeof * size, "Vector size is not aligned");
         for (int64_t i = 0; i < size; ++i) {
             auto offset = indexes[i];
             auto beg = src_vec.data() + offset * element_sizeof;
@@ -460,7 +460,7 @@ SegmentGrowingImpl::search_ids(const boost::dynamic_bitset<>& bitset, Timestamp 
 
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
 SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
-    Assert(id_array.has_int_id());
+    AssertInfo(id_array.has_int_id(), "Id array doesn't have int_id element");
     auto& src_int_arr = id_array.int_id();
     auto res_id_arr = std::make_unique<IdArray>();
     auto res_int_id_arr = res_id_arr->mutable_int_id();

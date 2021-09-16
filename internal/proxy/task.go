@@ -79,6 +79,7 @@ const (
 	ReleaseCollectionTaskName       = "ReleaseCollectionTask"
 	LoadPartitionTaskName           = "LoadPartitionsTask"
 	ReleasePartitionTaskName        = "ReleasePartitionsTask"
+	deleteTaskName                  = "DeleteTask"
 )
 
 type task interface {
@@ -113,7 +114,6 @@ type insertTask struct {
 	ctx context.Context
 
 	result         *milvuspb.MutationResult
-	dataCoord      types.DataCoord
 	rowIDAllocator *allocator.IDAllocator
 	segIDAssigner  *SegIDAssigner
 	chMgr          channelsMgr
@@ -1179,7 +1179,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 				}
 			}
 			if !exist {
-				return errors.New("dimension is not defined in field type params")
+				return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
 			}
 			if field.DataType == schemapb.DataType_FloatVector {
 				if err := ValidateDimension(dim, false); err != nil {
@@ -4621,52 +4621,52 @@ func (rpt *releasePartitionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type DeleteTask struct {
+type deleteTask struct {
 	Condition
 	*milvuspb.DeleteRequest
 	ctx    context.Context
 	result *milvuspb.MutationResult
 }
 
-func (dt *DeleteTask) TraceCtx() context.Context {
+func (dt *deleteTask) TraceCtx() context.Context {
 	return dt.ctx
 }
 
-func (dt *DeleteTask) ID() UniqueID {
+func (dt *deleteTask) ID() UniqueID {
 	return dt.Base.MsgID
 }
 
-func (dt *DeleteTask) SetID(uid UniqueID) {
+func (dt *deleteTask) SetID(uid UniqueID) {
 	dt.Base.MsgID = uid
 }
 
-func (dt *DeleteTask) Type() commonpb.MsgType {
+func (dt *deleteTask) Type() commonpb.MsgType {
 	return dt.Base.MsgType
 }
 
-func (dt *DeleteTask) Name() string {
-	return ReleasePartitionTaskName
+func (dt *deleteTask) Name() string {
+	return deleteTaskName
 }
 
-func (dt *DeleteTask) BeginTs() Timestamp {
+func (dt *deleteTask) BeginTs() Timestamp {
 	return dt.Base.Timestamp
 }
 
-func (dt *DeleteTask) EndTs() Timestamp {
+func (dt *deleteTask) EndTs() Timestamp {
 	return dt.Base.Timestamp
 }
 
-func (dt *DeleteTask) SetTs(ts Timestamp) {
+func (dt *deleteTask) SetTs(ts Timestamp) {
 	dt.Base.Timestamp = ts
 }
 
-func (dt *DeleteTask) OnEnqueue() error {
+func (dt *deleteTask) OnEnqueue() error {
 	dt.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (dt *DeleteTask) PreExecute(ctx context.Context) error {
-	dt.Base.MsgType = commonpb.MsgType_ReleasePartitions
+func (dt *deleteTask) PreExecute(ctx context.Context) error {
+	dt.Base.MsgType = commonpb.MsgType_Delete
 	dt.Base.SourceID = Params.ProxyID
 
 	collName := dt.CollectionName
@@ -4682,10 +4682,10 @@ func (dt *DeleteTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
+func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	return nil
 }
 
-func (dt *DeleteTask) PostExecute(ctx context.Context) error {
+func (dt *deleteTask) PostExecute(ctx context.Context) error {
 	return nil
 }

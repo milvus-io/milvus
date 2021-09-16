@@ -16,7 +16,13 @@ extern "C" {
 #endif
 
 void
-SegcoreInit(const char* config_dir);
+SegcoreInit();
+
+void
+SegcoreSetChunkRows(const int64_t);
+
+void
+SegcoreSetSimdType(const char*);
 
 #ifdef __cplusplus
 }

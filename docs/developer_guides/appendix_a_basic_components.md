@@ -4,7 +4,7 @@
 
 #### A.1 System Component
 
-Milvus has 9 different components, and can be abstracted into basic Component.
+Milvus has 9 different components and can be abstracted into basic Component.
 
 ```go
 type Component interface {
@@ -13,6 +13,7 @@ type Component interface {
 	Stop() error
 	GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+	Register() error
 }
 ```
 
@@ -56,13 +57,13 @@ type TimeTickProvider interface {
 #### A.2 Session
 ###### ServerID
 
-The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/services/ServerID". The initial value is 0. When a service is registered, it is incremented by 1 and returned to the next registered service.
+The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/session/id". The initial value is 0. When a service is registered, it is incremented by 1 and returned to the next registered service.
 
-###### Registeration
+###### Registration
 
 * Registration is achieved through etcd's lease mechanism.
 
-* The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
+* The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is available through the key.
 
 * key: metaRoot + "/session" + "/ServerName(-ServerID)(optional)"
 
@@ -79,7 +80,7 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 * By obtaining the address, you can establish a connection with other services
 
-* If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value. 
+* If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value.
 
 ###### Discovery
 
@@ -242,7 +243,7 @@ type nodeCtx struct {
 func (nodeCtx *nodeCtx) Start(ctx context.Context) error
 ```
 
-*Start()* will enter a loop. In each iteration, it tries to collect input messges from *inputChan*, then prepare node's input. When input is ready, it will trigger *node.Operate*. When *node.Operate* returns, it sends the returned *Msg* to *outputChans*, which connects to the downstreams' *inputChans*.
+*Start()* will enter a loop. In each iteration, it tries to collect input messages from *inputChan*, then prepares the node's input. When the input is ready, it will trigger *node.Operate*. When *node.Operate* returns, it sends the returned *Msg* to *outputChans*, which connects to the downstreams' *inputChans*.
 
 ```go
 type TimeTickedFlowGraph struct {
@@ -280,6 +281,8 @@ type Allocator struct {
 
 	CheckSyncFunc func(timeout bool) bool
 	PickCanDoFunc func()
+	SyncErr       error
+	Role          string
 }
 func (ta *Allocator) Start() error
 func (ta *Allocator) Init() error
@@ -307,11 +310,6 @@ type IDAllocator struct {
 }
 
 func (ia *IDAllocator) Start() error
-func (ia *IDAllocator) connectMaster() error
-func (ia *IDAllocator) syncID() bool
-func (ia *IDAllocator) checkSyncFunc(timeout bool) bool
-func (ia *IDAllocator) pickCanDoFunc()
-func (ia *IDAllocator) processFunc(req Request) error
 func (ia *IDAllocator) AllocOne() (UniqueID, error)
 func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error)
 
@@ -326,26 +324,26 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 
 ###### A.6.1 Timestamp
 
-Let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and a 18-bits logical component (used to distinguish between events with the same physical component).
+Let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and an 18-bits logical component (used to distinguish between events with the same physical component).
 
 <img src="./figs/hlc.png" width=400>
 
-HLC's logical part is advanced on each request. The phsical part can be increased in two cases:
+HLC's logical part is advanced on each request. The physical part can be increased in two cases:
 
 A. when the local wall time is greater than HLC's physical part,
 
 B. or the logical part overflows.
 
-In either cases, the physical part will be updated, and the logical part will be set to 0.
+In either case, the physical part will be updated, and the logical part will be set to 0.
 
-Keep the physical part close to local wall time may face non-monotonic problems such as updates to POSIX time that could turn time backward. HLC avoids such problems, since if 'local wall time < HLC's physical part' holds, only case B is satisfied, thus montonicity is guaranteed.
+Keep the physical part close to local wall time may face non-monotonic problems such as updates to POSIX time that could turn time backward. HLC avoids such problems, since if 'local wall time < HLC's physical part' holds, only case B is satisfied, thus monotonicity is guaranteed.
 
-Milvus does not support transaction, but it should gurantee the deterministic execution of the multi-way WAL. The timestamp attached to each request should
+Milvus does not support transaction, but it should guarantee the deterministic execution of the multi-way WAL. The timestamp attached to each request should
 
-- have its physical part close to wall time (has an acceptable bounded error, a.k.a. uncertainty interval in transaction senarios),
+- have its physical part close to wall time (has an acceptable bounded error, a.k.a. uncertainty interval in transaction scenarios),
 - and be globally unique.
 
-HLC leverages on physical clocks at nodes that are synchronized using the NTP. NTP usually maintain time to within tens of milliseconds over local networks in datacenter. Asymmetric routes and network congestion occasionally cause errors of hundreds of milliseconds. Both the normal time error and the spike are acceptable for Milvus use cases.
+HLC leverages physical clocks at nodes that are synchronized using the NTP. NTP usually maintains time to within tens of milliseconds over local networks in the datacenter. Asymmetric routes and network congestion occasionally cause errors of hundreds of milliseconds. Both the normal time error and the spike are acceptable for Milvus use cases.
 
 The interface of Timestamp is as follows.
 
@@ -428,6 +426,7 @@ type BaseKV interface {
 	MultiSave(kvs map[string]string) error
 	Remove(key string) error
 	MultiRemove(keys []string) error
+	RemoveWithPrefix(key string) error
 
 	Close()
 }
@@ -438,16 +437,46 @@ type BaseKV interface {
 ```go
 type TxnKV interface {
 	BaseKV
-	
+
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
 	MultiRemoveWithPrefix(keys []string) error
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }
 ```
 
+###### A.7.3 MetaKv
 
+```go
+type MetaKv interface {
+	TxnKV
+	GetPath(key string) string
+	LoadWithPrefix(key string) ([]string, []string, error)
+	LoadWithPrefix2(key string) ([]string, []string, []int64, error)
+	LoadWithRevision(key string) ([]string, []string, int64, error)
+	Watch(key string) clientv3.WatchChan
+	WatchWithPrefix(key string) clientv3.WatchChan
+	WatchWithRevision(key string, revision int64) clientv3.WatchChan
+	SaveWithLease(key, value string, id clientv3.LeaseID) error
+	Grant(ttl int64) (id clientv3.LeaseID, err error)
+	KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error)
+	CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error
+	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error
+}
 
-###### A.7.3 Etcd KV
+```
+
+###### A.7.4 MetaKv
+
+```go
+type SnapShotKV interface {
+	Save(key string, value string, ts typeutil.Timestamp) error
+	Load(key string, ts typeutil.Timestamp) (string, error)
+	MultiSave(kvs map[string]string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
+	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
+	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
+```
+
+###### A.7.5 Etcd KV
 
 ```go
 type EtcdKV struct {
@@ -475,7 +504,7 @@ func NewEtcdKV(etcdAddr string, rootPath string) *EtcdKV
 
 EtcdKV implements all *TxnKV* interfaces.
 
-###### A.7.4 Memory KV
+###### A.7.6 Memory KV
 
 ```go
 type MemoryKV struct {
@@ -500,7 +529,7 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remova
 
 MemoryKV implements all *TxnKV* interfaces.
 
-###### A.7.5 MinIO KV
+###### A.7.7 MinIO KV
 
 ```go
 type MinIOKV struct {
@@ -522,7 +551,7 @@ func (kv *MinIOKV) Close()
 
 MinIOKV implements all *KV* interfaces.
 
-###### A.7.6 RocksdbKV KV
+###### A.7.8 RocksdbKV KV
 
 ```go
 type RocksdbKV struct {
@@ -549,5 +578,3 @@ func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remov
 ```
 
 RocksdbKV implements all *TxnKV* interfaces.h
-
-

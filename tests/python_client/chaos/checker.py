@@ -26,6 +26,11 @@ timeout = 20
 
 
 class Checker:
+    """
+    A base class of milvus operation checker to
+       a. check whether milvus is servicing
+       b. count operations and success rate
+    """
     def __init__(self):
         self._succ = 0
         self._fail = 0

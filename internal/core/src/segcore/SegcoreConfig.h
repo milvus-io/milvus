@@ -55,13 +55,13 @@ class SegcoreConfig {
     }
 
     int64_t
-    get_size_per_chunk() const {
-        return size_per_chunk_;
+    get_chunk_rows() const {
+        return chunk_rows_;
     }
 
     void
-    set_size_per_chunk(int64_t size_per_chunk) {
-        size_per_chunk_ = size_per_chunk;
+    set_chunk_rows(int64_t chunk_rows) {
+        chunk_rows_ = chunk_rows;
     }
 
     void
@@ -70,7 +70,7 @@ class SegcoreConfig {
     }
 
  private:
-    int64_t size_per_chunk_ = 32768;
+    int64_t chunk_rows_ = 32 * 1024;
     std::map<MetricType, SmallIndexConf> table_;
 };
 

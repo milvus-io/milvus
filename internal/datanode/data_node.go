@@ -578,6 +578,7 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
+// GetMetrics return datanode metrics
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("DataNode.GetMetrics",

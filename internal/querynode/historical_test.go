@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"context"
 	"strconv"
 	"testing"
 	"time"
@@ -86,4 +87,102 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 	assert.NoError(t, err)
 	time.Sleep(100 * time.Millisecond) // for etcd latency
 	emptySegmentCheck()
+}
+
+func TestHistorical_Search(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	t.Run("test search", func(t *testing.T) {
+		his, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		_, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
+		assert.NoError(t, err)
+	})
+
+	t.Run("test no collection - search partitions", func(t *testing.T) {
+		his, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		err = his.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		_, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
+		assert.Error(t, err)
+	})
+
+	t.Run("test no collection - search all collection", func(t *testing.T) {
+		his, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		err = his.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		_, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
+		assert.Error(t, err)
+	})
+
+	t.Run("test load partition and partition has been released", func(t *testing.T) {
+		his, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		col, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.setLoadType(loadTypePartition)
+
+		err = his.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		_, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
+		assert.Error(t, err)
+	})
+
+	t.Run("test no partition in collection", func(t *testing.T) {
+		his, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		err = his.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		res, ids, err := his.search(searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
+		assert.Nil(t, res)
+		assert.Nil(t, ids)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test load collection partition released in collection", func(t *testing.T) {
+		his, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		col, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.addReleasedPartition(defaultPartitionID)
+
+		err = his.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		res, ids, err := his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
+		assert.Nil(t, res)
+		assert.Nil(t, ids)
+		assert.Error(t, err)
+	})
 }

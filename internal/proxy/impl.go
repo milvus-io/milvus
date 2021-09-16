@@ -155,7 +155,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
-			zap.Any("schema", request.Schema))
+		)
 	}()
 
 	err = cct.WaitToFinish()
@@ -1248,7 +1248,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		dataCoord: node.dataCoord,
 		req:       request,
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
@@ -1356,7 +1355,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	dt := &DeleteTask{
+	dt := &deleteTask{
 		ctx:           ctx,
 		Condition:     NewTaskCondition(ctx),
 		DeleteRequest: request,

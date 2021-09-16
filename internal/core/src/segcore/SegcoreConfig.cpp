@@ -48,8 +48,8 @@ SegcoreConfig::parse_from(const std::string& config_path) {
         YAML::Node top_config = YAML::LoadFile(config_path);
         Assert(top_config.IsMap());
         auto seg_config = subnode(top_config, "segcore");
-        auto chunk_size = subnode(seg_config, "chunk_size").as<int64_t>();
-        this->size_per_chunk_ = chunk_size;
+        auto chunk_rows = subnode(seg_config, "chunk_rows").as<int64_t>();
+        this->chunk_rows_ = chunk_rows;
 
 #if 0
         auto index_list = subnode(seg_config, "small_index");

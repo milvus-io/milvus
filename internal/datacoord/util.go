@@ -25,10 +25,6 @@ type Response interface {
 	GetStatus() *commonpb.Status
 }
 
-var errNilResponse = errors.New("response is nil")
-var errNilStatusResponse = errors.New("response has nil status")
-var errUnknownResponseType = errors.New("unknown response type")
-
 // VerifyResponse verify grpc Response 1. check error is nil 2. check response.GetStatus() with status success
 func VerifyResponse(response interface{}, err error) error {
 	if err != nil {

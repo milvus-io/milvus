@@ -81,9 +81,6 @@ func prefixLoad(db *gorocksdb.DB, prefix string) ([]string, []string, error) {
 		values = append(values, string(value.Data()))
 		value.Free()
 	}
-	if err := iter.Err(); err != nil {
-		return nil, nil, err
-	}
 	return keys, values, nil
 }
 
@@ -110,6 +107,8 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	return ri, nil
 }
 
+// Before do retention, load retention info from rocksdb to retention info structure in goroutines.
+// Because loadRetentionInfo may need some time, so do this asynchronously. Finally start retention goroutine.
 func (ri *retentionInfo) startRetentionInfo() error {
 	var wg sync.WaitGroup
 	ri.kv.ResetPrefixLength(FixedChannelNameLen)
@@ -126,6 +125,7 @@ func (ri *retentionInfo) startRetentionInfo() error {
 	return nil
 }
 
+// Read retention infos from rocksdb so that retention check can be done based on memory data
 func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 	// TODO(yukun): If there needs to add lock
 	// ll, ok := topicMu.Load(topic)
@@ -251,6 +251,7 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 
 func (ri *retentionInfo) retention() error {
 	log.Debug("Rocksmq retention goroutine start!")
+	// Do retention check every 6s
 	ticker := time.NewTicker(time.Duration(TickerTimeInMinutes * int64(time.Minute) / 10))
 
 	for {
@@ -274,6 +275,11 @@ func (ri *retentionInfo) retention() error {
 	}
 }
 
+// 1. Obtain pageAckedInfo and do time expired check, get the expired page scope;
+// 2. Do iteration in the page after the last page in step 1 and get the last time expired message id;
+// 3. Do size expired check in next page, and get the last size expired message id;
+// 4. Do delete by range of [start_msg_id, end_msg_id) in rocksdb
+// 5. Delete corresponding data in retentionInfo
 func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	// log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	var ackedInfo *topicAckedInfo

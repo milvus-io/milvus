@@ -9,26 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package performance
+package grpcproxy
 
 import (
-	"math"
-	"math/rand"
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-func randStringBytes(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letterBytes[rand.Intn(len(letterBytes))]
-	}
-	return string(b)
-}
-
-func GenerateData(base float64, iter float64) string {
-	multiplier := math.Pow(2, iter)
-	length := multiplier * base
-
-	return randStringBytes(int(math.Floor(length)))
+func Test_NewServer(t *testing.T) {
+	server, err := NewServer(context.Background(), nil)
+	assert.NotNil(t, server)
+	assert.Nil(t, err)
 }

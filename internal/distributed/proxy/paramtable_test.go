@@ -14,7 +14,10 @@ package grpcproxy
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
@@ -23,4 +26,15 @@ func TestParamTable(t *testing.T) {
 
 	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
 	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
+
+	Params.Remove("proxy.grpc.serverMaxSendSize")
+	Params.initServerMaxSendSize()
+	assert.Equal(t, Params.ServerMaxSendSize, grpcconfigs.DefaultServerMaxSendSize)
+
+	Params.Remove("proxy.grpc.serverMaxRecvSize")
+	Params.initServerMaxRecvSize()
+	assert.Equal(t, Params.ServerMaxRecvSize, grpcconfigs.DefaultServerMaxRecvSize)
+
+	Params.LoadFromEnv()
+	assert.Equal(t, Params.IP, funcutil.GetLocalIP())
 }

@@ -25,6 +25,11 @@ func TestRmqID_Serialize(t *testing.T) {
 	bin := rid.Serialize()
 	assert.NotNil(t, bin)
 	assert.NotZero(t, len(bin))
+
+	rid.LedgerID()
+	rid.EntryID()
+	rid.BatchIdx()
+	rid.PartitionIdx()
 }
 
 func Test_SerializeRmqID(t *testing.T) {

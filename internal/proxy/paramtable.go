@@ -61,6 +61,8 @@ type ParamTable struct {
 	DefaultPartitionName       string
 	DefaultIndexName           string
 
+	MaxTaskNum int64
+
 	PulsarMaxMessageSize int
 	Log                  log.Config
 	RoleName             string
@@ -99,6 +101,8 @@ func (pt *ParamTable) initParams() {
 
 	pt.initPulsarMaxMessageSize()
 	pt.initRoleName()
+
+	pt.initMaxTaskNum()
 }
 
 func (pt *ParamTable) InitAlias(alias string) {
@@ -302,4 +306,16 @@ func (pt *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	pt.MetaRootPath = path.Join(rootPath, subPath)
+}
+
+func (pt *ParamTable) initMaxTaskNum() {
+	str, err := pt.Load("proxy.maxTaskNum")
+	if err != nil {
+		panic(err)
+	}
+	maxTaskNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	pt.MaxTaskNum = maxTaskNum
 }

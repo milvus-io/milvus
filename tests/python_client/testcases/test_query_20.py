@@ -285,6 +285,11 @@ class TestQueryBase(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("pos", [0, ct.default_nb])
     def test_query_expr_not_in_empty_and_all(self, pos):
+        """
+        target: test query with `not in` expr
+        method: query with `not in` expr for (non)empty collection
+        expected: verify query result
+        """
         self._connect()
         df = cf.gen_default_dataframe_data()
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
@@ -319,6 +324,11 @@ class TestQueryBase(TestcaseBase):
 
     @pytest.mark.tag(CaseLabel.L1)
     def test_query_expr_not_in_random(self):
+        """
+        target: test query with fixed filter values
+        method: query with fixed filter values
+        expected: correct query result
+        """
         self._connect()
         df = cf.gen_default_dataframe_data(nb=50)
         log.debug(df.head(5))

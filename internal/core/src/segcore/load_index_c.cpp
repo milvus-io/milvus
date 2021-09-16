@@ -84,7 +84,7 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         auto& index_params = load_index_info->index_params;
         bool find_index_type = index_params.count("index_type") > 0 ? true : false;
         bool find_index_mode = index_params.count("index_mode") > 0 ? true : false;
-        Assert(find_index_type == true);
+        AssertInfo(find_index_type == true, "Can't find index type in index_params");
         milvus::knowhere::IndexMode mode;
         if (find_index_mode) {
             mode = index_params["index_mode"] == "CPU" ? milvus::knowhere::IndexMode::MODE_CPU

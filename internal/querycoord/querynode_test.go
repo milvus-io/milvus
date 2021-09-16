@@ -18,82 +18,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
-func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
-	factory := msgstream.NewPmsFactory()
-
-	coord, err := NewQueryCoordTest(ctx, factory)
-	if err != nil {
-		return nil, err
-	}
-
-	rootCoord := newRootCoordMock()
-	rootCoord.createCollection(defaultCollectionID)
-	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
-
-	dataCoord, err := newDataCoordMock(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	coord.SetRootCoord(rootCoord)
-	coord.SetDataCoord(dataCoord)
-
-	err = coord.Register()
-	if err != nil {
-		return nil, err
-	}
-	err = coord.Init()
-	if err != nil {
-		return nil, err
-	}
-	err = coord.Start()
-	if err != nil {
-		return nil, err
-	}
-	return coord, nil
-}
-
-func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
-	factory := msgstream.NewPmsFactory()
-
-	coord, err := NewQueryCoordTest(ctx, factory)
-	if err != nil {
-		return nil, err
-	}
-
-	rootCoord := newRootCoordMock()
-	rootCoord.createCollection(defaultCollectionID)
-	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
-
-	dataCoord, err := newDataCoordMock(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	coord.SetRootCoord(rootCoord)
-	coord.SetDataCoord(dataCoord)
-
-	err = coord.Register()
-	if err != nil {
-		return nil, err
-	}
-	err = coord.Init()
-	if err != nil {
-		return nil, err
-	}
-
-	return coord, nil
-}
-
 //func waitQueryNodeOnline(cluster *queryNodeCluster, nodeID int64)
 
-func waitAllQueryNodeOffline(cluster *queryNodeCluster, nodes map[int64]Node) bool {
+func waitAllQueryNodeOffline(cluster Cluster, nodes map[int64]Node) bool {
 	reDoCount := 20
 	for {
 		if reDoCount <= 0 {
@@ -117,6 +50,7 @@ func waitAllQueryNodeOffline(cluster *queryNodeCluster, nodes map[int64]Node) bo
 }
 
 func TestQueryNode_MultiNode_stop(t *testing.T) {
+	refreshParams()
 	baseCtx := context.Background()
 
 	queryCoord, err := startQueryCoord(baseCtx)
@@ -147,7 +81,7 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	time.Sleep(2 * time.Second)
-	nodes, err := queryCoord.cluster.onServiceNodes()
+	nodes, err := queryCoord.cluster.onlineNodes()
 	assert.Nil(t, err)
 	queryNode5.stop()
 
@@ -157,6 +91,7 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 }
 
 func TestQueryNode_MultiNode_reStart(t *testing.T) {
+	refreshParams()
 	baseCtx := context.Background()
 
 	queryCoord, err := startQueryCoord(baseCtx)
@@ -185,7 +120,7 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		CollectionID: defaultCollectionID,
 	})
 	assert.Nil(t, err)
-	nodes, err := queryCoord.cluster.onServiceNodes()
+	nodes, err := queryCoord.cluster.onlineNodes()
 	assert.Nil(t, err)
 	queryNode3.stop()
 
@@ -196,4 +131,26 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 
 func TestQueryNode_getMetrics(t *testing.T) {
 	log.Info("TestQueryNode_getMetrics, todo")
+}
+
+func TestNewQueryNode(t *testing.T) {
+	refreshParams()
+	baseCtx, cancel := context.WithCancel(context.Background())
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	assert.Nil(t, err)
+
+	queryNode1, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+
+	addr := queryNode1.session.Address
+	nodeID := queryNode1.queryNodeID
+	node, err := newQueryNode(baseCtx, addr, nodeID, kv)
+	assert.Nil(t, err)
+
+	err = node.start()
+	assert.Nil(t, err)
+
+	cancel()
+	node.stop()
+	queryNode1.stop()
 }

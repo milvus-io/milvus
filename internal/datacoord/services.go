@@ -15,8 +15,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const serverNotServingErrMsg = "server is not serving"
-
 // checks whether server in Healthy State
 func (s *Server) isClosed() bool {
 	return atomic.LoadInt64(&s.isServing) != ServerStateHealthy

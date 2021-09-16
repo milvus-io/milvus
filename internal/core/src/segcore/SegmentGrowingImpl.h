@@ -109,7 +109,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t
     size_per_chunk() const final {
-        return segcore_config_.get_size_per_chunk();
+        return segcore_config_.get_chunk_rows();
     }
 
  public:
@@ -159,7 +159,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
-          record_(*schema_, segcore_config.get_size_per_chunk()),
+          record_(*schema_, segcore_config.get_chunk_rows()),
           indexing_record_(*schema_, segcore_config_) {
     }
 

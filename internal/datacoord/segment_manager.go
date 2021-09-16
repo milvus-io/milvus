@@ -75,7 +75,7 @@ type Manager interface {
 	ExpireAllocations(channel string, ts Timestamp) error
 }
 
-// allcation entry for segment Allocation record
+// Allocation records the allocation info
 type Allocation struct {
 	SegmentID  UniqueID
 	NumOfRows  int64
@@ -321,7 +321,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
 	collMeta := s.meta.GetCollection(collectionID)
 	if collMeta == nil {
-		return -1, fmt.Errorf("Failed to get collection %d", collectionID)
+		return -1, fmt.Errorf("failed to get collection %d", collectionID)
 	}
 	return s.estimatePolicy(collMeta.Schema)
 }

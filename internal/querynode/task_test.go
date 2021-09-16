@@ -27,7 +27,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	defer cancel()
 
 	genWatchDMChannelsRequest := func() *querypb.WatchDmChannelsRequest {
-		_, schema := genSimpleSchema()
+		schema := genSimpleSegCoreSchema()
 		req := &querypb.WatchDmChannelsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_WatchDmChannels),
 			CollectionID: defaultCollectionID,
@@ -149,7 +149,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	defer cancel()
 
 	genLoadEmptySegmentsRequest := func() *querypb.LoadSegmentsRequest {
-		_, schema := genSimpleSchema()
+		schema := genSimpleSegCoreSchema()
 		req := &querypb.LoadSegmentsRequest{
 			Base:          genCommonMsgBase(commonpb.MsgType_LoadSegments),
 			Schema:        schema,
@@ -186,7 +186,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		schema, _ := genSimpleSchema()
+		schema := genSimpleInsertDataSchema()
 
 		fieldBinlog, err := saveSimpleBinLog(ctx)
 		assert.NoError(t, err)

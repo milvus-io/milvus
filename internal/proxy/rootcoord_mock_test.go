@@ -14,16 +14,11 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
@@ -95,6 +90,7 @@ type RootCoordMock struct {
 
 	describeCollectionFunc describeCollectionFuncType
 	showPartitionsFunc     showPartitionsFuncType
+	getMetricsFunc         getMetricsFuncType
 
 	// TODO(dragondriver): index-related
 
@@ -112,6 +108,10 @@ func (coord *RootCoordMock) updateState(state internalpb.StateCode) {
 
 func (coord *RootCoordMock) getState() internalpb.StateCode {
 	return coord.state.Load().(internalpb.StateCode)
+}
+
+func (coord *RootCoordMock) healthy() bool {
+	return coord.getState() == internalpb.StateCode_Healthy
 }
 
 func (coord *RootCoordMock) Init() error {
@@ -353,14 +353,24 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
+	var collID UniqueID
+	usingID := false
+	if req.CollectionName == "" {
+		usingID = true
+	}
+
 	collID, exist := coord.collName2ID[req.CollectionName]
-	if !exist {
+	if !exist && !usingID {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
 				Reason:    milvuserrors.MsgCollectionNotExist(req.CollectionName),
 			},
 		}, nil
+	}
+
+	if usingID {
+		collID = req.CollectionID
 	}
 
 	meta := coord.collID2Meta[collID]
@@ -795,70 +805,26 @@ func (coord *RootCoordMock) SegmentFlushCompleted(ctx context.Context, in *datap
 }
 
 func (coord *RootCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	code := coord.state.Load().(internalpb.StateCode)
-	if code != internalpb.StateCode_Healthy {
-
+	if !coord.healthy() {
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "failed",
+				Reason:    "unhealthy",
 			},
-			Response: "",
 		}, nil
 	}
-	rootCoordTopology := metricsinfo.RootCoordTopology{
-		Self: metricsinfo.RootCoordInfos{
-			BaseComponentInfos: metricsinfo.BaseComponentInfos{
-				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, coord.nodeID),
-				HardwareInfos: metricsinfo.HardwareMetrics{
-					IP:           coord.address,
-					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
-					CPUCoreUsage: metricsinfo.GetCPUUsage(),
-					Memory:       metricsinfo.GetMemoryCount(),
-					MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
-					Disk:         metricsinfo.GetDiskCount(),
-					DiskUsage:    metricsinfo.GetDiskUsage(),
-				},
-				SystemInfo: metricsinfo.DeployMetrics{
-					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-				},
-				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-				Type: typeutil.RootCoordRole,
-			},
-			SystemConfigurations: metricsinfo.RootCoordConfiguration{
-				MinSegmentSizeToEnableIndex: 100,
-			},
-		},
-		Connections: metricsinfo.ConnTopology{
-			Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, coord.nodeID),
-			// TODO(dragondriver): fill ConnectedComponents if necessary
-			ConnectedComponents: []metricsinfo.ConnectionInfo{},
-		},
-	}
 
-	resp, err := metricsinfo.MarshalTopology(rootCoordTopology)
-	if err != nil {
-		log.Warn("Failed to marshal system info metrics of root coordinator",
-			zap.Error(err))
-
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, coord.nodeID),
-		}, nil
+	if coord.getMetricsFunc != nil {
+		return coord.getMetricsFunc(ctx, req)
 	}
 
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
 		},
-		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, coord.nodeID),
+		Response:      "",
+		ComponentName: "",
 	}, nil
 }
 

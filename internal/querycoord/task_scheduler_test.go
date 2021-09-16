@@ -1,3 +1,13 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 package querycoord
 
 import (
@@ -7,17 +17,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/stretchr/testify/assert"
 )
 
 type testTask struct {
 	BaseTask
 	baseMsg *commonpb.MsgBase
-	cluster *queryNodeCluster
+	cluster Cluster
 	meta    Meta
 	nodeID  int64
 }
@@ -108,6 +119,7 @@ func (tt *testTask) PostExecute(ctx context.Context) error {
 }
 
 func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
+	refreshParams()
 	baseCtx := context.Background()
 	queryCoord, err := startQueryCoord(baseCtx)
 	assert.Nil(t, err)
@@ -117,14 +129,12 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	assert.Nil(t, err)
 	queryNode.addQueryChannels = returnFailedResult
 
-	time.Sleep(time.Second)
-	nodes, err := queryCoord.cluster.onServiceNodes()
-	assert.Nil(t, err)
-	assert.Equal(t, len(nodes), 1)
-	var nodeID int64
-	for id := range nodes {
-		nodeID = id
-		break
+	nodeID := queryNode.queryNodeID
+	for {
+		_, err = queryCoord.cluster.getNodeByID(nodeID)
+		if err == nil {
+			break
+		}
 	}
 	testTask := &testTask{
 		BaseTask: BaseTask{
@@ -142,16 +152,16 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	queryCoord.scheduler.Enqueue([]task{testTask})
 
 	time.Sleep(time.Second)
-	queryNode.stop()
-
-	allNodeOffline := waitAllQueryNodeOffline(queryCoord.cluster, nodes)
-	assert.Equal(t, allNodeOffline, true)
-
-	time.Sleep(time.Second)
-	newActiveTaskIDKeys, _, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
-	assert.Nil(t, err)
-	assert.Equal(t, len(newActiveTaskIDKeys), len(activeTaskIDKeys))
+	queryCoord.cluster.stopNode(nodeID)
+	for {
+		newActiveTaskIDKeys, _, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
+		assert.Nil(t, err)
+		if len(newActiveTaskIDKeys) == len(activeTaskIDKeys) {
+			break
+		}
+	}
 	queryCoord.Stop()
+	queryNode.stop()
 }
 
 func TestUnMarshalTask(t *testing.T) {

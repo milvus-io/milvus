@@ -37,6 +37,7 @@ type QueryCoordMock struct {
 	colMtx              sync.RWMutex
 
 	showCollectionsFunc queryCoordShowCollectionsFuncType
+	getMetricsFunc      getMetricsFuncType
 
 	statisticsChannel string
 	timeTickChannel   string
@@ -289,7 +290,19 @@ func (coord *QueryCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 			},
 		}, nil
 	}
-	panic("implement me")
+
+	if coord.getMetricsFunc != nil {
+		return coord.getMetricsFunc(ctx, req)
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
+		},
+		Response:      "",
+		ComponentName: "",
+	}, nil
 }
 
 func NewQueryCoordMock(opts ...QueryCoordMockOption) *QueryCoordMock {

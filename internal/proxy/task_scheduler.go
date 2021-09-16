@@ -44,10 +44,9 @@ type taskQueue interface {
 	getTaskByReqID(reqID UniqueID) task
 	TaskDoneTest(ts Timestamp) bool
 	Enqueue(t task) error
+	setMaxTaskNum(num int64)
+	getMaxTaskNum() int64
 }
-
-// TODO(dragondriver): load from config
-const maxTaskNum = 1024
 
 type baseTaskQueue struct {
 	unissuedTasks *list.List
@@ -56,7 +55,8 @@ type baseTaskQueue struct {
 	atLock        sync.RWMutex
 
 	// maxTaskNum should keep still
-	maxTaskNum int64
+	maxTaskNum    int64
+	maxTaskNumMtx sync.RWMutex
 
 	utBufChan chan int // to block scheduler
 
@@ -75,7 +75,7 @@ func (queue *baseTaskQueue) utEmpty() bool {
 }
 
 func (queue *baseTaskQueue) utFull() bool {
-	return int64(queue.unissuedTasks.Len()) >= queue.maxTaskNum
+	return int64(queue.unissuedTasks.Len()) >= queue.getMaxTaskNum()
 }
 
 func (queue *baseTaskQueue) addUnissuedTask(t task) error {
@@ -203,14 +203,28 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	return queue.addUnissuedTask(t)
 }
 
+func (queue *baseTaskQueue) setMaxTaskNum(num int64) {
+	queue.maxTaskNumMtx.Lock()
+	defer queue.maxTaskNumMtx.Unlock()
+
+	queue.maxTaskNum = num
+}
+
+func (queue *baseTaskQueue) getMaxTaskNum() int64 {
+	queue.maxTaskNumMtx.RLock()
+	defer queue.maxTaskNumMtx.RUnlock()
+
+	return queue.maxTaskNum
+}
+
 func newBaseTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *baseTaskQueue {
 	return &baseTaskQueue{
 		unissuedTasks:   list.New(),
 		activeTasks:     make(map[UniqueID]task),
 		utLock:          sync.RWMutex{},
 		atLock:          sync.RWMutex{},
-		maxTaskNum:      maxTaskNum,
-		utBufChan:       make(chan int, maxTaskNum),
+		maxTaskNum:      Params.MaxTaskNum,
+		utBufChan:       make(chan int, Params.MaxTaskNum),
 		tsoAllocatorIns: tsoAllocatorIns,
 		idAllocatorIns:  idAllocatorIns,
 	}
@@ -372,9 +386,9 @@ func newDqTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInte
 }
 
 type taskScheduler struct {
-	ddQueue taskQueue
+	ddQueue *ddTaskQueue
 	dmQueue *dmTaskQueue
-	dqQueue taskQueue
+	dqQueue *dqTaskQueue
 
 	wg     sync.WaitGroup
 	ctx    context.Context

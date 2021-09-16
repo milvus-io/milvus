@@ -100,10 +100,10 @@ def locust_executor(host, port, collection_name, connection_type="single", run_p
     runner.greenlet.join()
     print_stats(env.stats)
     result = {
-        "rps": round(env.stats.total.current_rps, 1),
-        "fail_ratio": env.stats.total.fail_ratio,
-        "max_response_time": round(env.stats.total.max_response_time, 1),
-        "avg_response_time": round(env.stats.total.avg_response_time, 1)
+        "rps": round(env.stats.total.current_rps, 1),  # Number of interface requests per second
+        "fail_ratio": env.stats.total.fail_ratio,  # Interface request failure rate
+        "max_response_time": round(env.stats.total.max_response_time, 1),  # Maximum interface response time
+        "avg_response_time": round(env.stats.total.avg_response_time, 1)  # ratio of average response time
     }
     runner.stop()
     return result

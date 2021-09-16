@@ -86,6 +86,21 @@ func Test_InitRocksMQ(t *testing.T) {
 	defer Rmq.stopRetention()
 	assert.NoError(t, err)
 	defer CloseRocksMQ()
+
+	topicName := "topic_register"
+	err = Rmq.CreateTopic(topicName)
+	assert.NoError(t, err)
+	groupName := "group_register"
+	_ = Rmq.DestroyConsumerGroup(topicName, groupName)
+	err = Rmq.CreateConsumerGroup(topicName, groupName)
+	assert.Nil(t, err)
+
+	consumer := &Consumer{
+		Topic:     topicName,
+		GroupName: groupName,
+		MsgMutex:  make(chan struct{}),
+	}
+	Rmq.RegisterConsumer(consumer)
 }
 
 func TestRocksmq_RegisterConsumer(t *testing.T) {

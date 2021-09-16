@@ -48,6 +48,14 @@ type BaseMsg struct {
 	MsgPosition    *MsgPosition
 }
 
+func (bm *BaseMsg) TraceCtx() context.Context {
+	return bm.Ctx
+}
+
+func (bm *BaseMsg) SetTraceCtx(ctx context.Context) {
+	bm.Ctx = ctx
+}
+
 func (bm *BaseMsg) BeginTs() Timestamp {
 	return bm.BeginTimestamp
 }
@@ -83,12 +91,8 @@ type InsertMsg struct {
 	internalpb.InsertRequest
 }
 
-func (it *InsertMsg) TraceCtx() context.Context {
-	return it.BaseMsg.Ctx
-}
-func (it *InsertMsg) SetTraceCtx(ctx context.Context) {
-	it.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &InsertMsg{}
 
 func (it *InsertMsg) ID() UniqueID {
 	return it.Base.MsgID
@@ -147,13 +151,8 @@ type DeleteMsg struct {
 	internalpb.DeleteRequest
 }
 
-func (dt *DeleteMsg) TraceCtx() context.Context {
-	return dt.BaseMsg.Ctx
-}
-
-func (dt *DeleteMsg) SetTraceCtx(ctx context.Context) {
-	dt.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &DeleteMsg{}
 
 func (dt *DeleteMsg) ID() UniqueID {
 	return dt.Base.MsgID
@@ -212,13 +211,8 @@ type SearchMsg struct {
 	internalpb.SearchRequest
 }
 
-func (st *SearchMsg) TraceCtx() context.Context {
-	return st.BaseMsg.Ctx
-}
-
-func (st *SearchMsg) SetTraceCtx(ctx context.Context) {
-	st.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &SearchMsg{}
 
 func (st *SearchMsg) ID() UniqueID {
 	return st.Base.MsgID
@@ -273,13 +267,8 @@ type SearchResultMsg struct {
 	internalpb.SearchResults
 }
 
-func (srt *SearchResultMsg) TraceCtx() context.Context {
-	return srt.BaseMsg.Ctx
-}
-
-func (srt *SearchResultMsg) SetTraceCtx(ctx context.Context) {
-	srt.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &SearchResultMsg{}
 
 func (srt *SearchResultMsg) ID() UniqueID {
 	return srt.Base.MsgID
@@ -326,13 +315,8 @@ type RetrieveMsg struct {
 	internalpb.RetrieveRequest
 }
 
-func (rm *RetrieveMsg) TraceCtx() context.Context {
-	return rm.BaseMsg.Ctx
-}
-
-func (rm *RetrieveMsg) SetTraceCtx(ctx context.Context) {
-	rm.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &RetrieveMsg{}
 
 func (rm *RetrieveMsg) ID() UniqueID {
 	return rm.Base.MsgID
@@ -387,13 +371,8 @@ type RetrieveResultMsg struct {
 	internalpb.RetrieveResults
 }
 
-func (rrm *RetrieveResultMsg) TraceCtx() context.Context {
-	return rrm.BaseMsg.Ctx
-}
-
-func (rrm *RetrieveResultMsg) SetTraceCtx(ctx context.Context) {
-	rrm.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &RetrieveResultMsg{}
 
 func (rrm *RetrieveResultMsg) ID() UniqueID {
 	return rrm.Base.MsgID
@@ -440,13 +419,8 @@ type TimeTickMsg struct {
 	internalpb.TimeTickMsg
 }
 
-func (tst *TimeTickMsg) TraceCtx() context.Context {
-	return tst.BaseMsg.Ctx
-}
-
-func (tst *TimeTickMsg) SetTraceCtx(ctx context.Context) {
-	tst.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &TimeTickMsg{}
 
 func (tst *TimeTickMsg) ID() UniqueID {
 	return tst.Base.MsgID
@@ -493,6 +467,9 @@ type QueryNodeStatsMsg struct {
 	BaseMsg
 	internalpb.QueryNodeStats
 }
+
+// interface implementation validation
+var _ TsMsg = &QueryNodeStatsMsg{}
 
 func (qs *QueryNodeStatsMsg) TraceCtx() context.Context {
 	return qs.BaseMsg.Ctx
@@ -545,6 +522,9 @@ type SegmentStatisticsMsg struct {
 	internalpb.SegmentStatistics
 }
 
+// interface implementation validation
+var _ TsMsg = &SegmentStatisticsMsg{}
+
 func (ss *SegmentStatisticsMsg) TraceCtx() context.Context {
 	return ss.BaseMsg.Ctx
 }
@@ -596,13 +576,8 @@ type CreateCollectionMsg struct {
 	internalpb.CreateCollectionRequest
 }
 
-func (cc *CreateCollectionMsg) TraceCtx() context.Context {
-	return cc.BaseMsg.Ctx
-}
-
-func (cc *CreateCollectionMsg) SetTraceCtx(ctx context.Context) {
-	cc.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &CreateCollectionMsg{}
 
 func (cc *CreateCollectionMsg) ID() UniqueID {
 	return cc.Base.MsgID
@@ -649,13 +624,8 @@ type DropCollectionMsg struct {
 	internalpb.DropCollectionRequest
 }
 
-func (dc *DropCollectionMsg) TraceCtx() context.Context {
-	return dc.BaseMsg.Ctx
-}
-
-func (dc *DropCollectionMsg) SetTraceCtx(ctx context.Context) {
-	dc.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &DropCollectionMsg{}
 
 func (dc *DropCollectionMsg) ID() UniqueID {
 	return dc.Base.MsgID
@@ -702,13 +672,8 @@ type CreatePartitionMsg struct {
 	internalpb.CreatePartitionRequest
 }
 
-func (cp *CreatePartitionMsg) TraceCtx() context.Context {
-	return cp.BaseMsg.Ctx
-}
-
-func (cp *CreatePartitionMsg) SetTraceCtx(ctx context.Context) {
-	cp.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &CreatePartitionMsg{}
 
 func (cp *CreatePartitionMsg) ID() UniqueID {
 	return cp.Base.MsgID
@@ -755,13 +720,8 @@ type DropPartitionMsg struct {
 	internalpb.DropPartitionRequest
 }
 
-func (dp *DropPartitionMsg) TraceCtx() context.Context {
-	return dp.BaseMsg.Ctx
-}
-
-func (dp *DropPartitionMsg) SetTraceCtx(ctx context.Context) {
-	dp.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &DropPartitionMsg{}
 
 func (dp *DropPartitionMsg) ID() UniqueID {
 	return dp.Base.MsgID
@@ -862,13 +822,8 @@ type LoadBalanceSegmentsMsg struct {
 	internalpb.LoadBalanceSegmentsRequest
 }
 
-func (l *LoadBalanceSegmentsMsg) TraceCtx() context.Context {
-	return l.BaseMsg.Ctx
-}
-
-func (l *LoadBalanceSegmentsMsg) SetTraceCtx(ctx context.Context) {
-	l.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &LoadBalanceSegmentsMsg{}
 
 func (l *LoadBalanceSegmentsMsg) ID() UniqueID {
 	return l.Base.MsgID
@@ -914,13 +869,8 @@ type DataNodeTtMsg struct {
 	datapb.DataNodeTtMsg
 }
 
-func (m *DataNodeTtMsg) TraceCtx() context.Context {
-	return m.BaseMsg.Ctx
-}
-
-func (m *DataNodeTtMsg) SetTraceCtx(ctx context.Context) {
-	m.BaseMsg.Ctx = ctx
-}
+// interface implementation validation
+var _ TsMsg = &DataNodeTtMsg{}
 
 func (m *DataNodeTtMsg) ID() UniqueID {
 	return m.Base.MsgID

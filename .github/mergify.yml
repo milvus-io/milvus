@@ -6,6 +6,7 @@ pull_request_rules:
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=continuous-integration/jenkins/pr-merge"
       - "status-success=codecov/patch"
+      - "status-success=codecov/project"
     actions:
       label:
         add:
@@ -31,16 +32,6 @@ pull_request_rules:
       label:
         add:
           - ci-passed
-
-#  - name: Test passed for tests20 changed
-#    conditions:
-#      - base=master
-#      - -files~=^(?!tests20\/python_client).+
-#      - "status-success=continuous-integration/jenkins/pr-merge"
-#    actions:
-#      label:
-#        add:
-#          - ci-passed
 
   - name: Test passed for document changed
     conditions:
