@@ -58,7 +58,7 @@ type TimeTickProvider interface {
 
 The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/services/ServerID". The initial value is 0. When a service is registered, it is incremented by 1 and returned to the next registered service.
 
-###### Registeration
+###### Registration
 
 * Registration is achieved through etcd's lease mechanism.
 
@@ -79,7 +79,7 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 * By obtaining the address, you can establish a connection with other services
 
-* If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value. 
+* If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value.
 
 ###### Discovery
 
@@ -436,7 +436,7 @@ type BaseKV interface {
 ```go
 type TxnKV interface {
 	BaseKV
-	
+
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
 	MultiRemoveWithPrefix(keys []string) error
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
@@ -445,7 +445,7 @@ type TxnKV interface {
 
 ###### A.7.3 MetaKv
 
-```go 
+```go
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
@@ -577,5 +577,3 @@ func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remov
 ```
 
 RocksdbKV implements all *TxnKV* interfaces.h
-
-
