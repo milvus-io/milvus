@@ -2003,3 +2003,96 @@ func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) 
 		Response: "",
 	}, nil
 }
+
+func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("CreateAlias ", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	t := &CreateAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("CreateAlias failed", zap.String("alias", in.Alias), zap.String("name", in.CollectionName), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Create alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("CreateAlias Success", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("DropAlias ", zap.String("alias", in.Alias))
+	t := &DropAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("DropAlias failed", zap.String("alias", in.Alias), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Drop alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("DropAlias Success", zap.String("alias", in.Alias))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("AlterAlias ", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	t := &AlterAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("AlterAlias failed", zap.String("alias", in.Alias), zap.String("name", in.CollectionName), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Alter alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("AlterAlias Success", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}

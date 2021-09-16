@@ -2035,5 +2035,80 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	t.Run("create alias", func(t *testing.T) {
+		req := createCollectionReq
+		resp, err := proxy.CreateCollection(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		// create alias
+		aliasReq := &milvuspb.CreateAliasRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			Alias:          "alias",
+		}
+		resp, err = proxy.CreateAlias(ctx, aliasReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		sameAliasReq := &milvuspb.CreateAliasRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			Alias:          "alias",
+		}
+
+		resp, err = proxy.CreateAlias(ctx, sameAliasReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+	})
+
+	t.Run("alter alias", func(t *testing.T) {
+		// alter alias
+		alterReq := &milvuspb.AlterAliasRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			Alias:          "alias",
+		}
+		resp, err := proxy.AlterAlias(ctx, alterReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		nonExistingCollName := "coll_name_random_zarathustra"
+		faultyAlterReq := &milvuspb.AlterAliasRequest{
+			Base:           nil,
+			CollectionName: nonExistingCollName,
+			Alias:          "alias",
+		}
+		resp, err = proxy.AlterAlias(ctx, faultyAlterReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+	})
+
+	t.Run("drop alias", func(t *testing.T) {
+		// drop alias
+		resp, err := proxy.DropAlias(ctx, &milvuspb.DropAliasRequest{
+			Base:  nil,
+			Alias: "alias",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		sameDropReq := &milvuspb.DropAliasRequest{
+			Base:  nil,
+			Alias: "alias",
+		}
+
+		// Can't drop non-existing alias
+		resp, err = proxy.DropAlias(ctx, sameDropReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+
+		dropReq := &milvuspb.DropCollectionRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		}
+		resp, err = proxy.DropCollection(ctx, dropReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
 	cancel()
 }

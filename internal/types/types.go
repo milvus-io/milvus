@@ -106,6 +106,11 @@ type RootCoord interface {
 	DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
+	// collection alias
+	CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error)
+	DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error)
+	AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
+
 	//global timestamp allocator
 	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)

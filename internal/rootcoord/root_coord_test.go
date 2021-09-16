@@ -505,10 +505,12 @@ func TestRootCoordInit(t *testing.T) {
 
 func TestRootCoord(t *testing.T) {
 	const (
-		dbName   = "testDb"
-		collName = "testColl"
-		partName = "testPartition"
-		segID    = 1001
+		dbName    = "testDb"
+		collName  = "testColl"
+		collName2 = "testColl2"
+		aliasName = "alias1"
+		partName  = "testPartition"
+		segID     = 1001
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1775,6 +1777,120 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	schema := schemapb.CollectionSchema{
+		Name: collName,
+	}
+	sbf, err := proto.Marshal(&schema)
+	assert.Nil(t, err)
+	req := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_CreateCollection,
+			MsgID:     3011,
+			Timestamp: 3011,
+			SourceID:  3011,
+		},
+		DbName:         dbName,
+		CollectionName: collName,
+		Schema:         sbf,
+	}
+	status, err := core.CreateCollection(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	t.Run("create alias", func(t *testing.T) {
+		req := &milvuspb.CreateAliasRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateAlias,
+				MsgID:     3012,
+				Timestamp: 3012,
+				SourceID:  3012,
+			},
+			CollectionName: collName,
+			Alias:          aliasName,
+		}
+		rsp, err := core.CreateAlias(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	// temporarily create collName2
+	schema = schemapb.CollectionSchema{
+		Name: collName2,
+	}
+	sbf, err = proto.Marshal(&schema)
+	assert.Nil(t, err)
+	req2 := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_CreateCollection,
+			MsgID:     3013,
+			Timestamp: 3013,
+			SourceID:  3013,
+		},
+		DbName:         dbName,
+		CollectionName: collName2,
+		Schema:         sbf,
+	}
+	status, err = core.CreateCollection(ctx, req2)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	t.Run("alter alias", func(t *testing.T) {
+		req := &milvuspb.AlterAliasRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_AlterAlias,
+				MsgID:     3014,
+				Timestamp: 3014,
+				SourceID:  3014,
+			},
+			CollectionName: collName2,
+			Alias:          aliasName,
+		}
+		rsp, err := core.AlterAlias(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	t.Run("drop alias", func(t *testing.T) {
+		req := &milvuspb.DropAliasRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropAlias,
+				MsgID:     3015,
+				Timestamp: 3015,
+				SourceID:  3015,
+			},
+			Alias: aliasName,
+		}
+		rsp, err := core.DropAlias(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     3016,
+			Timestamp: 3016,
+			SourceID:  3016,
+		},
+		DbName:         dbName,
+		CollectionName: collName,
+	})
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     3017,
+			Timestamp: 3017,
+			SourceID:  3017,
+		},
+		DbName:         dbName,
+		CollectionName: collName2,
+	})
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
 	t.Run("get metrics", func(t *testing.T) {
 		// not healthy
 		stateSave := core.stateCode.Load().(internalpb.StateCode)
@@ -2021,6 +2137,7 @@ func TestRootCoord(t *testing.T) {
 	})
 	err = core.Stop()
 	assert.Nil(t, err)
+
 }
 
 func TestRootCoord2(t *testing.T) {
