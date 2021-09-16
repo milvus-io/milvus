@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -41,8 +42,9 @@ type GrpcClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	grpcClient rootcoordpb.RootCoordClient
-	conn       *grpc.ClientConn
+	grpcClient    rootcoordpb.RootCoordClient
+	conn          *grpc.ClientConn
+	grpcClientMtx sync.RWMutex
 
 	sess *sessionutil.Session
 	addr string
@@ -136,8 +138,19 @@ func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 		return err
 	}
 	log.Debug("RootCoordClient try reconnect success")
+
+	c.grpcClientMtx.Lock()
+	defer c.grpcClientMtx.Unlock()
 	c.grpcClient = rootcoordpb.NewRootCoordClient(c.conn)
+
 	return nil
+}
+
+func (c *GrpcClient) getGrpcClient() rootcoordpb.RootCoordClient {
+	c.grpcClientMtx.RLock()
+	defer c.grpcClientMtx.RUnlock()
+
+	return c.grpcClient
 }
 
 func (c *GrpcClient) Start() error {
@@ -174,13 +187,13 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 // GetComponentStates TODO: timeout need to be propagated through ctx
 func (c *GrpcClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		return c.getGrpcClient().GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	return ret.(*internalpb.ComponentStates), err
 }
 func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		return c.getGrpcClient().GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	return ret.(*milvuspb.StringResponse), err
 }
@@ -188,7 +201,7 @@ func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRe
 // GetStatisticsChannel just define a channel, not used currently
 func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return c.getGrpcClient().GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	return ret.(*milvuspb.StringResponse), err
 }
@@ -196,61 +209,61 @@ func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 //DDL request
 func (c *GrpcClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.CreateCollection(ctx, in)
+		return c.getGrpcClient().CreateCollection(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.DropCollection(ctx, in)
+		return c.getGrpcClient().DropCollection(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.HasCollection(ctx, in)
+		return c.getGrpcClient().HasCollection(ctx, in)
 	})
 	return ret.(*milvuspb.BoolResponse), err
 }
 func (c *GrpcClient) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.DescribeCollection(ctx, in)
+		return c.getGrpcClient().DescribeCollection(ctx, in)
 	})
 	return ret.(*milvuspb.DescribeCollectionResponse), err
 }
 
 func (c *GrpcClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowCollections(ctx, in)
+		return c.getGrpcClient().ShowCollections(ctx, in)
 	})
 	return ret.(*milvuspb.ShowCollectionsResponse), err
 }
 func (c *GrpcClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.CreatePartition(ctx, in)
+		return c.getGrpcClient().CreatePartition(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.DropPartition(ctx, in)
+		return c.getGrpcClient().DropPartition(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.HasPartition(ctx, in)
+		return c.getGrpcClient().HasPartition(ctx, in)
 	})
 	return ret.(*milvuspb.BoolResponse), err
 }
 
 func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowPartitions(ctx, in)
+		return c.getGrpcClient().ShowPartitions(ctx, in)
 	})
 	return ret.(*milvuspb.ShowPartitionsResponse), err
 }
@@ -258,21 +271,21 @@ func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartit
 // CreateIndex index builder service
 func (c *GrpcClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.CreateIndex(ctx, in)
+		return c.getGrpcClient().CreateIndex(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.DropIndex(ctx, in)
+		return c.getGrpcClient().DropIndex(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.DescribeIndex(ctx, in)
+		return c.getGrpcClient().DescribeIndex(ctx, in)
 	})
 	return ret.(*milvuspb.DescribeIndexResponse), err
 }
@@ -280,14 +293,14 @@ func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeInd
 // AllocTimestamp global timestamp allocator
 func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.AllocTimestamp(ctx, in)
+		return c.getGrpcClient().AllocTimestamp(ctx, in)
 	})
 	return ret.(*rootcoordpb.AllocTimestampResponse), err
 }
 
 func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.AllocID(ctx, in)
+		return c.getGrpcClient().AllocID(ctx, in)
 	})
 	return ret.(*rootcoordpb.AllocIDResponse), err
 }
@@ -295,7 +308,7 @@ func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest
 // UpdateChannelTimeTick used to handle ChannelTimeTickMsg
 func (c *GrpcClient) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.UpdateChannelTimeTick(ctx, in)
+		return c.getGrpcClient().UpdateChannelTimeTick(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
@@ -303,33 +316,33 @@ func (c *GrpcClient) UpdateChannelTimeTick(ctx context.Context, in *internalpb.C
 // DescribeSegment receiver time tick from proxy service, and put it into this channel
 func (c *GrpcClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.DescribeSegment(ctx, in)
+		return c.getGrpcClient().DescribeSegment(ctx, in)
 	})
 	return ret.(*milvuspb.DescribeSegmentResponse), err
 }
 
 func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowSegments(ctx, in)
+		return c.getGrpcClient().ShowSegments(ctx, in)
 	})
 	return ret.(*milvuspb.ShowSegmentsResponse), err
 }
 func (c *GrpcClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ReleaseDQLMessageStream(ctx, in)
+		return c.getGrpcClient().ReleaseDQLMessageStream(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
 func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.SegmentFlushCompleted(ctx, in)
+		return c.getGrpcClient().SegmentFlushCompleted(ctx, in)
 	})
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetMetrics(ctx, in)
+		return c.getGrpcClient().GetMetrics(ctx, in)
 	})
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
