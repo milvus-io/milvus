@@ -1157,6 +1157,11 @@ class TestIndexInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_index_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test create index interface for invalid scenario
+        method: create index with invalid collection name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
