@@ -13,6 +13,7 @@ type Component interface {
 	Stop() error
 	GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+	Register() error
 }
 ```
 
