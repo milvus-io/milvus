@@ -7,9 +7,10 @@ from base.collection_wrapper import ApiCollectionWrapper
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common import common_func as cf
 from common import common_type as ct
-from chaos_commons import *
+from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, reconnect
 from common.common_type import CaseLabel
 from chaos import constants
+from utils.util_log import test_log as log
 
 
 def reboot_pod(chaos_yaml):
