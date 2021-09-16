@@ -19,6 +19,7 @@ import (
 var Mmq *MemMQ
 var once sync.Once
 
+// MemConsumer registered to consume data from specified channel
 type MemConsumer struct {
 	GroupName   string
 	ChannelName string
@@ -30,6 +31,8 @@ type ChannelMsg struct {
 	Msg         *MsgPack
 }
 
+// Notice, We DON'T use memMQ for now since it does not support seek logic for insert channels
+// TODO Use MemMQ in query channel
 type MemMQ struct {
 	consumers  map[string][]*MemConsumer
 	consumerMu sync.Mutex
