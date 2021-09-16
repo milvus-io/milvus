@@ -9,7 +9,7 @@ _VERSION = 'v1alpha1'
 _NAMESPACE = "default"
 
 
-class CustomResourceDefinition(object):
+class CustomResourceOperations(object):
     def __init__(self, kind, group=_GROUP, version=_VERSION, namespace=_NAMESPACE):
         self.group = group
         self.version = version
@@ -53,9 +53,9 @@ class CustomResourceDefinition(object):
         return data
 
     def delete_all(self):
-        crd_objects = self.list_all()
-        if len(crd_objects["items"]) > 0:
-            for item in crd_objects["items"]:
+        cus_objects = self.list_all()
+        if len(cus_objects["items"]) > 0:
+            for item in cus_objects["items"]:
                 metadata_name = item["metadata"]["name"]
                 self.delete(metadata_name)
 

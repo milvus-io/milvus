@@ -4,7 +4,7 @@ from time import sleep
 from pymilvus import connections
 from checker import CreateChecker, InsertFlushChecker, \
     SearchChecker, QueryChecker, IndexChecker, Op
-from common.custom_resource import CustomResourceDefinition as CusResource
+from common.cus_resource_opts import CustomResourceOperations as CusResource
 from utils.util_log import test_log as log
 from chaos_commons import *
 from common.common_type import CaseLabel
@@ -88,12 +88,12 @@ class TestChaos(TestChaosBase):
         self.health_checkers = checkers
 
     def teardown(self):
-        chaos_crd = CusResource(kind=self._chaos_config['kind'],
+        chaos_res = CusResource(kind=self._chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
                                 version=constants.CHAOS_VERSION,
                                 namespace=constants.CHAOS_NAMESPACE)
         meta_name = self._chaos_config.get('metadata', None).get('name', None)
-        chaos_crd.delete(meta_name, raise_ex=False)
+        chaos_res.delete(meta_name, raise_ex=False)
         for k, ch in self.health_checkers.items():
             ch.terminate()
             log.info(f"tear down: checker {k} terminated")
@@ -127,11 +127,11 @@ class TestChaos(TestChaosBase):
         assert_statistic(self.health_checkers)
 
         # apply chaos object
-        chaos_crd = CusResource(kind=chaos_config['kind'],
+        chaos_res = CusResource(kind=chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
                                 version=constants.CHAOS_VERSION,
                                 namespace=constants.CHAOS_NAMESPACE)
-        chaos_crd.create(chaos_config)
+        chaos_res.create(chaos_config)
         log.info("chaos injected")
         sleep(constants.WAIT_PER_OP * 2.1)
         # reset counting
@@ -156,7 +156,7 @@ class TestChaos(TestChaosBase):
 
         # delete chaos
         meta_name = chaos_config.get('metadata', None).get('name', None)
-        chaos_crd.delete(meta_name)
+        chaos_res.delete(meta_name)
         log.info("chaos deleted")
         for k, t in self.checker_threads.items():
             log.info(f"Thread {k} is_alive(): {t.is_alive()}")

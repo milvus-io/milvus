@@ -4,7 +4,7 @@ from time import sleep
 
 from pymilvus import connections, utility
 from base.collection_wrapper import ApiCollectionWrapper
-from common.custom_resource import CustomResourceDefinition as CusResource
+from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common import common_func as cf
 from common import common_type as ct
 from chaos_commons import *
@@ -17,16 +17,16 @@ def reboot_pod(chaos_yaml):
     chaos_config = gen_experiment_config(chaos_yaml)
     log.debug(chaos_config)
     # inject chaos
-    chaos_crd = CusResource(kind=chaos_config['kind'],
+    chaos_res = CusResource(kind=chaos_config['kind'],
                             group=constants.CHAOS_GROUP,
                             version=constants.CHAOS_VERSION,
                             namespace=constants.CHAOS_NAMESPACE)
-    chaos_crd.create(chaos_config)
+    chaos_res.create(chaos_config)
     log.debug("chaos injected")
     sleep(1)
     # delete chaos
     meta_name = chaos_config.get('metadata', None).get('name', None)
-    chaos_crd.delete(meta_name)
+    chaos_res.delete(meta_name)
     log.debug("chaos deleted")
 
 
