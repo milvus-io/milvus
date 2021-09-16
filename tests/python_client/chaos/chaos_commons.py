@@ -67,6 +67,6 @@ def get_chaos_yamls():
     return glob.glob(constants.TESTS_CONFIG_LOCATION + constants.ALL_CHAOS_YAMLS)
 
 
-def reconnect(conn, host, port):
-    conn.add_connection(default={"host": host, "port": port})
-    return conn.connect(alias='default')
+def reconnect(connections, alias='default'):
+    # conn.add_connection(default={"host": host, "port": port})
+    return connections.connect(alias=alias)
