@@ -1,7 +1,6 @@
 from __future__ import print_function
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
-from chaos import constants as cf
 from utils.util_log import test_log as log
 
 _GROUP = 'milvus.io'

@@ -10,7 +10,6 @@ from pymilvus import DataType
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from utils.util_log import test_log as log
-import threading
 import traceback
 
 """" Methods of processing data """

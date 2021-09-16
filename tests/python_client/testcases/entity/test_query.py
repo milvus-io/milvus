@@ -1,6 +1,3 @@
-import pdb
-import logging
-
 import pytest
 from pymilvus import DataType
 
