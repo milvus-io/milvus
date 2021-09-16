@@ -13,8 +13,6 @@ spec:
       app.kubernetes.io/instance: chaos-milvus
       app.kubernetes.io/name: milvus
   duration: 5m
-  scheduler:
-    cron: '@every 5s'
   direction: both
   target:
     selector:
