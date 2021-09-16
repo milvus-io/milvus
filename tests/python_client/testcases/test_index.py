@@ -1168,6 +1168,11 @@ class TestIndexInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test drop index interface for invalid scenario
+        method: drop index with invalid collection name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.drop_index(collection_name)
