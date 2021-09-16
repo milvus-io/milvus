@@ -1858,13 +1858,155 @@ func TestProxy(t *testing.T) {
 	defer shortCancel()
 	time.Sleep(timeout)
 
-	t.Run("failed to create collection, timeout", func(t *testing.T) {
+	t.Run("CreateCollection, timeout", func(t *testing.T) {
 		resp, err := proxy.CreateCollection(shortCtx, &milvuspb.CreateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
-	// TODO(dragondriver): other tasks
+	t.Run("DropCollection fail, timeout", func(t *testing.T) {
+		resp, err := proxy.DropCollection(shortCtx, &milvuspb.DropCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("HasCollection fail, timeout", func(t *testing.T) {
+		resp, err := proxy.HasCollection(shortCtx, &milvuspb.HasCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("LoadCollection fail, timeout", func(t *testing.T) {
+		resp, err := proxy.LoadCollection(shortCtx, &milvuspb.LoadCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("ReleaseCollection fail, timeout", func(t *testing.T) {
+		resp, err := proxy.ReleaseCollection(shortCtx, &milvuspb.ReleaseCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("DescribeCollection fail, timeout", func(t *testing.T) {
+		resp, err := proxy.DescribeCollection(shortCtx, &milvuspb.DescribeCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetCollectionStatistics fail, timeout", func(t *testing.T) {
+		resp, err := proxy.GetCollectionStatistics(shortCtx, &milvuspb.GetCollectionStatisticsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("ShowCollections fail, timeout", func(t *testing.T) {
+		resp, err := proxy.ShowCollections(shortCtx, &milvuspb.ShowCollectionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("CreatePartition fail, timeout", func(t *testing.T) {
+		resp, err := proxy.CreatePartition(shortCtx, &milvuspb.CreatePartitionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("DropPartition fail, timeout", func(t *testing.T) {
+		resp, err := proxy.DropPartition(shortCtx, &milvuspb.DropPartitionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("HasPartition fail, timeout", func(t *testing.T) {
+		resp, err := proxy.HasPartition(shortCtx, &milvuspb.HasPartitionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("LoadPartitions fail, timeout", func(t *testing.T) {
+		resp, err := proxy.LoadPartitions(shortCtx, &milvuspb.LoadPartitionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("ReleasePartitions fail, timeout", func(t *testing.T) {
+		resp, err := proxy.ReleasePartitions(shortCtx, &milvuspb.ReleasePartitionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("GetPartitionStatistics fail, timeout", func(t *testing.T) {
+		resp, err := proxy.GetPartitionStatistics(shortCtx, &milvuspb.GetPartitionStatisticsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("ShowPartitions fail, timeout", func(t *testing.T) {
+		resp, err := proxy.ShowPartitions(shortCtx, &milvuspb.ShowPartitionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("CreateIndex fail, timeout", func(t *testing.T) {
+		resp, err := proxy.CreateIndex(shortCtx, &milvuspb.CreateIndexRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("DescribeIndex fail, timeout", func(t *testing.T) {
+		resp, err := proxy.DescribeIndex(shortCtx, &milvuspb.DescribeIndexRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("DropIndex fail, timeout", func(t *testing.T) {
+		resp, err := proxy.DropIndex(shortCtx, &milvuspb.DropIndexRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("GetIndexBuildProgress fail, timeout", func(t *testing.T) {
+		resp, err := proxy.GetIndexBuildProgress(shortCtx, &milvuspb.GetIndexBuildProgressRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetIndexState fail, timeout", func(t *testing.T) {
+		resp, err := proxy.GetIndexState(shortCtx, &milvuspb.GetIndexStateRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("Flush fail, timeout", func(t *testing.T) {
+		resp, err := proxy.Flush(shortCtx, &milvuspb.FlushRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("Insert fail, timeout", func(t *testing.T) {
+		resp, err := proxy.Insert(shortCtx, &milvuspb.InsertRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("Delete fail, timeout", func(t *testing.T) {
+		resp, err := proxy.Delete(shortCtx, &milvuspb.DeleteRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("Search fail, timeout", func(t *testing.T) {
+		resp, err := proxy.Search(shortCtx, &milvuspb.SearchRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("Query fail, dq queue full", func(t *testing.T) {
+		resp, err := proxy.Query(shortCtx, &milvuspb.QueryRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
 
 	cancel()
 }
