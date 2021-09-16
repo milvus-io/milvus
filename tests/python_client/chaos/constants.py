@@ -14,10 +14,10 @@ RAW_DATA_DIR = "/test/milvus/raw_data/"
 
 DEFAULT_DEPLOY_MODE = "single"
 
-NAMESPACE = "chaos-testing"
-DEFAULT_API_VERSION = 'chaos-mesh.org/v1alpha1'
-DEFAULT_GROUP = 'chaos-mesh.org'
-DEFAULT_VERSION = 'v1alpha1'
+CHAOS_NAMESPACE = "chaos-testing"
+CHAOS_API_VERSION = 'chaos-mesh.org/v1alpha1'
+CHAOS_GROUP = 'chaos-mesh.org'
+CHAOS_VERSION = 'v1alpha1'
 SUCC = 'succ'
 FAIL = 'fail'
 DELTA_PER_INS = 10
