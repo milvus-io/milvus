@@ -58,6 +58,7 @@ class Checker:
 
 
 class SearchChecker(Checker):
+    """check search operations in a dependent thread"""
     def __init__(self):
         super().__init__()
         self.c_wrap.load()   # do load before search
