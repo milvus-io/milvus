@@ -55,7 +55,7 @@ struct GeneratedData {
  private:
     GeneratedData() = default;
     friend GeneratedData
-    DataGen(SchemaPtr schema, int64_t N, uint64_t seed);
+    DataGen(SchemaPtr schema, int64_t N, uint64_t seed, uint64_t ts_offset);
     void
     generate_rows(int64_t N, SchemaPtr schema);
 };
@@ -86,7 +86,7 @@ GeneratedData::generate_rows(int64_t N, SchemaPtr schema) {
 }
 
 inline GeneratedData
-DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
+DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0) {
     using std::vector;
     std::vector<aligned_vector<uint8_t>> cols;
     std::default_random_engine er(seed);
@@ -193,7 +193,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
     res.cols_ = std::move(cols);
     for (int i = 0; i < N; ++i) {
         res.row_ids_.push_back(i);
-        res.timestamps_.push_back(i);
+        res.timestamps_.push_back(i + ts_offset);
     }
     //    std::shuffle(res.row_ids_.begin(), res.row_ids_.end(), er);
     res.generate_rows(N, schema);
