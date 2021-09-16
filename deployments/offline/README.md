@@ -34,7 +34,6 @@ Your Milvus installation may fail when images are not properly loaded from publi
 
 2. Get Kubernetes manifest of Milvus standalone
    ```shell
-   # Get Kubernetes manifest of Milvus standalone
    helm template my-release milvus/milvus > milvus_manifest.yaml
    ```
 
