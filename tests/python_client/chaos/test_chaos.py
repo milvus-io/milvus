@@ -164,7 +164,7 @@ class TestChaos(TestChaosBase):
 
         # reconnect if needed
         sleep(constants.WAIT_PER_OP*2)
-        cc.reconnect(connections, self.host, self.port)
+        cc.reconnect(connections, alias='default')
 
         # reset counting again
         cc.reset_counting(self.health_checkers)
