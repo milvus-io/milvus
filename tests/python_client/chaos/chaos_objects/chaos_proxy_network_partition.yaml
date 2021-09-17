@@ -1,7 +1,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
 metadata:
-  name: test-proxy-partition
+  name: test-proxy-network-partition
   namespace: chaos-testing
 spec:
   action: partition

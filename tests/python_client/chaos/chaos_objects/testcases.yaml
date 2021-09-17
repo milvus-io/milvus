@@ -150,8 +150,8 @@ Collections:
           query: fail
   -
     testcase:
-      name: test_partition_proxy
-      chaos: chaos_pratition_proxy.yaml
+      name: test_proxy_network_partition
+      chaos: chaos_proxy_network_partition.yaml
       expectation:
         cluster_1_node:
           create: fail
