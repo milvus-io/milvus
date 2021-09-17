@@ -146,6 +146,10 @@ func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 	return &InsertCodec{Schema: schema}
 }
 
+// Serialize transfer insert data to blob. It will sort insert data by timestamp.
+// From schema, it get all fields.
+// For each field, it will create a binlog writer, and write a event to the binlog.
+// It returns binlog buffer in the end.
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, []*Blob, error) {
 	var blobs []*Blob
 	var statsBlobs []*Blob
@@ -243,6 +247,10 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	return blobs, statsBlobs, nil
 }
 
+// Deserialize transfer blob back to insert data.
+// From schema, it get all fields.
+// For each field, it will create a binlog reader, and read all event to the buffer.
+// It returns origin @InsertData in the end.
 func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *InsertData, err error) {
 	if len(blobs) == 0 {
 		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
@@ -491,6 +499,11 @@ func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
 	return &DataDefinitionCodec{collectionID: collectionID}
 }
 
+// Serialize transfer @ts and @ddRequsts to blob.
+// From schema, it get all fields.
+// For each field, it will create a binlog writer, and write specific event according
+// to the dataDefinition type.
+// It returns blobs in the end.
 func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequests []string, eventTypes []EventTypeCode) ([]*Blob, error) {
 	writer := NewDDLBinlogWriter(schemapb.DataType_Int64, dataDefinitionCodec.collectionID)
 
@@ -586,6 +599,11 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	return blobs, nil
 }
 
+// Deserialize transfer blob back to data definition data.
+// From schema, it get all fields.
+// It will sort blob by blob key for blob logid is increasing by time.
+// For each field, it will create a binlog reader, and read all event to the buffer.
+// It returns origin @ts and @ddRequests in the end.
 func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts []Timestamp, ddRequests []string, err error) {
 	if len(blobs) == 0 {
 		return nil, nil, fmt.Errorf("blobs is empty")
