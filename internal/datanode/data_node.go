@@ -159,6 +159,7 @@ func (node *DataNode) Register() error {
 	log.Debug("DataNode Init",
 		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
 	)
+
 	return nil
 }
 
@@ -342,6 +343,10 @@ func (node *DataNode) Start() error {
 	FilterThreshold = rep.GetTimestamp()
 
 	go node.BackGroundGC(node.clearSignal)
+
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
+
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
