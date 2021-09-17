@@ -469,13 +469,6 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
 		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 345}}
 		iBNode.Operate([]flowgraph.Msg{iMsg})
-		assert.Equal(t, len(iBNode.segmentCheckPoints), 3)
-		assert.Equal(t, iBNode.segmentCheckPoints[1].numRows, int64(50+16000+100+32000))
-		assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
-		assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
-		assert.Equal(t, iBNode.segmentCheckPoints[1].pos.Timestamp, Timestamp(345))
-		assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
-		assert.Equal(t, iBNode.segmentCheckPoints[3].pos.Timestamp, Timestamp(123))
 
 		assert.Equal(t, len(flushUnit), 2)
 		assert.Equal(t, flushUnit[1].segID, int64(1))
@@ -511,11 +504,6 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		assert.Equal(t, len(flushSeg), 1)
 		assert.Equal(t, flushSeg[0].FieldID, int64(1))
 		assert.NotNil(t, flushSeg[0].Binlogs)
-		assert.Equal(t, len(iBNode.segmentCheckPoints), 2)
-		assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
-		assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
-		assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
-		assert.Equal(t, iBNode.segmentCheckPoints[3].pos.Timestamp, Timestamp(123))
 
 		assert.Equal(t, len(flushUnit), 3)
 		assert.Equal(t, flushUnit[2].segID, int64(1))
@@ -545,9 +533,6 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		assert.Equal(t, len(flushSeg), 1)
 		assert.Equal(t, flushSeg[0].FieldID, int64(3))
 		assert.NotNil(t, flushSeg[0].Binlogs)
-		assert.Equal(t, len(iBNode.segmentCheckPoints), 1)
-		assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
-		assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
 		assert.Equal(t, len(flushUnit), 4)
 		assert.Equal(t, flushUnit[3].segID, int64(3))
 		assert.Equal(t, len(flushUnit[3].checkPoint), 2)
