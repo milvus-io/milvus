@@ -117,8 +117,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.Nil(t, err)
 
 	channels := []Channel{"0"}
-	err = node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, channels)
-	assert.NoError(t, err)
+	node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, channels)
 	err = node.streaming.dataSyncService.startCollectionFlowGraph(collectionID, channels)
 	assert.NoError(t, err)
 
@@ -142,8 +141,7 @@ func TestDataSyncService_collectionFlowGraphs(t *testing.T) {
 	dataSyncService := newDataSyncService(ctx, streaming.replica, streaming.tSafeReplica, fac)
 	assert.NotNil(t, dataSyncService)
 
-	err = dataSyncService.addCollectionFlowGraph(defaultCollectionID, []Channel{defaultVChannel})
-	assert.NoError(t, err)
+	dataSyncService.addCollectionFlowGraph(defaultCollectionID, []Channel{defaultVChannel})
 
 	fg, err := dataSyncService.getCollectionFlowGraphs(defaultCollectionID, []Channel{defaultVChannel})
 	assert.NotNil(t, fg)
@@ -186,8 +184,7 @@ func TestDataSyncService_partitionFlowGraphs(t *testing.T) {
 	dataSyncService := newDataSyncService(ctx, streaming.replica, streaming.tSafeReplica, fac)
 	assert.NotNil(t, dataSyncService)
 
-	err = dataSyncService.addPartitionFlowGraph(defaultPartitionID, defaultPartitionID, []Channel{defaultVChannel})
-	assert.NoError(t, err)
+	dataSyncService.addPartitionFlowGraph(defaultPartitionID, defaultPartitionID, []Channel{defaultVChannel})
 
 	fg, err := dataSyncService.getPartitionFlowGraphs(defaultPartitionID, []Channel{defaultVChannel})
 	assert.NotNil(t, fg)
