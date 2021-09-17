@@ -296,6 +296,7 @@ func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 	return s.rootCoord.ShowCollections(ctx, in)
 }
 
+// CreatePartition creates a partition in a collection
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreatePartition(ctx, in)
 }
