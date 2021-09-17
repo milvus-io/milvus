@@ -23,20 +23,18 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
 // CDFMsFactory count down fails msg factory
@@ -87,13 +85,13 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	assert.NotNil(t, iBNode)
 	require.NoError(t, err)
 
 	ctxDone, cancel := context.WithCancel(ctx)
 	cancel() // cancel now to make context done
-	_, err = newInsertBufferNode(ctxDone, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	_, err = newInsertBufferNode(ctxDone, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	assert.Error(t, err)
 
 	cdf := &CDFMsFactory{
@@ -101,13 +99,13 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		cd:      0,
 	}
 
-	_, err = newInsertBufferNode(ctx, replica, cdf, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	_, err = newInsertBufferNode(ctx, replica, cdf, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	assert.Error(t, err)
 	cdf = &CDFMsFactory{
 		Factory: msFactory,
 		cd:      1,
 	}
-	_, err = newInsertBufferNode(ctx, replica, cdf, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	_, err = newInsertBufferNode(ctx, replica, cdf, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	assert.Error(t, err)
 }
 
@@ -173,25 +171,19 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	require.NoError(t, err)
-
-	dmlFlushedCh := make(chan []*datapb.FieldBinlog, 1)
 
 	flushChan <- &flushMsg{
 		msgID:        1,
 		timestamp:    2000,
 		segmentID:    UniqueID(1),
 		collectionID: UniqueID(1),
-		dmlFlushedCh: dmlFlushedCh,
 	}
 
 	inMsg := genInsertMsg(insertChannelName)
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{iMsg})
-	isflushed := <-dmlFlushedCh
-	assert.NotNil(t, isflushed)
-	log.Debug("DML binlog paths", zap.Any("paths", isflushed))
 }
 
 func genInsertMsg(insertChannelName string) insertMsg {
@@ -279,7 +271,7 @@ func TestFlushSegment(t *testing.T) {
 	saveBinlog := func(*segmentFlushUnit) error {
 		return nil
 	}
-	ibNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	ibNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	require.NoError(t, err)
 
 	flushSegment(collMeta,
@@ -394,7 +386,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	iBNode, err := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
@@ -512,26 +504,17 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		assert.Equal(t, len(iBNode.insertBuffer.insertData), 1)
 		assert.Equal(t, iBNode.insertBuffer.size(3), int32(50+16000))
 
-		dmlFlushedCh := make(chan []*datapb.FieldBinlog, 1)
-
 		flushChan <- &flushMsg{
 			msgID:        3,
 			timestamp:    456,
 			segmentID:    UniqueID(1),
 			collectionID: UniqueID(1),
-			dmlFlushedCh: dmlFlushedCh,
 		}
 
 		inMsg.insertMessages = []*msgstream.InsertMsg{}
 		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 345}}
 		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 456}}
 		iBNode.Operate([]flowgraph.Msg{iMsg})
-
-		flushSeg := <-dmlFlushedCh
-		assert.NotNil(t, flushSeg)
-		assert.Equal(t, len(flushSeg), 1)
-		assert.Equal(t, flushSeg[0].FieldID, int64(1))
-		assert.NotNil(t, flushSeg[0].Binlogs)
 
 		assert.Equal(t, len(flushUnit), 3)
 		assert.Equal(t, flushUnit[2].segID, int64(1))
@@ -553,14 +536,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 			timestamp:    567,
 			segmentID:    UniqueID(3),
 			collectionID: UniqueID(3),
-			dmlFlushedCh: dmlFlushedCh,
 		}
 		iBNode.Operate([]flowgraph.Msg{iMsg})
-		flushSeg = <-dmlFlushedCh
-		assert.NotNil(t, flushSeg)
-		assert.Equal(t, len(flushSeg), 1)
-		assert.Equal(t, flushSeg[0].FieldID, int64(3))
-		assert.NotNil(t, flushSeg[0].Binlogs)
+
 		assert.Equal(t, len(flushUnit), 4)
 		assert.Equal(t, flushUnit[3].segID, int64(3))
 		assert.Equal(t, len(flushUnit[3].checkPoint), 2)
@@ -633,7 +611,7 @@ func TestInsertBufferNode_getCollMetaBySegID(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	require.NoError(t, err)
 
 	meta, err := iBNode.getCollMetabySegID(1, 101)
@@ -686,7 +664,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	require.NoError(t, err)
 
 	inMsg := genInsertMsg(insertChannelName)
