@@ -14,6 +14,7 @@ package datanode
 import (
 	"log"
 	"testing"
+	"time"
 )
 
 func TestParamTable_DataNode(t *testing.T) {
@@ -97,5 +98,15 @@ func TestParamTable_DataNode(t *testing.T) {
 	t.Run("Test MinioBucketName", func(t *testing.T) {
 		name := Params.MinioBucketName
 		log.Println("MinioBucketName:", name)
+	})
+
+	t.Run("Test CreatedTime", func(t *testing.T) {
+		Params.CreatedTime = time.Now()
+		log.Println("CreatedTime: ", Params.CreatedTime)
+	})
+
+	t.Run("Test UpdatedTime", func(t *testing.T) {
+		Params.UpdatedTime = time.Now()
+		log.Println("UpdatedTime: ", Params.UpdatedTime)
 	})
 }
