@@ -291,6 +291,7 @@ func (s *Server) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCo
 	return s.rootCoord.DescribeCollection(ctx, in)
 }
 
+// ShowCollections gets all collections
 func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return s.rootCoord.ShowCollections(ctx, in)
 }
