@@ -27,6 +27,7 @@ default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
+default_bool_field_name = ct.default_bool_field_name
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 
 uid = "test_search"
@@ -1569,6 +1570,60 @@ class TestCollectionSearch(TestcaseBase):
             search_res.done()
             search_res = search_res.result()
         
+        filter_ids_set = set(filter_ids)
+        for hits in search_res:
+            ids = hits.ids
+            assert set(ids).issubset(filter_ids_set)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7910")
+    @pytest.mark.parametrize("bool_type", [True, False, "true", "false", 1, 0, 2])
+    def test_search_with_expression_bool(self, dim, auto_id, _async, bool_type):
+        """
+        target: test search with different bool expressions
+        method: search with different bool expressions
+        expected: searched successfully with correct limit(topK)
+        """
+        # 1. initialize with data
+        nb = 1000
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                             is_all_data_type=True,
+                                                                             auto_id=auto_id,
+                                                                             dim=dim)
+
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+        # 3. filter result with expression in collection
+        filter_ids = []
+        bool_type_cmp = bool_type
+        if bool_type == "true":
+            bool_type_cmp = True
+        if bool_type == "false":
+            bool_type_cmp = False
+        for i, _id in enumerate(insert_ids):
+            if _vectors[0][f"{default_bool_field_name}"][i] == bool_type_cmp:
+                filter_ids.append(_id)
+
+        # 4. search with different expressions
+        expression = f"{default_bool_field_name} == {bool_type}"
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            default_search_params, nb, expression,
+                                            _async=_async,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "ids": insert_ids,
+                                                         "limit": min(nb, len(filter_ids)),
+                                                         "_async": _async})
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+
         filter_ids_set = set(filter_ids)
         for hits in search_res:
             ids = hits.ids
