@@ -31,7 +31,6 @@ pipeline {
                     axis {
                         name 'MILVUS_CLIENT'
                         values 'pymilvus'
-//                         'pymilvus-orm'
                     }
                 }
                 agent {
@@ -82,18 +81,6 @@ pipeline {
                                             --test-extra-arg "--tags L0 L1 L2" \
                                             --test-timeout ${e2e_timeout_seconds}
                                             """
-//                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
-//                                             sh """
-//                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-//                                             ./e2e-k8s.sh \
-//                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
-//                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
-//                                             --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
-//                                             --skip-export-logs \
-//                                             --skip-cleanup \
-//                                             --test-extra-arg "--tags L0 L1 L2" \
-//                                             --test-timeout ${e2e_timeout_seconds}
-//                                             """
                                         } else {
                                             error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
                                         }
