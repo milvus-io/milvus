@@ -527,7 +527,6 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		log.Debug("ShowCollections Done",
 			zap.Error(err),
 			zap.String("role", Params.RoleName),
-			zap.Any("request", request),
 			zap.Any("result", sct.result))
 	}()
 
@@ -914,7 +913,6 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		log.Debug("ShowPartitions Done",
 			zap.Error(err),
 			zap.String("role", Params.RoleName),
-			zap.Any("request", request),
 			zap.Any("result", spt.result))
 	}()
 
@@ -1544,6 +1542,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	err = ft.WaitToFinish()
 	if err != nil {
+		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}

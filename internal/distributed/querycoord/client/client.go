@@ -13,8 +13,8 @@ package grpcquerycoordclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -39,11 +39,48 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	grpcClient querypb.QueryCoordClient
-	conn       *grpc.ClientConn
+	grpcClient    querypb.QueryCoordClient
+	conn          *grpc.ClientConn
+	grpcClientMtx sync.RWMutex
 
 	sess *sessionutil.Session
 	addr string
+}
+
+func (c *Client) getGrpcClient() (querypb.QueryCoordClient, error) {
+	c.grpcClientMtx.RLock()
+	if c.grpcClient != nil {
+		defer c.grpcClientMtx.RUnlock()
+		return c.grpcClient, nil
+	}
+	c.grpcClientMtx.RUnlock()
+
+	c.grpcClientMtx.Lock()
+	defer c.grpcClientMtx.Unlock()
+
+	if c.grpcClient != nil {
+		return c.grpcClient, nil
+	}
+
+	// FIXME(dragondriver): how to handle error here?
+	// if we return nil here, then we should check if client is nil outside,
+	err := c.connect(retry.Attempts(20))
+	if err != nil {
+		return nil, err
+	}
+
+	return c.grpcClient, nil
+}
+
+func (c *Client) resetConnection() {
+	c.grpcClientMtx.Lock()
+	defer c.grpcClientMtx.Unlock()
+
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
+	c.conn = nil
+	c.grpcClient = nil
 }
 
 func getQueryCoordAddress(sess *sessionutil.Session) (string, error) {
@@ -119,6 +156,9 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		if err != nil {
 			return err
 		}
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
 		c.conn = conn
 		return nil
 	}
@@ -139,10 +179,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	log.Debug("QueryCoord Client grpc error", zap.Error(err))
-	err = c.connect()
-	if err != nil {
-		return ret, errors.New("Connect to querycoord failed with error:\n" + err.Error())
-	}
+
+	c.resetConnection()
+
 	ret, err = caller()
 	if err == nil {
 		return ret, nil
@@ -156,7 +195,12 @@ func (c *Client) Start() error {
 
 func (c *Client) Stop() error {
 	c.cancel()
-	return c.conn.Close()
+	c.grpcClientMtx.Lock()
+	defer c.grpcClientMtx.Unlock()
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }
 
 // Register dummy
@@ -166,91 +210,195 @@ func (c *Client) Register() error {
 
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*internalpb.ComponentStates), err
 }
 
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowCollections(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.ShowCollections(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*querypb.ShowCollectionsResponse), err
 }
 
 func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.LoadCollection(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.LoadCollection(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ReleaseCollection(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.ReleaseCollection(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowPartitions(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.ShowPartitions(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*querypb.ShowPartitionsResponse), err
 }
 
 func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.LoadPartitions(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.LoadPartitions(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ReleasePartitions(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.ReleasePartitions(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.CreateQueryChannel(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.CreateQueryChannel(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*querypb.CreateQueryChannelResponse), err
 }
 
 func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetPartitionStates(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetPartitionStates(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*querypb.GetPartitionStatesResponse), err
 }
 
 func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetSegmentInfo(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetSegmentInfo(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*querypb.GetSegmentInfoResponse), err
 }
 
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetMetrics(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetMetrics(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
