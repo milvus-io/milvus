@@ -944,6 +944,11 @@ class TestIndexBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_PQ_without_nbits(self, connect, collection):
+        """
+        target: test create PQ index
+        method: create PQ index without nbits
+        expected: create successfully
+        """
         PQ_index = {"index_type": "IVF_PQ", "params": {"nlist": 128, "m": 16}, "metric_type": "L2"}
         result = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, PQ_index)
