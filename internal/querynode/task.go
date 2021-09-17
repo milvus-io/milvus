@@ -236,6 +236,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		log.Debug("query node add collection flow graphs", zap.Any("channels", vChannels))
 	}
 
+	// add tSafe watcher if queryCollection exists
+	if w.node.queryService.hasQueryCollection(collectionID) {
+		for _, channel := range vChannels {
+			w.node.queryService.queryCollections[collectionID].addTSafeWatcher(channel)
+		}
+	}
+
 	// channels as consumer
 	var nodeFGs map[Channel]*queryNodeFlowGraph
 	if loadPartition {

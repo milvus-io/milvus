@@ -16,7 +16,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"reflect"
 	"sync"
 	"unsafe"
 
@@ -57,8 +56,9 @@ type queryCollection struct {
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []queryMsg
 
+	tSafeWatchersMu   sync.Mutex // guards tSafeWatchers
 	tSafeWatchers     map[Channel]*tSafeWatcher
-	watcherSelectCase []reflect.SelectCase
+	watcherSharedChan chan struct{}
 
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
 	serviceableTime      Timestamp
@@ -140,19 +140,45 @@ func (q *queryCollection) register() {
 		return
 	}
 
-	//TODO:: can't add new vChannel to selectCase
-	q.watcherSelectCase = make([]reflect.SelectCase, 0)
+	q.watcherSharedChan = make(chan struct{}, 1024)
 	log.Debug("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("dml channels", collection.getVChannels()),
 	)
 	for _, channel := range collection.getVChannels() {
-		q.tSafeWatchers[channel] = newTSafeWatcher()
-		q.streaming.tSafeReplica.registerTSafeWatcher(channel, q.tSafeWatchers[channel])
-		q.watcherSelectCase = append(q.watcherSelectCase, reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(q.tSafeWatchers[channel].watcherChan()),
-		})
+		q.addTSafeWatcher(channel)
+	}
+}
+
+func (q *queryCollection) addTSafeWatcher(vChannel Channel) {
+	q.tSafeWatchersMu.Lock()
+	defer q.tSafeWatchersMu.Unlock()
+	if _, ok := q.tSafeWatchers[vChannel]; ok {
+		log.Debug("tSafeWatcher of queryCollection has been exists",
+			zap.Any("collectionID", q.collectionID),
+			zap.Any("channel", vChannel),
+		)
+		return
+	}
+	q.tSafeWatchers[vChannel] = newTSafeWatcher()
+	q.streaming.tSafeReplica.registerTSafeWatcher(vChannel, q.tSafeWatchers[vChannel])
+	log.Debug("add tSafeWatcher to queryCollection",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", vChannel),
+	)
+	go q.startWatcher(q.tSafeWatchers[vChannel].watcherChan())
+}
+
+// TODO: add stopWatcher(), add close() to tSafeWatcher
+func (q *queryCollection) startWatcher(channel <-chan bool) {
+	for {
+		select {
+		case <-q.releaseCtx.Done():
+			return
+		case <-channel:
+			// TODO: check if channel is closed
+			q.watcherSharedChan <- struct{}{}
+		}
 	}
 }
 
@@ -173,11 +199,7 @@ func (q *queryCollection) popAllUnsolvedMsg() []queryMsg {
 
 func (q *queryCollection) waitNewTSafe() Timestamp {
 	// block until any vChannel updating tSafe
-	_, _, recvOK := reflect.Select(q.watcherSelectCase)
-	if !recvOK {
-		//log.Warn("tSafe has been closed", zap.Any("collectionID", q.collectionID))
-		return Timestamp(math.MaxInt64)
-	}
+	<-q.watcherSharedChan
 	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
 	t := Timestamp(math.MaxInt64)
 	for channel := range q.tSafeWatchers {
