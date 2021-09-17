@@ -73,7 +73,7 @@ class TestIndexParams(TestcaseBase):
                                    check_items={ct.err_code: 1,
                                                 ct.err_msg: f"cannot create index on non-existed field: {f_name}"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     # TODO (reason="pymilvus issue #677", raises=TypeError)
     @pytest.mark.parametrize("index_type", ct.get_invalid_strs)
     def test_index_type_invalid(self, index_type):
