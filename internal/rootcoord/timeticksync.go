@@ -221,7 +221,8 @@ func (t *timetickSync) GetProxy(sess []*sessionutil.Session) {
 }
 
 // StartWatch watch proxy node change and process all channels' timetick msg
-func (t *timetickSync) StartWatch() {
+func (t *timetickSync) StartWatch(wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
 		select {
 		case <-t.core.ctx.Done():
