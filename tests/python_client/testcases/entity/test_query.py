@@ -8,7 +8,7 @@ default_entities = ut.gen_entities(ut.default_nb, is_normal=True)
 raw_vectors, default_binary_entities = ut.gen_binary_entities(ut.default_nb)
 default_int_field_name = "int64"
 default_float_field_name = "float"
-default_pos = 5 
+default_pos = 5
 default_term_expr = f'{default_int_field_name} in {[i for i in range(default_pos)]}'
 
 
@@ -168,33 +168,6 @@ class TestQueryBase:
         assert res[1][default_float_field_name] == binary_entities[1]["values"][0]
         assert res[2][ut.default_float_vec_field_name] == binary_entities[2]["values"][0]
 
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_output_field_empty(self, connect, collection):
-        """
-        target: test query with none output field
-        method: query with output field=None
-        expected: return all fields
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.load_collection(collection)
-        res = connect.query(collection, default_term_expr, output_fields=[])
-        assert default_int_field_name in res[0].keys()
-        assert default_float_field_name not in res[0].keys()
-        assert ut.default_float_vec_field_name not in res[0].keys()
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_output_not_existed_field(self, connect, collection):
-        """
-        target: test query output not existed field
-        method: query with not existed output field
-        expected: raise exception
-        """
-        entities, ids = init_data(connect, collection)
-        connect.load_collection(collection)
-        with pytest.raises(Exception):
-            connect.query(collection, default_term_expr, output_fields=["int"])
-
     @pytest.mark.parametrize("fields", ut.gen_invalid_strs())
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_invalid_output_fields(self, connect, collection, fields):
@@ -203,7 +176,7 @@ class TestQueryBase:
         method: query with invalid field fields
         expected: raise exception
         """
-        entities, ids = init_data(connect, collection)
+        init_data(connect, collection)
         connect.load_collection(collection)
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr, output_fields=[fields])
@@ -214,6 +187,7 @@ class TestQueryPartition:
     test Query interface
     query(collection_name, expr, output_fields=None, partition_names=None, timeout=None)
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_partition(self, connect, collection):
         """
@@ -230,48 +204,6 @@ class TestQueryPartition:
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_not_existed_partition(self, connect, collection):
-        """
-        target: test query on a not existed partition
-        method: query on not existed partition
-        expected: raise exception
-        """
-        connect.load_partitions(collection, [ut.default_partition_name])
-        tag = ut.gen_unique_str()
-        with pytest.raises(Exception):
-            connect.query(collection, default_term_expr, partition_names=[tag])
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_partition_repeatedly(self, connect, collection):
-        """
-        target: test query repeatedly on partition
-        method: query on partition twice
-        expected: verify query result
-        """
-        connect.create_partition(collection, ut.default_tag)
-        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
-        assert len(ids) == ut.default_nb
-        connect.load_partitions(collection, [ut.default_tag])
-        res_one = connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
-        res_two = connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
-        assert res_one == res_two
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_multi_partitions_single_result(self, connect, collection):
-        """
-        target: test query on multi partitions and get single result
-        method: 1.insert into two partitions
-                2.query on two partitions and query single result
-        expected: query from two partitions and get single result
-        """
-        entities, entities_2 = insert_entities_into_two_partitions_in_half(connect, collection)
-        half = ut.default_nb // 2
-        term_expr = f'{default_int_field_name} in [{half}]'
-        res = connect.query(collection, term_expr, partition_names=[ut.default_tag, ut.default_partition_name])
-        assert len(res) == 1
-        assert res[0][default_int_field_name] == entities_2[0]["values"][0]
 
 
 def insert_entities_into_two_partitions_in_half(connect, collection):
