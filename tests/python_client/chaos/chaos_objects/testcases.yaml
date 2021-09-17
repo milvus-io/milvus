@@ -174,6 +174,18 @@ Collections:
           query: fail
   -
     testcase:
+      name: test_pulsar_network_partition
+      chaos: chaos_pulsar_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail  
+  -
+    testcase:
       name: test_querynode_cpu100p
       chaos: chaos_querynode_cpu100p.yaml
     # and 10 more for the other pods
