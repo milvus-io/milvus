@@ -158,6 +158,8 @@ func (i *IndexNode) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
+// CreateIndex receives request from IndexCoordinator to build an index.
+// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
