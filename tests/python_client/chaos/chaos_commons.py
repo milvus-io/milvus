@@ -63,7 +63,7 @@ def get_chaos_yamls():
         else:
             # not a valid directory, return default
             pass
-    log.debug("not a valid directory or file, return default")
+    log.debug("not a valid directory or file, return default chaos config path")
     return glob.glob(constants.TESTS_CONFIG_LOCATION + constants.ALL_CHAOS_YAMLS)
 
 
