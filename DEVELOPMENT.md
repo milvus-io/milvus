@@ -44,49 +44,49 @@ In fact, all Linux distributions is available to develop Milvus. The following o
 - Debian/Ubuntu
 
 ```shell
-sudo apt update
-sudo apt install -y build-essential ccache gfortran \
-    libssl-dev zlib1g-dev python3-dev libcurl4-openssl-dev libtbb-dev\
-    libboost-regex-dev libboost-program-options-dev libboost-system-dev \
-    libboost-filesystem-dev libboost-serialization-dev libboost-python-dev
+$ sudo apt update
+$ sudo apt install -y build-essential ccache gfortran \
+      libssl-dev zlib1g-dev python3-dev libcurl4-openssl-dev libtbb-dev\
+      libboost-regex-dev libboost-program-options-dev libboost-system-dev \
+      libboost-filesystem-dev libboost-serialization-dev libboost-python-dev
 ```
 
 - CentOS
 
 ```shell
-sudo yum install -y epel-release centos-release-scl-rh && \
-sudo yum install -y git make automake openssl-devel zlib-devel \
-      libcurl-devel python3-devel \
-      devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
-      llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
-      ccache lcov
+$ sudo yum install -y epel-release centos-release-scl-rh && \
+$ sudo yum install -y git make automake openssl-devel zlib-devel \
+        libcurl-devel python3-devel \
+        devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
+        llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
+        ccache lcov
 
-echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
-echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
-echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-7.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
-source "/etc/profile.d/llvm-toolset-7.sh"
+$ echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
+$ echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
+$ echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-7.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
+$ source "/etc/profile.d/llvm-toolset-7.sh"
 
 # Install tbb
-git clone https://github.com/wjakob/tbb.git && \
-cd tbb/build && \
-cmake .. && make -j && \
-sudo make install && \
-cd ../../ && rm -rf tbb/
+$ git clone https://github.com/wjakob/tbb.git && \
+      cd tbb/build && \
+      cmake .. && make -j && \
+      sudo make install && \
+      cd ../../ && rm -rf tbb/
 
 # Install boost
-wget -q https://boostorg.jfrog.io/artifactory/main/release/1.65.1/source/boost_1_65_1.tar.gz && \
-    tar zxf boost_1_65_1.tar.gz && cd boost_1_65_1 && \
-    ./bootstrap.sh --prefix=/usr/local --with-toolset=gcc --without-libraries=python && \
-    sudo ./b2 -j2 --prefix=/usr/local --without-python toolset=gcc install && \
-    cd ../ && rm -rf ./boost_1_65_1*
+$ wget -q https://boostorg.jfrog.io/artifactory/main/release/1.65.1/source/boost_1_65_1.tar.gz && \
+      tar zxf boost_1_65_1.tar.gz && cd boost_1_65_1 && \
+      ./bootstrap.sh --prefix=/usr/local --with-toolset=gcc --without-libraries=python && \
+      sudo ./b2 -j2 --prefix=/usr/local --without-python toolset=gcc install && \
+      cd ../ && rm -rf ./boost_1_65_1*
 
 ```
 
 Once you have finished, confirm that `gcc` and `make` are installed:
 
 ```shell
-gcc --version
-make --version
+$ gcc --version
+$ make --version
 ```
 
 #### CMake
@@ -96,7 +96,7 @@ The algorithm library of Milvus, Knowhere is written in c++. CMake is required i
 Confirm that cmake is available:
 
 ```shell
-cmake --version
+$ cmake --version
 ```
 
 #### Go
@@ -106,7 +106,7 @@ Milvus is written in [Go](http://golang.org/). If you don't have a Go developmen
 Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set as detailed in [How to Write Go Code](https://golang.org/doc/code.html) before proceeding.
 
 ```shell
-go version
+$ go version
 ```
 
 #### Docker & Docker Compose
@@ -121,7 +121,7 @@ Milvus depends on Etcd, Pulsar and minIO. Using Docker Compose to manage these i
 To build the Milvus project, run the following command:
 
 ```shell
-make all
+$ make all
 ```
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
@@ -135,7 +135,7 @@ Presubmission verification provides a battery of checks and tests to give your p
 To run all presubmission verification tests, use this command:
 
 ```shell
-make verifiers
+$ make verifiers
 ```
 
 ### Unit Tests
@@ -143,12 +143,12 @@ make verifiers
 Pull requests need to pass all unit tests. To run every unit test, use this command:
 
 ```shell
-make unittest
+$ make unittest
 ```
 
 To run single test case, for instance, run TestSearchTask in /internal/proxy directory, use
 ```shell
-go test -v ./internal/proxy/ -test.run TestSearchTask
+$ go test -v ./internal/proxy/ -test.run TestSearchTask
 ```
 
 
@@ -157,23 +157,22 @@ go test -v ./internal/proxy/ -test.run TestSearchTask
 Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
 
 ```shell
-cd deployments/docker/dev
-docker-compose up -d
-cd ../../../
-# Running Milvus
-./scripts/start_standalone.sh
+$ cd deployments/docker/dev
+$ docker-compose up -d
+$ cd ../../../
+# Running Milvus standalone
+$ ./scripts/start_standalone.sh
 
-# or
-
-./scripts/start_cluster.sh
+# or running running a Milvus cluster
+$ ./scripts/start_cluster.sh
 ```
 
 To run E2E tests, use these command:
 
 ```shell
-cd tests/python_client
-pip install -r requirements.txt
-pytest --tags=L0 -n auto
+$ cd tests/python_client
+$ pip install -r requirements.txt
+$ pytest --tags=L0 -n auto
 ```
 
 ## GitHub Flow
