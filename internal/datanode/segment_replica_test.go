@@ -416,9 +416,8 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 					sr.flushedSegments[test.flushedSegID] = &Segment{}
 				}
 
-				err := sr.updateStatistics(test.inSegID, test.inNumRows)
+				sr.updateStatistics(test.inSegID, test.inNumRows)
 				if test.isvalidCase {
-					assert.NoError(t, err)
 
 					updates, err := sr.getSegmentStatisticsUpdates(test.inSegID)
 					assert.NoError(t, err)
@@ -427,7 +426,6 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 
 					sr.updateSegmentCheckPoint(10000)
 				} else {
-					assert.Error(t, err)
 					updates, err := sr.getSegmentStatisticsUpdates(test.inSegID)
 					assert.Error(t, err)
 					assert.Nil(t, updates)
@@ -501,8 +499,7 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 		assert.True(t, seg.isNew.Load().(bool))
 		assert.False(t, seg.isFlushed.Load().(bool))
 
-		err = replica.updateStatistics(0, 10)
-		assert.NoError(t, err)
+		replica.updateStatistics(0, 10)
 		assert.Equal(t, int64(10), seg.numRows)
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
@@ -527,8 +524,7 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 		err = replica.addNormalSegment(1, 100000, 2, "invalid", int64(0), &segmentCheckPoint{})
 		assert.Error(t, err)
 
-		err = replica.updateStatistics(1, 10)
-		assert.NoError(t, err)
+		replica.updateStatistics(1, 10)
 		assert.Equal(t, int64(20), seg.numRows)
 
 		segPos := replica.listNewSegmentsStartPositions()
