@@ -30,6 +30,7 @@ const (
 	loadTypePartition  loadType = 1
 )
 
+// dataSyncService manages a lot of flow graphs for collections and partitions
 type dataSyncService struct {
 	ctx context.Context
 
