@@ -13,6 +13,7 @@ package rootcoord
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -58,4 +59,9 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotZero(t, Params.TimeTickInterval)
 	t.Logf("master timetickerInterval = %d", Params.TimeTickInterval)
+
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
+	t.Logf("created time: %v", Params.CreatedTime)
+	t.Logf("updated time: %v", Params.UpdatedTime)
 }

@@ -1111,9 +1111,15 @@ func (c *Core) Start() error {
 		go c.sessionLoop()
 		go c.chanTimeTick.StartWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
+
+		Params.CreatedTime = time.Now()
+		Params.UpdatedTime = time.Now()
+
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
+
 	log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
+
 	return nil
 }
 
