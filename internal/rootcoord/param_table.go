@@ -15,6 +15,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -46,6 +47,9 @@ type ParamTable struct {
 
 	Timeout          int
 	TimeTickInterval int
+
+	CreatedTime time.Time
+	UpdatedTime time.Time
 
 	Log log.Config
 
