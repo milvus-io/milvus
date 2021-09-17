@@ -207,16 +207,6 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 	return ret, nil
 }
 
-// AddStartCallback adds a callback in the startServer phase.
-//func (i *IndexNode) AddStartCallback(callbacks ...func()) {
-//	i.startCallbacks = append(i.startCallbacks, callbacks...)
-//}
-
-// AddCloseCallback adds a callback in the Close phase.
-//func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
-//	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
-//}
-
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexNode components states ...")
 	stateInfo := &internalpb.ComponentInfo{
