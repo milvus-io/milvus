@@ -10,12 +10,8 @@ from pymilvus import DataType
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from utils.util_log import test_log as log
-import traceback
 
 """" Methods of processing data """
-
-
-# l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
 
 
 def gen_unique_str(str_value=None):
