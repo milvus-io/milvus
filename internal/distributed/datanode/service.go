@@ -141,7 +141,21 @@ func (s *Server) Stop() error {
 	}
 	s.cancel()
 	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
+		// make graceful stop has a timeout
+		stopped := make(chan struct{})
+		go func() {
+			s.grpcServer.GracefulStop()
+			close(stopped)
+		}()
+
+		t := time.NewTimer(10 * time.Second)
+		select {
+		case <-t.C:
+			// hard stop since grace timeout
+			s.grpcServer.Stop()
+		case <-stopped:
+			t.Stop()
+		}
 	}
 
 	err := s.datanode.Stop()
