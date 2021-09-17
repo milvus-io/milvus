@@ -42,7 +42,7 @@ docker ps
 docker cp container_id:/milvus .
 ```
 
-- Install Milvus dependencies.
+### Install Milvus dependencies.
 
 ```bash
 sudo apt-get install libopenblas-dev
