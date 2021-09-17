@@ -125,6 +125,11 @@ go-codecov:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 
+# Run cpp-codecov
+cpp-codecov:
+	@echo "Running cpp unittests..."
+	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
+
 #TODO: build each component to docker
 docker: verifiers
 
