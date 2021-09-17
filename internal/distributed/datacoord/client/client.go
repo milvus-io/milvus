@@ -13,8 +13,8 @@ package grpcdatacoordclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -39,11 +39,48 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	grpcClient datapb.DataCoordClient
-	conn       *grpc.ClientConn
+	grpcClient    datapb.DataCoordClient
+	conn          *grpc.ClientConn
+	grpcClientMtx sync.RWMutex
 
 	sess *sessionutil.Session
 	addr string
+}
+
+func (c *Client) getGrpcClient() (datapb.DataCoordClient, error) {
+	c.grpcClientMtx.RLock()
+	if c.grpcClient != nil {
+		defer c.grpcClientMtx.RUnlock()
+		return c.grpcClient, nil
+	}
+	c.grpcClientMtx.RUnlock()
+
+	c.grpcClientMtx.Lock()
+	defer c.grpcClientMtx.Unlock()
+
+	if c.grpcClient != nil {
+		return c.grpcClient, nil
+	}
+
+	// FIXME(dragondriver): how to handle error here?
+	// if we return nil here, then we should check if client is nil outside,
+	err := c.connect(retry.Attempts(20))
+	if err != nil {
+		return nil, err
+	}
+
+	return c.grpcClient, nil
+}
+
+func (c *Client) resetConnection() {
+	c.grpcClientMtx.Lock()
+	defer c.grpcClientMtx.Unlock()
+
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
+	c.conn = nil
+	c.grpcClient = nil
 }
 
 func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
@@ -78,7 +115,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 
 func (c *Client) Init() error {
 	Params.Init()
-	return c.connect(retry.Attempts(20))
+	return nil
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
@@ -117,6 +154,9 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		if err != nil {
 			return err
 		}
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
 		c.conn = conn
 		return nil
 	}
@@ -136,10 +176,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	log.Debug("DataCoord Client grpc error", zap.Error(err))
-	err = c.connect()
-	if err != nil {
-		return ret, errors.New("Connect to datacoord failed with error:\n" + err.Error())
-	}
+
+	c.resetConnection()
+
 	ret, err = caller()
 	if err == nil {
 		return ret, nil
@@ -153,7 +192,12 @@ func (c *Client) Start() error {
 
 func (c *Client) Stop() error {
 	c.cancel()
-	return c.conn.Close()
+	c.grpcClientMtx.Lock()
+	defer c.grpcClientMtx.Unlock()
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }
 
 // Register dumy
@@ -163,102 +207,223 @@ func (c *Client) Register() error {
 
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*internalpb.ComponentStates), err
 }
 
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.Flush(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.Flush(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.FlushResponse), err
 }
 
 func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.AssignSegmentID(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.AssignSegmentID(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.AssignSegmentIDResponse), err
 }
 
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetSegmentStates(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetSegmentStates(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.GetSegmentStatesResponse), err
 }
 
 func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetInsertBinlogPaths(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetInsertBinlogPaths(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.GetInsertBinlogPathsResponse), err
 }
 
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetCollectionStatistics(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetCollectionStatistics(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.GetCollectionStatisticsResponse), err
 }
 
 func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetPartitionStatistics(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetPartitionStatistics(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.GetPartitionStatisticsResponse), err
 }
 
 func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetSegmentInfo(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetSegmentInfo(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.GetSegmentInfoResponse), err
 }
 
 func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	return c.grpcClient.SaveBinlogPaths(ctx, req)
+	// FIXME(dragondriver): why not to recall here?
+	client, err := c.getGrpcClient()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return client.SaveBinlogPaths(ctx, req)
 }
 
 func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetRecoveryInfo(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetRecoveryInfo(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.GetRecoveryInfoResponse), err
 }
 
 func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetFlushedSegments(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetFlushedSegments(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*datapb.GetFlushedSegmentsResponse), err
 }
 
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetMetrics(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetMetrics(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
