@@ -9,6 +9,7 @@ from .hardware import Hardware
 
 class Metric(object):
     def __init__(self):
+        # format of report data
         self._version = '0.1'
         self._type = 'metric'
         self.run_id = None
