@@ -203,6 +203,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	return s.dataCoord.AssignSegmentID(ctx, req)
 }
 
+// GetSegmentStates gets states of segments
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	return s.dataCoord.GetSegmentStates(ctx, req)
 }
