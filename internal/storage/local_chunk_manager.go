@@ -53,7 +53,7 @@ func (lcm *LocalChunkManager) Write(key string, content []byte) error {
 			return err
 		}
 	}
-	err := ioutil.WriteFile(filePath, content, 0644)
+	err := ioutil.WriteFile(filePath, content, 0600)
 	if err != nil {
 		return err
 	}

@@ -117,6 +117,8 @@ func (t *timestampOracle) InitTimestamp() error {
 	current := &atomicObject{
 		physical: next,
 	}
+	// atomic unsafe pointer
+	/* #nosec G103 */
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(current))
 
 	return nil
@@ -144,6 +146,8 @@ func (t *timestampOracle) ResetUserTimestamp(tso uint64) error {
 	update := &atomicObject{
 		physical: next,
 	}
+	// atomic unsafe pointer
+	/* #nosec G103 */
 	atomic.CompareAndSwapPointer(&t.TSO, unsafe.Pointer(prev), unsafe.Pointer(update))
 	return nil
 }
@@ -196,7 +200,8 @@ func (t *timestampOracle) UpdateTimestamp() error {
 		physical: next,
 		logical:  0,
 	}
-
+	// atomic unsafe pointer
+	/* #nosec G103 */
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(current))
 
 	return nil
@@ -207,5 +212,7 @@ func (t *timestampOracle) ResetTimestamp() {
 	zero := &atomicObject{
 		physical: time.Now(),
 	}
+	// atomic unsafe pointer
+	/* #nosec G103 */
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(zero))
 }

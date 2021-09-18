@@ -229,6 +229,8 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.Req.IndexID == indexID && !meta.indexMeta.MarkDeleted {
 			meta.indexMeta.MarkDeleted = true
+			// marshal inside
+			/* #nosec G601 */
 			if err := mt.saveIndexMeta(&meta); err != nil {
 				log.Debug("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
 				fn := func() error {

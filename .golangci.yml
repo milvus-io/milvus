@@ -24,6 +24,7 @@ linters:
     - golint
     - ineffassign
     - gosimple
+    - gosec
 
 issues:
   exclude-use-default: false
@@ -33,6 +34,19 @@ issues:
     - should be of the form
     - should not use dot imports
     - which can be annoying to use
+    # Binds to all network interfaces
+    - G102
+    # Errors unhandled
+    - G104
+    # file/folder Permission
+    - G301
+    - G302
+    # Potential file inclusion via variable
+    - G304
+    # Deferring unsafe method like *os.File Close 
+    - G307
+    # Use of weak random number generator math/rand
+    - G404
 service:
   golangci-lint-version: 1.27.0 # use the fixed version to not introduce new linters unexpectedly
 

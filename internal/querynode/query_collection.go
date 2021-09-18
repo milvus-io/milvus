@@ -706,6 +706,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
 					//ref https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+					/* #nosec G103 */
 					ptr := unsafe.Pointer(&dataBlob[0])
 					farray := (*[1 << 28]float32)(ptr)
 					colData = append(colData, farray[:dim:dim]...)
