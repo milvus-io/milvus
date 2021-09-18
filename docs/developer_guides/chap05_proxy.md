@@ -102,6 +102,10 @@ type MilvusService interface {
 	GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error)
 	ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
 	
+	CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error)
+	DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error)
+	AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
+
 	CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
 	DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
 	HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
@@ -168,6 +172,18 @@ See *Master API* for detailed definitions.
 See *Master API* for detailed definitions.
 
 * *ShowCollections*
+
+See *Master API* for detailed definitions.
+
+* *CreateAlias*
+
+See *Master API* for detailed definitions.
+
+* *DropAlias*
+
+See *Master API* for detailed definitions.
+
+* *AlterAlias*
 
 See *Master API* for detailed definitions.
 
