@@ -51,11 +51,21 @@ Run a single test scenario manually(take query node pod is killed as instance):
 1. update `ALL_CHAOS_YAMLS = 'chaos_querynode_podkill.yaml'` in `constants.py`
 
 2. run the commands below:
-```bash
-cd /milvus/tests/python_client/chaos
+   ```bash
+   cd /milvus/tests/python_client/chaos
 
-pytest test_chaos.py --host ${Milvus_IP} -v
-```
+   pytest test_chaos.py --host ${Milvus_IP} -v
+   ```
+Run multiple test scenario in a category manually(take network partition chaos for all pods as instance):
+
+1. update `ALL_CHAOS_YAMLS = 'chaos_*_network_partition.yaml'` in `constants.py`
+
+2. run the commands below:
+   ```bash
+   cd /milvus/tests/python_client/chaos
+
+   pytest test_chaos.py --host ${Milvus_IP} -v
+   ```
 
 ### Nightly 
 still in planning 
