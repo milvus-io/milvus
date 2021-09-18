@@ -194,6 +194,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return s.dataCoord.GetSegmentInfo(ctx, req)
 }
 
+// Flush flushes a collection's data
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	return s.dataCoord.Flush(ctx, req)
 }
