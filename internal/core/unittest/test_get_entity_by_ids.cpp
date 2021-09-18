@@ -182,15 +182,15 @@ TEST(Retrieve2, LargeTimestamp) {
     std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
     plan->field_offsets_ = target_offsets;
 
-    std::vector<int> filter_timestamps {-1, 0, 1, 10 ,20};
+    std::vector<int> filter_timestamps{-1, 0, 1, 10, 20};
     filter_timestamps.push_back(N / 2);
-    for (const auto & f_ts: filter_timestamps) {
+    for (const auto& f_ts : filter_timestamps) {
         auto retrieve_results = segment->Retrieve(plan.get(), ts_offset + 1 + f_ts);
         Assert(retrieve_results->fields_data_size() == 2);
         auto field0 = retrieve_results->fields_data(0);
         auto field1 = retrieve_results->fields_data(1);
-        int target_num = (f_ts + choose_sep ) / choose_sep;
-        if (target_num >req_size) {
+        int target_num = (f_ts + choose_sep) / choose_sep;
+        if (target_num > req_size) {
             target_num = req_size;
         }
         Assert(field0.scalars().long_data().data_size() == target_num);
