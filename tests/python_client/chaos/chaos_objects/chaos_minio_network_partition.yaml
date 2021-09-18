@@ -1,7 +1,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
 metadata:
-  name: test-rootcoord-network-partition
+  name: test-minio-network-partition
   namespace: chaos-testing
 spec:
   action: partition
@@ -19,7 +19,7 @@ spec:
       namespaces:
         - chaos-testing
       labelSelectors:
-        app.kubernetes.io/instance: chaos-testing
-        app.kubernetes.io/name: milvus
-        component: rootcoord
+        release: milvus-chaos
+        app: minio
+
     mode: one
