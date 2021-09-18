@@ -80,9 +80,10 @@ type RootCoordMock struct {
 	timeTickChannel   string
 
 	// naive inverted index
-	collName2ID map[string]typeutil.UniqueID
-	collID2Meta map[typeutil.UniqueID]collectionMeta
-	collMtx     sync.RWMutex
+	collName2ID  map[string]typeutil.UniqueID
+	collID2Meta  map[typeutil.UniqueID]collectionMeta
+	collAlias2ID map[string]typeutil.UniqueID
+	collMtx      sync.RWMutex
 
 	// TODO(dragondriver): need default partition?
 	collID2Partitions map[typeutil.UniqueID]partitionMap
@@ -100,6 +101,98 @@ type RootCoordMock struct {
 
 	lastTs    typeutil.Timestamp
 	lastTsMtx sync.Mutex
+}
+
+func (coord *RootCoordMock) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	_, exist := coord.collAlias2ID[req.Alias]
+	if exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("duplicate collection alias, alias = %s", req.Alias),
+		}, nil
+	}
+
+	collID, exist := coord.collName2ID[req.CollectionName]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("aliased collection name does not exist, name = %s", req.CollectionName),
+		}, nil
+	}
+
+	coord.collAlias2ID[req.Alias] = collID
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (coord *RootCoordMock) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	_, exist := coord.collAlias2ID[req.Alias]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("alias does not exist, alias = %s", req.Alias),
+		}, nil
+	}
+
+	delete(coord.collAlias2ID, req.Alias)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (coord *RootCoordMock) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	_, exist := coord.collAlias2ID[req.Alias]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    fmt.Sprintf("alias does not exist, alias = %s", req.Alias),
+		}, nil
+	}
+	collID, exist := coord.collName2ID[req.CollectionName]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    fmt.Sprintf("aliased collection name does not exist, name = %s", req.CollectionName),
+		}, nil
+	}
+	coord.collAlias2ID[req.Alias] = collID
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
 }
 
 func (coord *RootCoordMock) updateState(state internalpb.StateCode) {

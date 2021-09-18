@@ -3077,3 +3077,126 @@ func TestDeleteTask_PreExecute(t *testing.T) {
 	assert.Error(t, task.PreExecute(ctx))
 	task.DeleteRequest.PartitionName = partitionName
 }
+
+func TestCreateAlias_all(t *testing.T) {
+	Params.Init()
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	ctx := context.Background()
+	prefix := "TestCreateAlias_all"
+	collectionName := prefix + funcutil.GenRandomStr()
+	task := &CreateAliasTask{
+		Condition: NewTaskCondition(ctx),
+		CreateAliasRequest: &milvuspb.CreateAliasRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			Alias:          "alias1",
+		},
+		ctx: ctx,
+		result: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		rootCoord: rc,
+	}
+
+	assert.NoError(t, task.OnEnqueue())
+
+	assert.NotNil(t, task.TraceCtx())
+
+	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	task.SetID(id)
+	assert.Equal(t, id, task.ID())
+
+	task.Base.MsgType = commonpb.MsgType_CreateAlias
+	assert.Equal(t, commonpb.MsgType_CreateAlias, task.Type())
+	ts := Timestamp(time.Now().UnixNano())
+	task.SetTs(ts)
+	assert.Equal(t, ts, task.BeginTs())
+	assert.Equal(t, ts, task.EndTs())
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.NoError(t, task.PostExecute(ctx))
+}
+
+func TestDropAlias_all(t *testing.T) {
+	Params.Init()
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	ctx := context.Background()
+	task := &DropAliasTask{
+		Condition: NewTaskCondition(ctx),
+		DropAliasRequest: &milvuspb.DropAliasRequest{
+			Base:  nil,
+			Alias: "alias1",
+		},
+		ctx: ctx,
+		result: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		rootCoord: rc,
+	}
+
+	assert.NoError(t, task.OnEnqueue())
+	assert.NotNil(t, task.TraceCtx())
+
+	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	task.SetID(id)
+	assert.Equal(t, id, task.ID())
+
+	task.Base.MsgType = commonpb.MsgType_DropAlias
+	assert.Equal(t, commonpb.MsgType_DropAlias, task.Type())
+	ts := Timestamp(time.Now().UnixNano())
+	task.SetTs(ts)
+	assert.Equal(t, ts, task.BeginTs())
+	assert.Equal(t, ts, task.EndTs())
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.NoError(t, task.PostExecute(ctx))
+
+}
+
+func TestAlterAlias_all(t *testing.T) {
+	Params.Init()
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	ctx := context.Background()
+	prefix := "TestAlterAlias_all"
+	collectionName := prefix + funcutil.GenRandomStr()
+	task := &AlterAliasTask{
+		Condition: NewTaskCondition(ctx),
+		AlterAliasRequest: &milvuspb.AlterAliasRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			Alias:          "alias1",
+		},
+		ctx: ctx,
+		result: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		rootCoord: rc,
+	}
+
+	assert.NoError(t, task.OnEnqueue())
+
+	assert.NotNil(t, task.TraceCtx())
+
+	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	task.SetID(id)
+	assert.Equal(t, id, task.ID())
+
+	task.Base.MsgType = commonpb.MsgType_AlterAlias
+	assert.Equal(t, commonpb.MsgType_AlterAlias, task.Type())
+	ts := Timestamp(time.Now().UnixNano())
+	task.SetTs(ts)
+	assert.Equal(t, ts, task.BeginTs())
+	assert.Equal(t, ts, task.EndTs())
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.NoError(t, task.PostExecute(ctx))
+}
