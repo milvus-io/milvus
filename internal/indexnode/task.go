@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"runtime"
 	"strconv"
 
@@ -345,8 +346,9 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		tr.Record("serialize index codec done")
 
 		getSavePathByKey := func(key string) string {
-			// TODO: fix me, use more reasonable method
-			return strconv.Itoa(int(it.req.IndexBuildID)) + "/" + strconv.Itoa(int(it.req.Version)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
+
+			return path.Join(Params.IndexRootPath, strconv.Itoa(int(it.req.IndexBuildID)), strconv.Itoa(int(it.req.Version)),
+				strconv.Itoa(int(partitionID)), strconv.Itoa(int(segmentID)), key)
 		}
 		saveBlob := func(path string, value []byte) error {
 			return it.kv.Save(path, string(value))

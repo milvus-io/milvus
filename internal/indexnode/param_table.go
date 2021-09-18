@@ -41,6 +41,7 @@ type ParamTable struct {
 
 	EtcdEndpoints []string
 	MetaRootPath  string
+	IndexRootPath string
 
 	MinIOAddress         string
 	MinIOAccessKeyID     string
@@ -94,6 +95,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMinioBucketName()
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
+	pt.initIndexRootPath()
 }
 
 func (pt *ParamTable) initMinIOAddress() {
@@ -149,6 +151,14 @@ func (pt *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	pt.MetaRootPath = path.Join(rootPath, subPath)
+}
+
+func (pt *ParamTable) initIndexRootPath() {
+	rootPath, err := pt.Load("minio.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	pt.IndexRootPath = path.Join(rootPath, "index_files")
 }
 
 func (pt *ParamTable) initMinioBucketName() {
