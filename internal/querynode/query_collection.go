@@ -101,7 +101,8 @@ func newQueryCollection(releaseCtx context.Context,
 		historical:   historical,
 		streaming:    streaming,
 
-		tSafeWatchers: make(map[Channel]*tSafeWatcher),
+		tSafeWatchers:     make(map[Channel]*tSafeWatcher),
+		watcherSharedChan: make(chan struct{}, 1024),
 
 		unsolvedMsg: unsolvedMsg,
 
@@ -133,14 +134,13 @@ func (q *queryCollection) close() {
 	}
 }
 
+// register tSafe watcher if vChannels exists
 func (q *queryCollection) register() {
 	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
-		log.Warn(err.Error())
 		return
 	}
 
-	q.watcherSharedChan = make(chan struct{}, 1024)
 	log.Debug("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("dml channels", collection.getVChannels()),

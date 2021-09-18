@@ -452,7 +452,7 @@ func (qn *queryNode) removeQueryChannel(ctx context.Context, in *querypb.RemoveQ
 }
 
 func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) error {
-	if qn.isOnline() {
+	if !qn.isOnline() {
 		return nil
 	}
 
