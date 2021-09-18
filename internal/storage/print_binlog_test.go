@@ -13,6 +13,7 @@ package storage
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"testing"
 	"time"
@@ -60,7 +61,7 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 	buf, err := w.GetBuffer()
 	assert.Nil(t, err)
 
-	fd, err := os.Create("/tmp/binlog_int64.db")
+	fd, err := ioutil.TempFile("", "binlog_int64.db")
 	assert.Nil(t, err)
 	num, err := fd.Write(buf)
 	assert.Nil(t, err)

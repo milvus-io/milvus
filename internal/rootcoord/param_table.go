@@ -15,6 +15,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -47,6 +48,9 @@ type ParamTable struct {
 	Timeout          int
 	TimeTickInterval int
 
+	CreatedTime time.Time
+	UpdatedTime time.Time
+
 	Log log.Config
 
 	RoleName string
@@ -69,7 +73,9 @@ func (p *ParamTable) Init() {
 		p.initMsgChannelSubName()
 		p.initTimeTickChannel()
 		p.initStatisticsChannelName()
+		p.initDmlChannelName()
 
+		p.initDmlChannelNum()
 		p.initMaxPartitionNum()
 		p.initMinSegmentSizeToEnableIndex()
 		p.initDefaultPartitionName()
@@ -145,6 +151,18 @@ func (p *ParamTable) initStatisticsChannelName() {
 		panic(err)
 	}
 	p.StatisticsChannel = channel
+}
+
+func (p *ParamTable) initDmlChannelName() {
+	channel, err := p.Load("msgChannel.chanNamePrefix.rootCoordDml")
+	if err != nil {
+		panic(err)
+	}
+	p.DmlChannelName = channel
+}
+
+func (p *ParamTable) initDmlChannelNum() {
+	p.DmlChannelNum = p.ParseInt64("rootcoord.dmlChannelNum")
 }
 
 func (p *ParamTable) initMaxPartitionNum() {

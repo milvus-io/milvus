@@ -69,6 +69,8 @@ type IndexCoord struct {
 
 	nodeLock sync.RWMutex
 
+	once sync.Once
+
 	reqTimeoutInterval time.Duration
 	durationInterval   time.Duration
 	assignTaskInterval time.Duration
@@ -203,31 +205,36 @@ func (i *IndexCoord) Init() error {
 }
 
 func (i *IndexCoord) Start() error {
-	i.loopWg.Add(1)
-	go i.tsLoop()
+	var startErr error = nil
+	i.once.Do(func() {
+		i.loopWg.Add(1)
+		go i.tsLoop()
 
-	i.loopWg.Add(1)
-	go i.recycleUnusedIndexFiles()
+		i.loopWg.Add(1)
+		go i.recycleUnusedIndexFiles()
 
-	i.loopWg.Add(1)
-	go i.assignTaskLoop()
+		i.loopWg.Add(1)
+		go i.assignTaskLoop()
 
-	i.loopWg.Add(1)
-	go i.watchNodeLoop()
+		i.loopWg.Add(1)
+		go i.watchNodeLoop()
 
-	i.loopWg.Add(1)
-	go i.watchMetaLoop()
+		i.loopWg.Add(1)
+		go i.watchMetaLoop()
 
-	i.sched.Start()
+		startErr = i.sched.Start()
+
+		i.UpdateStateCode(internalpb.StateCode_Healthy)
+	})
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
-	log.Debug("IndexCoord start successfully")
 
-	return nil
+	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
+	log.Debug("IndexCoord start successfully", zap.Error(startErr))
+
+	return startErr
 }
 
 func (i *IndexCoord) Stop() error {

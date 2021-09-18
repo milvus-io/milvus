@@ -514,7 +514,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
+		return c.dmlChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
@@ -530,7 +530,7 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
+		return c.dmlChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error {
@@ -546,7 +546,7 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
+		return c.dmlChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error {
@@ -562,7 +562,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
+		return c.dmlChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	return nil
@@ -941,9 +941,12 @@ func (c *Core) Init() error {
 			return
 		}
 
-		c.dmlChannels = newDMLChannels(c)
+		c.dmlChannels = newDmlChannels(c, Params.DmlChannelName, Params.DmlChannelNum)
+
+		// recover physical channels for all collections
 		pc := c.MetaTable.ListCollectionPhysicalChannels()
 		c.dmlChannels.AddProducerChannels(pc...)
+		log.Debug("recover all physical channels", zap.Any("chanNames", pc))
 
 		c.chanTimeTick = newTimeTickSync(c)
 		c.chanTimeTick.AddProxy(c.session)
@@ -1111,9 +1114,15 @@ func (c *Core) Start() error {
 		go c.sessionLoop()
 		go c.chanTimeTick.StartWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
+
+		Params.CreatedTime = time.Now()
+		Params.UpdatedTime = time.Now()
+
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
+
 	log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
+
 	return nil
 }
 
@@ -1992,5 +2001,98 @@ func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) 
 			Reason:    metricsinfo.MsgUnimplementedMetric,
 		},
 		Response: "",
+	}, nil
+}
+
+func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("CreateAlias ", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	t := &CreateAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("CreateAlias failed", zap.String("alias", in.Alias), zap.String("name", in.CollectionName), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Create alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("CreateAlias Success", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("DropAlias ", zap.String("alias", in.Alias))
+	t := &DropAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("DropAlias failed", zap.String("alias", in.Alias), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Drop alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("DropAlias Success", zap.String("alias", in.Alias))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("AlterAlias ", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	t := &AlterAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("AlterAlias failed", zap.String("alias", in.Alias), zap.String("name", in.CollectionName), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Alter alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("AlterAlias Success", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
 	}, nil
 }

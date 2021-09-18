@@ -133,7 +133,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	vchanNames := make([]string, t.Req.ShardsNum)
 	chanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%d_%d_v%d", t.Req.CollectionName, collID, i, i)
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.dmlChannels.GetDmlMsgStreamName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
@@ -284,10 +284,8 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 
-		for _, chanName := range collMeta.PhysicalChannelNames {
-			// send tt into deleted channels to tell data_node to clear flowgragh
-			t.core.chanTimeTick.SendChannelTimeTick(chanName, ts)
-		}
+		// send tt into deleted channels to tell data_node to clear flowgragh
+		t.core.chanTimeTick.SendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
 
 		// remove dml channel after send dd msg
 		t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
@@ -890,4 +888,204 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	ts, _ := t.core.TSOAllocator(1)
 	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName, ts)
 	return err
+}
+
+type CreateAliasReqTask struct {
+	baseReqTask
+	Req *milvuspb.CreateAliasRequest
+}
+
+func (t *CreateAliasReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *CreateAliasReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_CreateAlias {
+		return fmt.Errorf("create alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	ddReq := internalpb.CreateAliasRequest{
+		Base:           t.Req.Base,
+		CollectionName: t.Req.CollectionName,
+		Alias:          t.Req.Alias,
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, CreateAliasDDType)
+	}
+
+	reason := fmt.Sprintf("create alias %s", t.Req.Alias)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	createAliasFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		err = t.core.MetaTable.AddAlias(t.Req.Alias, t.Req.CollectionName, ts, ddOp)
+		if err != nil {
+			return err
+		}
+		return t.core.SendTimeTick(ts, reason)
+	}
+
+	err = createAliasFn()
+	if err != nil {
+		return err
+	}
+
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
+}
+
+type DropAliasReqTask struct {
+	baseReqTask
+	Req *milvuspb.DropAliasRequest
+}
+
+func (t *DropAliasReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *DropAliasReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DropAlias {
+		return fmt.Errorf("create alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	ddReq := internalpb.DropAliasRequest{
+		Base:  t.Req.Base,
+		Alias: t.Req.Alias,
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, DropAliasDDType)
+	}
+
+	reason := fmt.Sprintf("create alias %s", t.Req.Alias)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	dropAliasFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		err = t.core.MetaTable.DeleteAlias(t.Req.Alias, ts, ddOp)
+		if err != nil {
+			return err
+		}
+		t.core.SendTimeTick(ts, reason)
+		return nil
+	}
+
+	err = dropAliasFn()
+	if err != nil {
+		return err
+	}
+
+	req := proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0, //TODO, msg type
+			MsgID:     0, //TODO, msg id
+			Timestamp: ts,
+			SourceID:  t.core.session.ServerID,
+		},
+		CollectionName: t.Req.Alias,
+	}
+	// error doesn't matter here
+	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
+
+}
+
+type AlterAliasReqTask struct {
+	baseReqTask
+	Req *milvuspb.AlterAliasRequest
+}
+
+func (t *AlterAliasReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_AlterAlias {
+		return fmt.Errorf("alter alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	ddReq := internalpb.DropAliasRequest{
+		Base:  t.Req.Base,
+		Alias: t.Req.Alias,
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, AlterAliasDDType)
+	}
+
+	reason := fmt.Sprintf("alter alias %s", t.Req.Alias)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	alterAliasFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		err = t.core.MetaTable.AlterAlias(t.Req.Alias, t.Req.CollectionName, ts, ddOp)
+		if err != nil {
+			return err
+		}
+		t.core.SendTimeTick(ts, reason)
+		return nil
+	}
+
+	err = alterAliasFn()
+	if err != nil {
+		return err
+	}
+
+	req := proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0, //TODO, msg type
+			MsgID:     0, //TODO, msg id
+			Timestamp: ts,
+			SourceID:  t.core.session.ServerID,
+		},
+		CollectionName: t.Req.Alias,
+	}
+	// error doesn't matter here
+	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
+
 }

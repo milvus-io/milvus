@@ -158,6 +158,8 @@ func (i *IndexNode) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
+// CreateIndex receives request from IndexCoordinator to build an index.
+// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -204,16 +206,6 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 
 	return ret, nil
 }
-
-// AddStartCallback adds a callback in the startServer phase.
-//func (i *IndexNode) AddStartCallback(callbacks ...func()) {
-//	i.startCallbacks = append(i.startCallbacks, callbacks...)
-//}
-
-// AddCloseCallback adds a callback in the Close phase.
-//func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
-//	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
-//}
 
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexNode components states ...")

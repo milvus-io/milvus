@@ -29,12 +29,13 @@ import (
 )
 
 const (
-	ComponentPrefix        = "root-coord"
-	TenantMetaPrefix       = ComponentPrefix + "/tenant"
-	ProxyMetaPrefix        = ComponentPrefix + "/proxy"
-	CollectionMetaPrefix   = ComponentPrefix + "/collection"
-	SegmentIndexMetaPrefix = ComponentPrefix + "/segment-index"
-	IndexMetaPrefix        = ComponentPrefix + "/index"
+	ComponentPrefix           = "root-coord"
+	TenantMetaPrefix          = ComponentPrefix + "/tenant"
+	ProxyMetaPrefix           = ComponentPrefix + "/proxy"
+	CollectionMetaPrefix      = ComponentPrefix + "/collection"
+	SegmentIndexMetaPrefix    = ComponentPrefix + "/segment-index"
+	IndexMetaPrefix           = ComponentPrefix + "/index"
+	CollectionAliasMetaPrefix = ComponentPrefix + "/collection-alias"
 
 	TimestampPrefix = ComponentPrefix + "/timestamp"
 
@@ -45,6 +46,9 @@ const (
 	DropCollectionDDType   = "DropCollection"
 	CreatePartitionDDType  = "CreatePartition"
 	DropPartitionDDType    = "DropPartition"
+	CreateAliasDDType      = "CreateAlias"
+	DropAliasDDType        = "DropAlias"
+	AlterAliasDDType       = "AlterAlias"
 )
 
 type metaTable struct {
@@ -53,6 +57,7 @@ type metaTable struct {
 	proxyID2Meta    map[typeutil.UniqueID]pb.ProxyMeta                              // proxy id to proxy meta
 	collID2Meta     map[typeutil.UniqueID]pb.CollectionInfo                         // collection_id -> meta
 	collName2ID     map[string]typeutil.UniqueID                                    // collection name to collection id
+	collAlias2ID    map[string]typeutil.UniqueID                                    // collection alias to collection id
 	partID2SegID    map[typeutil.UniqueID]map[typeutil.UniqueID]bool                // partition_id -> segment_id -> bool
 	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // collection_id/index_id/partition_id/segment_id -> meta
 	indexID2Meta    map[typeutil.UniqueID]pb.IndexInfo                              // collection_id/index_id -> meta
@@ -82,6 +87,7 @@ func (mt *metaTable) reloadFromKV() error {
 	mt.proxyID2Meta = make(map[typeutil.UniqueID]pb.ProxyMeta)
 	mt.collID2Meta = make(map[typeutil.UniqueID]pb.CollectionInfo)
 	mt.collName2ID = make(map[string]typeutil.UniqueID)
+	mt.collAlias2ID = make(map[string]typeutil.UniqueID)
 	mt.partID2SegID = make(map[typeutil.UniqueID]map[typeutil.UniqueID]bool)
 	mt.segID2IndexMeta = make(map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo)
 	mt.indexID2Meta = make(map[typeutil.UniqueID]pb.IndexInfo)
@@ -174,6 +180,20 @@ func (mt *metaTable) reloadFromKV() error {
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
 
+	_, values, err = mt.client.LoadWithPrefix(CollectionAliasMetaPrefix, 0)
+	if err != nil {
+		return err
+	}
+	for _, value := range values {
+		aliasInfo := pb.CollectionInfo{}
+		err = proto.UnmarshalText(value, &aliasInfo)
+		if err != nil {
+			return fmt.Errorf("RootCoord UnmarshalText pb.AliasInfo err:%w", err)
+		}
+		mt.collAlias2ID[aliasInfo.Schema.Name] = aliasInfo.ID
+	}
+
+	log.Debug("reload meta table from KV successfully")
 	return nil
 }
 
@@ -309,11 +329,25 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 		}
 		delete(mt.indexID2Meta, idxInfo.IndexID)
 	}
+	var aliases []string
+	// delete collection aliases
+	for alias, cid := range mt.collAlias2ID {
+		if cid == collID {
+			aliases = append(aliases, alias)
+		}
+	}
 
 	delMetakeys := []string{
 		fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID),
 		fmt.Sprintf("%s/%d", SegmentIndexMetaPrefix, collID),
 		fmt.Sprintf("%s/%d", IndexMetaPrefix, collID),
+	}
+
+	for _, alias := range aliases {
+		delete(mt.collAlias2ID, alias)
+		delMetakeys = append(delMetakeys,
+			fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias),
+		)
 	}
 
 	// save ddOpStr into etcd
@@ -372,7 +406,9 @@ func (mt *metaTable) GetCollectionByName(collectionName string, ts typeutil.Time
 	if ts == 0 {
 		vid, ok := mt.collName2ID[collectionName]
 		if !ok {
-			return nil, fmt.Errorf("can't find collection: " + collectionName)
+			if vid, ok = mt.collAlias2ID[collectionName]; !ok {
+				return nil, fmt.Errorf("can't find collection: " + collectionName)
+			}
 		}
 		col, ok := mt.collID2Meta[vid]
 		if !ok {
@@ -1044,4 +1080,89 @@ func (mt *metaTable) dupMeta() (
 		indexID2Meta[k] = v
 	}
 	return collID2Meta, segID2IndexMeta, indexID2Meta
+}
+
+func (mt *metaTable) AddAlias(collectionAlias string, collectionName string,
+	ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	if _, ok := mt.collAlias2ID[collectionAlias]; ok {
+		return fmt.Errorf("duplicate collection alias, alias = %s", collectionAlias)
+	}
+
+	if _, ok := mt.collName2ID[collectionAlias]; ok {
+		return fmt.Errorf("collection alias collides with existing collection name. collection = %s, alias = %s", collectionAlias, collectionAlias)
+	}
+
+	id, ok := mt.collName2ID[collectionName]
+	if !ok {
+		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
+	}
+	mt.collAlias2ID[collectionAlias] = id
+
+	meta := make(map[string]string)
+	addition := mt.getAdditionKV(ddOpStr, meta)
+	saveAlias := func(ts typeutil.Timestamp) (string, string, error) {
+		k1 := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
+		v1 := proto.MarshalTextString(&pb.CollectionInfo{ID: id, Schema: &schemapb.CollectionSchema{Name: collectionAlias}})
+		meta[k1] = v1
+		return k1, v1, nil
+	}
+
+	err := mt.client.MultiSave(meta, ts, addition, saveAlias)
+	if err != nil {
+		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+		panic("SnapShotKV MultiSave fail")
+	}
+	return nil
+}
+
+func (mt *metaTable) DeleteAlias(collectionAlias string, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
+		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
+	}
+	delete(mt.collAlias2ID, collectionAlias)
+
+	delMetakeys := []string{
+		fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias),
+	}
+	meta := make(map[string]string)
+	addition := mt.getAdditionKV(ddOpStr, meta)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetakeys, ts, addition)
+	if err != nil {
+		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+		panic("SnapShotKV MultiSave fail")
+	}
+	return nil
+}
+
+func (mt *metaTable) AlterAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
+		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
+	}
+
+	id, ok := mt.collName2ID[collectionName]
+	if !ok {
+		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
+	}
+	mt.collAlias2ID[collectionAlias] = id
+	meta := make(map[string]string)
+	addition := mt.getAdditionKV(ddOpStr, meta)
+	alterAlias := func(ts typeutil.Timestamp) (string, string, error) {
+		k1 := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
+		v1 := proto.MarshalTextString(&pb.CollectionInfo{ID: id, Schema: &schemapb.CollectionSchema{Name: collectionAlias}})
+		meta[k1] = v1
+		return k1, v1, nil
+	}
+
+	err := mt.client.MultiSave(meta, ts, addition, alterAlias)
+	if err != nil {
+		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+		panic("SnapShotKV MultiSave fail")
+	}
+	return nil
 }

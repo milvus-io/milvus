@@ -29,7 +29,7 @@ type simpleStruct struct {
 }
 
 func TestInit(t *testing.T) {
-	cfg := InitFromEnv("test")
+	cfg := initFromEnv("test")
 	assert.NotNil(t, cfg)
 }
 

@@ -35,34 +35,42 @@ func isNumber(c uint8) bool {
 	return true
 }
 
-func ValidateCollectionName(collName string) error {
-	collName = strings.TrimSpace(collName)
+func validateCollectionNameOrAlias(entity, entityType string) error {
+	entity = strings.TrimSpace(entity)
 
-	if collName == "" {
-		return errors.New("Collection name should not be empty")
+	if entity == "" {
+		return fmt.Errorf("Collection %s should not be empty", entityType)
 	}
 
-	invalidMsg := "Invalid collection name: " + collName + ". "
-	if int64(len(collName)) > Params.MaxNameLength {
-		msg := invalidMsg + "The length of a collection name must be less than " +
+	invalidMsg := fmt.Sprintf("Invalid collection %s: %s. ", entityType, entity)
+	if int64(len(entity)) > Params.MaxNameLength {
+		msg := invalidMsg + fmt.Sprintf("The length of a collection %s must be less than ", entityType) +
 			strconv.FormatInt(Params.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
 
-	firstChar := collName[0]
+	firstChar := entity[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
-		msg := invalidMsg + "The first character of a collection name must be an underscore or letter."
+		msg := invalidMsg + fmt.Sprintf("The first character of a collection %s must be an underscore or letter.", entityType)
 		return errors.New(msg)
 	}
 
-	for i := 1; i < len(collName); i++ {
-		c := collName[i]
+	for i := 1; i < len(entity); i++ {
+		c := entity[i]
 		if c != '_' && c != '$' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + "Collection name can only contain numbers, letters, dollars and underscores."
+			msg := invalidMsg + fmt.Sprintf("Collection %s can only contain numbers, letters, dollars and underscores.", entityType)
 			return errors.New(msg)
 		}
 	}
 	return nil
+}
+
+func ValidateCollectionAlias(collAlias string) error {
+	return validateCollectionNameOrAlias(collAlias, "alias")
+}
+
+func ValidateCollectionName(collName string) error {
+	return validateCollectionNameOrAlias(collName, "name")
 }
 
 func ValidatePartitionTag(partitionTag string, strictCheck bool) error {

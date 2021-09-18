@@ -15,87 +15,81 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"go.uber.org/zap"
 )
 
 type dmlChannels struct {
-	core *Core
-	lock sync.RWMutex
-	dml  map[string]msgstream.MsgStream
+	core       *Core
+	namePrefix string
+	capacity   int64
+	refcnt     sync.Map
+	idx        *atomic.Int64
+	pool       sync.Map
 }
 
-func newDMLChannels(c *Core) *dmlChannels {
-	return &dmlChannels{
-		core: c,
-		lock: sync.RWMutex{},
-		dml:  make(map[string]msgstream.MsgStream),
+func newDmlChannels(c *Core, chanNamePrefix string, chanNum int64) *dmlChannels {
+	d := &dmlChannels{
+		core:       c,
+		namePrefix: chanNamePrefix,
+		capacity:   chanNum,
+		refcnt:     sync.Map{},
+		idx:        atomic.NewInt64(0),
+		pool:       sync.Map{},
 	}
+
+	var i int64
+	for i = 0; i < chanNum; i++ {
+		name := fmt.Sprintf("%s_%d", d.namePrefix, i)
+		ms, err := c.msFactory.NewMsgStream(c.ctx)
+		if err != nil {
+			log.Error("add msgstream failed", zap.String("name", name), zap.Error(err))
+			panic("add msgstream failed")
+		}
+		ms.AsProducer([]string{name})
+		d.pool.Store(name, &ms)
+	}
+	log.Debug("init dml channels", zap.Int64("num", chanNum))
+	return d
 }
 
-// GetNumChannels get current dml channel count
-func (d *dmlChannels) GetNumChannels() int {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-	return len(d.dml)
+func (d *dmlChannels) GetDmlMsgStreamName() string {
+	cnt := d.idx.Load()
+	name := fmt.Sprintf("%s_%d", d.namePrefix, cnt)
+	d.idx.Store((cnt + 1) % d.capacity)
+	return name
 }
 
 // ListChannels lists all dml channel names
 func (d *dmlChannels) ListChannels() []string {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-
-	ret := make([]string, 0, len(d.dml))
-	for n := range d.dml {
-		ret = append(ret, n)
-	}
-	return ret
-
+	chanNames := make([]string, 0)
+	d.refcnt.Range(
+		func(k, v interface{}) bool {
+			chanNames = append(chanNames, k.(string))
+			return true
+		})
+	return chanNames
 }
 
-// Produce produces msg pack into specified channel
-func (d *dmlChannels) Produce(name string, pack *msgstream.MsgPack) error {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
-	ds, ok := d.dml[name]
-	if !ok {
-		return fmt.Errorf("channel %s not exist", name)
-	}
-	if err := ds.Produce(pack); err != nil {
-		return err
-	}
-	return nil
+// GetNumChannels get current dml channel count
+func (d *dmlChannels) GetNumChannels() int {
+	return len(d.ListChannels())
 }
 
 // Broadcast broadcasts msg pack into specified channel
-func (d *dmlChannels) Broadcast(name string, pack *msgstream.MsgPack) error {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
-	ds, ok := d.dml[name]
-	if !ok {
-		return fmt.Errorf("channel %s not exist", name)
-	}
-	if err := ds.Broadcast(pack); err != nil {
-		return err
-	}
-	return nil
-}
-
-// BroadcastAll invoke broadcast with provided msg pack in all channels specified
-func (d *dmlChannels) BroadcastAll(channels []string, pack *msgstream.MsgPack) error {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
-	for _, ch := range channels {
-		ds, ok := d.dml[ch]
-		if !ok {
-			return fmt.Errorf("channel %s not exist", ch)
-		}
-		if err := ds.Broadcast(pack); err != nil {
-			return err
+func (d *dmlChannels) Broadcast(chanNames []string, pack *msgstream.MsgPack) error {
+	for _, chanName := range chanNames {
+		// only in-use chanName exist in refcnt
+		if _, ok := d.refcnt.Load(chanName); ok {
+			v, _ := d.pool.Load(chanName)
+			if err := (*(v.(*msgstream.MsgStream))).Broadcast(pack); err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("channel %s not exist", chanName)
 		}
 	}
 	return nil
@@ -103,33 +97,34 @@ func (d *dmlChannels) BroadcastAll(channels []string, pack *msgstream.MsgPack) e
 
 // AddProducerChannels add named channels as producer
 func (d *dmlChannels) AddProducerChannels(names ...string) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
 	for _, name := range names {
-		log.Debug("add dml channel", zap.String("channel name", name))
-		_, ok := d.dml[name]
-		if !ok {
-			ms, err := d.core.msFactory.NewMsgStream(d.core.ctx)
-			if err != nil {
-				log.Debug("add msgstream failed", zap.String("name", name), zap.Error(err))
-				continue
+		if _, ok := d.pool.Load(name); ok {
+			var cnt int64
+			if _, ok := d.refcnt.Load(name); !ok {
+				cnt = 1
+			} else {
+				v, _ := d.refcnt.Load(name)
+				cnt = v.(int64) + 1
 			}
-			ms.AsProducer([]string{name})
-			d.dml[name] = ms
+			d.refcnt.Store(name, cnt)
+			log.Debug("assign dml channel", zap.String("chanName", name), zap.Int64("refcnt", cnt))
+		} else {
+			log.Error("invalid channel name", zap.String("chanName", name))
+			panic("invalid channel name: " + name)
 		}
 	}
 }
 
 // RemoveProducerChannels removes specified channels
 func (d *dmlChannels) RemoveProducerChannels(names ...string) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
 	for _, name := range names {
-		if ds, ok := d.dml[name]; ok {
-			ds.Close()
-			delete(d.dml, name)
+		if v, ok := d.refcnt.Load(name); ok {
+			cnt := v.(int64)
+			if cnt > 1 {
+				d.refcnt.Store(name, cnt-1)
+			} else {
+				d.refcnt.Delete(name)
+			}
 		}
 	}
 }

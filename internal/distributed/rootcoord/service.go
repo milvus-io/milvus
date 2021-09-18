@@ -63,6 +63,18 @@ type Server struct {
 	closer io.Closer
 }
 
+func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	return s.rootCoord.CreateAlias(ctx, request)
+}
+
+func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	return s.rootCoord.DropAlias(ctx, request)
+}
+
+func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AlterAlias(ctx, request)
+}
+
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &Server{
@@ -296,6 +308,7 @@ func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 	return s.rootCoord.ShowCollections(ctx, in)
 }
 
+// CreatePartition creates a partition in a collection
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreatePartition(ctx, in)
 }

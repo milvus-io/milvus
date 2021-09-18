@@ -49,7 +49,7 @@ type Replica interface {
 	updateSegmentPKRange(segID UniqueID, rowIDs []int64)
 	hasSegment(segID UniqueID, countFlushed bool) bool
 
-	updateStatistics(segID UniqueID, numRows int64) error
+	updateStatistics(segID UniqueID, numRows int64)
 	getSegmentStatisticsUpdates(segID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
 	segmentFlushed(segID UniqueID)
 }
@@ -362,7 +362,7 @@ func (replica *SegmentReplica) hasSegment(segID UniqueID, countFlushed bool) boo
 }
 
 // updateStatistics updates the number of rows of a segment in replica.
-func (replica *SegmentReplica) updateStatistics(segID UniqueID, numRows int64) error {
+func (replica *SegmentReplica) updateStatistics(segID UniqueID, numRows int64) {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 
@@ -370,16 +370,16 @@ func (replica *SegmentReplica) updateStatistics(segID UniqueID, numRows int64) e
 	if seg, ok := replica.newSegments[segID]; ok {
 		seg.memorySize = 0
 		seg.numRows += numRows
-		return nil
+		return
 	}
 
 	if seg, ok := replica.normalSegments[segID]; ok {
 		seg.memorySize = 0
 		seg.numRows += numRows
-		return nil
+		return
 	}
 
-	return fmt.Errorf("There's no segment %v", segID)
+	log.Warn("update segment num row not exist", zap.Int64("segID", segID))
 }
 
 // getSegmentStatisticsUpdates gives current segment's statistics updates.

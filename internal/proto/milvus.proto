@@ -24,6 +24,10 @@ service MilvusService {
   rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
   rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {}
 
+  rpc CreateAlias(CreateAliasRequest) returns (common.Status) {}
+  rpc DropAlias(DropAliasRequest) returns (common.Status) {}
+  rpc AlterAlias(AlterAliasRequest) returns (common.Status) {}
+
   rpc CreateIndex(CreateIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
   rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
@@ -49,8 +53,25 @@ service MilvusService {
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
 }
 
+message CreateAliasRequest {
+  common.MsgBase base = 1;
+  string collection_name = 2;
+  string alias = 3;
+}
+
+message DropAliasRequest {
+  common.MsgBase base = 1;
+  string alias = 2;
+}
+
+message AlterAliasRequest{
+  common.MsgBase base = 1;
+  string collection_name = 2;
+  string alias = 3;
+}
+
 /**
-* Create collection in milvus 
+* Create collection in milvus
 */
 message CreateCollectionRequest {
   // Not useful for now
@@ -138,31 +159,57 @@ message DescribeCollectionResponse {
   // The utc timestamp calculated by created_timestamp
   uint64 created_utc_timestamp = 7;
   // The shards number you set.
-  int32 shards_num = 8; 
+  int32 shards_num = 8;
+  // The aliases of this collection
+  repeated string aliases = 9;
 }
 
+/**
+* Load collection data into query nodes, then you can do vector search on this collection.
+*/
 message LoadCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to load
+  string collection_name = 3;
 }
 
+/**
+* Release collection data from query nodes, then you can't do vector search on this collection.
+*/
 message ReleaseCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to release
+  string collection_name = 3;
 }
 
+/**
+* Get collection statistics like row_count.
+*/
 message GetCollectionStatisticsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want get statistics
+  string collection_name = 3;
 }
 
+/**
+* Will return collection statistics in stats field like [{key:"row_count",value:"1"}]
+*/
 message GetCollectionStatisticsResponse {
+  // Contain error_code and reason
   common.Status status = 1;
+  // Collection statistics data
   repeated common.KeyValuePair stats = 2;
 }
+
 
 enum ShowType {
   All = 0;

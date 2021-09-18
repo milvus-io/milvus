@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+/* #nosec G103 */
 func TestInsertBinlog(t *testing.T) {
 	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 
@@ -280,6 +281,7 @@ func TestInsertBinlog(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDeleteBinlog(t *testing.T) {
 	w := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50)
 
@@ -536,6 +538,7 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDDLBinlog1(t *testing.T) {
 	w := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 
@@ -792,6 +795,7 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDDLBinlog2(t *testing.T) {
 	w := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 

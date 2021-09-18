@@ -129,6 +129,54 @@ func TestInsertMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	assert.Nil(t, tsMsg)
 }
 
+func TestDeleteMsg(t *testing.T) {
+	deleteMsg := &DeleteMsg{
+		BaseMsg: generateBaseMsg(),
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+
+			CollectionName: "test_collection",
+			ChannelID:      "test-channel",
+			Timestamps:     []uint64{2, 1, 3},
+			PrimaryKeys:    []int64{5, 6, 7},
+		},
+	}
+
+	assert.NotNil(t, deleteMsg.TraceCtx())
+
+	ctx := context.Background()
+	deleteMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, deleteMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), deleteMsg.ID())
+	assert.Equal(t, commonpb.MsgType_Delete, deleteMsg.Type())
+	assert.Equal(t, int64(3), deleteMsg.SourceID())
+
+	bytes, err := deleteMsg.Marshal(deleteMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := deleteMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	deleteMsg2, ok := tsMsg.(*DeleteMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), deleteMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_Delete, deleteMsg2.Type())
+	assert.Equal(t, int64(3), deleteMsg2.SourceID())
+}
+
+func TestDeleteMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	deleteMsg := &DeleteMsg{}
+	tsMsg, err := deleteMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
 func TestSearchMsg(t *testing.T) {
 	searchMsg := &SearchMsg{
 		BaseMsg: generateBaseMsg(),

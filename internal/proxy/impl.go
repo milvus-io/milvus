@@ -527,7 +527,6 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		log.Debug("ShowCollections Done",
 			zap.Error(err),
 			zap.String("role", Params.RoleName),
-			zap.Any("request", request),
 			zap.Any("result", sct.result))
 	}()
 
@@ -914,7 +913,6 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		log.Debug("ShowPartitions Done",
 			zap.Error(err),
 			zap.String("role", Params.RoleName),
-			zap.Any("request", request),
 			zap.Any("result", spt.result))
 	}()
 
@@ -1544,6 +1542,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	err = ft.WaitToFinish()
 	if err != nil {
+		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
@@ -1629,6 +1628,142 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		Status:     qt.result.Status,
 		FieldsData: qt.result.FieldsData,
 	}, nil
+}
+
+func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+	cat := &CreateAliasTask{
+		ctx:                ctx,
+		Condition:          NewTaskCondition(ctx),
+		CreateAliasRequest: request,
+		rootCoord:          node.rootCoord,
+	}
+
+	err := node.sched.ddQueue.Enqueue(cat)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug("CreateAlias",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("alias", request.Alias),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("CreateAlias Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("alias", request.Alias),
+			zap.String("collection", request.CollectionName))
+	}()
+
+	err = cat.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return cat.result, nil
+}
+
+func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+	dat := &DropAliasTask{
+		ctx:              ctx,
+		Condition:        NewTaskCondition(ctx),
+		DropAliasRequest: request,
+		rootCoord:        node.rootCoord,
+	}
+
+	err := node.sched.ddQueue.Enqueue(dat)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug("DropAlias",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("alias", request.Alias))
+	defer func() {
+		log.Debug("DropAlias Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("alias", request.Alias))
+	}()
+
+	err = dat.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return dat.result, nil
+}
+
+func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+	aat := &AlterAliasTask{
+		ctx:               ctx,
+		Condition:         NewTaskCondition(ctx),
+		AlterAliasRequest: request,
+		rootCoord:         node.rootCoord,
+	}
+
+	err := node.sched.ddQueue.Enqueue(aat)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug("AlterAlias",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("alias", request.Alias),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("AlterAlias Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("alias", request.Alias),
+			zap.String("collection", request.CollectionName))
+	}()
+
+	err = aat.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return aat.result, nil
 }
 
 func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {

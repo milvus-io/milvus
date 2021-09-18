@@ -3045,6 +3045,11 @@ class TestLoadPartition:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_partition_not_existed(self, connect, collection):
+        """
+        target: test load partition for invalid scenario
+        method: load not existed partition
+        expected: raise exception and report the error
+        """
         partition_name = gen_unique_str(uid_load)
         try:
             connect.load_partitions(collection, [partition_name])
@@ -3057,8 +3062,8 @@ class TestLoadPartition:
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_partition_not_load(self, connect, collection):
         """
-        target: test release collection without load
-        method:
+        target: test release partition without load
+        method: release partition without load
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)

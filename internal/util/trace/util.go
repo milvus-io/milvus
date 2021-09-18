@@ -45,7 +45,7 @@ func InitTracing(serviceName string) io.Closer {
 		},
 	}
 	if true {
-		cfg = InitFromEnv(serviceName)
+		cfg = initFromEnv(serviceName)
 	}
 	tracer, closer, err := cfg.NewTracer()
 	tracingCloser = closer
@@ -58,7 +58,7 @@ func InitTracing(serviceName string) io.Closer {
 	return tracingCloser
 }
 
-func InitFromEnv(serviceName string) *config.Configuration {
+func initFromEnv(serviceName string) *config.Configuration {
 	cfg, err := config.FromEnv()
 	if err != nil {
 		log.Error(err)

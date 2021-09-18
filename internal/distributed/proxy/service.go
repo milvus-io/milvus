@@ -417,3 +417,15 @@ func (s *Server) RegisterLink(ctx context.Context, request *milvuspb.RegisterLin
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.proxy.GetMetrics(ctx, request)
 }
+
+func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateAlias(ctx, request)
+}
+
+func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	return s.proxy.DropAlias(ctx, request)
+}
+
+func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterAlias(ctx, request)
+}

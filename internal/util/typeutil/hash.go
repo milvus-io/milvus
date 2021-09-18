@@ -27,6 +27,8 @@ func Hash32Bytes(b []byte) (uint32, error) {
 }
 
 func Hash32Uint64(v uint64) (uint32, error) {
+	// need unsafe package to get element byte size
+	/* #nosec G103 */
 	b := make([]byte, unsafe.Sizeof(v))
 	binary.LittleEndian.PutUint64(b, v)
 	return Hash32Bytes(b)

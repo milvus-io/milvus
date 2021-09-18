@@ -19,7 +19,7 @@ type Config struct {
 	maxSleepTime time.Duration
 }
 
-func NewDefaultConfig() *Config {
+func newDefaultConfig() *Config {
 	return &Config{
 		attempts:     uint(10),
 		sleep:        200 * time.Millisecond,

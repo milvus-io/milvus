@@ -12,7 +12,6 @@
 package mqclient
 
 import (
-	"reflect"
 	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -88,8 +87,6 @@ func (pc *pulsarConsumer) Close() {
 // ONLY used in Chan() function
 // DON'T use elsewhere
 func patchEarliestMessageID(mid *pulsar.MessageID) {
-	v := reflect.ValueOf(mid)
-	v = v.Elem()
 	// cannot use field.SetInt(), since partitionIdx is not exported
 
 	// this reflect+ unsafe solution is disable by go vet
@@ -101,6 +98,7 @@ func patchEarliestMessageID(mid *pulsar.MessageID) {
 	//*(*int32)(unsafe.Pointer(v.InterfaceData()[1] + 20)) = 0
 
 	// use direct unsafe conversion
+	/* #nosec G103 */
 	r := (*iface)(unsafe.Pointer(mid))
 	id := (*messageID)(r.Data)
 	id.partitionIdx = 0

@@ -68,14 +68,12 @@ TEST(ConcurrentVector, TestMultithreads) {
 
     ConcurrentVectorImpl<int64_t, false> c_vec(dim, 32);
     std::atomic<int64_t> ack_counter = 0;
-    //    std::mutex mutex;
 
     auto executor = [&](int thread_id) {
         std::default_random_engine e(42 + thread_id);
         int64_t data = 0;
         int64_t total_count = 0;
         for (int i = 0; i < 10000; ++i) {
-            // std::lock_guard lck(mutex);
             int insert_size = e() % 150;
             vector<int64_t> vec(insert_size * dim);
             for (auto& x : vec) {
@@ -109,6 +107,7 @@ TEST(ConcurrentVector, TestMultithreads) {
         }
     }
 }
+
 TEST(ConcurrentVector, TestAckSingle) {
     std::vector<std::tuple<int64_t, int64_t, int64_t>> raw_data;
     std::default_random_engine e(42);
