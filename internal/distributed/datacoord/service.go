@@ -185,6 +185,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTime
 	return s.dataCoord.GetTimeTickChannel(ctx)
 }
 
+// GetStatisticsChannel gets statistics channel
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataCoord.GetStatisticsChannel(ctx)
 }
