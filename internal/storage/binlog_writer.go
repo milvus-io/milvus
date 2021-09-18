@@ -27,7 +27,7 @@ const (
 	ServerVersion = 1
 )
 
-// BinlogType is to distinguish different files saving diffrent data.
+// BinlogType is to distinguish different files saving different data.
 type BinlogType int32
 
 const (
