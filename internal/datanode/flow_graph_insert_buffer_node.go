@@ -396,6 +396,7 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 	return
 }
 
+/* #nosec G103 */
 // bufferInsertMsg put InsertMsg into buffer
 // 	1.1 fetch related schema from replica
 // 	1.2 Get buffer data and put data into each field buffer
