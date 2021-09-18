@@ -35,10 +35,10 @@ IndexCoordinate. In fact, the index construction has not been completed yet. Ind
 process to find all the index tasks that need to be allocated periodically, and then allocate it to IndexNode for 
 actual execution.
 
-When IndexCoordinate receives a delete index request from RootCoordinate, IndexCoordinate traverses the MetaTable, 
+When IndexCoordinate receives a request to delete an index from RootCoordinate, IndexCoordinate traverses the MetaTable, 
 marks the corresponding index task as deleted, and returns. It is not really deleted from the MetaTable at this time. 
 IndexCoordinate has another background process that periodically queries the index tasks that need to be deleted. 
-When the index task is marked as deleted and the index status is complete, the corresponding index task is actually 
+When the index task is marked as deleted, and the index status is complete, the corresponding index task is actually 
 deleted from the MetaTable.
 
 When IndexCoordinate receives a query index status request from other components, first check whether the corresponding
