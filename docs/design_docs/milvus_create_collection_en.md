@@ -18,12 +18,17 @@ service MilvusService {
 }
 
 message CreateCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  // `schema` is the serialized `schema.CollectionSchema`
-  bytes schema = 4; // must
-  int32 shards_num = 5; // must. Once set, no modification is allowed
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3; 
+  // The serialized `schema.CollectionSchema`(Required)
+  bytes schema = 4; 
+  // Once set, no modification is allowed (Optional)
+  // https://github.com/milvus-io/milvus/issues/6690
+  int32 shards_num = 5;
 }
 
 message CollectionSchema {
@@ -54,14 +59,13 @@ type task interface {
 	Notify(err error)
 Notify(err error)
 
-type CreateCollectionTask struct {
+type createCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
-	ctx context.Context
+	ctx       context.Context
 	rootCoord types.RootCoord
-	dataCoordClient types.DataCoord
-	result *commonpb.Status
-	schema *schemapb.CollectionSchema
+	result    *commonpb.Status
+	schema    *schemapb.CollectionSchema
 }
 ```
 

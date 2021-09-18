@@ -163,10 +163,3 @@ WatchDmChannels -> new dataSyncService -> HEALTH
 • If collection:flowgraph = n : n  , load balancing on vchannels.
 
 ![datanode_design](graphs/collection_flowgraph_n_n.jpg)
-
-
-
-
-
-
-
