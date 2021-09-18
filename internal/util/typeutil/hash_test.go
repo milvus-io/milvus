@@ -37,6 +37,7 @@ func TestHash32_Uint64(t *testing.T) {
 	t.Log(h1)
 	assert.Equal(t, h, h1)
 
+	/* #nosec G103 */
 	b := make([]byte, unsafe.Sizeof(u))
 	b[0] = 0x12
 	h2, err := Hash32Bytes(b)

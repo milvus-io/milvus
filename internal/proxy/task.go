@@ -906,6 +906,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	threshold := Params.PulsarMaxMessageSize / factor
 	log.Debug("Proxy", zap.Int("threshold of message size: ", threshold))
 	// not accurate
+	/* #nosec G103 */
 	getFixedSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
 		size := 0
 
@@ -974,6 +975,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 			curMsg.Timestamps = append(curMsg.Timestamps, ts)
 			curMsg.RowIDs = append(curMsg.RowIDs, rowID)
 			curMsg.RowData = append(curMsg.RowData, row)
+			/* #nosec G103 */
 			curMsgSize += 4 + 8 + int(unsafe.Sizeof(row.Value))
 			curMsgSize += len(row.Value)
 
