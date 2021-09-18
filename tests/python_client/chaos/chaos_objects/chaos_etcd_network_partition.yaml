@@ -1,7 +1,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
 metadata:
-  name: test-rootcoord-network-partition
+  name: test-etcd-network-partition
   namespace: chaos-testing
 spec:
   action: partition
@@ -20,6 +20,5 @@ spec:
         - chaos-testing
       labelSelectors:
         app.kubernetes.io/instance: chaos-testing
-        app.kubernetes.io/name: milvus
-        component: rootcoord
+        app.kubernetes.io/name: etcd
     mode: one

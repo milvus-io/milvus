@@ -1,7 +1,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
 metadata:
-  name: test-rootcoord-network-partition
+  name: test-querycoord-network-partition
   namespace: chaos-testing
 spec:
   action: partition
@@ -11,7 +11,7 @@ spec:
       - chaos-testing
     labelSelectors:
       app.kubernetes.io/instance: chaos-testing
-      app.kubernetes.io/name: milvus
+      app.kubernetes.io/name: etcd
   duration: 5m
   direction: both
   target:
@@ -21,5 +21,5 @@ spec:
       labelSelectors:
         app.kubernetes.io/instance: chaos-testing
         app.kubernetes.io/name: milvus
-        component: rootcoord
+        component: querycoord
     mode: one
