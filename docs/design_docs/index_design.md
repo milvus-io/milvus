@@ -7,7 +7,7 @@ update: 7.31.2021, by [Cai.Zhang](https://github.com/xiaocai2333)
 IndexCoord is a component responsible for scheduling index construction tasks and maintaining index status. 
 IndexCoord accepts requests from rootcoord to build indexes, delete indexes, and query index information. 
 IndexCoord is responsible for assigning IndexBuildID to the request to build the index, and forwarding the 
-request to build the index to IndexNode. IndexCoord records the status of the index and the index file.
+request to build the index to IndexNode. IndexCoord records the status of the index, and the index file.
 
 The following figure shows the design of the indexcoord component:
 
