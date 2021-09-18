@@ -40,6 +40,8 @@ func TestValidateCollectionName(t *testing.T) {
 
 	for _, name := range invalidNames {
 		assert.NotNil(t, ValidateCollectionName(name))
+		assert.NotNil(t, validateCollectionNameOrAlias(name, "name"))
+		assert.NotNil(t, validateCollectionNameOrAlias(name, "alias"))
 	}
 }
 

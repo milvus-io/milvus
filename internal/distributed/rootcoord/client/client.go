@@ -559,3 +559,24 @@ func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequ
 	}
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
+
+func (c *GrpcClient) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.CreateAlias(ctx, req)
+	})
+	return ret.(*commonpb.Status), err
+}
+
+func (c *GrpcClient) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.DropAlias(ctx, req)
+	})
+	return ret.(*commonpb.Status), err
+}
+
+func (c *GrpcClient) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.AlterAlias(ctx, req)
+	})
+	return ret.(*commonpb.Status), err
+}

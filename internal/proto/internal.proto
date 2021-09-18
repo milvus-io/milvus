@@ -97,6 +97,23 @@ message DropPartitionRequest {
   int64 partitionID = 7;
 }
 
+message CreateAliasRequest {
+  common.MsgBase base = 1;
+  string collection_name = 2;
+  string alias = 3;
+}
+
+message DropAliasRequest {
+  common.MsgBase base = 1;
+  string alias = 2;
+}
+
+message AlterAliasRequest{
+  common.MsgBase base = 1;
+  string collection_name = 2;
+  string alias = 3;
+}
+
 message CreateIndexRequest {
   common.MsgBase base = 1;
   string db_name = 2;
