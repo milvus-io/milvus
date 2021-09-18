@@ -82,7 +82,6 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		bucketName:  option.BucketName,
 	}
 	log.Debug("MinioKV new MinioKV success.")
-	//go kv.performanceTest(false, 16<<20)
 
 	return kv, nil
 }
