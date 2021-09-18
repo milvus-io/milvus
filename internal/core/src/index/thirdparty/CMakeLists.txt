@@ -20,6 +20,20 @@ endif()
 message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
 # ----------------------------------------------------------------------
 # Find pthreads
+set(KNOWHERE_THIRDPARTY_DEPENDENCIES
+        Arrow
+        FAISS
+        GTest
+        MKL
+        )
+message(STATUS "Using ${KNOWHERE_DEPENDENCY_SOURCE} approach to find dependencies")
+
+# For each dependency, set dependency source to global default, if unset
+foreach (DEPENDENCY ${KNOWHERE_THIRDPARTY_DEPENDENCIES})
+    if ("${${DEPENDENCY}_SOURCE}" STREQUAL "")
+        set(${DEPENDENCY}_SOURCE ${KNOWHERE_DEPENDENCY_SOURCE})
+    endif ()
+endforeach ()
 
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )

@@ -10,101 +10,55 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
-
-set(KNOWHERE_THIRDPARTY_DEPENDENCIES
-        Arrow
-        FAISS
-        GTest
-        OpenBLAS
-        MKL
-        )
-
 message(STATUS "Using ${KNOWHERE_DEPENDENCY_SOURCE} approach to find dependencies")
-
-# For each dependency, set dependency source to global default, if unset
-foreach (DEPENDENCY ${KNOWHERE_THIRDPARTY_DEPENDENCIES})
-    if ("${${DEPENDENCY}_SOURCE}" STREQUAL "")
-        set(${DEPENDENCY}_SOURCE ${KNOWHERE_DEPENDENCY_SOURCE})
-    endif ()
-endforeach ()
-
-macro(build_dependency DEPENDENCY_NAME)
-    if ("${DEPENDENCY_NAME}" STREQUAL "Arrow")
-        build_arrow()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "OpenBLAS")
-        build_openblas()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "FAISS")
-        build_faiss()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "MKL")
-        build_mkl()
-    else ()
-        message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
-    endif ()
-endmacro()
-
-macro(resolve_dependency DEPENDENCY_NAME)
-    if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
-        find_package(${DEPENDENCY_NAME} MODULE)
-        if (NOT ${${DEPENDENCY_NAME}_FOUND})
-            build_dependency(${DEPENDENCY_NAME})
-        endif ()
-    elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
-        build_dependency(${DEPENDENCY_NAME})
-    elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
-        find_package(${DEPENDENCY_NAME} REQUIRED)
-    endif ()
-endmacro()
+set(OpenBLAS_SOURCE "AUTO")
 
 # ----------------------------------------------------------------------
 # Identify OS
 if (UNIX)
-    if (APPLE)
-        set(CMAKE_OS_NAME "osx" CACHE STRING "Operating system name" FORCE)
-    else (APPLE)
-        ## Check for Debian GNU/Linux ________________
-        find_file(DEBIAN_FOUND debian_version debconf.conf
+    ## Check for Debian GNU/Linux ________________
+    find_file(DEBIAN_FOUND debian_version debconf.conf
+            PATHS /etc
+           )
+    if (DEBIAN_FOUND)
+        set(CMAKE_OS_NAME "debian" CACHE STRING "Operating system name" FORCE)
+    endif (DEBIAN_FOUND)
+    ##  Check for Fedora _________________________
+    find_file(FEDORA_FOUND fedora-release
+            PATHS /etc
+            )
+    if (FEDORA_FOUND)
+        set(CMAKE_OS_NAME "fedora" CACHE STRING "Operating system name" FORCE)
+    endif (FEDORA_FOUND)
+    ##  Check for RedHat _________________________
+    find_file(REDHAT_FOUND redhat-release inittab.RH
+            PATHS /etc
+            )
+    if (REDHAT_FOUND)
+        set(CMAKE_OS_NAME "redhat" CACHE STRING "Operating system name" FORCE)
+    endif (REDHAT_FOUND)
+    ## Extra check for Ubuntu ____________________
+    if (DEBIAN_FOUND)
+        ## At its core Ubuntu is a Debian system, with
+        ## a slightly altered configuration; hence from
+        ## a first superficial inspection a system will
+        ## be considered as Debian, which signifies an
+        ## extra check is required.
+        find_file(UBUNTU_EXTRA legal issue
                 PATHS /etc
                 )
-        if (DEBIAN_FOUND)
-            set(CMAKE_OS_NAME "debian" CACHE STRING "Operating system name" FORCE)
-        endif (DEBIAN_FOUND)
-        ##  Check for Fedora _________________________
-        find_file(FEDORA_FOUND fedora-release
-                PATHS /etc
-                )
-        if (FEDORA_FOUND)
-            set(CMAKE_OS_NAME "fedora" CACHE STRING "Operating system name" FORCE)
-        endif (FEDORA_FOUND)
-        ##  Check for RedHat _________________________
-        find_file(REDHAT_FOUND redhat-release inittab.RH
-                PATHS /etc
-                )
-        if (REDHAT_FOUND)
-            set(CMAKE_OS_NAME "redhat" CACHE STRING "Operating system name" FORCE)
-        endif (REDHAT_FOUND)
-        ## Extra check for Ubuntu ____________________
-        if (DEBIAN_FOUND)
-            ## At its core Ubuntu is a Debian system, with
-            ## a slightly altered configuration; hence from
-            ## a first superficial inspection a system will
-            ## be considered as Debian, which signifies an
-            ## extra check is required.
-            find_file(UBUNTU_EXTRA legal issue
-                    PATHS /etc
+           if (UBUNTU_EXTRA)
+            ## Scan contents of file
+            file(STRINGS ${UBUNTU_EXTRA} UBUNTU_FOUND
+                    REGEX Ubuntu
                     )
-            if (UBUNTU_EXTRA)
-                ## Scan contents of file
-                file(STRINGS ${UBUNTU_EXTRA} UBUNTU_FOUND
-                        REGEX Ubuntu
-                        )
-                ## Check result of string search
-                if (UBUNTU_FOUND)
-                    set(CMAKE_OS_NAME "ubuntu" CACHE STRING "Operating system name" FORCE)
-                    set(DEBIAN_FOUND FALSE)
-                endif (UBUNTU_FOUND)
-            endif (UBUNTU_EXTRA)
-        endif (DEBIAN_FOUND)
-    endif (APPLE)
+           ## Check result of string search
+            if (UBUNTU_FOUND)
+                set(CMAKE_OS_NAME "ubuntu" CACHE STRING "Operating system name" FORCE)
+                set(DEBIAN_FOUND FALSE)
+            endif (UBUNTU_FOUND)
+        endif (UBUNTU_EXTRA)
+    endif (DEBIAN_FOUND)
 endif (UNIX)
 
 
@@ -212,8 +166,8 @@ endif ()
 
 # ----------------------------------------------------------------------
 # Openblas
-set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
 macro(build_openblas)
+    set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
     message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
     set(OpenBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
     set(OpenBLAS_LIB_DIR "${OPENBLAS_PREFIX}/lib")
@@ -274,10 +228,43 @@ endmacro()
 
 if (KNOWHERE_WITH_OPENBLAS)
     if (OpenBLAS_SOURCE STREQUAL "AUTO")
-        find_package(OpenBLAS MODULE)
-        if (NOT ${OpenBLAS_FOUND})
-            build_openblas()
-        endif ()
+       unset(OpenBLAS_DIR CACHE)
+       set(OpenBLAS_INCLUDE_SEARCH_PATHS
+            /opt/OpenBLAS/include
+            ${OPENBLAS_PREFIX}
+          )
+        set(OpenBLAS_LIB_SEARCH_PATHS
+            /opt/OpenBLAS/lib
+            ${OPENBLAS_PREFIX}
+	  )
+        find_path(OpenBLAS_INCLUDE_DIR NAMES openblas_config.h lapacke.h PATHS ${OpenBLAS_INCLUDE_SEARCH_PATHS})
+        find_library(OpenBLAS_LIB NAMES openblas PATHS ${OpenBLAS_LIB_SEARCH_PATHS})
+        find_library(Lapacke_LIB NAMES lapacke PATHS ${OpenBLAS_LIB_SEARCH_PATHS})
+        set(OpenBLAS_FOUND ON)
+        #    Check include files
+        if(NOT OpenBLAS_INCLUDE_DIR)
+            set(OpenBLAS_FOUND OFF)
+        endif()
+        #    Check libraries
+        if(NOT OpenBLAS_LIB)
+            set(OpenBLAS_FOUND OFF)
+        endif()
+	if (OpenBLAS_FOUND)
+        set(OpenBLAS_LIBRARIES ${OpenBLAS_LIB})  #location of .so
+	    STRING(REGEX REPLACE "/libopenblas.so" "" OpenBLAS_LIB_DIR ${OpenBLAS_LIBRARIES})
+        if (Lapacke_LIB)
+            set(OpenBLAS_LIBRARIES ${OpenBLAS_LIBRARIES} ${Lapacke_LIB})
+        endif()
+        add_library(openblas SHARED IMPORTED)
+        set_target_properties(
+            openblas
+            PROPERTIES
+	        IMPORTED_GLOBAL TRUE
+	        IMPORTED_LOCATION "${OpenBLAS_LIBRARIES}"
+            INTERFACE_INCLUDE_DIRECTORIES "${OpenBLAS_INCLUDE_DIR}")
+        else()
+	        build_openblas()
+        endif()
     elseif (OpenBLAS_SOURCE STREQUAL "BUNDLED")
         build_openblas()
     elseif (OpenBLAS_SOURCE STREQUAL "SYSTEM")

@@ -70,19 +70,10 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
 
     ${CMAKE_CMD}
     make clean
-    make -j 8 || exit 1
-    make install || exit 1
 fi
 
-CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
--DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
--DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
--DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
--DMILVUS_ENABLE_PROFILING=${PROFILING} \
--DOpenBLAS_SOURCE=AUTO \
-../"
-echo ${CMAKE_CMD}
+make -j 8 ||exit 1
 
-${CMAKE_CMD}
+make install || exit 1
 
 
