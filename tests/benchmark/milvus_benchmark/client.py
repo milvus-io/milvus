@@ -14,6 +14,8 @@ from milvus_benchmark.runners import utils
 
 logger = logging.getLogger("milvus_benchmark.client")
 
+
+# yaml file and code file comparison table of Index parameters
 INDEX_MAP = {
     "flat": "FLAT",
     "ivf_flat": "IVF_FLAT",
