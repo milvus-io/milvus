@@ -141,28 +141,52 @@ message DescribeCollectionResponse {
   int32 shards_num = 8; 
 }
 
+/**
+* Load collection data into query nodes, then you can do vector search on this collection.
+*/
 message LoadCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to load
+  string collection_name = 3;
 }
 
+/**
+* Release collection data from query nodes, then you can't do vector search on this collection.
+*/
 message ReleaseCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to release
+  string collection_name = 3;
 }
 
+/**
+* Get collection statistics like row_count.
+*/
 message GetCollectionStatisticsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want get statistics
+  string collection_name = 3;
 }
 
+/**
+* Will return collection statistics in stats field like [{key:"row_count",value:"1"}]
+*/
 message GetCollectionStatisticsResponse {
+  // Contain error_code and reason
   common.Status status = 1;
+  // Collection statistics data
   repeated common.KeyValuePair stats = 2;
 }
+
 
 enum ShowType {
   All = 0;
