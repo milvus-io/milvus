@@ -54,10 +54,12 @@ type insertBufferNode struct {
 	BaseNode
 	channelName  string
 	insertBuffer *insertBuffer
-	replica      Replica
-	idAllocator  allocatorInterface
-	flushMap     sync.Map
-	flushChan    <-chan *flushMsg
+	// insertBuffer map[UniqueID]*BufferData // SegmentID to BufferData
+	replica     Replica
+	idAllocator allocatorInterface
+
+	flushMap  sync.Map
+	flushChan <-chan *flushMsg
 
 	minIOKV kv.BaseKV
 
@@ -79,6 +81,22 @@ type segmentFlushUnit struct {
 	checkPoint     map[UniqueID]segmentCheckPoint
 	startPositions []*datapb.SegmentStartPosition
 	flushed        bool
+}
+
+type BufferData struct {
+	buffer *InsertData
+	size   int64
+	limit  int64 // Num of rows
+}
+
+func newBufferData(dimension int64) (*BufferData, error) {
+	if dimension == 0 {
+		return nil, errors.New("Invalid dimension")
+	}
+
+	limit := Params.FlushInsertBufferSize * (1 << 18) / dimension
+
+	return &BufferData{&InsertData{}, 0, limit}, nil
 }
 
 type insertBuffer struct {
@@ -199,7 +217,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	// insert messages -> buffer
 	for _, msg := range iMsg.insertMessages {
-		err := ibNode.bufferInsertMsg(iMsg, msg)
+		err := ibNode.bufferInsertMsg(msg, endPositions[0])
 		if err != nil {
 			log.Warn("msg to buffer failed", zap.Error(err))
 		}
@@ -383,7 +401,7 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 // 	1.2 Get buffer data and put data into each field buffer
 // 	1.3 Put back into buffer
 // 	1.4 Update related statistics
-func (ibNode *insertBufferNode) bufferInsertMsg(iMsg *insertMsg, msg *msgstream.InsertMsg) error {
+func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos *internalpb.MsgPosition) error {
 	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
 		return errors.New("misaligned messages detected")
 	}
@@ -625,13 +643,8 @@ func (ibNode *insertBufferNode) bufferInsertMsg(iMsg *insertMsg, msg *msgstream.
 	ibNode.insertBuffer.insertData[currentSegID] = idata
 
 	// store current endPositions as Segment->EndPostion
-	endPositions := make([]*internalpb.MsgPosition, 0, len(iMsg.endPositions))
-	for idx := range iMsg.endPositions {
-		pos := proto.Clone(iMsg.endPositions[idx]).(*internalpb.MsgPosition)
-		pos.ChannelName = ibNode.channelName
-		endPositions = append(endPositions, pos)
-	}
-	ibNode.replica.updateSegmentEndPosition(currentSegID, endPositions[0])
+	ibNode.replica.updateSegmentEndPosition(currentSegID, endPos)
+
 	// update segment pk filter
 	ibNode.replica.updateSegmentPKRange(currentSegID, msg.GetRowIDs())
 	return nil
