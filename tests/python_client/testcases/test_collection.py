@@ -3062,8 +3062,8 @@ class TestLoadPartition:
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_partition_not_load(self, connect, collection):
         """
-        target: test release collection without load
-        method:
+        target: test release partition without load
+        method: release partition without load
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
