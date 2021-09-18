@@ -1191,6 +1191,11 @@ class TestIndexInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_with_invalid_index_params(self, connect, collection, get_index):
+        """
+        target: test create index interface for invalid scenario
+        method: create index with invalid index params
+        expected: raise exception
+        """
         logging.getLogger().info(get_index)
         with pytest.raises(Exception) as e:
             connect.create_index(collection, field_name, get_index)
