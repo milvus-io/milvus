@@ -355,7 +355,12 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 			err = ibNode.replica.addNewSegment(currentSegID, collID, partitionID, msg.GetChannelID(),
 				startPos, endPos)
 			if err != nil {
-				log.Warn("add segment wrong", zap.Int64("Seg ID", currentSegID), zap.Error(err))
+				log.Error("add segment wrong",
+					zap.Int64("segID", currentSegID),
+					zap.Int64("collID", collID),
+					zap.Int64("partID", partitionID),
+					zap.String("chanName", msg.GetChannelID()),
+					zap.Error(err))
 				return
 			}
 		}

@@ -92,7 +92,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					zap.Uint64("Message endts", msg.EndTs()),
 					zap.Uint64("FilterThreshold", FilterThreshold),
 				)
-				if ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg)) {
+				if ddn.filterFlushedSegmentInsertMessages(imsg) {
 					continue
 				}
 			}
