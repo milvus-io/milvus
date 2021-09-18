@@ -357,11 +357,11 @@ type IDAllocator interface {
 
 // Every collection has its RocksMQ
 type RocksMQ struct {
-		store			 *gorocksdb.DB
-	kv					kv.Base
+	store		*gorocksdb.DB
+	kv			kv.Base
 	idAllocator IDAllocator
-	produceMu	 sync.Mutex
-	consumeMu	 sync.Mutex
+	produceMu	sync.Mutex
+	consumeMu	sync.Mutex
 }
 
 func (rmq *RocksMQ) CreateChannel(channelName string) error
