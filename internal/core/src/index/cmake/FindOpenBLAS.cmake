@@ -17,6 +17,8 @@ else()
             /usr/local/opt/openblas/include
             $ENV{OpenBLAS_HOME}
             $ENV{OpenBLAS_HOME}/include
+            ${OPENBLAS_PREFIX}/lapack-netlib/LAPACKE/include
+            ${OPENBLAS_PREFIX}/include
             )
 
     set(OpenBLAS_LIB_SEARCH_PATHS

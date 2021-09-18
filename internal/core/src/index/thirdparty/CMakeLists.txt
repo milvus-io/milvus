@@ -35,15 +35,13 @@ endif()
 
 
 # ****************************** Thirdparty Arrow ***************************************
-if(NOT TARGET boost_bitset_ext)
-  add_subdirectory( boost_ext )
-endif()
 if(NOT TARGET fiu)
     add_subdirectory(fiu)
 endif()
 add_subdirectory( arrow )
 #add_subdirectory( OpenBLAS )
 add_subdirectory(NGT)
+
 # 编译faiss
 set(FAISS_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/faiss)
 macro(build_mkl)
