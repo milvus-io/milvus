@@ -24,6 +24,7 @@ type FieldSchema struct {
 	DataType     DataType
 	TypeParams   []*commonpb.KeyValuePair
 	IndexParams  []*commonpb.KeyValuePair
+  AutoID       bool
 }
 ```
 
