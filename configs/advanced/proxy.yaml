@@ -10,7 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 proxy:
-  timeTickInterval: 200 # ms
+  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
 
   msgStream:
     insert:
