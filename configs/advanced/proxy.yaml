@@ -31,4 +31,4 @@ proxy:
   maxDimension: 32768
   maxShardNum: 256
 
-  maxTaskNum: 1024
+  maxTaskNum: 1024 # max task number of proxy task queue
