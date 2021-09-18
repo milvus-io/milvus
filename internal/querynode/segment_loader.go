@@ -83,14 +83,15 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			deleteSegment(s)
 		}
 	}
-	setSegments := func() {
+	setSegments := func() error {
 		for _, s := range newSegments {
 			err := loader.historicalReplica.setSegment(s)
 			if err != nil {
-				log.Warn(err.Error())
-				deleteSegment(s)
+				segmentGC()
+				return err
 			}
 		}
+		return nil
 	}
 
 	// start to load
@@ -142,9 +143,8 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 		}
 		newSegments = append(newSegments, segment)
 	}
-	setSegments()
 
-	return nil
+	return setSegments()
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
