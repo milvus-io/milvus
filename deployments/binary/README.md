@@ -36,10 +36,8 @@ chmod +x minio
 ### To start Milvus service, you need a Milvus binary file. Currently you can get the latest version of Milvus binary file through the Milvus docker image. (we will upload Milvus binary files in the future)
 
 ```bash
-docker run -itd --name milvus milvusdb/milvus:v2.0.0-rc6-20210910-020f109 /bin/bash
-# view the container_id
-docker ps
-docker cp container_id:/milvus .
+docker run -d --name milvus milvusdb/milvus:v2.0.0-rc6-20210910-020f109 /bin/bash
+docker cp milvus:/milvus .
 ```
 
 ### Install Milvus dependencies
