@@ -320,7 +320,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	vchanNames := make([]string, t.ShardsNum)
 	chanNames := make([]string, t.ShardsNum)
 	for i := int32(0); i < t.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%d_%d_v%d", collName, collID, i, i)
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.dmlChannels.GetDmlMsgStreamName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
@@ -1721,7 +1721,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		core.dmlChannels.AddProducerChannels("c0", "c1", "c2")
+		cn0 := core.dmlChannels.GetDmlMsgStreamName()
+		cn1 := core.dmlChannels.GetDmlMsgStreamName()
+		cn2 := core.dmlChannels.GetDmlMsgStreamName()
+		core.dmlChannels.AddProducerChannels(cn0, cn1, cn2)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{

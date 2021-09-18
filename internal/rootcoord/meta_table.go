@@ -174,6 +174,7 @@ func (mt *metaTable) reloadFromKV() error {
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
 
+	log.Debug("reload meta table from KV successfully")
 	return nil
 }
 
