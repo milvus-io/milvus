@@ -29,6 +29,6 @@ proxy:
   maxNameLength: 255
   maxFieldNum: 64
   maxDimension: 32768
-  maxShardNum: 256
+  maxShardNum: 256 # max shard number of a collection
 
   maxTaskNum: 1024 # max task number of proxy task queue
