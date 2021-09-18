@@ -18,4 +18,6 @@ dataNode:
 
   flush:
     # max buffer size to flush
-    insertBufSize: 32000 # number of rows
+    insertBufSize: 32000 # GOOSE TODO: to delete
+
+    # insertBufSize: 16 # MB GOOSE TODO: to enable

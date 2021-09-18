@@ -692,20 +692,20 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	inMsg := genInsertMsg(insertChannelName)
 	for _, msg := range inMsg.insertMessages {
 		msg.EndTimestamp = 101 // ts valid
-		err = iBNode.bufferInsertMsg(&inMsg, msg)
+		err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})
 		assert.Nil(t, err)
 	}
 
 	for _, msg := range inMsg.insertMessages {
 		msg.EndTimestamp = 99 // ts invalid
-		err = iBNode.bufferInsertMsg(&inMsg, msg)
+		err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})
 		assert.NotNil(t, err)
 	}
 
 	for _, msg := range inMsg.insertMessages {
 		msg.EndTimestamp = 101 // ts valid
 		msg.RowIDs = []int64{} //misaligned data
-		err = iBNode.bufferInsertMsg(&inMsg, msg)
+		err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})
 		assert.NotNil(t, err)
 	}
 }
@@ -742,4 +742,40 @@ func TestInsertBufferNode_updateSegStatesInReplica(te *testing.T) {
 
 	}
 
+}
+
+func TestInsertBufferNode_BufferData(te *testing.T) {
+	Params.FlushInsertBufferSize = 16
+
+	tests := []struct {
+		isValid bool
+
+		indim         int64
+		expectedLimit int64
+
+		description string
+	}{
+		{true, 1, 4194304, "Smallest of the DIM"},
+		{true, 128, 32768, "Normal DIM"},
+		{true, 32768, 128, "Largest DIM"},
+		{false, 0, 0, "Illegal DIM"},
+	}
+
+	for _, test := range tests {
+		te.Run(test.description, func(t *testing.T) {
+			idata, err := newBufferData(test.indim)
+
+			if test.isValid {
+				assert.NoError(t, err)
+				assert.NotNil(t, idata)
+
+				assert.Equal(t, test.expectedLimit, idata.limit)
+				assert.Zero(t, idata.size)
+			} else {
+				assert.Error(t, err)
+				assert.Nil(t, idata)
+			}
+		})
+
+	}
 }
