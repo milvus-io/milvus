@@ -172,18 +172,21 @@ config_summary()
 
 # **************************** Source files ****************************
 
+if ( BUILD_UNIT_TEST STREQUAL "ON" AND BUILD_COVERAGE STREQUAL "ON" )
+    append_flags( CMAKE_CXX_FLAGS
+                    FLAGS
+                    "-fprofile-arcs"
+                    "-ftest-coverage"
+                    )
+endif ()
+
+# Warning: add_subdirectory(src) must be after append_flags("-ftest-coverage"),
+# otherwise cpp code coverage tool will miss src folder
 add_subdirectory( thirdparty )
 add_subdirectory( src )
 
 # Unittest lib
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
-    if ( BUILD_COVERAGE STREQUAL "ON" )
-        append_flags(  CMAKE_CXX_FLAGS
-                       FLAGS
-                            "-fprofile-arcs"
-                            "-ftest-coverage"
-                            )
-    endif ()
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
 
     add_subdirectory(unittest)
