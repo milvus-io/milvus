@@ -154,3 +154,26 @@ func TestNewQueryNode(t *testing.T) {
 	node.stop()
 	queryNode1.stop()
 }
+
+func TestReleaseCollectionOnOfflineNode(t *testing.T) {
+	refreshParams()
+	baseCtx, cancel := context.WithCancel(context.Background())
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	assert.Nil(t, err)
+
+	node, err := newQueryNode(baseCtx, "test", 100, kv)
+	assert.Nil(t, err)
+
+	node.setState(offline)
+	req := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: defaultCollectionID,
+	}
+
+	err = node.releaseCollection(baseCtx, req)
+	assert.Nil(t, err)
+
+	cancel()
+}
