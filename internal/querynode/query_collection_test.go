@@ -7,7 +7,6 @@ import (
 	"errors"
 	"math"
 	"math/rand"
-	"reflect"
 	"testing"
 	"time"
 
@@ -68,14 +67,11 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 
 func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) {
 	// register
-	queryCollection.watcherSelectCase = make([]reflect.SelectCase, 0)
+	queryCollection.watcherSharedChan = make(chan struct{}, 1024)
 	queryCollection.tSafeWatchers[defaultVChannel] = newTSafeWatcher()
 	queryCollection.streaming.tSafeReplica.addTSafe(defaultVChannel)
 	queryCollection.streaming.tSafeReplica.registerTSafeWatcher(defaultVChannel, queryCollection.tSafeWatchers[defaultVChannel])
-	queryCollection.watcherSelectCase = append(queryCollection.watcherSelectCase, reflect.SelectCase{
-		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(queryCollection.tSafeWatchers[defaultVChannel].watcherChan()),
-	})
+	queryCollection.addTSafeWatcher(defaultVChannel)
 
 	queryCollection.streaming.tSafeReplica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
 }
@@ -482,6 +478,15 @@ func TestQueryCollection_serviceableTime(t *testing.T) {
 	gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
 	resST := queryCollection.getServiceableTime()
 	assert.Equal(t, st+gracefulTime, resST)
+}
+
+func TestQueryCollection_addTSafeWatcher(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	queryCollection.addTSafeWatcher(defaultVChannel)
 }
 
 func TestQueryCollection_waitNewTSafe(t *testing.T) {
