@@ -183,7 +183,107 @@ Collections:
           flush: fail
           index: fail
           search: fail
-          query: fail  
+          query: fail
+  -
+    testcase:
+      name: test_datacoord_network_partition
+      chaos: chaos_datacoord_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_datanode_network_partition
+      chaos: chaos_datanode_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_indexcoord_network_partition
+      chaos: chaos_indexcoord_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+
+  -
+    testcase:
+      name: test_indexnode_network_partition
+      chaos: chaos_indexnode_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+
+  -
+    testcase:
+      name: test_querycoord_network_partition
+      chaos: chaos_querycoord_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+
+  -
+    testcase:
+      name: test_querynode_network_partition
+      chaos: chaos_querynode_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_etcd_network_partition
+      chaos: chaos_etcd_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_minio_network_partition
+      chaos: chaos_minio_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+
   -
     testcase:
       name: test_querynode_cpu100p
