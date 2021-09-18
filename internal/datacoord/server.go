@@ -70,8 +70,11 @@ const (
 	ServerStateHealthy ServerState = 2
 )
 
-type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
-type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
+// DataNodeCreatorFunc creator function for datanode
+type DataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+
+// RootCoordCreatorFunc creator function for rootcoord
+type RootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
 
 // Server implements `types.Datacoord`
 // handles Data Cooridinator related jobs
@@ -99,8 +102,8 @@ type Server struct {
 	activeCh <-chan bool
 	eventCh  <-chan *sessionutil.SessionEvent
 
-	dataClientCreator      dataNodeCreatorFunc
-	rootCoordClientCreator rootCoordCreatorFunc
+	dataNodeCreator        DataNodeCreatorFunc
+	rootCoordClientCreator RootCoordCreatorFunc
 }
 
 // ServerHelper datacoord server injection helper
@@ -118,7 +121,7 @@ func defaultServerHelper() ServerHelper {
 type Option func(svr *Server)
 
 // SetRootCoordCreator returns an `Option` setting RootCoord creator with provided parameter
-func SetRootCoordCreator(creator rootCoordCreatorFunc) Option {
+func SetRootCoordCreator(creator RootCoordCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.rootCoordClientCreator = creator
 	}
@@ -138,6 +141,13 @@ func SetCluster(cluster *Cluster) Option {
 	}
 }
 
+// SetDataNodeCreator returns an `Option` setting DataNode create function
+func SetDataNodeCreator(creator DataNodeCreatorFunc) Option {
+	return func(svr *Server) {
+		svr.dataNodeCreator = creator
+	}
+}
+
 // CreateServer create `Server` instance
 func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
@@ -145,7 +155,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 		ctx:                    ctx,
 		msFactory:              factory,
 		flushCh:                make(chan UniqueID, 1024),
-		dataClientCreator:      defaultDataNodeCreatorFunc,
+		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		helper:                 defaultServerHelper(),
 
@@ -158,6 +168,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 	return s, nil
 }
 
+// defaultDataNodeCreatorFunc defines the default behavior to get a DataNode
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
 	return datanodeclient.NewClient(ctx, addr)
 }

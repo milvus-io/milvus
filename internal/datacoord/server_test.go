@@ -1252,7 +1252,7 @@ func TestOptions(t *testing.T) {
 	t.Run("SetRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, endpoints []string) (types.RootCoord, error) {
+		var crt RootCoordCreatorFunc = func(ctx context.Context, metaRoot string, endpoints []string) (types.RootCoord, error) {
 			return nil, errors.New("dummy")
 		}
 		opt := SetRootCoordCreator(crt)
@@ -1281,6 +1281,24 @@ func TestOptions(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		assert.Equal(t, cluster, svr.cluster)
+	})
+	t.Run("SetDataNodeCreator", func(t *testing.T) {
+		var target int64
+		var val int64 = rand.Int63()
+		opt := SetDataNodeCreator(func(context.Context, string) (types.DataNode, error) {
+			target = val
+			return nil, nil
+		})
+		assert.NotNil(t, opt)
+
+		factory := msgstream.NewPmsFactory()
+
+		svr, err := CreateServer(context.TODO(), factory, opt)
+		assert.Nil(t, err)
+		dn, err := svr.dataNodeCreator(context.Background(), "")
+		assert.Nil(t, dn)
+		assert.Nil(t, err)
+		assert.Equal(t, target, val)
 	})
 }
 
@@ -1433,7 +1451,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 
 	svr, err := CreateServer(context.TODO(), factory, opts...)
 	assert.Nil(t, err)
-	svr.dataClientCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
