@@ -1,6 +1,6 @@
 #!/usr/bin/env groovy
 
-int total_timeout_minutes = 60
+int total_timeout_minutes = 120
 int e2e_timeout_seconds = 30 * 60
 
 pipeline {
