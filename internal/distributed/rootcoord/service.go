@@ -300,6 +300,7 @@ func (s *Server) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRe
 	return s.rootCoord.HasCollection(ctx, in)
 }
 
+// DescribeCollection gets meta info of a collection
 func (s *Server) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.rootCoord.DescribeCollection(ctx, in)
 }
