@@ -104,6 +104,11 @@ Keeping a consistent style for code, code comments, commit messages, and PR desc
 ### Go
 - Coding style: refer to the [Effictive Go Style Guide](https://golang.org/doc/effective_go)
 
+We also use `golangci-lint` to perform code check. Run the following command before submit your pull request and make sure there is no issue reported:
+```shell
+$ make static-check
+```
+
 ###C++
 The c++ coding style used in Milvus generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 And we made the following changes based on the guide:
