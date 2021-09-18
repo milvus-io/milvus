@@ -715,17 +715,22 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 
 // ---------- unittest util functions ----------
 // functions of replica
-func genSimpleSealedSegment() (*Segment, error) {
-	schema := genSimpleSegCoreSchema()
-	col := newCollection(defaultCollectionID, schema)
+func genSealedSegment(schemaForCreate *schemapb.CollectionSchema,
+	schemaForLoad *schemapb.CollectionSchema,
+	collectionID,
+	partitionID,
+	segmentID UniqueID,
+	vChannel Channel,
+	msgLength int) (*Segment, error) {
+	col := newCollection(collectionID, schemaForCreate)
 	seg := newSegment(col,
-		defaultSegmentID,
-		defaultPartitionID,
-		defaultCollectionID,
-		defaultVChannel,
+		segmentID,
+		partitionID,
+		collectionID,
+		vChannel,
 		segmentTypeSealed,
 		true)
-	insertData, err := genSimpleInsertData()
+	insertData, err := genInsertData(msgLength, schemaForLoad)
 	if err != nil {
 		return nil, err
 	}
@@ -776,6 +781,18 @@ func genSimpleSealedSegment() (*Segment, error) {
 		}
 	}
 	return seg, nil
+}
+
+func genSimpleSealedSegment() (*Segment, error) {
+	schema := genSimpleSegCoreSchema()
+	schema2 := genSimpleInsertDataSchema()
+	return genSealedSegment(schema,
+		schema2,
+		defaultCollectionID,
+		defaultPartitionID,
+		defaultSegmentID,
+		defaultVChannel,
+		defaultMsgLength)
 }
 
 func genSimpleReplica() (ReplicaInterface, error) {
