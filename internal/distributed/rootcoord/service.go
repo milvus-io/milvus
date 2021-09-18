@@ -295,6 +295,7 @@ func (s *Server) DropCollection(ctx context.Context, in *milvuspb.DropCollection
 	return s.rootCoord.DropCollection(ctx, in)
 }
 
+// HasCollection checks whether a collection is created
 func (s *Server) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return s.rootCoord.HasCollection(ctx, in)
 }
