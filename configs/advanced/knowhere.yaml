@@ -9,22 +9,8 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-queryNode:
-  stats:
-    publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
-
-  dataSync:
-    flowGraph:
-      maxQueueLength: 1024 # Maximum length of task queue in flowgraph
-      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-
-  msgStream:
-    search:
-      recvBufSize: 512 # msgPack channel buffer size
-      pulsarBufSize: 512 # pulsar channel buffer size
-
-    searchResult:
-      recvBufSize: 64 # msgPack channel buffer size
-
-  segcore:
-    chunkRows: 32768
+knowhere:
+  # Default value: auto
+  # Valid values: [auto, avx512, avx2, sse]
+  # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
+  simdType: auto
