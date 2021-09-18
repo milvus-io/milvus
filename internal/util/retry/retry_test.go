@@ -85,6 +85,20 @@ func TestAllError(t *testing.T) {
 	fmt.Println(err)
 }
 
+func TestUnRecoveryError(t *testing.T) {
+	attempts := 0
+	ctx := context.Background()
+
+	testFn := func() error {
+		attempts++
+		return Unrecoverable(fmt.Errorf("some error"))
+	}
+
+	err := Do(ctx, testFn, Attempts(3))
+	assert.NotNil(t, err)
+	assert.Equal(t, attempts, 1)
+}
+
 func TestContextDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()

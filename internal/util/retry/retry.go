@@ -20,20 +20,19 @@ import (
 
 func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
-	c := NewDefaultConfig()
+	c := newDefaultConfig()
 
 	for _, opt := range opts {
 		opt(c)
 	}
-	el := make(ErrorList, c.attempts)
+	el := make(ErrorList, 0)
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
-			if s, ok := err.(InterruptError); ok {
-				return s.error
+			if ok := IsUncoverable(err); ok {
+				return err
 			}
-			// TODO early termination if this is unretriable error?
-			el[i] = err
+			el = append(el, err)
 
 			select {
 			case <-time.After(c.sleep):
@@ -52,9 +51,11 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	return el
 }
 
+// ErrorList for print error log
 type ErrorList []error
 
 // TODO shouldn't print all retries, might be too much
+// Error method return an string representation of retry error list.
 func (el ErrorList) Error() string {
 	var builder strings.Builder
 	builder.WriteString("All attempts results:\n")
@@ -68,10 +69,17 @@ func (el ErrorList) Error() string {
 	return builder.String()
 }
 
-type InterruptError struct {
+type unrecoverableError struct {
 	error
 }
 
-func NoRetryError(err error) InterruptError {
-	return InterruptError{err}
+// Unrecoverable method wrap an error to unrecoverableError. This will make retry
+// quick return.
+func Unrecoverable(err error) error {
+	return unrecoverableError{err}
+}
+
+func IsUncoverable(err error) bool {
+	_, isUnrecoverable := err.(unrecoverableError)
+	return isUnrecoverable
 }

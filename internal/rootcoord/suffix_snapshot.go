@@ -76,7 +76,7 @@ var _ kv.SnapShotKV = (*suffixSnapshot)(nil)
 // newSuffixSnapshot creates a newSuffixSnapshot with provided kv
 func newSuffixSnapshot(txnKV kv.TxnKV, sep, root, snapshot string) (*suffixSnapshot, error) {
 	if txnKV == nil {
-		return nil, retry.NoRetryError(errors.New("txnKV is nil"))
+		return nil, retry.Unrecoverable(errors.New("txnKV is nil"))
 	}
 
 	// handles trailing / logic
