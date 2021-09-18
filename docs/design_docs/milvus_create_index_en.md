@@ -44,7 +44,7 @@ type task interface {
 	Notify(err error)
 }
 
-type CreateIndexTask struct {
+type createIndexTask struct {
 	Condition
 	*milvuspb.CreateIndexRequest
 	ctx       context.Context
@@ -197,10 +197,11 @@ message SegmentInfo {
   string insert_channel = 4;
   int64 num_of_rows = 5;
   common.SegmentState state = 6;
-  internal.MsgPosition dml_position = 7;
-  int64 max_row_num = 8;
-  uint64 last_expire_time = 9;
-  internal.MsgPosition start_position = 10;
+  int64 max_row_num = 7;
+  uint64 last_expire_time = 8;
+  internal.MsgPosition start_position = 9;
+  internal.MsgPosition dml_position = 10;
+  repeated FieldBinlog binlogs = 11;
 }
 
 ```
