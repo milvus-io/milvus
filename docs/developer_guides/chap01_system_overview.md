@@ -1,18 +1,14 @@
-
-
 ## 1. System Overview
 
 In this section, we sketch the system design of Milvus, including the data model, data organization, architecture, and state synchronization.
-
-
 
 #### 1.1 Data Model
 
 Milvus exposes the following set of data features to applications:
 
-* a data model based on schematized relational tables, in that rows must have primary keys,
+- a data model based on schematized relational tables, in that rows must have primary keys,
 
-* a query language specifies data definition, data manipulation, and data query, where data definition includes create, drop, and data manipulation includes insert, upsert, delete, and data query falls into three types, primary key search, approximate nearest neighbor search (ANNS), ANNS with predicates.
+- a query language specifies data definition, data manipulation, and data query, where data definition includes create, drop, and data manipulation includes insert, upsert, delete, and data query falls into three types, primary key search, approximate nearest neighbor search (ANNS), ANNS with predicates.
 
 The requests' execution order is strictly in accordance with their issue-time order. We take proxy's issue time as a request's issue time. For a batch request, all its sub-requests share the same issue time. In cases there are multiple proxies, issue time from different proxies are regarded as coming from a central clock.
 
@@ -20,11 +16,7 @@ Transaction is currently not supported by Milvus.
 
 A batch insert/delete is guaranteed to become visible atomically.
 
-
-
 #### 1.2 Data Organization
-
-
 
 <img src="./figs/data_organization.png" width=550>
 
@@ -34,11 +26,7 @@ Each collection or partition contains a set of 'segment groups'. Segment group i
 
 'Segment' is the finest unit of data organization. It is where the data and indexes are actually kept. Each segment contains a set of rows. In order to reduce the memory footprint during query execution and to fully utilize SIMD, the physical data layout within segments is organized in a column-based manner.
 
-
-
 #### 1.3 Architecture Overview
-
-
 
 <img src="./figs/system_framework.png" width=800>
 
@@ -54,8 +42,6 @@ The write nodes are stateless. They simply transform the newly arrived WALs to b
 
 Note that not all the components are necessarily replicated. The system provides failure tolerance by maintaining multiple copies of WAL and binlog. When there is no in-memory index replica and there occurs a query node failure, other query nodes will take over its indexes by loading the dumped index files, or rebuilding them from binlog and WALs. The links from query nodes to the hash ring will also be adjusted such that the failure node's input WAL stream can be properly handled by its neighbors.
 
-
-
 #### 1.4 State Synchronization
 
 <img src="./figs/state_sync.png" width=800>
@@ -66,9 +52,6 @@ Each of the WAL is attached with a timestamp, which is the time when the log is 
 
 For better throughput, Milvus allows asynchronous state synchronization between WAL and index/binlog/table. Whenever the data is not fresh enough to satisfy a query, the query will be suspended until the data is up-to-date, or timeout will be returned.
 
-
-
 #### 1.5 Stream and Time
 
 In order to boost throughput, we model Milvus as a stream-driven system.
-
