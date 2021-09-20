@@ -68,21 +68,21 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 ### 开始使用 Milvus
 
-- [Standalone Quick Start Guide](https://milvus.io/cn/docs/v2.0.0/install_standalone-docker.md)
+- [Milvus单机版安装](https://milvus.io/cn/docs/v2.0.0/install_standalone-docker.md)
 
-- [Cluster Quick Start Guide](https://milvus.io/cn/docs/v2.0.0/install_cluster-docker.md)
+- [Milvus集群版安装](https://milvus.io/cn/docs/v2.0.0/install_cluster-docker.md)
 
 ### 开发 Milvus
 
 ```bash
-# Clone github repository.
+# 克隆 github 代码库.
 $ git clone https://github.com/milvus-io/milvus.git
 
-# Install third-party dependencies.
+# 安装第三方库.
 $ cd milvus/
 $ ./scripts/install_deps.sh
 
-# Compile Milvus standalone.
+# 编译milvus.
 $ make milvus
 ```
 
