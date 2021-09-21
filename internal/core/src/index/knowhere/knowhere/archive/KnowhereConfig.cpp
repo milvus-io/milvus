@@ -59,7 +59,7 @@ KnowhereConfig::SetSimdType(const SimdType simd_type) {
     std::string cpu_flag;
     if (faiss::hook_init(cpu_flag)) {
         std::cout << "FAISS hook " << cpu_flag << std::endl;
-        LOG_ENGINE_DEBUG_ << "FAISS hook " << cpu_flag;
+        LOG_KNOWHERE_DEBUG_ << "FAISS hook " << cpu_flag;
         return Status::OK();
     }
 
