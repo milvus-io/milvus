@@ -19,14 +19,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
-const (
-	// todo : put to param table
-	ServerID      = 1
-	BinlogVersion = 1
-	CommitID      = 1
-	ServerVersion = 1
-)
-
 // BinlogType is to distinguish different files saving different data.
 type BinlogType int32
 
