@@ -13,6 +13,7 @@ package datanode
 
 import (
 	"log"
+	"path"
 	"testing"
 	"time"
 
@@ -121,5 +122,16 @@ func TestParamTable(t *testing.T) {
 	t.Run("Test UpdatedTime", func(t *testing.T) {
 		Params.UpdatedTime = time.Now()
 		log.Println("UpdatedTime: ", Params.UpdatedTime)
+	})
+
+	t.Run("Test InsertBinlogRootPath", func(t *testing.T) {
+		Params.Init()
+		assert.Equal(t, path.Join("files", "insert_log"), Params.InsertBinlogRootPath)
+	})
+
+	t.Run("Test StatsBinlogRootPath", func(t *testing.T) {
+		p := new(ParamTable)
+		p.Init()
+		assert.Equal(t, path.Join("files", "stats_log"), Params.StatsBinlogRootPath)
 	})
 }
