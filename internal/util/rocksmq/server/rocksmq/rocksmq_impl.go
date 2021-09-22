@@ -196,13 +196,11 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 
 	err := rmq.kv.Save(beginKey, "0")
 	if err != nil {
-		log.Debug("RocksMQ: save " + beginKey + " failed.")
 		return err
 	}
 
 	err = rmq.kv.Save(endKey, "0")
 	if err != nil {
-		log.Debug("RocksMQ: save " + endKey + " failed.")
 		return err
 	}
 	if _, ok := topicMu.Load(topicName); !ok {
@@ -323,7 +321,6 @@ func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 	}
 	err := rmq.kv.Save(key, DefaultMessageID)
 	if err != nil {
-		log.Debug("RocksMQ: save " + key + " failed.")
 		return err
 	}
 
@@ -362,7 +359,6 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 
 	err := rmq.kv.Remove(key)
 	if err != nil {
-		log.Debug("RocksMQ: remove " + key + " failed.")
 		return err
 	}
 	if vals, ok := rmq.consumers.Load(topicName); ok {
