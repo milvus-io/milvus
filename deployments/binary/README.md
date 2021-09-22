@@ -18,12 +18,11 @@ cd etcd-v3.5.0-linux-amd64
 
 ## Start MinIO service
 
-### Refer: https://min.io/download#/linux
+#### Refer: https://min.io/download#/linux
 
 ```bash
 wget https://dl.min.io/server/minio/release/linux-amd64/minio
 chmod +x minio
-#start minio service
 ./minio server /minio
 ```
 
