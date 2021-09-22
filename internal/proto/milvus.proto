@@ -210,34 +210,62 @@ message GetCollectionStatisticsResponse {
   repeated common.KeyValuePair stats = 2;
 }
 
-
+/*
+* This is for ShowCollectionsRequest type field.
+*/
 enum ShowType {
+  // Will return all colloections 
   All = 0;
+  // Will return loaded collections with their inMemory_percentages
   InMemory = 1;
 }
 
+/*
+* List collections 
+*/
 message ShowCollectionsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
+  // Not useful for now
   uint64 time_stamp = 3;
+  // Decide return Loaded collections or All collections(Optional)
   ShowType type = 4;
-  repeated string collection_names = 5; // show collection in querynode, showType = InMemory
+  // When type is InMemory, will return these collection's inMemory_percentages.(Optional)
+  repeated string collection_names = 5; 
 }
 
+/*
+* Return basic collection infos.
+*/
 message ShowCollectionsResponse {
+  // Contain error_code and reason
   common.Status status = 1;
+  // Collection name array
   repeated string collection_names = 2;
+  // Collection Id array
   repeated int64 collection_ids = 3;
-  repeated uint64 created_timestamps = 4; // hybrid timestamps
-  repeated uint64 created_utc_timestamps = 5; // physical timestamps
-  repeated int64 inMemory_percentages = 6; // load percentage on querynode
+  // Hybrid timestamps in milvus
+  repeated uint64 created_timestamps = 4;
+  // The utc timestamp calculated by created_timestamp
+  repeated uint64 created_utc_timestamps = 5;
+  // Load percentage on querynode when type is InMemory
+  repeated int64 inMemory_percentages = 6; 
 }
 
+/*
+* Create partition in created collection.
+*/
 message CreatePartitionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  string partition_name = 4; // must
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition name you want to create.
+  string partition_name = 4;
 }
 
 message DropPartitionRequest {
