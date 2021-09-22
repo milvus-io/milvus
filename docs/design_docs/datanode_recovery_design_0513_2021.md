@@ -8,17 +8,17 @@ update: 6.21.2021, by [Goose](https://github.com/XuanYang-cn)
 
 DataNode processes insert data and persists them.
 
-DataNode is based on flowgraph, each flowgraph cares about only one vchannel. There're ddl messages, dml
+DataNode is based on flowgraph; each flowgraph cares about only one vchannel. There are ddl messages, dml
 messages, and timetick messages inside one vchannel, FIFO log stream.
 
 One vchannel only contains dml messages of one collection. A collection consists of many segments, hence
-a vchannel contains dml messsages of many segments. **Most importantly, the dml messages of the same segment 
+a vchannel contains dml messsages of many segments. **Most importantly, the dml messages of the same segment
 can appear in anywhere in vchannel.**
 
 ## What does DataNode recovery really mean?
 
-DataNode is stateless, but vchannel has states. DataNode's statelessness is guranteed by DataCoord, which
-means the vchannel's states is maintained by DataCoord. So DataNode recovery has no different as starting.
+DataNode is stateless, but vchannel has states. DataNode's statelessness is guaranteed by DataCoord, which
+means the vchannel's state is maintained by DataCoord. So DataNode recovery is no different from starting.
 
 So what's DataNode's starting procedure?
 
@@ -36,7 +36,7 @@ DataNode discovers DataCoord and RootCoord, in *HEALTHY* and *IDLE* state.
 
 The detailed design can be found at [datanode flowgraph recovery design](datanode_flowgraph_recovery_design_0604_2021.md).
 
-After DataNode subscribes to a stateful vchannel, DataNode starts to work, or more specifically, flowgraph starts to work. 
+After DataNode subscribes to a stateful vchannel, DataNode starts to work, or more specifically, flowgraph starts to work.
 
 Vchannel is stateful because we don't want to process twice what's already processed. And a "processed" message means its
 already persistant. In DataNode's terminology, a message is processed if it's been flushed.
@@ -48,12 +48,12 @@ DataNode tells DataCoord vchannel states after each flush through RPC `SaveBinlo
 keep the vchannel states update.
 
 
-## Some of the following interface/proto designs are outdate, will be updated soon
+## Some of the following interface/proto designs are outdated, will be updated soon
 
 ### 1. DataNode no longer interacts with Etcd except service registering
 
 #### DataCoord rather than DataNode saves binlog paths into Etcd
-    
+
    ![datanode_design](graphs/datanode_design_01.jpg)
 
 
