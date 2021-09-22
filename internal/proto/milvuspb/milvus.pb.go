@@ -26,10 +26,14 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 
+//
+// This is for ShowCollectionsRequest type field.
 type ShowType int32
 
 const (
-	ShowType_All      ShowType = 0
+	// Will return all colloections
+	ShowType_All ShowType = 0
+	// Will return loaded collections with their inMemory_percentages
 	ShowType_InMemory ShowType = 1
 )
 
@@ -961,15 +965,22 @@ func (m *GetCollectionStatisticsResponse) GetStats() []*commonpb.KeyValuePair {
 	return nil
 }
 
+//
+// List collections
 type ShowCollectionsRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	TimeStamp            uint64            `protobuf:"varint,3,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
-	Type                 ShowType          `protobuf:"varint,4,opt,name=type,proto3,enum=milvus.proto.milvus.ShowType" json:"type,omitempty"`
-	CollectionNames      []string          `protobuf:"bytes,5,rep,name=collection_names,json=collectionNames,proto3" json:"collection_names,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// Not useful for now
+	TimeStamp uint64 `protobuf:"varint,3,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
+	// Decide return Loaded collections or All collections(Optional)
+	Type ShowType `protobuf:"varint,4,opt,name=type,proto3,enum=milvus.proto.milvus.ShowType" json:"type,omitempty"`
+	// When type is InMemory, will return these collection's inMemory_percentages.(Optional)
+	CollectionNames      []string `protobuf:"bytes,5,rep,name=collection_names,json=collectionNames,proto3" json:"collection_names,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *ShowCollectionsRequest) Reset()         { *m = ShowCollectionsRequest{} }
@@ -1032,16 +1043,24 @@ func (m *ShowCollectionsRequest) GetCollectionNames() []string {
 	return nil
 }
 
+//
+// Return basic collection infos.
 type ShowCollectionsResponse struct {
-	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	CollectionNames      []string         `protobuf:"bytes,2,rep,name=collection_names,json=collectionNames,proto3" json:"collection_names,omitempty"`
-	CollectionIds        []int64          `protobuf:"varint,3,rep,packed,name=collection_ids,json=collectionIds,proto3" json:"collection_ids,omitempty"`
-	CreatedTimestamps    []uint64         `protobuf:"varint,4,rep,packed,name=created_timestamps,json=createdTimestamps,proto3" json:"created_timestamps,omitempty"`
-	CreatedUtcTimestamps []uint64         `protobuf:"varint,5,rep,packed,name=created_utc_timestamps,json=createdUtcTimestamps,proto3" json:"created_utc_timestamps,omitempty"`
-	InMemoryPercentages  []int64          `protobuf:"varint,6,rep,packed,name=inMemory_percentages,json=inMemoryPercentages,proto3" json:"inMemory_percentages,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
+	// Contain error_code and reason
+	Status *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// Collection name array
+	CollectionNames []string `protobuf:"bytes,2,rep,name=collection_names,json=collectionNames,proto3" json:"collection_names,omitempty"`
+	// Collection Id array
+	CollectionIds []int64 `protobuf:"varint,3,rep,packed,name=collection_ids,json=collectionIds,proto3" json:"collection_ids,omitempty"`
+	// Hybrid timestamps in milvus
+	CreatedTimestamps []uint64 `protobuf:"varint,4,rep,packed,name=created_timestamps,json=createdTimestamps,proto3" json:"created_timestamps,omitempty"`
+	// The utc timestamp calculated by created_timestamp
+	CreatedUtcTimestamps []uint64 `protobuf:"varint,5,rep,packed,name=created_utc_timestamps,json=createdUtcTimestamps,proto3" json:"created_utc_timestamps,omitempty"`
+	// Load percentage on querynode when type is InMemory
+	InMemoryPercentages  []int64  `protobuf:"varint,6,rep,packed,name=inMemory_percentages,json=inMemoryPercentages,proto3" json:"inMemory_percentages,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *ShowCollectionsResponse) Reset()         { *m = ShowCollectionsResponse{} }
@@ -1111,14 +1130,20 @@ func (m *ShowCollectionsResponse) GetInMemoryPercentages() []int64 {
 	return nil
 }
 
+//
+// Create partition in created collection.
 type CreatePartitionRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	PartitionName        string            `protobuf:"bytes,4,opt,name=partition_name,json=partitionName,proto3" json:"partition_name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name in milvus
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// The partition name you want to create.
+	PartitionName        string   `protobuf:"bytes,4,opt,name=partition_name,json=partitionName,proto3" json:"partition_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *CreatePartitionRequest) Reset()         { *m = CreatePartitionRequest{} }
