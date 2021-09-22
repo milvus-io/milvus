@@ -1,4 +1,7 @@
-<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_en_6c5b3a1466.png" alt="milvus banner">
+<a href="https://milvus.io/hacktoberfest-2021">
+    <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/milvus_hacktoberfest_15ba8e5083.jpeg" alt="Join Hacktoberfest with Milvus">
+</a>
+
 
 <div class="column" align="middle">
   <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
