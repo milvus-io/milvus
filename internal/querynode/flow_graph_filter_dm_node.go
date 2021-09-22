@@ -26,7 +26,7 @@ import (
 
 type filterDmNode struct {
 	baseNode
-	loadType     loadType
+	loadType     loadType // load collection or load partition
 	collectionID UniqueID
 	partitionID  UniqueID
 	replica      ReplicaInterface
