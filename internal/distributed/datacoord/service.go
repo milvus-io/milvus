@@ -177,6 +177,7 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// GetComponentStates gets states of datacoord and datanodes
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.dataCoord.GetComponentStates(ctx)
 }
