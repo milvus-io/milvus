@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// proxyManager manages proxy connected to the rootcoord
 type proxyManager struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -37,6 +38,9 @@ type proxyManager struct {
 	delSessions []func(*sessionutil.Session)
 }
 
+// newProxyManager helper function to create a proxyManager
+// etcdEndpoints is the address list of etcd
+// fns are the custom getSessions function list
 func newProxyManager(ctx context.Context, etcdEndpoints []string, fns ...func([]*sessionutil.Session)) (*proxyManager, error) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	if err != nil {
@@ -53,18 +57,21 @@ func newProxyManager(ctx context.Context, etcdEndpoints []string, fns ...func([]
 	return p, nil
 }
 
+// AddSession adds functions to addSessions function list
 func (p *proxyManager) AddSession(fns ...func(*sessionutil.Session)) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.addSessions = append(p.addSessions, fns...)
 }
 
+// DelSession add functions to delSessions function list
 func (p *proxyManager) DelSession(fns ...func(*sessionutil.Session)) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.delSessions = append(p.delSessions, fns...)
 }
 
+// WatchProxy starts a goroutine to watch proxy session changes on etcd
 func (p *proxyManager) WatchProxy() error {
 	ctx2, cancel := context.WithTimeout(p.ctx, RequestTimeout)
 	defer cancel()
@@ -160,10 +167,12 @@ func (p *proxyManager) WatchProxy() error {
 	return nil
 }
 
+// Stop stops the proxyManager
 func (p *proxyManager) Stop() {
 	p.cancel()
 }
 
+// listProxyInEtcd helper function lists proxy in etcd
 func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sessionutil.Session, error) {
 	ctx2, cancel := context.WithTimeout(ctx, RequestTimeout)
 	defer cancel()
