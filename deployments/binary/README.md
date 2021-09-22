@@ -48,6 +48,5 @@ sudo apt-get install libtbb2
 ```bash
 cd milvus
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PWD/lib
-# Start Milvus service
 ./bin/milvus run standalone
 ```
