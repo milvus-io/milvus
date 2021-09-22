@@ -291,6 +291,7 @@ func (s *Server) CreateCollection(ctx context.Context, in *milvuspb.CreateCollec
 	return s.rootCoord.CreateCollection(ctx, in)
 }
 
+// DropCollection drops a collection
 func (s *Server) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.DropCollection(ctx, in)
 }
