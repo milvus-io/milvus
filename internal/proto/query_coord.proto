@@ -52,6 +52,7 @@ service QueryNode {
 //--------------------query coordinator proto------------------
 message ShowCollectionsRequest {
   common.MsgBase base = 1;
+  // Not useful for now
   int64 dbID = 2;
   repeated int64 collectionIDs = 3;
 }
