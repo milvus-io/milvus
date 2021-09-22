@@ -275,6 +275,8 @@ func TestMetaTable(t *testing.T) {
 		ts := ftso()
 		err = mt.AddAlias("alias1", "testColl", ts, ddOp)
 		assert.Nil(t, err)
+		aliases := mt.ListAliases(collID)
+		assert.Equal(t, aliases, []string{"alias1"})
 	})
 
 	t.Run("alter alias", func(t *testing.T) {

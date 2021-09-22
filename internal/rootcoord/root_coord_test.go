@@ -1813,6 +1813,23 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 	})
 
+	t.Run("describe collection2", func(t *testing.T) {
+		req := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     3013,
+				Timestamp: 3013,
+				SourceID:  3013,
+			},
+			DbName:         dbName,
+			CollectionName: collName,
+		}
+		rsp, err := core.DescribeCollection(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+		assert.Equal(t, rsp.Aliases, []string{aliasName})
+	})
+
 	// temporarily create collName2
 	schema = schemapb.CollectionSchema{
 		Name: collName2,
@@ -1822,9 +1839,9 @@ func TestRootCoord(t *testing.T) {
 	req2 := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreateCollection,
-			MsgID:     3013,
-			Timestamp: 3013,
-			SourceID:  3013,
+			MsgID:     3014,
+			Timestamp: 3014,
+			SourceID:  3014,
 		},
 		DbName:         dbName,
 		CollectionName: collName2,
@@ -1838,9 +1855,9 @@ func TestRootCoord(t *testing.T) {
 		req := &milvuspb.AlterAliasRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_AlterAlias,
-				MsgID:     3014,
-				Timestamp: 3014,
-				SourceID:  3014,
+				MsgID:     3015,
+				Timestamp: 3015,
+				SourceID:  3015,
 			},
 			CollectionName: collName2,
 			Alias:          aliasName,
@@ -1854,9 +1871,9 @@ func TestRootCoord(t *testing.T) {
 		req := &milvuspb.DropAliasRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropAlias,
-				MsgID:     3015,
-				Timestamp: 3015,
-				SourceID:  3015,
+				MsgID:     3016,
+				Timestamp: 3016,
+				SourceID:  3016,
 			},
 			Alias: aliasName,
 		}
@@ -1868,9 +1885,9 @@ func TestRootCoord(t *testing.T) {
 	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
-			MsgID:     3016,
-			Timestamp: 3016,
-			SourceID:  3016,
+			MsgID:     3017,
+			Timestamp: 3017,
+			SourceID:  3017,
 		},
 		DbName:         dbName,
 		CollectionName: collName,
@@ -1881,9 +1898,9 @@ func TestRootCoord(t *testing.T) {
 	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
-			MsgID:     3017,
-			Timestamp: 3017,
-			SourceID:  3017,
+			MsgID:     3018,
+			Timestamp: 3018,
+			SourceID:  3018,
 		},
 		DbName:         dbName,
 		CollectionName: collName2,

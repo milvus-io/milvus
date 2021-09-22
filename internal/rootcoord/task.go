@@ -384,7 +384,7 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	t.Rsp.CreatedTimestamp = collInfo.CreateTime
 	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)
 	t.Rsp.CreatedUtcTimestamp = createdPhysicalTime
-
+	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID)
 	return nil
 }
 
