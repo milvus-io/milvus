@@ -11,6 +11,17 @@
 
 package indexnode
 
+/*
+
+#cgo CFLAGS: -I${SRCDIR}/../core/output/include
+
+#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
+
+#include <stdlib.h>
+#include "indexbuilder/init_c.h"
+
+*/
+import "C"
 import (
 	"context"
 	"errors"
@@ -19,6 +30,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
@@ -90,6 +102,15 @@ func (i *IndexNode) Register() error {
 	return nil
 }
 
+func (i *IndexNode) initKnowhere() {
+	C.IndexBuilderInit()
+
+	// override segcore SIMD type
+	cSimdType := C.CString(Params.SimdType)
+	C.IndexBuilderSetSimdType(cSimdType)
+	C.free(unsafe.Pointer(cSimdType))
+}
+
 func (i *IndexNode) Init() error {
 	Params.Init()
 	i.UpdateStateCode(internalpb.StateCode_Initializing)
@@ -121,6 +142,9 @@ func (i *IndexNode) Init() error {
 	}
 	log.Debug("IndexNode NewMinIOKV success")
 	i.closer = trace.InitTracing("index_node")
+
+	i.initKnowhere()
+
 	return nil
 }
 
