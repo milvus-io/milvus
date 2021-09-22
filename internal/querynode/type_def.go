@@ -23,6 +23,7 @@ const (
 const invalidTimestamp = Timestamp(0)
 
 type (
+	// UniqueID is an identifier that is guaranteed to be unique among all the collections, partitions and segments
 	UniqueID = typeutil.UniqueID
 	// Timestamp is timestamp
 	Timestamp = typeutil.Timestamp
