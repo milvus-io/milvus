@@ -16,6 +16,13 @@ import (
 	"fmt"
 )
 
+const (
+	MsgRootCoordNotServing  = "root coordinator is not serving"
+	MsgQueryCoordNotServing = "query coordinator is not serving"
+	MsgDataCoordNotServing  = "data coordinator is not serving"
+	MsgIndexCoordNotServing = "index coordinator is not serving"
+)
+
 func MsgCollectionAlreadyExist(name string) string {
 	return fmt.Sprintf("Collection %s already exist", name)
 }

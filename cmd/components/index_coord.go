@@ -14,6 +14,8 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 )
 
@@ -48,4 +50,8 @@ func (s *IndexCoord) Stop() error {
 		return err
 	}
 	return nil
+}
+
+func (s *IndexCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return s.svr.GetComponentStates(ctx, request)
 }
