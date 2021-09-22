@@ -81,6 +81,7 @@ coverage.txt
 profile.out
 profile.txt
 go_coverage.html
+cover.out
 
 # codecov-cpp generated files
 lcov_*.info
