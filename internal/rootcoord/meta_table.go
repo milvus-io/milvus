@@ -464,6 +464,18 @@ func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]*pb.Coll
 	return colls, nil
 }
 
+func (mt *metaTable) ListAliases(collID typeutil.UniqueID) []string {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	var aliases []string
+	for alias, cid := range mt.collAlias2ID {
+		if cid == collID {
+			aliases = append(aliases, alias)
+		}
+	}
+	return aliases
+}
+
 // ListCollectionVirtualChannels list virtual channel of all the collection
 func (mt *metaTable) ListCollectionVirtualChannels() []string {
 	mt.ddLock.RLock()
