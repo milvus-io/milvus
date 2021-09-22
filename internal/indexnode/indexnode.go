@@ -112,7 +112,6 @@ func (i *IndexNode) initKnowhere() {
 }
 
 func (i *IndexNode) Init() error {
-	Params.Init()
 	i.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
 	connectEtcdFn := func() error {

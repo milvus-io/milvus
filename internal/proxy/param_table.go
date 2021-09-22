@@ -47,19 +47,24 @@ type ParamTable struct {
 
 	RocksmqPath string // not used in Proxy
 
-	ProxyID                    UniqueID
-	TimeTickInterval           time.Duration
+	ProxyID                  UniqueID
+	TimeTickInterval         time.Duration
+	MsgStreamTimeTickBufSize int64
+	MaxNameLength            int64
+	MaxFieldNum              int64
+	MaxShardNum              int32
+	MaxDimension             int64
+	DefaultPartitionName     string
+	DefaultIndexName         string
+
+	// --- Channels ---
+	ClusterChannelPrefix      string
+	ProxyTimeTickChannelNames []string
+	ProxySubName              string
+
+	// required from query coord
 	SearchResultChannelNames   []string
 	RetrieveResultChannelNames []string
-	ProxySubName               string
-	ProxyTimeTickChannelNames  []string
-	MsgStreamTimeTickBufSize   int64
-	MaxNameLength              int64
-	MaxFieldNum                int64
-	MaxShardNum                int32
-	MaxDimension               int64
-	DefaultPartitionName       string
-	DefaultIndexName           string
 
 	MaxTaskNum int64
 
@@ -71,24 +76,27 @@ type ParamTable struct {
 var Params ParamTable
 var once sync.Once
 
-func (pt *ParamTable) Init() {
+func (pt *ParamTable) InitOnce() {
 	once.Do(func() {
-		pt.BaseTable.Init()
-		err := pt.LoadYaml("advanced/proxy.yaml")
-		if err != nil {
-			panic(err)
-		}
-		pt.initParams()
+		pt.Init()
 	})
 }
 
-func (pt *ParamTable) initParams() {
+func (pt *ParamTable) Init() {
+	pt.BaseTable.Init()
+	err := pt.LoadYaml("advanced/proxy.yaml")
+	if err != nil {
+		panic(err)
+	}
+
 	pt.initLogCfg()
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
 	pt.initPulsarAddress()
 	pt.initRocksmqPath()
 	pt.initTimeTickInterval()
+	// Has to init global msgchannel prefix before other channel names
+	pt.initClusterMsgChannelPrefix()
 	pt.initProxySubName()
 	pt.initProxyTimeTickChannelNames()
 	pt.initMsgStreamTimeTickBufSize()
@@ -137,20 +145,30 @@ func (pt *ParamTable) initTimeTickInterval() {
 	pt.TimeTickInterval = time.Duration(interval) * time.Millisecond
 }
 
-func (pt *ParamTable) initProxySubName() {
-	prefix, err := pt.Load("msgChannel.subNamePrefix.proxySubNamePrefix")
+func (pt *ParamTable) initClusterMsgChannelPrefix() {
+	config, err := pt.Load("msgChannel.chanNamePrefix.cluster")
 	if err != nil {
 		panic(err)
 	}
-	pt.ProxySubName = prefix + "-" + strconv.FormatInt(pt.ProxyID, 10)
+	pt.ClusterChannelPrefix = config
+}
+
+func (pt *ParamTable) initProxySubName() {
+	config, err := pt.Load("msgChannel.subNamePrefix.proxySubNamePrefix")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{pt.ClusterChannelPrefix, config, strconv.FormatInt(pt.ProxyID, 10)}
+	pt.ProxySubName = strings.Join(s, "-")
 }
 
 func (pt *ParamTable) initProxyTimeTickChannelNames() {
-	prefix, err := pt.Load("msgChannel.chanNamePrefix.proxyTimeTick")
+	config, err := pt.Load("msgChannel.chanNamePrefix.proxyTimeTick")
 	if err != nil {
 		panic(err)
 	}
-	prefix += "-0"
+	s := []string{pt.ClusterChannelPrefix, config, "0"}
+	prefix := strings.Join(s, "-")
 	pt.ProxyTimeTickChannelNames = []string{prefix}
 }
 

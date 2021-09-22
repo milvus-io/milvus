@@ -46,7 +46,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			SearchPulsarBufSize:          Params.SearchPulsarBufSize,
 			SearchResultReceiveBufSize:   Params.SearchResultReceiveBufSize,
 			RetrieveReceiveBufSize:       Params.RetrieveReceiveBufSize,
-			RetrievePulsarBufSize:        Params.retrievePulsarBufSize,
+			RetrievePulsarBufSize:        Params.RetrievePulsarBufSize,
 			RetrieveResultReceiveBufSize: Params.RetrieveResultReceiveBufSize,
 		},
 	}

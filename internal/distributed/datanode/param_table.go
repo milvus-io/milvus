@@ -48,6 +48,9 @@ func (pt *ParamTable) Init() {
 		pt.initDataCoordAddress()
 		pt.initPort()
 
+		pt.LoadFromEnv()
+		pt.LoadFromArgs()
+
 		pt.initServerMaxSendSize()
 		pt.initServerMaxRecvSize()
 	})

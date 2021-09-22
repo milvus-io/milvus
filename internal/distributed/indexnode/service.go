@@ -92,14 +92,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 func (s *Server) init() error {
 	var err error
 	Params.Init()
-	if !funcutil.CheckPortAvailable(Params.Port) {
-		Params.Port = funcutil.GetAvailablePort()
-		log.Warn("IndexNode init", zap.Any("Port", Params.Port))
-	}
-	Params.LoadFromEnv()
-	Params.LoadFromArgs()
 
-	indexnode.Params.Init()
+	indexnode.Params.InitOnce()
 	indexnode.Params.Port = Params.Port
 	indexnode.Params.IP = Params.IP
 	indexnode.Params.Address = Params.Address

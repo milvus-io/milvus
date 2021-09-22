@@ -169,10 +169,8 @@ func (s *Server) Stop() error {
 func (s *Server) init() error {
 	ctx := context.Background()
 	Params.Init()
-	Params.LoadFromEnv()
-	Params.LoadFromArgs()
 
-	dn.Params.Init()
+	dn.Params.InitOnce()
 	dn.Params.Port = Params.Port
 	dn.Params.IP = Params.IP
 

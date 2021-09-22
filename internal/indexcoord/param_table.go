@@ -44,17 +44,27 @@ var Params ParamTable
 var once sync.Once
 
 func (pt *ParamTable) Init() {
+	pt.BaseTable.Init()
+	// TODO, load index_node.yaml
+	/*err := pt.LoadYaml("advanced/index_coord.yaml")
+	if err != nil {
+		panic(err)
+	}*/
+
+	pt.initLogCfg()
+	pt.initEtcdEndpoints()
+	pt.initMetaRootPath()
+	pt.initKvRootPath()
+	pt.initMinIOAddress()
+	pt.initMinIOAccessKeyID()
+	pt.initMinIOSecretAccessKey()
+	pt.initMinIOUseSSL()
+	pt.initMinioBucketName()
+}
+
+func (pt *ParamTable) InitOnce() {
 	once.Do(func() {
-		pt.BaseTable.Init()
-		pt.initLogCfg()
-		pt.initEtcdEndpoints()
-		pt.initMetaRootPath()
-		pt.initKvRootPath()
-		pt.initMinIOAddress()
-		pt.initMinIOAccessKeyID()
-		pt.initMinIOSecretAccessKey()
-		pt.initMinIOUseSSL()
-		pt.initMinioBucketName()
+		pt.Init()
 	})
 }
 

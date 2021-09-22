@@ -69,12 +69,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory, opts ...datacoord
 
 func (s *Server) init() error {
 	Params.Init()
-	Params.LoadFromEnv()
 
 	closer := trace.InitTracing("datacoord")
 	s.closer = closer
 
-	datacoord.Params.Init()
+	datacoord.Params.InitOnce()
 	datacoord.Params.IP = Params.IP
 	datacoord.Params.Port = Params.Port
 
