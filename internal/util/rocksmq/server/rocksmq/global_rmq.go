@@ -70,30 +70,7 @@ func InitRocksMQ() error {
 
 func CloseRocksMQ() {
 	log.Debug("Close Rocksmq!")
-	if Rmq != nil {
-		Rmq.stopRetention()
-		if Rmq.store != nil {
-			Rmq.consumers.Range(func(k, v interface{}) bool {
-				var topic string
-				for _, consumer := range v.([]*Consumer) {
-					err := Rmq.DestroyConsumerGroup(consumer.Topic, consumer.GroupName)
-					if err != nil {
-						log.Warn("Rocksmq DestroyConsumerGroup failed!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName))
-					}
-					topic = consumer.Topic
-				}
-				if topic != "" {
-					err := Rmq.DestroyTopic(topic)
-					if err != nil {
-						log.Warn("Rocksmq DestroyTopic failed!", zap.Any("topic", topic))
-					}
-				}
-				return true
-			})
-			// FIXME(yukun): When close Rmq.store, there may be some goroutines in rocksmq.Consume() using the
-			// store instance, so this may cause crash. Needs to send a mutex to rocksmq to stop using store
-			// when Rmq needs to be closed.
-			// Rmq.store.Close()
-		}
+	if Rmq != nil && Rmq.store != nil {
+		Rmq.Close()
 	}
 }
