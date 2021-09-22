@@ -29,7 +29,6 @@ SegcoreInitImpl() {
     el::Configurations el_conf;
     el_conf.setGlobally(el::ConfigurationType::Enabled, std::to_string(false));
 }
-}  // namespace milvus::segcore
 
 extern "C" void
 SegcoreInit() {
@@ -40,7 +39,7 @@ extern "C" void
 SegcoreSetChunkRows(const int64_t value) {
     milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
     config.set_chunk_rows(value);
-    std::cout << "set config chunk_size: " << config.get_chunk_rows() << std::endl;
+    LOG_SEGCORE_DEBUG_ << "set config chunk_size: " << config.get_chunk_rows();
 }
 
 extern "C" void
@@ -58,5 +57,7 @@ SegcoreSetSimdType(const char* value) {
         PanicInfo("invalid SIMD type: " + std::string(value));
     }
     milvus::engine::KnowhereConfig::SetSimdType(simd_type);
-    std::cout << "set config simd_type: " << int(simd_type) << std::endl;
+    LOG_SEGCORE_DEBUG_ << "set config simd_type: " << int(simd_type);
 }
+
+}  // namespace milvus::segcore
