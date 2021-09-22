@@ -4,19 +4,23 @@ This document will help to setup your development environment and running tests.
 
 Table of contents
 =================
-* [Building Milvus with Docker](#building-milvus-with-docker)
-* [Building Milvus on a local OS/shell environment](#building-milvus-on-a-local-osshell-environment)
-  * [Hardware Requirements](#hardware-requirements)
-  * [Installing Required Software](#installing-required-software)
-     * [Dependencies](#dependencies)
-     * [CMake](#cmake)
-     * [Go](#go)
-     * [Docker &amp; Docker Compose](#docker--docker-compose)
-  * [Building Milvus](#building-milvus)
-* [A Quick Start for Testing Milvus](#a-quick-start-for-testing-milvus)
-  * [Presubmission Verification](#presubmission-verification)
-  * [Unit Tests](#unit-tests)
-  * [E2E Tests](#e2e-tests)
+- [Development](#development)
+- [Table of contents](#table-of-contents)
+  - [Building Milvus with Docker](#building-milvus-with-docker)
+  - [Building Milvus on a local OS/shell environment](#building-milvus-on-a-local-osshell-environment)
+    - [Hardware Requirements](#hardware-requirements)
+    - [Installing Required Software](#installing-required-software)
+      - [Dependencies](#dependencies)
+      - [CMake](#cmake)
+      - [Go](#go)
+      - [Docker & Docker Compose](#docker--docker-compose)
+    - [Building Milvus](#building-milvus)
+  - [A Quick Start for Testing Milvus](#a-quick-start-for-testing-milvus)
+    - [Presubmission Verification](#presubmission-verification)
+    - [Unit Tests](#unit-tests)
+    - [Code coverage](#code-coverage)
+    - [E2E Tests](#e2e-tests)
+  - [GitHub Flow](#github-flow)
 
 
 ## Building Milvus with Docker
@@ -151,6 +155,31 @@ To run single test case, for instance, run TestSearchTask in /internal/proxy dir
 $ go test -v ./internal/proxy/ -test.run TestSearchTask
 ```
 
+### Code coverage
+
+Before submitting your Pull Request, make sure your code change is covered by unit test. Use the following commands to check code coverage rate:
+
+Install lcov(cpp code coverage tool)
+```shell
+$ sudo apt-get install lcov
+```
+
+Run unit test and generate report for code coverage
+```shell
+$ make codecov
+```
+This command will generate html report for Golang and C++ respectively.
+For Golang report, open the `go_coverage.html` under milvus project path.
+For C++ report, open the `cpp_coverage/index.html` under milvus project path.
+
+You also can generate Golang coverage report by:
+```shell
+$ make codecov-go
+```
+Or C++ coverage report by:
+```shell
+$ make codecov-cpp
+```
 
 ### E2E Tests
 
