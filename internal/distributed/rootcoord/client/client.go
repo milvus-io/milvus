@@ -562,21 +562,45 @@ func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequ
 
 func (c *GrpcClient) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.CreateAlias(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.CreateAlias(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.DropAlias(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.DropAlias(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
 func (c *GrpcClient) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.AlterAlias(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.AlterAlias(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
