@@ -59,11 +59,11 @@ class ShowExprNodeVisitor : ExprVisitor {
 
 void
 ShowExprVisitor::visit(LogicalUnaryExpr& expr) {
-    Assert(!ret_.has_value());
+    AssertInfo(!ret_.has_value(), "[ShowExprVisitor]Ret json already has value before visit");
     using OpType = LogicalUnaryExpr::OpType;
 
     // TODO: use magic_enum if available
-    Assert(expr.op_type_ == OpType::LogicalNot);
+    AssertInfo(expr.op_type_ == OpType::LogicalNot, "[ShowExprVisitor]Expr op type isn't LogicNot");
     auto op_name = "LogicalNot";
 
     Json extra{
@@ -75,7 +75,7 @@ ShowExprVisitor::visit(LogicalUnaryExpr& expr) {
 
 void
 ShowExprVisitor::visit(LogicalBinaryExpr& expr) {
-    Assert(!ret_.has_value());
+    AssertInfo(!ret_.has_value(), "[ShowExprVisitor]Ret json already has value before visit");
     using OpType = LogicalBinaryExpr::OpType;
 
     // TODO: use magic_enum if available
@@ -103,14 +103,14 @@ template <typename T>
 static Json
 TermExtract(const TermExpr& expr_raw) {
     auto expr = dynamic_cast<const TermExprImpl<T>*>(&expr_raw);
-    Assert(expr);
+    AssertInfo(expr, "[ShowExprVisitor]TermExpr cast to TermExprImpl failed");
     return Json{expr->terms_};
 }
 
 void
 ShowExprVisitor::visit(TermExpr& expr) {
-    Assert(!ret_.has_value());
-    Assert(datatype_is_vector(expr.data_type_) == false);
+    AssertInfo(!ret_.has_value(), "[ShowExprVisitor]Ret json already has value before visit");
+    AssertInfo(datatype_is_vector(expr.data_type_) == false, "[ShowExprVisitor]Data type of expr isn't vector type");
     auto terms = [&] {
         switch (expr.data_type_) {
             case DataType::BOOL:
@@ -146,7 +146,7 @@ UnaryRangeExtract(const UnaryRangeExpr& expr_raw) {
     using proto::plan::OpType;
     using proto::plan::OpType_Name;
     auto expr = dynamic_cast<const UnaryRangeExprImpl<T>*>(&expr_raw);
-    Assert(expr);
+    AssertInfo(expr, "[ShowExprVisitor]UnaryRangeExpr cast to UnaryRangeExprImpl failed");
     Json res{{"expr_type", "UnaryRange"},
              {"field_offset", expr->field_offset_.get()},
              {"data_type", datatype_name(expr->data_type_)},
@@ -157,8 +157,8 @@ UnaryRangeExtract(const UnaryRangeExpr& expr_raw) {
 
 void
 ShowExprVisitor::visit(UnaryRangeExpr& expr) {
-    Assert(!ret_.has_value());
-    Assert(datatype_is_vector(expr.data_type_) == false);
+    AssertInfo(!ret_.has_value(), "[ShowExprVisitor]Ret json already has value before visit");
+    AssertInfo(datatype_is_vector(expr.data_type_) == false, "[ShowExprVisitor]Data type of expr isn't vector type");
     switch (expr.data_type_) {
         case DataType::BOOL:
             ret_ = UnaryRangeExtract<bool>(expr);
@@ -192,7 +192,7 @@ BinaryRangeExtract(const BinaryRangeExpr& expr_raw) {
     using proto::plan::OpType;
     using proto::plan::OpType_Name;
     auto expr = dynamic_cast<const BinaryRangeExprImpl<T>*>(&expr_raw);
-    Assert(expr);
+    AssertInfo(expr, "[ShowExprVisitor]BinaryRangeExpr cast to BinaryRangeExprImpl failed");
     Json res{{"expr_type", "BinaryRange"},
              {"field_offset", expr->field_offset_.get()},
              {"data_type", datatype_name(expr->data_type_)},
@@ -205,8 +205,8 @@ BinaryRangeExtract(const BinaryRangeExpr& expr_raw) {
 
 void
 ShowExprVisitor::visit(BinaryRangeExpr& expr) {
-    Assert(!ret_.has_value());
-    Assert(datatype_is_vector(expr.data_type_) == false);
+    AssertInfo(!ret_.has_value(), "[ShowExprVisitor]Ret json already has value before visit");
+    AssertInfo(datatype_is_vector(expr.data_type_) == false, "[ShowExprVisitor]Data type of expr isn't vector type");
     switch (expr.data_type_) {
         case DataType::BOOL:
             ret_ = BinaryRangeExtract<bool>(expr);
@@ -238,7 +238,7 @@ void
 ShowExprVisitor::visit(CompareExpr& expr) {
     using proto::plan::OpType;
     using proto::plan::OpType_Name;
-    Assert(!ret_.has_value());
+    AssertInfo(!ret_.has_value(), "[ShowExprVisitor]Ret json already has value before visit");
 
     Json res{{"expr_type", "Compare"},
              {"left_field_offset", expr.left_field_offset_.get()},
