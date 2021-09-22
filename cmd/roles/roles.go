@@ -23,9 +23,9 @@ import (
 	"syscall"
 
 	"github.com/milvus-io/milvus/internal/util/healthz"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
@@ -369,7 +369,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	} else {
 		err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
 		if err != nil {
-			fmt.Println("failed to set deploy mode: ", err)
+			log.Error("failed to set deploy mode: ", zap.Error(err))
 		}
 	}
 
@@ -487,7 +487,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 	sig := <-sc
-	fmt.Printf("Get %s signal to exit\n", sig.String())
+	log.Error("Get signal to exit\n", zap.String("signal", sig.String()))
 
 	// some deferred Stop has race with context cancel
 	cancel()
