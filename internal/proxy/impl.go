@@ -18,6 +18,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util/trace"
+
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"go.uber.org/zap"
@@ -1243,6 +1245,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	defer sp.Finish()
 	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
