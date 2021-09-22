@@ -97,8 +97,6 @@ class TestPartitionParams(TestcaseBase):
                                  )
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("collection_name, partition_name, description",
-                             # [(cf.gen_unique_str(), cf.gen_unique_str(prefix), cf.gen_unique_str())])
     def test_partition_dup_name(self):
         """
         target: verify create partitions with duplicate name
