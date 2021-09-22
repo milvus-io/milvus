@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -487,4 +488,14 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 	})
+}
+
+func TestElapse(t *testing.T) {
+	start := time.Now()
+	isElapse := etcdkv.CheckElapseAndWarn(start, "err message")
+	assert.Equal(t, isElapse, false)
+
+	time.Sleep(time.Duration(3) * time.Second)
+	isElapse = etcdkv.CheckElapseAndWarn(start, "err message")
+	assert.Equal(t, isElapse, true)
 }
