@@ -9,30 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <iostream>
-
-#include "segcore/segcore_init_c.h"
-#include "segcore/SegcoreConfig.h"
-#include "utils/Log.h"
 #include "config/ConfigKnowhere.h"
+#include "indexbuilder/init_c.h"
 
-namespace milvus::segcore {
-extern "C" void
-SegcoreInit() {
+void
+IndexBuilderInit() {
     milvus::config::KnowhereInitImpl();
 }
 
-extern "C" void
-SegcoreSetChunkRows(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
-    config.set_chunk_rows(value);
-    LOG_SEGCORE_DEBUG_ << "set config chunk_size: " << config.get_chunk_rows();
-}
-
-extern "C" void
-SegcoreSetSimdType(const char* value) {
+void
+IndexBuilderSetSimdType(const char* value) {
     milvus::config::KnowhereSetSimdType(value);
-    LOG_SEGCORE_DEBUG_ << "set config simd_type: " << value;
 }
-
-}  // namespace milvus::segcore

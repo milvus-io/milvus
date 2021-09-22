@@ -65,6 +65,12 @@ func TestParamTable(t *testing.T) {
 	t.Run("MinioBucketName", func(t *testing.T) {
 		t.Logf("MinioBucketName: %v", Params.MinioBucketName)
 	})
+
+	t.Run("SimdType", func(t *testing.T) {
+		t.Logf("SimdType: %v", Params.SimdType)
+	})
+
+	// FIXME(dragondriver): how to cover panic case? we use `LoadWithDefault` to initialize `SimdType`
 }
 
 //TODO: Params Load should be return error when key does not exist.

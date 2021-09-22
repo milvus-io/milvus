@@ -9,26 +9,15 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-
-set(INDEXBUILDER_FILES
-        IndexWrapper.cpp
-        index_c.cpp
-        init_c.cpp
-        )
-add_library(milvus_indexbuilder SHARED
-        ${INDEXBUILDER_FILES}
+set(CONFIG_SRC
+        ConfigKnowhere.cpp
         )
 
-# link order matters
-target_link_libraries(milvus_indexbuilder
-        milvus_config
-        milvus_common
-        milvus_utils
+add_library(milvus_config
+        ${CONFIG_SRC}
+        )
+target_link_libraries(milvus_config
         milvus_proto
+        milvus_utils
         knowhere
-        tbb
-        log
-        dl
-        pthread
         )
-
