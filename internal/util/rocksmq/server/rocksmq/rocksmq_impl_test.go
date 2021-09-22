@@ -119,6 +119,9 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	}
 	rmq.RegisterConsumer(consumer2)
 
+	topicMu.Delete(topicName)
+	topicMu.Store(topicName, topicName)
+	assert.Error(t, rmq.DestroyConsumerGroup(topicName, groupName))
 	err = rmq.DestroyConsumerGroup(topicName, groupName)
 	assert.Error(t, err)
 }
@@ -230,6 +233,16 @@ func TestRocksmq_Dummy(t *testing.T) {
 	pMsgs := make([]ProducerMessage, 1)
 	pMsgA := ProducerMessage{Payload: []byte(msgA)}
 	pMsgs[0] = pMsgA
+
+	topicMu.Delete(channelName)
+	_, err = rmq.Consume(channelName, groupName1, 1)
+	assert.Error(t, err)
+	topicMu.Store(channelName, channelName)
+	assert.Error(t, rmq.Produce(channelName, nil))
+
+	_, err = rmq.Consume(channelName, groupName1, 1)
+	assert.Error(t, err)
+
 }
 
 func TestRocksmq_Loop(t *testing.T) {
