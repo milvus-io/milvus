@@ -83,6 +83,8 @@ const (
 	CreateAliasTaskName             = "CreateAliasTask"
 	DropAliasTaskName               = "DropAliasTask"
 	AlterAliasTaskName              = "AlterAliasTask"
+
+	minFloat32 = -1 * float32(math.MaxFloat32)
 )
 
 type task interface {
@@ -1755,8 +1757,6 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 		}
 	}
 
-	const minFloat32 = -1 * float32(math.MaxFloat32)
-
 	// TODO(yukun): Use parallel function
 	var realTopK int64 = -1
 	var idx int64
@@ -1766,17 +1766,14 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 
 		j = 0
 		for ; j < topk; j++ {
-			valid := true
-			choice, maxDistance := 0, minFloat32
+			choice, maxDistance := -1, minFloat32
 			for q, loc := range locs { // query num, the number of ways to merge
 				if loc >= topk {
 					continue
 				}
 				curIdx := idx*topk + loc
 				id := searchResultData[q].Ids.GetIntId().Data[curIdx]
-				if id == -1 {
-					valid = false
-				} else {
+				if id != -1 {
 					distance := searchResultData[q].Scores[curIdx]
 					if distance > maxDistance {
 						choice = q
@@ -1784,7 +1781,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					}
 				}
 			}
-			if !valid {
+			if choice == -1 {
 				break
 			}
 			choiceOffset := locs[choice]
