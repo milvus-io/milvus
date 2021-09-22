@@ -24,7 +24,7 @@ FILE_INFO_BASE="${ROOT_DIR}/lcov_base.info"
 FILE_INFO_UT="${ROOT_DIR}/lcov_ut.info"
 FILE_INFO_COMBINE="${ROOT_DIR}/lcov_combine.info"
 FILE_INFO_OUTPUT="${ROOT_DIR}/lcov_output.info"
-DIR_LCOV_OUTPUT="${ROOT_DIR}/lcov_html"
+DIR_LCOV_OUTPUT="${ROOT_DIR}/cpp_coverage"
 DIR_GCNO="${ROOT_DIR}/cmake_build/"
 
 # delete old code coverage info files
