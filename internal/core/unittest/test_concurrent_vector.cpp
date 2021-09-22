@@ -10,17 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
-#include <iostream>
 #include <random>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "segcore/ConcurrentVector.h"
-#include "segcore/SegmentGrowing.h"
-// #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-
 #include "segcore/SegmentGrowing.h"
 #include "segcore/AckResponder.h"
 
