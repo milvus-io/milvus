@@ -10,7 +10,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 | Suitable for                             | Projects                                                     | Resources                                                    |
 | ---------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| Go developers                            | [milvus](https://github.com/milvus-io/milvus), [milvus-sdk-go](https://github.com/milvus-io/milvus-sdk-go),       |                                                              |
+| Go developers                            | [milvus](https://github.com/milvus-io/milvus), [milvus-sdk-go](https://github.com/milvus-io/milvus-sdk-go)       |                                                              |
 | CPP developers                           | [milvus](https://github.com/milvus-io/milvus)                |                                                              |
 | Developers interested in other languages | [pymilvus](https://github.com/milvus-io/pymilvus), [milvus-sdk-node](https://github.com/milvus-io/milvus-sdk-node), [milvus-sdk-java](https://github.com/milvus-io/milvus-sdk-java) | [Contributing to PyMilvus](https://github.com/milvus-io/pymilvus/blob/master/CONTRIBUTING.md) |
 | Kubernetes enthusiasts                   | [milvus-helm](https://github.com/milvus-io/milvus-helm)      |                                                              |
