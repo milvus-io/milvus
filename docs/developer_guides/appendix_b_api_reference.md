@@ -8,7 +8,7 @@ In this section, we introduce the RPCs of milvus service. A brief description of
 | :----------------- | ------------------------------------------------------------ |
 | CreateCollection        | create a collection base on schema statement                 |
 | DropCollection          | drop a collection                                            |
-| HasCollection           | whether or not a collection exists                           |
+| HasCollection           | whether a collection exists                                  |
 | LoadCollection          | load collection to memory for future search                  |
 | ReleaseCollection       | release the memory the collection memory                     |
 | DescribeCollection      | show a collection's schema and its descriptive statistics    |
@@ -16,10 +16,10 @@ In this section, we introduce the RPCs of milvus service. A brief description of
 | ShowCollections         | list all collections                                         |
 | CreatePartition         | create a partition                                           |
 | DropPartition           | drop a partition                                             |
-| HasPartition            | whether or not a partition exists                            |
+| HasPartition            | whether a partition exists                                   |
 | LoadPartition           | load collection to memory for future search                  |
-| ReleasePartition        | release the memory the collection memory                     |
-| GetPartitionStatistics  | show a collection's statistics                               |
+| ReleasePartitions       | release the memory the collection memory                     |
+| GetPartitionStatistics  | show a partition's statistics                                |
 | ShowPartitions          | list a collection's all partitions                           |
 | CreateIndex             | create index for a field in the collection                       |
 | DescribeIndex           | get index details for a field in the collection                |
