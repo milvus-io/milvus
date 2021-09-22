@@ -25,10 +25,12 @@ class MilvusSys:
 
     @property
     def build_version(self):
+        """get the first node's build version as milvus build version"""
         return self.nodes[0].get('infos').get('system_info').get('system_version')
 
     @property
     def deploy_mode(self):
+        """get the first node's deploy_mode as milvus deploy_mode"""
         return self.nodes[0].get('infos').get('system_info').get('deploy_mode')
 
     @property
