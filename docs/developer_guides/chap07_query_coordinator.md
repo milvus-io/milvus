@@ -41,36 +41,19 @@ type MsgBase struct {
 }
 ```
 
-* *RegisterNode*
-
-```go
-type Address struct {
-	Ip   string
-	port int64
-}
-
-type RegisterNodeRequest struct {
-	Base    *commonpb.MsgBase
-	Address *commonpb.Address
-}
-
-type RegisterNodeResponse struct {
-	Status     *commonpb.Status
-	InitParams *internalpb.InitParams
-}
-```
-
 * *ShowCollections*
 
 ```go
 type ShowCollectionRequest struct {
-	Base *commonpb.MsgBase
-	DbID UniqueID
+	Base          *commonpb.MsgBase
+	DbID          UniqueID
+	CollectionIDs []int64
 }
 
 type ShowCollectionResponse struct {
-	Status        *commonpb.Status
-	CollectionIDs []UniqueID
+	Status              *commonpb.Status
+	CollectionIDs       []UniqueID
+	InMemoryPercentages []int64
 }
 ```
 
@@ -102,11 +85,13 @@ type ShowPartitionRequest struct {
 	Base         *commonpb.MsgBase
 	DbID         UniqueID
 	CollectionID UniqueID
+	PartitionIDs []int64
 }
 
 type ShowPartitionResponse struct {
-	Status       *commonpb.Status
-	PartitionIDs []UniqueID
+	Status              *commonpb.Status
+	PartitionIDs        []UniqueID
+	InMemoryPercentages []int64
 }
 ```
 
@@ -206,15 +191,18 @@ type GetSegmentInfoResponse struct {
 
 ```go
 type SearchRequest struct {
-	Base            *commonpb.MsgBase
-	ResultChannelID string
-	DbID            int64
-	CollectionID    int64
-	PartitionIDs    []int64
-	Dsl             string
-	// serialized `PlaceholderGroup`
-	PlaceholderGroup []byte
-	Query            *commonpb.Blob
+	Base               *commonpb.MsgBase
+	ResultChannelID    string
+	DbID               int64
+	CollectionID       int64
+	PartitionIDs       []int64
+	Dsl                string
+	PlaceholderGroup   []byte
+	DslType            commonpb.DslType
+	SerializedExprPlan []byte
+	OutputFieldsId     []int64
+	TravelTimestamp    uint64
+	GuaranteeTimestamp uint64
 }
 
 type SearchMsg struct {
@@ -223,7 +211,25 @@ type SearchMsg struct {
 }
 ```
 
+* *RetriveMsg*
+```go
+type RetriveRequest struct {
+	Base               *commonpb.MsgBase
+	ResultChannelID    string
+	DbID               int64
+	CollectionID       int64
+	PartitionIDs       []int64
+	SerializedExprPlan []byte
+	OutputFieldsId     []int64
+	TravelTimestamp    uint64
+	GuaranteeTimestamp uint64
+}
 
+type RetriveMsg struct {
+	BaseMsg
+	RetrieveRequest
+}
+```
 
 #### 8.2 Query Node Interface
 
