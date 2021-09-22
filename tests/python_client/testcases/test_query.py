@@ -1188,3 +1188,23 @@ class TestQueryBase:
         connect.load_collection(collection)
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr, output_fields=[fields])
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_partition(self, connect, collection):
+        """
+        target: test query on partition
+        method: create a partition and query
+        expected: verify query result
+        """
+        connect.create_partition(collection, ut.default_tag)
+        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
+        assert len(ids) == ut.default_nb
+        connect.load_partitions(collection, [ut.default_tag])
+        term_expr = f'{default_int_field_name} in {[i for i in range(default_pos)]}'
+        res = connect.query(collection, term_expr, partition_names=[ut.default_tag], output_fields=["*", "%"])
+        for _id, index in enumerate(ids[:default_pos]):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
+
+
