@@ -191,3 +191,12 @@ class ApiCollectionWrapper:
         res, check = api_request([self.collection.drop_index], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
+
+    def create_alias(self):
+        pass
+
+    def drop_alias(self):
+        pass
+
+    def alter_alias(self):
+        pass
