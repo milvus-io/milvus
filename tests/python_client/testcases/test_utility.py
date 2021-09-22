@@ -223,7 +223,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.loading_progress("not_existed_name", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tag(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #7613")
+    @pytest.mark.xfail(reason="pymilvus issue #677")
     def test_loading_progress_invalid_partition_names(self, get_invalid_partition_names):
         """
         target: test loading progress with invalid partition names
@@ -238,7 +238,6 @@ class TestUtilityParams(TestcaseBase):
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
     @pytest.mark.tag(CaseLabel.L1)
-    @pytest.mark.xfail("issue #7613")
     @pytest.mark.parametrize("partition_names", [[ct.default_tag], [ct.default_partition_name, ct.default_tag]])
     def test_loading_progress_not_existed_partitions(self, partition_names):
         """
@@ -249,7 +248,7 @@ class TestUtilityParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         log.debug(collection_w.num_entities)
         collection_w.load()
-        err_msg = {ct.err_code: 0, ct.err_msg: "can't find partition"}
+        err_msg = {ct.err_code: 1, ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be found"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
