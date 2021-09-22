@@ -160,22 +160,3 @@ Run unit test and generate code for code coverage check
 ```shell 
 $ ./build.sh -u -c
 ```
-
-Run MySQL docker
-```shell 
-docker pull mysql:latest
-docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:latest
-```
-
-Run code coverage
-
-```shell  
-$ ./coverage.sh -u root -p 123456 -t 127.0.0.1
-```
-
-Or start your own MySQL server, and then run code coverage
-
-```shell
-$ ./coverage.sh -u ${MYSQL_USERNAME} -p ${MYSQL_PASSWORD} -t ${MYSQL_SERVER_IP}
-```
-
