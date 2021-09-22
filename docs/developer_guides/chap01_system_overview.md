@@ -30,7 +30,7 @@ Each collection or partition contains a set of 'segment groups'. Segment group i
 
 <img src="./figs/system_framework.png" width=800>
 
-The main components, proxy, WAL, query node, and write node can scale to multiple instances. These components scale separately for better tradeoff between availability and cost.
+The main components, proxy, WAL, query node, and write node can scale to multiple instances. These components scale separately for a better tradeoff between availability and cost.
 
 The WAL forms a hash ring. Requests (i.e. inserts and deletes) from clients will be repacked by proxy. Operations shared identical hash value (the hash value of primary key) will be routed to the same hash bucket. In addition, some preprocessing work will be done by proxy, such as static validity checking, primary key assignment (if not given by user), timestamp assignment.
 
