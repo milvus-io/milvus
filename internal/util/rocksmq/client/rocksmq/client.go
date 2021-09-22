@@ -12,6 +12,8 @@
 package rocksmq
 
 import (
+	"context"
+
 	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
@@ -26,6 +28,8 @@ func NewClient(options ClientOptions) (Client, error) {
 
 type ClientOptions struct {
 	Server RocksMQ
+	Ctx    context.Context
+	Cancel context.CancelFunc
 }
 
 type Client interface {

@@ -14,17 +14,20 @@ package rocksmq
 import (
 	"context"
 	"reflect"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
 	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
+	"go.uber.org/zap"
 )
 
 type client struct {
 	server          RocksMQ
 	producerOptions []ProducerOptions
 	consumerOptions []ConsumerOptions
-	context         context.Context
+	ctx             context.Context
 	cancel          context.CancelFunc
+	wg              *sync.WaitGroup
 }
 
 func newClient(options ClientOptions) (*client, error) {
@@ -32,12 +35,16 @@ func newClient(options ClientOptions) (*client, error) {
 		return nil, newError(InvalidConfiguration, "Server is nil")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	if options.Ctx == nil {
+		options.Ctx, options.Cancel = context.WithCancel(context.Background())
+	}
+
 	c := &client{
 		server:          options.Server,
 		producerOptions: []ProducerOptions{},
-		context:         ctx,
-		cancel:          cancel,
+		ctx:             options.Ctx,
+		cancel:          options.Cancel,
+		wg:              &sync.WaitGroup{},
 	}
 	return c, nil
 }
@@ -68,12 +75,13 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, newError(0, "rmq server is nil")
 	}
 	if exist, con := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName); exist {
-		log.Debug("EXISTED")
+		log.Debug("ConsumerGroup already existed", zap.Any("topic", options.Topic), zap.Any("SubscriptionName", options.SubscriptionName))
 		consumer, err := newConsumer1(c, options, con.MsgMutex)
 		if err != nil {
 			return nil, err
 		}
-		go consume(c.context, consumer)
+		c.wg.Add(1)
+		go c.consume(consumer)
 		return consumer, nil
 	}
 	consumer, err := newConsumer(c, options)
@@ -97,17 +105,18 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 
 	// Take messages from RocksDB and put it into consumer.Chan(),
 	// trigger by consumer.MsgMutex which trigger by producer
-	go consume(c.context, consumer)
+	c.wg.Add(1)
+	go c.consume(consumer)
 	c.consumerOptions = append(c.consumerOptions, options)
 
 	return consumer, nil
 }
 
-func consume(ctx context.Context, consumer *consumer) {
+func (c *client) consume(consumer *consumer) {
+	defer c.wg.Done()
 	for {
 		select {
-		case <-ctx.Done():
-			log.Debug("client finished")
+		case <-c.ctx.Done():
 			return
 		case _, ok := <-consumer.MsgMutex():
 			if !ok {
@@ -142,12 +151,12 @@ func consume(ctx context.Context, consumer *consumer) {
 }
 
 func (c *client) Close() {
-	// TODO: free resources
-	for _, opt := range c.consumerOptions {
-		log.Debug("Close" + opt.Topic + "+" + opt.SubscriptionName)
-		_ = c.server.DestroyConsumerGroup(opt.Topic, opt.SubscriptionName)
-		//TODO(yukun): Should topic be closed?
-		_ = c.server.DestroyTopic(opt.Topic)
-	}
+	// TODO(yukun): Should call server.close() here?
 	c.cancel()
+	// Wait all consume goroutines exit
+	c.wg.Wait()
+	if c.server != nil {
+		c.server.Close()
+	}
+	c.consumerOptions = nil
 }

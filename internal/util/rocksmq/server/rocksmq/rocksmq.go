@@ -31,6 +31,7 @@ type RocksMQ interface {
 	DestroyTopic(topicName string) error
 	CreateConsumerGroup(topicName string, groupName string) error
 	DestroyConsumerGroup(topicName string, groupName string) error
+	Close()
 
 	RegisterConsumer(consumer *Consumer)
 

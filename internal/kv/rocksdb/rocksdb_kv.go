@@ -12,6 +12,9 @@
 package rocksdbkv
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/tecbot/gorocksdb"
 )
 
@@ -24,6 +27,9 @@ type RocksdbKV struct {
 }
 
 func NewRocksdbKV(name string) (*RocksdbKV, error) {
+	if name == "" {
+		return nil, errors.New("rocksdb name is nil")
+	}
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(3 << 30))
 	opts := gorocksdb.NewDefaultOptions()
@@ -48,7 +54,9 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 }
 
 func (kv *RocksdbKV) Close() {
-	kv.DB.Close()
+	if kv.DB != nil {
+		kv.DB.Close()
+	}
 }
 
 func (kv *RocksdbKV) GetName() string {
@@ -56,12 +64,22 @@ func (kv *RocksdbKV) GetName() string {
 }
 
 func (kv *RocksdbKV) Load(key string) (string, error) {
+	if kv.DB == nil {
+		return "", fmt.Errorf("Rocksdb instance is nil when load %s", key)
+	}
+
 	value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
 	defer value.Free()
 	return string(value.Data()), err
 }
 
 func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
+	if key == "" {
+		return nil, nil, errors.New("Key is nil in LoadWithPrefix")
+	}
+	if kv.DB == nil {
+		return nil, nil, fmt.Errorf("Rocksdb instance is nil when load %s", key)
+	}
 	kv.ReadOptions.SetPrefixSameAsStart(true)
 	kv.DB.Close()
 	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(key)))
@@ -99,6 +117,9 @@ func (kv *RocksdbKV) ResetPrefixLength(len int) error {
 }
 
 func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
+	if kv.DB == nil {
+		return nil, errors.New("Rocksdb instance is nil when do MultiLoad")
+	}
 	values := make([]string, 0, len(keys))
 	for _, key := range keys {
 		value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
@@ -111,11 +132,17 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 }
 
 func (kv *RocksdbKV) Save(key, value string) error {
+	if kv.DB == nil {
+		return errors.New("Rocksdb instance is nil when do save")
+	}
 	err := kv.DB.Put(kv.WriteOptions, []byte(key), []byte(value))
 	return err
 }
 
 func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
+	if kv.DB == nil {
+		return errors.New("Rocksdb instance is nil when do MultiSave")
+	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Clear()
 	for k, v := range kvs {
@@ -126,6 +153,9 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 }
 
 func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
+	if kv.DB == nil {
+		return errors.New("Rocksdb instance is nil when do RemoveWithPrefix")
+	}
 	kv.ReadOptions.SetPrefixSameAsStart(true)
 	kv.DB.Close()
 	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(prefix)))
@@ -152,11 +182,17 @@ func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 }
 
 func (kv *RocksdbKV) Remove(key string) error {
+	if kv.DB == nil {
+		return errors.New("Rocksdb instance is nil when do Remove")
+	}
 	err := kv.DB.Delete(kv.WriteOptions, []byte(key))
 	return err
 }
 
 func (kv *RocksdbKV) MultiRemove(keys []string) error {
+	if kv.DB == nil {
+		return errors.New("Rocksdb instance is nil when do MultiRemove")
+	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Clear()
 	for _, key := range keys {
@@ -167,6 +203,9 @@ func (kv *RocksdbKV) MultiRemove(keys []string) error {
 }
 
 func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
+	if kv.DB == nil {
+		return errors.New("Rocksdb instance is nil when do MultiSaveAndRemove")
+	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Clear()
 	for k, v := range saves {
@@ -180,6 +219,9 @@ func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []stri
 }
 
 func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
+	if kv.DB == nil {
+		return errors.New("Rocksdb instance is nil when do DeleteRange")
+	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Clear()
 	if len(startKey) == 0 {
