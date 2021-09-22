@@ -196,7 +196,6 @@ class TestPartitionParams(TestcaseBase):
         # TODO: need an error code issue #5144 and assert independently
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_none_collection(self):
         """
         target: verify create a partition with none collection
@@ -211,7 +210,6 @@ class TestPartitionParams(TestcaseBase):
                                                         ct.err_msg: "must be pymilvus.Collection"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop(self):
         """
         target: verify drop a partition in one collection
@@ -288,7 +286,6 @@ class TestPartitionParams(TestcaseBase):
         assert len(res2) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
                                       cf.gen_default_list_data(10),
                                       cf.gen_default_tuple_data(10)])
