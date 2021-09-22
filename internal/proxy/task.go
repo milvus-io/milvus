@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -731,6 +732,8 @@ func (it *insertTask) checkFieldAutoID() error {
 }
 
 func (it *insertTask) PreExecute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
+	defer sp.Finish()
 	it.Base.MsgType = commonpb.MsgType_Insert
 	it.Base.SourceID = Params.ProxyID
 
@@ -1000,6 +1003,8 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 }
 
 func (it *insertTask) Execute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-Execute")
+	defer sp.Finish()
 	collectionName := it.BaseInsertTask.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
