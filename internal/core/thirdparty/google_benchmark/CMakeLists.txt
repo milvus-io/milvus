@@ -12,7 +12,7 @@ if ( NOT google_benchmark_POPULATED )
     FetchContent_Populate( google_benchmark )
 
     # Adding the following targets:
-    # gtest, gtest_main, gmock, gmock_main
+    # benchmark::benchmark_main
     message("gb=${google_benchmark_SOURCE_DIR}")
     add_subdirectory( ${google_benchmark_SOURCE_DIR}
                       ${google_benchmark_BINARY_DIR}

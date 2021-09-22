@@ -10,6 +10,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
+set( GTEST_VERSION 1.8.1 )
 
 if ( DEFINED ENV{MILVUS_GTEST_URL} )
     set( GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}" )

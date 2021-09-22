@@ -10,8 +10,19 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
+set(KNOWHERE_THIRDPARTY_DEPENDENCIES
+        Arrow
+        FAISS
+)
+
 message(STATUS "Using ${KNOWHERE_DEPENDENCY_SOURCE} approach to find dependencies")
-set(OpenBLAS_SOURCE "AUTO")
+
+# For each dependency, set dependency source to global default, if unset
+foreach (DEPENDENCY ${KNOWHERE_THIRDPARTY_DEPENDENCIES})
+    if ("${${DEPENDENCY}_SOURCE}" STREQUAL "")
+        set(${DEPENDENCY}_SOURCE ${KNOWHERE_DEPENDENCY_SOURCE})
+    endif ()
+endforeach ()
 
 # ----------------------------------------------------------------------
 # Identify OS
@@ -124,13 +135,6 @@ endif ()
 
 set(MAKE_BUILD_ARGS "-j6")
 
-
-# ----------------------------------------------------------------------
-# Find pthreads
-
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
-
 # ----------------------------------------------------------------------
 # Versions and URLs for toolchain builds, which also can be used to configure
 # offline builds
@@ -167,14 +171,9 @@ endif ()
 # ----------------------------------------------------------------------
 # Openblas
 macro(build_openblas)
-    set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
     message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
-    set(OpenBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
-    set(OpenBLAS_LIB_DIR "${OPENBLAS_PREFIX}/lib")
-    set(OPENBLAS_SHARED_LIB
-            "${OPENBLAS_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    set(OPENBLAS_STATIC_LIB
-            "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set (KNOWHERE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
+
     set(OPENBLAS_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             -DCMAKE_BUILD_TYPE=Release
@@ -189,87 +188,58 @@ macro(build_openblas)
             -DCC=gcc
             -DINTERFACE64=0
             -DNUM_THREADS=128
-            -DNO_LAPACKE=1
+            -DNO_LAPACKE=0
             "-DVERSION=${OPENBLAS_VERSION}"
-            "-DCMAKE_INSTALL_PREFIX=${OPENBLAS_PREFIX}"
-            -DCMAKE_INSTALL_LIBDIR=lib)
+            "-DCMAKE_INSTALL_PREFIX=${KNOWHERE_INSTALL_PREFIX}"
+            )
 
     externalproject_add(openblas_ep
-            URL
-            ${OPENBLAS_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${OPENBLAS_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE}
-            PREFIX=${OPENBLAS_PREFIX}
-            install
-            BUILD_BYPRODUCTS
-            ${OPENBLAS_SHARED_LIB}
-            ${OPENBLAS_STATIC_LIB})
+            URL ${OPENBLAS_SOURCE_URL}
+            URL_MD5 "28cc19a6acbf636f5aab5f10b9a0dfe1"
+            CMAKE_ARGS ${OPENBLAS_CMAKE_ARGS}
+            BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS}
+            PREFIX              ${CMAKE_BINARY_DIR}/3rdparty_download/openblas-subbuild
+            BINARY_DIR          openblas-bin
+            INSTALL_DIR         ${KNOWHERE_INSTALL_PREFIX}
+            )
 
-    file(MAKE_DIRECTORY "${OpenBLAS_INCLUDE_DIR}")
+    ExternalProject_Get_Property(openblas_ep INSTALL_DIR)
+
+    if( NOT IS_DIRECTORY ${INSTALL_DIR}/include )
+        file( MAKE_DIRECTORY "${INSTALL_DIR}/include" )
+    endif()
+
+    include(GNUInstallDirs)
+
     add_library(openblas SHARED IMPORTED)
-    set_target_properties(
-            openblas
+    set_target_properties( openblas
             PROPERTIES
-            IMPORTED_LOCATION "${OPENBLAS_SHARED_LIB}"
-            LIBRARY_OUTPUT_NAME "openblas"
-            INTERFACE_INCLUDE_DIRECTORIES "${OpenBLAS_INCLUDE_DIR}")
+                IMPORTED_GLOBAL     TRUE
+                IMPORTED_LOCATION   ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/libopenblas.so
+                INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
+
     add_dependencies(openblas openblas_ep)
-    get_target_property(OpenBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-    set(OpenBLAS_LIBRARIES "${OPENBLAS_SHARED_LIB}")
 endmacro()
 
 if (KNOWHERE_WITH_OPENBLAS)
     if (OpenBLAS_SOURCE STREQUAL "AUTO")
-       unset(OpenBLAS_DIR CACHE)
-       set(OpenBLAS_INCLUDE_SEARCH_PATHS
-            /opt/OpenBLAS/include
-            ${OPENBLAS_PREFIX}
-          )
-        set(OpenBLAS_LIB_SEARCH_PATHS
-            /opt/OpenBLAS/lib
-            ${OPENBLAS_PREFIX}
-	  )
-        find_path(OpenBLAS_INCLUDE_DIR NAMES openblas_config.h lapacke.h PATHS ${OpenBLAS_INCLUDE_SEARCH_PATHS})
-        find_library(OpenBLAS_LIB NAMES openblas PATHS ${OpenBLAS_LIB_SEARCH_PATHS})
-        find_library(Lapacke_LIB NAMES lapacke PATHS ${OpenBLAS_LIB_SEARCH_PATHS})
-        set(OpenBLAS_FOUND ON)
-        #    Check include files
-        if(NOT OpenBLAS_INCLUDE_DIR)
-            set(OpenBLAS_FOUND OFF)
-        endif()
-        #    Check libraries
-        if(NOT OpenBLAS_LIB)
-            set(OpenBLAS_FOUND OFF)
-        endif()
-	if (OpenBLAS_FOUND)
-        set(OpenBLAS_LIBRARIES ${OpenBLAS_LIB})  #location of .so
-	    STRING(REGEX REPLACE "/libopenblas.so" "" OpenBLAS_LIB_DIR ${OpenBLAS_LIBRARIES})
-        if (Lapacke_LIB)
-            set(OpenBLAS_LIBRARIES ${OpenBLAS_LIBRARIES} ${Lapacke_LIB})
-        endif()
-        add_library(openblas SHARED IMPORTED)
-        set_target_properties(
-            openblas
-            PROPERTIES
-	        IMPORTED_GLOBAL TRUE
-	        IMPORTED_LOCATION "${OpenBLAS_LIBRARIES}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OpenBLAS_INCLUDE_DIR}")
+        set (BLA_VENDOR OpenBLAS)
+        find_package(BLAS)
+
+        message(STATUS "Knowhere openblas libraries: ${BLAS_LIBRARIES}")
+        message(STATUS "Knowhere openblas found: ${BLAS_FOUND}")
+
+        if (BLAS_FOUND)
+            add_library(openblas ALIAS BLAS::BLAS)
         else()
-	        build_openblas()
+            build_openblas()
         endif()
+
     elseif (OpenBLAS_SOURCE STREQUAL "BUNDLED")
         build_openblas()
     elseif (OpenBLAS_SOURCE STREQUAL "SYSTEM")
-        find_package(OpenBLAS REQUIRED)
-    endif ()    
-    include_directories(SYSTEM "${OpenBLAS_INCLUDE_DIR}")
-    link_directories(SYSTEM "${OpenBLAS_LIB_DIR}")
+        set (BLA_VENDOR OpenBLAS)
+        find_package(BLAS REQUIRED)
+        add_library(openblas ALIAS BLAS::BLAS)
+    endif ()
 endif()
