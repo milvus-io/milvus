@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// DeleteNode is to process delete msg, flush delete info into storage.
 type deleteNode struct {
 	BaseNode
 
@@ -35,7 +36,7 @@ func (dn *deleteNode) Close() {
 }
 
 func (dn *deleteNode) Operate(in []Msg) []Msg {
-	// log.Debug("deleteNode Operating")
+	log.Debug("deleteNode Operating")
 
 	if len(in) != 1 {
 		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
@@ -51,6 +52,9 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	return []Msg{}
 }
 
+// getSegmentsByPKs return the bloom filter check result.
+// If the key may exists in the segment, returns it in map.
+// If the key not exists in the segment, the segment is filter out.
 func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, error) {
 	if pks == nil {
 		return nil, errors.New("pks is nil")
