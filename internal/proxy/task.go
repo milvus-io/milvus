@@ -27,6 +27,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/trace"
+
 	"github.com/milvus-io/milvus/internal/common"
 
 	"go.uber.org/zap"
@@ -1439,6 +1441,8 @@ func (st *searchTask) getVChannels() ([]vChan, error) {
 }
 
 func (st *searchTask) PreExecute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-PreExecute")
+	defer sp.Finish()
 	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
 
@@ -1630,6 +1634,8 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 }
 
 func (st *searchTask) Execute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-Execute")
+	defer sp.Finish()
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: *st.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
@@ -1957,6 +1963,8 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, avail
 //}
 
 func (st *searchTask) PostExecute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-PostExecute")
+	defer sp.Finish()
 	t0 := time.Now()
 	defer func() {
 		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))

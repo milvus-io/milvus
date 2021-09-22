@@ -1418,6 +1418,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
+	defer sp.Finish()
 	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
