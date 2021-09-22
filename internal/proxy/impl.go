@@ -18,6 +18,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util/trace"
+
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"go.uber.org/zap"
@@ -1414,6 +1416,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
+	defer sp.Finish()
 	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
