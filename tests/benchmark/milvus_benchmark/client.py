@@ -469,7 +469,7 @@ class MilvusClient(object):
 
         entities = utils.generate_entities(collection_info, vectors, ids)
         logger.debug("[scene_test] Start insert : %s" % collection_name)
-        self.insert(entities)
+        self.insert(entities, collection_name=collection_name)
         logger.debug("[scene_test] Start flush : %s" % collection_name)
         self.flush()
 
