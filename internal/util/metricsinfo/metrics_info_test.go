@@ -160,6 +160,8 @@ func TestIndexNodeInfos_Codec(t *testing.T) {
 		},
 		SystemConfigurations: IndexNodeConfiguration{
 			MinioBucketName: "a-bucket",
+
+			SimdType: "auto",
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
