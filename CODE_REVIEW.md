@@ -7,7 +7,11 @@ All PRs are checked in automatically by the sre-robot, with the following condit
 4. Reviewe passed, with a "lgtm" label
 5. Approver passed, with a "approved" label
 
-Generally speaking, reviewer is volunteered and can be anyone in the community who is familiar with the packages the PR modifies. Reviewers are responsible for the logic correctness, error handling, unit test coverage and code readability. While Approver focus on overall design, code readability, and ensuring the PR follows code of conduct(Such as meaningful title and commit message, marked with correct labels, meaningful comments). Currently, all Approvers are listed under OWNERS_ALIASES file.
+Generally speaking, reviewer is volunteered and can be anyone in the community who is familiar with the packages the PR modifies.
+Reviewers are responsible for the logic correctness, error handling, unit test coverage and code readability.
+While Approver focus on overall design, code readability, and ensuring the PR follows code of
+conduct(Such as meaningful title and commit message, marked with correct labels, meaningful comments). Currently,
+all Approvers are listed under OWNERS_ALIASES file.
 
 
 ## Things to do before review
