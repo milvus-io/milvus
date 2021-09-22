@@ -104,11 +104,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_different_partition_names(self, connect, collection):
-        '''
+        """
         target: test create partition twice with different names
         method: call function: create_partition, and again
         expected: status ok
-        '''
+        """
         connect.create_partition(collection, default_tag)
         tag_name = gen_unique_str()
         connect.create_partition(collection, tag_name)
