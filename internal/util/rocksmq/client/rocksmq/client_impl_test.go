@@ -12,6 +12,7 @@
 package rocksmq
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,6 @@ func TestClient_CreateProducer(t *testing.T) {
 		Server: newMockRocksMQ(),
 	})
 	assert.NoError(t, err)
-	defer client.Close()
 
 	producer, err := client.CreateProducer(ProducerOptions{
 		Topic: newTopicName(),
@@ -68,8 +68,11 @@ func TestClient_CreateProducer(t *testing.T) {
 }
 
 func TestClient_Subscribe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	client, err := NewClient(ClientOptions{
 		Server: newMockRocksMQ(),
+		Ctx:    ctx,
+		Cancel: cancel,
 	})
 	assert.NoError(t, err)
 
@@ -79,8 +82,6 @@ func TestClient_Subscribe(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Nil(t, consumer)
-
-	client.Close()
 
 	/////////////////////////////////////////////////
 	rmqPath := "/tmp/milvus/test_client2"
@@ -113,8 +114,11 @@ func TestClient_consume(t *testing.T) {
 	rmqPath := "/tmp/milvus/test_client3"
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
+	ctx, cancel := context.WithCancel(context.Background())
 	client, err := NewClient(ClientOptions{
 		Server: rmq,
+		Ctx:    ctx,
+		Cancel: cancel,
 	})
 	assert.NoError(t, err)
 	defer client.Close()

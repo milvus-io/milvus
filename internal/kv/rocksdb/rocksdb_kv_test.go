@@ -130,3 +130,33 @@ func TestRocksdbKV_Goroutines(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestRocksdbKV_Dummy(t *testing.T) {
+	name := "/tmp/rocksdb_dummy"
+	rocksdbkv, err := rocksdbkv.NewRocksdbKV(name)
+	assert.Nil(t, err)
+	defer rocksdbkv.Close()
+	defer rocksdbkv.RemoveWithPrefix("")
+
+	rocksdbkv.DB = nil
+	_, err = rocksdbkv.Load("")
+	assert.Error(t, err)
+	_, _, err = rocksdbkv.LoadWithPrefix("")
+	assert.Error(t, err)
+	_, err = rocksdbkv.MultiLoad(nil)
+	assert.Error(t, err)
+	err = rocksdbkv.Save("", "")
+	assert.Error(t, err)
+	err = rocksdbkv.MultiSave(nil)
+	assert.Error(t, err)
+	err = rocksdbkv.RemoveWithPrefix("")
+	assert.Error(t, err)
+	err = rocksdbkv.Remove("")
+	assert.Error(t, err)
+	err = rocksdbkv.MultiRemove(nil)
+	assert.Error(t, err)
+	err = rocksdbkv.MultiSaveAndRemove(nil, nil)
+	assert.Error(t, err)
+	err = rocksdbkv.DeleteRange("", "")
+	assert.Error(t, err)
+}
