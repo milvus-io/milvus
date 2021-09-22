@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
+// mock of query coordinator client
 type queryCoordMock struct {
 	types.QueryCoord
 }
