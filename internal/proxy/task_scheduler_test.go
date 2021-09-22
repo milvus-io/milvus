@@ -118,6 +118,16 @@ func TestBaseTaskQueue(t *testing.T) {
 	assert.True(t, queue.utFull())
 	err = queue.Enqueue(newDefaultMockTask())
 	assert.NotNil(t, err)
+	queue.setMaxTaskNum(100)
+
+	// test removeTaskByID
+	err = queue.Enqueue(newDefaultMockTask())
+	assert.NoError(t, err)
+	unissuedTask = queue.FrontUnissuedTask()
+	assert.NotNil(t, unissuedTask)
+	queue.removeTaskByID(unissuedTask.ID())
+	queue.AddActiveTask(unissuedTask)
+	queue.removeTaskByID(unissuedTask.ID())
 }
 
 func TestDdTaskQueue(t *testing.T) {

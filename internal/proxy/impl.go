@@ -162,6 +162,8 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 
 	err = cct.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(cct.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -214,6 +216,8 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 
 	err = dct.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(dct.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -268,6 +272,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 
 	err = hct.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(hct.ID())
+
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -320,6 +326,8 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 
 	err = lct.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(lct.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -371,6 +379,8 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 
 	err = rct.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(rct.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -425,6 +435,8 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 
 	err = dct.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(dct.ID())
+
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -534,6 +546,8 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 
 	err = sct.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(sct.ID())
+
 		return &milvuspb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -590,6 +604,8 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 
 	err = cpt.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(cpt.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -643,6 +659,8 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 
 	err = dpt.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(dpt.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -701,6 +719,8 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 
 	err = hpt.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(hpt.ID())
+
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -756,6 +776,8 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 
 	err = lpt.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(lpt.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -809,6 +831,8 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 
 	err = rpt.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(rpt.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -866,6 +890,8 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 
 	err = g.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(g.ID())
+
 		return &milvuspb.GetPartitionStatisticsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -920,6 +946,8 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 
 	err = spt.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(spt.ID())
+
 		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -977,6 +1005,8 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 
 	err = cit.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(cit.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -1041,6 +1071,9 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		if dit.result != nil {
 			errCode = dit.result.Status.GetErrorCode()
 		}
+
+		node.sched.ddQueue.removeTaskByID(dit.ID())
+
 		return &milvuspb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: errCode,
@@ -1100,6 +1133,8 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 
 	err = dit.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(dit.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -1163,6 +1198,8 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 
 	err = gibpt.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(gibpt.ID())
+
 		return &milvuspb.GetIndexBuildProgressResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1228,6 +1265,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 
 	err = dipt.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(dipt.ID())
+
 		return &milvuspb.GetIndexStateResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1336,6 +1375,9 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			errIndex[i] = i
 		}
 		result.ErrIndex = errIndex
+
+		node.sched.dmQueue.removeTaskByID(it.ID())
+
 		return result, nil
 	}
 	if it.result.Status.ErrorCode != commonpb.ErrorCode_Success {
@@ -1401,6 +1443,8 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	err = dt.WaitToFinish()
 	if err != nil {
+		node.sched.dmQueue.removeTaskByID(dt.ID())
+
 		return &milvuspb.MutationResult{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1491,6 +1535,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
 
 	if err != nil {
+		node.sched.dqQueue.removeTaskByID(qt.ID())
+
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1548,6 +1594,8 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	err = ft.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(ft.ID())
+
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status.Reason = err.Error()
 		return resp, nil
@@ -1622,6 +1670,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	err = qt.WaitToFinish()
 	if err != nil {
+		node.sched.dqQueue.removeTaskByID(qt.ID())
+
 		return &milvuspb.QueryResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1673,6 +1723,8 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 
 	err = cat.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(cat.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -1717,6 +1769,8 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 
 	err = dat.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(dat.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -1763,6 +1817,8 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 
 	err = aat.WaitToFinish()
 	if err != nil {
+		node.sched.ddQueue.removeTaskByID(aat.ID())
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -1823,6 +1879,8 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 
 		err = qt.WaitToFinish()
 		if err != nil {
+			node.sched.ddQueue.removeTaskByID(qt.ID())
+
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,

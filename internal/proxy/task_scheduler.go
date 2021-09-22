@@ -46,6 +46,7 @@ type taskQueue interface {
 	Enqueue(t task) error
 	setMaxTaskNum(num int64)
 	getMaxTaskNum() int64
+	removeTaskByID(id UniqueID)
 }
 
 type baseTaskQueue struct {
@@ -215,6 +216,25 @@ func (queue *baseTaskQueue) getMaxTaskNum() int64 {
 	defer queue.maxTaskNumMtx.RUnlock()
 
 	return queue.maxTaskNum
+}
+
+func (queue *baseTaskQueue) removeTaskFromUnissuedListByID(id UniqueID) {
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+
+	var e *list.Element
+	for e = queue.unissuedTasks.Front(); e != nil; e = e.Next() {
+		if e.Value.(task).ID() == id {
+			queue.unissuedTasks.Remove(e)
+			return
+		}
+	}
+}
+
+// removeTaskByID should only be called when task timeouts
+func (queue *baseTaskQueue) removeTaskByID(id UniqueID) {
+	queue.removeTaskFromUnissuedListByID(id)
+	queue.PopActiveTask(id)
 }
 
 func newBaseTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *baseTaskQueue {
