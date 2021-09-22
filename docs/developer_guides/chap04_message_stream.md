@@ -164,6 +164,7 @@ type TsMsg interface {
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	Type() MsgType
+	SourceID() int64
 	HashKeys() []uint32
 	Marshal(TsMsg) (MarshalType, error)
 	Unmarshal(MarshalType) (TsMsg, error)
