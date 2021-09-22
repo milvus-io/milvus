@@ -3074,6 +3074,11 @@ class TestLoadPartition:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_after_drop(self, connect, collection):
+        """
+        target: test load and release partition after drop
+        method: drop partition and then load and release it
+        expected: raise exception
+        """
         connect.create_partition(collection, default_tag)
         result = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
