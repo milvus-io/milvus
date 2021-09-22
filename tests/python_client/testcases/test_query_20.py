@@ -756,7 +756,6 @@ class TestQueryOperation(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("collection_name", [cf.gen_unique_str(prefix)])
     def test_query_without_connection(self):
         """
         target: test query without connection
