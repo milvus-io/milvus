@@ -1056,7 +1056,7 @@ class TestIndexBinary:
     def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
         """
         target: test create index interface with invalid metric type
-        method: add entitys into binary connection, flash, create index with L2 metric type.
+        method: add entities into binary collection, flush, create index with L2 metric type.
         expected: return create_index failure
         """
         # insert 6000 vectors
