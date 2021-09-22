@@ -15,6 +15,8 @@ import (
 	"context"
 	"io"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/opentracing/opentracing-go"
@@ -54,4 +56,8 @@ func (rc *RootCoord) Stop() error {
 		return err
 	}
 	return nil
+}
+
+func (rc *RootCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return rc.svr.GetComponentStates(ctx, request)
 }

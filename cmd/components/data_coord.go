@@ -14,6 +14,8 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
@@ -50,4 +52,8 @@ func (s *DataCoord) Stop() error {
 		return err
 	}
 	return nil
+}
+
+func (s *DataCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return s.svr.GetComponentStates(ctx, request)
 }

@@ -14,6 +14,8 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
@@ -50,4 +52,8 @@ func (qs *QueryCoord) Stop() error {
 		return err
 	}
 	return nil
+}
+
+func (qs *QueryCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return qs.svr.GetComponentStates(ctx, request)
 }
