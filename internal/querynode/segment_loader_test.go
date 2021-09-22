@@ -15,9 +15,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -66,12 +66,8 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 			},
 		}
 
-		key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, defaultSegmentID)
-		err = kv.Remove(key)
-		assert.NoError(t, err)
-
 		err = loader.loadSegment(req, true)
-		assert.Error(t, err)
+		assert.Nil(t, err)
 	})
 
 	t.Run("test load segment", func(t *testing.T) {
@@ -100,12 +96,6 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 				},
 			},
 		}
-
-		key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, defaultSegmentID)
-		segmentInfo := &querypb.SegmentInfo{}
-		value := proto.MarshalTextString(segmentInfo)
-		err = kv.Save(key, value)
-		assert.NoError(t, err)
 
 		err = loader.loadSegment(req, true)
 		assert.NoError(t, err)
@@ -138,10 +128,8 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 			},
 		}
 
-		key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, defaultSegmentID)
-		segmentInfo := &querypb.SegmentInfo{}
-		value := proto.MarshalTextString(segmentInfo)
-		err = kv.Save(key, value)
+		key := fmt.Sprintf("%s/%d", segmentStatePrefix, defaultSegmentID)
+		err = kv.Save(key, strconv.Itoa(int(querypb.SegmentState_sealed)))
 		assert.NoError(t, err)
 
 		err = loader.loadSegment(req, true)

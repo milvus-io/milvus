@@ -122,7 +122,9 @@ func (h *historical) watchGlobalSegmentMeta() {
 func (h *historical) addGlobalSegmentInfo(segmentID UniqueID, segmentInfo *querypb.SegmentInfo) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.globalSealedSegments[segmentID] = segmentInfo
+	if segmentInfo.SegmentState == querypb.SegmentState_sealed {
+		h.globalSealedSegments[segmentID] = segmentInfo
+	}
 }
 
 func (h *historical) removeGlobalSegmentInfo(segmentID UniqueID) {

@@ -205,3 +205,47 @@ func TestWatchNodeLoop(t *testing.T) {
 		queryCoord.Stop()
 	})
 }
+
+func TestWatchMetaLoop(t *testing.T) {
+	refreshParams()
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	assert.Nil(t, err)
+
+	meta, err := newMeta(kv)
+	assert.Nil(t, err)
+
+	ctx1, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	coord := &QueryCoord{
+		loopCtx:    ctx1,
+		loopCancel: cancel,
+		kvClient:   kv,
+		meta:       meta,
+	}
+	coord.loopWg.Add(1)
+	go coord.watchMetaLoop()
+
+	schema := genCollectionSchema(defaultCollectionID, false)
+	err = coord.meta.addCollection(defaultCollectionID, schema)
+	assert.Nil(t, err)
+	segmentInfo := &querypb.SegmentInfo{
+		SegmentID:    defaultSegmentID,
+		PartitionID:  defaultPartitionID,
+		CollectionID: defaultCollectionID,
+		SegmentState: querypb.SegmentState_sealing,
+	}
+	err = coord.meta.setSegmentInfo(defaultSegmentID, segmentInfo)
+	assert.Nil(t, err)
+
+	key := fmt.Sprintf("%s/%d", "queryNode-segmentState", defaultSegmentID)
+	err = kv.Save(key, strconv.Itoa(int(querypb.SegmentState_sealed)))
+	assert.Nil(t, err)
+
+	for {
+		updatedInfo, err := coord.meta.getSegmentInfoByID(defaultSegmentID)
+		assert.Nil(t, err)
+		if updatedInfo.SegmentState == querypb.SegmentState_sealed {
+			break
+		}
+	}
+}

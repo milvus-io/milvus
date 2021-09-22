@@ -34,6 +34,7 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 		SegmentID:    segmentID,
 		CollectionID: collectionID,
 		PartitionID:  partitionID,
+		SegmentState: querypb.SegmentState_sealed,
 	}
 
 	emptySegmentCheck := func() {

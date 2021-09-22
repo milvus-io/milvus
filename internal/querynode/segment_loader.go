@@ -15,8 +15,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -34,8 +34,7 @@ import (
 )
 
 const (
-	queryCoordSegmentMetaPrefix = "queryCoord-segmentMeta"
-	queryNodeSegmentMetaPrefix  = "queryNode-segmentMeta"
+	segmentStatePrefix = "queryNode-segmentState"
 )
 
 // segmentLoader is only responsible for loading the field data from binlog
@@ -115,25 +114,8 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			return err
 		}
 		if onService {
-			key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, segmentID)
-			value, err := loader.etcdKV.Load(key)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when load segment info from etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-			segmentInfo := &querypb.SegmentInfo{}
-			err = proto.UnmarshalText(value, segmentInfo)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-			segmentInfo.SegmentState = querypb.SegmentState_sealed
-			newKey := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
-			err = loader.etcdKV.Save(newKey, proto.MarshalTextString(segmentInfo))
+			newKey := fmt.Sprintf("%s/%d", segmentStatePrefix, segmentID)
+			err = loader.etcdKV.Save(newKey, strconv.Itoa(int(querypb.SegmentState_sealed)))
 			if err != nil {
 				deleteSegment(segment)
 				log.Warn("error when update segment info to etcd", zap.Any("error", err.Error()))

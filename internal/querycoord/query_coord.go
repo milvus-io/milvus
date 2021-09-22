@@ -20,7 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
@@ -279,7 +278,7 @@ func (qc *QueryCoord) watchMetaLoop() {
 	defer qc.loopWg.Done()
 	log.Debug("query coordinator start watch MetaReplica loop")
 
-	watchChan := qc.kvClient.WatchWithPrefix("queryNode-segmentMeta")
+	watchChan := qc.kvClient.WatchWithPrefix("queryNode-segmentState")
 
 	for {
 		select {
@@ -292,15 +291,24 @@ func (qc *QueryCoord) watchMetaLoop() {
 				if err != nil {
 					log.Error("watch MetaReplica loop error when get segmentID", zap.Any("error", err.Error()))
 				}
-				segmentInfo := &querypb.SegmentInfo{}
-				err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
-				if err != nil {
-					log.Error("watch MetaReplica loop error when unmarshal", zap.Any("error", err.Error()))
-				}
 				switch event.Type {
 				case mvccpb.PUT:
-					//TODO::
-					qc.meta.setSegmentInfo(segmentID, segmentInfo)
+					value, err := strconv.ParseInt(string(event.Kv.Value), 10, 64)
+					if err != nil {
+						log.Error(err.Error())
+						continue
+					}
+					segmentInfo, err := qc.meta.getSegmentInfoByID(segmentID)
+					if err != nil {
+						log.Error(err.Error())
+						continue
+					}
+					segmentInfo.SegmentState = querypb.SegmentState(value)
+					err = qc.meta.setSegmentInfo(segmentID, segmentInfo)
+					if err != nil {
+						log.Error(err.Error())
+						continue
+					}
 				case mvccpb.DELETE:
 					//TODO::
 				}
