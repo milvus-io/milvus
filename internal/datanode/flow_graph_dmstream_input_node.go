@@ -22,13 +22,16 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context, factory msgstream.Factory, collID UniqueID, chanName string, seekPos *internalpb.MsgPosition) *flowgraph.InputNode {
+func newDmInputNode(ctx context.Context, factory msgstream.Factory, collID UniqueID, chanName string, seekPos *internalpb.MsgPosition) (*flowgraph.InputNode, error) {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
 	// subName should be unique, since pchannelName is shared among several collections
 	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collID, 10)
-	insertStream, _ := factory.NewTtMsgStream(ctx)
+	insertStream, err := factory.NewTtMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	pchannelName := rootcoord.ToPhysicalChannel(chanName)
 	insertStream.AsConsumer([]string{pchannelName}, consumeSubName)
@@ -43,5 +46,5 @@ func newDmInputNode(ctx context.Context, factory msgstream.Factory, collID Uniqu
 
 	var stream msgstream.MsgStream = insertStream
 	node := flowgraph.NewInputNode(&stream, "dmInputNode", maxQueueLength, maxParallelism)
-	return node
+	return node, nil
 }
