@@ -149,7 +149,8 @@ func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	activeCh := node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	go node.etcdAliveCheck(node.ctx, activeCh)
 	Params.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
 	// Start node watch node
@@ -195,6 +196,26 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 			for _, evt := range event.Events {
 				go node.handleChannelEvt(evt)
 			}
+		}
+	}
+}
+
+// etcdAliveCheck performs alive check for etcd connection
+// will close datanode if check fails
+func (node *DataNode) etcdAliveCheck(ctx context.Context, ch <-chan bool) {
+	for {
+		select {
+		case _, ok := <-ch:
+			if ok { // ok means still alive do nothing
+				continue
+			}
+			// not ok, disconnect
+			go func() { node.Stop() }()
+			log.Warn("disconnected from etcd, shuting down datanode", zap.Int64("ServerID", node.NodeID))
+			return
+		case <-ctx.Done():
+			log.Warn("etcd alive check quit, due to ctx done")
+			return
 		}
 	}
 }
