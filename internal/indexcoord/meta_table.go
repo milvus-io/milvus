@@ -29,6 +29,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
+// Meta is used to record the state of the index.
+// revision: The number of times IndexMeta has been changed in ETCD. It's the same as Event.Kv.Version in ETCD.
+// indexMeta:A structure that records the state of the index defined by proto.
 type Meta struct {
 	indexMeta *indexpb.IndexMeta
 	revision  int64
@@ -41,6 +44,7 @@ type metaTable struct {
 	lock sync.RWMutex
 }
 
+// NewMetaTable is used to create a new meta table.
 func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 	mt := &metaTable{
 		client: kv,
