@@ -47,7 +47,7 @@ func TestSizeofStruct(t *testing.T) {
 	}
 	err = de.Write(&buf)
 	assert.Nil(t, err)
-	s3 := binary.Size(de.DescriptorEventDataFixPart) + binary.Size(de.PostHeaderLengths)
+	s3 := binary.Size(de.DescriptorEventDataFixPart) + binary.Size(de.PostHeaderLengths) + binary.Size(de.ExtraLength) + int(de.ExtraLength)
 	assert.Equal(t, s3, buf.Len())
 }
 

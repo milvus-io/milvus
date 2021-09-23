@@ -64,71 +64,33 @@ func TestDescriptorEvent(t *testing.T) {
 
 	utc := UnsafeReadInt8(buffer, int(unsafe.Sizeof(ts)))
 	assert.Equal(t, EventTypeCode(utc), DescriptorEventType)
-	usID := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)))
-	assert.Equal(t, usID, int32(ServerID))
-	elen := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usID)))
+	elen := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)))
 	assert.Equal(t, elen, int32(len(buffer)))
-	nPos := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usID)+unsafe.Sizeof(elen)))
+	nPos := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(elen)))
 	assert.GreaterOrEqual(t, nPos, int32(binary.Size(MagicNumber)+len(buffer)))
 	t.Logf("next position = %d", nPos)
 
-	binVersion := UnsafeReadInt16(buffer, binary.Size(eventHeader{}))
-	assert.Equal(t, binVersion, int16(BinlogVersion))
-	svrVersion := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+int(unsafe.Sizeof(binVersion)))
-	assert.Equal(t, svrVersion, int64(ServerVersion))
-	commitID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+int(unsafe.Sizeof(binVersion))+int(unsafe.Sizeof(svrVersion)))
-	assert.Equal(t, commitID, int64(CommitID))
-	headLen := UnsafeReadInt8(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID)))
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	t.Logf("head len = %d", headLen)
-	collID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen)))
+	collID := UnsafeReadInt64(buffer, binary.Size(eventHeader{}))
 	assert.Equal(t, collID, int64(-1))
 	partID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID)))
 	assert.Equal(t, partID, int64(-1))
 	segID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID)))
 	assert.Equal(t, segID, int64(-1))
 	fieldID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID)))
 	assert.Equal(t, fieldID, int64(-1))
 	startTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
 		int(unsafe.Sizeof(fieldID)))
 	assert.Equal(t, startTs, int64(0))
 	endTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
@@ -136,10 +98,6 @@ func TestDescriptorEvent(t *testing.T) {
 		int(unsafe.Sizeof(startTs)))
 	assert.Equal(t, endTs, int64(0))
 	colType := UnsafeReadInt32(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
@@ -149,10 +107,6 @@ func TestDescriptorEvent(t *testing.T) {
 	assert.Equal(t, colType, int32(-1))
 
 	postHeadOffset := binary.Size(eventHeader{}) +
-		int(unsafe.Sizeof(binVersion)) +
-		int(unsafe.Sizeof(svrVersion)) +
-		int(unsafe.Sizeof(commitID)) +
-		int(unsafe.Sizeof(headLen)) +
 		int(unsafe.Sizeof(collID)) +
 		int(unsafe.Sizeof(partID)) +
 		int(unsafe.Sizeof(segID)) +
@@ -197,7 +151,6 @@ func TestInsertEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, InsertEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -371,7 +324,6 @@ func TestInsertEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, InsertEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -445,7 +397,6 @@ func TestDeleteEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, DeleteEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -619,7 +570,6 @@ func TestDeleteEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, DeleteEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -693,7 +643,6 @@ func TestCreateCollectionEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, CreateCollectionEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -741,7 +690,6 @@ func TestCreateCollectionEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, CreateCollectionEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -815,7 +763,6 @@ func TestDropCollectionEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, DropCollectionEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -863,7 +810,6 @@ func TestDropCollectionEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, DropCollectionEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -937,7 +883,6 @@ func TestCreatePartitionEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, CreatePartitionEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -985,7 +930,6 @@ func TestCreatePartitionEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, CreatePartitionEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -1059,7 +1003,6 @@ func TestDropPartitionEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, DropPartitionEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
@@ -1107,7 +1050,6 @@ func TestDropPartitionEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		wBuf := buf.Bytes()
-		checkEventHeader(t, wBuf, DropPartitionEventType, ServerID, int32(len(wBuf)))
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
 		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
 		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
