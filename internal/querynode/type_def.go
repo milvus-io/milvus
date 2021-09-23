@@ -38,6 +38,7 @@ type (
 	ConsumeSubName = string
 )
 
+// TimeRange is a range of time periods
 type TimeRange struct {
 	timestampMin Timestamp
 	timestampMax Timestamp
