@@ -56,7 +56,7 @@ TEST(SegmentCoreTest, NormalDistributionTest) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
-    int N = 1000 * 1000;
+    int N = 100 * 1000;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
