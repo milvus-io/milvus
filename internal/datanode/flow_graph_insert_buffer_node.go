@@ -46,8 +46,11 @@ const (
 )
 
 type (
+	// InsertData of storage
 	InsertData = storage.InsertData
-	Blob       = storage.Blob
+
+	// Blob of storage
+	Blob = storage.Blob
 )
 
 type insertBufferNode struct {
