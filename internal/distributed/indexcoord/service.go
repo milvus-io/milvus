@@ -35,9 +35,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is an alias of int64, is used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
-type Timestamp = typeutil.Timestamp
 
+// Server is the grpc wrapper of IndexCoord.
 type Server struct {
 	indexcoord types.IndexCoord
 
@@ -51,6 +52,7 @@ type Server struct {
 	closer io.Closer
 }
 
+// Server.Run initializes and starts IndexCoord's grpc service.
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
@@ -63,6 +65,7 @@ func (s *Server) Run() error {
 	return nil
 }
 
+//Server.init initializes IndexCoord's grpc service.
 func (s *Server) init() error {
 	Params.Init()
 
@@ -92,6 +95,7 @@ func (s *Server) init() error {
 	return nil
 }
 
+//Server.start starts IndexCoord's grpc service.
 func (s *Server) start() error {
 	if err := s.indexcoord.Start(); err != nil {
 		return err
@@ -100,6 +104,7 @@ func (s *Server) start() error {
 	return nil
 }
 
+//Server.Stop stops IndexCoord's grpc service.
 func (s *Server) Stop() error {
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
@@ -119,39 +124,48 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+//Server.SetClient set the IndexCoord's instance.
 func (s *Server) SetClient(indexCoordClient types.IndexCoord) error {
 	s.indexcoord = indexCoordClient
 	return nil
 }
 
+//Server.GetComponentStates gets the component states of IndexCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.indexcoord.GetComponentStates(ctx)
 }
 
+//Server.GetTimeTickChannel gets the time tick channel of IndexCoord.
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.indexcoord.GetTimeTickChannel(ctx)
 }
 
+//Server.GetStatisticsChannel gets the statistics channel of IndexCoord.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.indexcoord.GetStatisticsChannel(ctx)
 }
 
+//Server.BuildIndex sends the build index request to IndexCoord.
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	return s.indexcoord.BuildIndex(ctx, req)
 }
 
+//Server.GetIndexStates gets the index states from IndexCoord.
 func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
 	return s.indexcoord.GetIndexStates(ctx, req)
 }
 
+//Server.DropIndex sends the drop index request to IndexCoord.
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.indexcoord.DropIndex(ctx, request)
 }
 
+//Server.GetIndexFilePaths gets the index file paths from IndexCoord.
 func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	return s.indexcoord.GetIndexFilePaths(ctx, req)
 }
 
+//Server.GetMetrics gets the metrics info of IndexCoord.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.indexcoord.GetMetrics(ctx, request)
 }
@@ -186,6 +200,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	log.Debug("IndexCoord grpcServer loop exit")
 }
 
+// NewServer create a new IndexCoord grpc server.
 func NewServer(ctx context.Context) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	serverImp, err := indexcoord.NewIndexCoord(ctx)
