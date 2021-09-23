@@ -74,7 +74,7 @@ func metricProxy(v int64) string {
 
 // Core root coordinator core
 type Core struct {
-	MetaTable *metaTable
+	MetaTable *MetaTable
 	//id allocator
 	IDAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
 	IDAllocatorUpdate func() error
@@ -159,6 +159,7 @@ type Core struct {
 
 // --------------------- function --------------------------
 
+// NewCore create rootcoord core
 func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
@@ -172,6 +173,7 @@ func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	return core, nil
 }
 
+// UpdateStateCode update state code
 func (c *Core) UpdateStateCode(code internalpb.StateCode) {
 	c.stateCode.Store(code)
 }
@@ -568,7 +570,7 @@ func (c *Core) setMsgStreams() error {
 	return nil
 }
 
-//SetNewProxyClient create proxy node by this func
+// SetNewProxyClient set client to create proxy
 func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.Proxy, error)) {
 	if c.NewProxyClient == nil {
 		c.NewProxyClient = f
@@ -577,6 +579,7 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.Proxy,
 	}
 }
 
+// SetDataCoord set datacoord
 func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 	initCh := make(chan struct{})
 	go func() {
@@ -692,6 +695,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 	return nil
 }
 
+// SetIndexCoord set indexcoord
 func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	initCh := make(chan struct{})
 	go func() {
@@ -752,6 +756,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	return nil
 }
 
+// SetQueryCoord set querycoord
 func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 	initCh := make(chan struct{})
 	go func() {
@@ -861,6 +866,7 @@ func (c *Core) Register() error {
 	return nil
 }
 
+// Init initialize routine
 func (c *Core) Init() error {
 	var initError error = nil
 	if c.kvBaseCreate == nil {
@@ -1090,6 +1096,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	return c.setDdMsgSendFlag(true)
 }
 
+// Start start rootcoord
 func (c *Core) Start() error {
 	if err := c.checkInit(); err != nil {
 		log.Debug("RootCoord Start checkInit failed", zap.Error(err))
@@ -1126,6 +1133,7 @@ func (c *Core) Start() error {
 	return nil
 }
 
+// Stop stop rootcoord
 func (c *Core) Stop() error {
 	c.cancel()
 	c.wg.Wait()
@@ -1133,6 +1141,7 @@ func (c *Core) Stop() error {
 	return nil
 }
 
+// GetComponentStates get states of components
 func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	log.Debug("GetComponentStates", zap.String("State Code", internalpb.StateCode_name[int32(code)]))
@@ -1159,6 +1168,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 	}, nil
 }
 
+// GetTimeTickChannel get timetick channel name
 func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -1169,6 +1179,7 @@ func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse
 	}, nil
 }
 
+// GetStatisticsChannel get statistics channel name
 func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -1179,6 +1190,7 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 	}, nil
 }
 
+// CreateCollection create collection
 func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	metrics.RootCoordCreateCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1212,6 +1224,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	}, nil
 }
 
+// DropCollection drop collection
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	metrics.RootCoordDropCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1245,6 +1258,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	}, nil
 }
 
+// HasCollection check collection existence
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	metrics.RootCoordHasCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1288,6 +1302,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	}, nil
 }
 
+// DescribeCollection return collection info
 func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	metrics.RootCoordDescribeCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1331,6 +1346,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	return t.Rsp, nil
 }
 
+// ShowCollections list all collection names
 func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	metrics.RootCoordShowCollectionsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1376,6 +1392,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	return t.Rsp, nil
 }
 
+// CreatePartition create partition
 func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	metrics.RootCoordCreatePartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1410,6 +1427,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	}, nil
 }
 
+// DropPartition drop partition
 func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	metrics.RootCoordDropPartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1444,6 +1462,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	}, nil
 }
 
+// HasPartition check partition existence
 func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	metrics.RootCoordHasPartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1487,6 +1506,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	}, nil
 }
 
+// ShowPartitions list all partition names
 func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	metrics.RootCoordShowPartitionsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	log.Debug("ShowPartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", in.Base.MsgID),
@@ -1536,6 +1556,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	return t.Rsp, nil
 }
 
+// CreateIndex create index
 func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	metrics.RootCoordCreateIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1571,6 +1592,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 	}, nil
 }
 
+// DescribeIndex return index info
 func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	metrics.RootCoordDescribeIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1626,6 +1648,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	return t.Rsp, nil
 }
 
+// DropIndex drop index
 func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	metrics.RootCoordDropIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1659,6 +1682,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 	}, nil
 }
 
+// DescribeSegment return segment info
 func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	metrics.RootCoordDescribeSegmentCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1703,6 +1727,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 	return t.Rsp, nil
 }
 
+// ShowSegments list all segments
 func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	metrics.RootCoordShowSegmentsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1747,6 +1772,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	return t.Rsp, nil
 }
 
+// AllocTimestamp alloc timestamp
 func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1785,6 +1811,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 	}, nil
 }
 
+// AllocID alloc ids
 func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1850,6 +1877,7 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 	}, nil
 }
 
+// ReleaseDQLMessageStream release DQL msgstream
 func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1861,6 +1889,7 @@ func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseD
 	return c.proxyClientManager.ReleaseDQLMessageStream(ctx, in)
 }
 
+// SegmentFlushCompleted check whether segment flush has completed
 func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1932,6 +1961,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 	}, nil
 }
 
+// GetMetrics get metrics
 func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("RootCoord.GetMetrics",
 		zap.Int64("node_id", c.session.ServerID),
@@ -2007,6 +2037,7 @@ func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) 
 	}, nil
 }
 
+// CreateAlias create collection alias
 func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -2038,6 +2069,7 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 	}, nil
 }
 
+// DropAlias drop collection alias
 func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -2069,6 +2101,7 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 	}, nil
 }
 
+// AlterAlias alter collection alias
 func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {

@@ -21,9 +21,18 @@ import "github.com/milvus-io/milvus/internal/common"
 // 102: ...
 
 const (
+	// StartOfUserFieldID id of user defined filed begin from here
 	StartOfUserFieldID = common.StartOfUserFieldID
-	RowIDField         = common.RowIDField
-	TimeStampField     = common.TimeStampField
-	RowIDFieldName     = common.RowIDFieldName
+
+	// RowIDField id of row ID field
+	RowIDField = common.RowIDField
+
+	// TimeStampField id of timestamp field
+	TimeStampField = common.TimeStampField
+
+	// RowIDFieldName name of row ID field
+	RowIDFieldName = common.RowIDFieldName
+
+	// TimeStampFieldName name of timestamp field
 	TimeStampFieldName = common.TimeStampFieldName
 )
