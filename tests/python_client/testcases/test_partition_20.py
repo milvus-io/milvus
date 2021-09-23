@@ -577,7 +577,6 @@ class TestPartitionOperations(TestcaseBase):
                             check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_release_dropped_collection(self):
         """
         target: verify release an dropped collection
