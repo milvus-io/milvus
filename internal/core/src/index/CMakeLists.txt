@@ -93,7 +93,7 @@ endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
-if (KNOWHERE_BUILD_TESTS)
+if (BUILD_UNIT_TEST)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DELPP_DISABLE_LOGS")
     add_subdirectory(unittest)
 endif ()
