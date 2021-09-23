@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pod: [datacoord, datanode, indexcoord, indexnode, proxy, pulsar, querycoord, querynode, rootcoord]
+        pod: [datacoord, datanode, indexcoord, indexnode, proxy, pulsar, querycoord, querynode, rootcoord, etcd, minio]
     
     steps:
 
@@ -39,9 +39,10 @@ jobs:
           helm repo add chaos-mesh https://charts.chaos-mesh.org
           helm search repo chaos-mesh
           kubectl create ns chaos-testing
-          helm install chaos-mesh chaos-mesh/chaos-mesh -n=chaos-testing --version v2.0.1
+          helm install chaos-mesh chaos-mesh/chaos-mesh -n=chaos-testing --version v2.0.1 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
           sleep 60s
           kubectl get po -n chaos-testing
+
       - name: Deploy Milvus
         shell: bash
         run: |
@@ -62,8 +63,4 @@ jobs:
           pip install --upgrade protobuf
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_network_partition.yaml\'/g" constants.py
           cat constants.py
-          # kubectl apply -f chaos_objects/chaos_${{ matrix.pod }}_network_partition.yaml
-          # kubectl get NetworkChaos -n chaos-testing
-          # sleep 10s
-          # kubectl describe NetworkChaos test-${{ matrix.pod }}-network-partition -n chaos-testing
           pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO
