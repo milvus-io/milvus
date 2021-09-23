@@ -12,7 +12,6 @@ Before installing etcd and MinIO, you can refer to [docker-compose.yml](https://
 wget https://github.com/etcd-io/etcd/releases/download/v3.5.0/etcd-v3.5.0-linux-amd64.tar.gz
 tar zxvf etcd-v3.5.0-linux-amd64.tar.gz
 cd etcd-v3.5.0-linux-amd64
-# start etcd service
 ./etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 ```
 
