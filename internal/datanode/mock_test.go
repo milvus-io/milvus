@@ -543,3 +543,16 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.
 		},
 	}, nil
 }
+
+// FailMessageStreamFactory mock MessageStreamFactory failure
+type FailMessageStreamFactory struct {
+	msgstream.Factory
+}
+
+func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, errors.New("mocked failure")
+}
+
+func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, errors.New("mocked failure")
+}

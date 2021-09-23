@@ -159,13 +159,17 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 	dsService.saveBinlog = saveBinlog
 
-	var dmStreamNode Node = newDmInputNode(
+	var dmStreamNode Node
+	dmStreamNode, err = newDmInputNode(
 		dsService.ctx,
 		dsService.msFactory,
 		vchanInfo.CollectionID,
 		vchanInfo.GetChannelName(),
 		vchanInfo.GetSeekPosition(),
 	)
+	if err != nil {
+		return err
+	}
 	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
 	var insertBufferNode Node
 	insertBufferNode, err = newInsertBufferNode(
