@@ -8,7 +8,7 @@ import pytest
 from utils.utils import *
 from common.constants import *
 
-uid = "list_id_in_segment"
+# uid = "list_id_in_segment"
 
 # def get_segment_id(connect, collection, nb=1, vec_type='float', index_params=None):
 #     if vec_type != "float":
