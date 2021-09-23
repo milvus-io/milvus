@@ -4,7 +4,6 @@ import time
 import argparse
 import logging
 import traceback
-# from queue import Queue
 from yaml import full_load, dump
 from milvus_benchmark.metrics.models.server import Server
 from milvus_benchmark.metrics.models.hardware import Hardware
@@ -20,9 +19,6 @@ from logs import log
 
 log.setup_logging()
 logger = logging.getLogger("milvus_benchmark.main")
-
-# q = Queue()
-
 
 def positive_int(s):
     i = None
