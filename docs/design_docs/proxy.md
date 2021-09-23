@@ -2,7 +2,7 @@
 
 As the user access layer of Milvus, Proxy mainly plays a role that do some check and preprocessing for requests from
 clients and then forward these requests to other components, such as Root Coordinator, Data Coordinator, Query
-Coordinator, Index Coordinator. The below figure shows that how Proxy interact with other components.
+Coordinator, Index Coordinator. The below figure shows that how Proxy interacts with other components.
 
 <img src="./graphs/proxy.png" width=700>
 
@@ -67,7 +67,7 @@ Proxy will forward the DdRequest to Root Coordinator. These requests include:
 	- GetIndexBuildProgress
 	- GetIndexState
 
-Proxy handles the DdRequest sequencely. Only when the request entered earlier was done, the next request can be handled.
+Proxy handles the DdRequest sequentially. Only when the request entered earlier was done, the next request can be handled.
 Proxy forwards these requests to Root Coordinator, waits for Root Coordinator returning the result and then returns the
 result or error message to clients.
 
