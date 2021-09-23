@@ -63,6 +63,7 @@ type IndexNode struct {
 
 	kv      kv.BaseKV
 	session *sessionutil.Session
+	liveCh  <-chan bool
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -97,7 +98,7 @@ func (i *IndexNode) Register() error {
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	i.liveCh = i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = i.session.ServerID
 	return nil
 }
@@ -149,6 +150,11 @@ func (i *IndexNode) Init() error {
 
 func (i *IndexNode) Start() error {
 	i.sched.Start()
+
+	//start liveness check
+	go i.session.LivenessCheck(i.loopCtx, i.liveCh, func() {
+		i.Stop()
+	})
 
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
