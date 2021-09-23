@@ -275,7 +275,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord)
+	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache)
 	if err != nil {
 		return err
 	}
@@ -495,20 +495,17 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return status, nil
 	}
 
-	numOfFlushingSeg := len(req.SegmentIDs)
-	log.Debug("FlushSegments ...",
+	log.Debug("Receive FlushSegments req",
 		zap.Int("num", len(req.SegmentIDs)),
 		zap.Int64s("segments", req.SegmentIDs),
 	)
 
-	dmlFlushedCh := make(chan []*datapb.FieldBinlog, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelNamebySegmentID(id)
-		log.Debug("vchannel",
-			zap.String("name", chanName),
-			zap.Int64("SegmentID", id))
+		log.Debug("vchannel", zap.String("name", chanName), zap.Int64("SegmentID", id))
 
 		if len(chanName) == 0 {
+			log.Warn("DataNode not find segment", zap.Int64("ID", id))
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
 			return status, nil
 		}
@@ -516,7 +513,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		if node.segmentCache.checkIfCached(id) {
 			// Segment in flushing or flushed, ignore
 			log.Info("Segment in flushing, ignore it", zap.Int64("ID", id))
-			numOfFlushingSeg--
 			continue
 		}
 
@@ -526,7 +522,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		flushCh, ok := node.vchan2FlushCh[chanName]
 		node.chanMut.RUnlock()
 		if !ok {
-			// TODO restart DataNode or reshape vchan2FlushCh and vchan2SyncService
 			status.Reason = "DataNode abnormal, restarting"
 			return status, nil
 		}
@@ -536,29 +531,11 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			timestamp:    req.Base.Timestamp,
 			segmentID:    id,
 			collectionID: req.CollectionID,
-			dmlFlushedCh: dmlFlushedCh,
 		}
 		flushCh <- flushmsg
-
 	}
 
-	failedSegments := ""
-	for i := 0; i < numOfFlushingSeg; i++ {
-		msg := <-dmlFlushedCh
-		if len(msg) != 1 {
-			panic("flush size expect to 1")
-		}
-		if msg[0].Binlogs == nil {
-			failedSegments += fmt.Sprintf(" %d", msg[0].FieldID)
-		}
-	}
-	if len(failedSegments) != 0 {
-		status.Reason = fmt.Sprintf("flush failed segment list = %s", failedSegments)
-		return status, nil
-	}
-
-	node.segmentCache.Remove(req.SegmentIDs...)
-	log.Debug("FlushSegments Done",
+	log.Debug("FlushSegments tasks triggered",
 		zap.Int64s("segments", req.SegmentIDs))
 
 	status.ErrorCode = commonpb.ErrorCode_Success

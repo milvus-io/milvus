@@ -39,6 +39,8 @@ type dataSyncService struct {
 	dataCoord    types.DataCoord
 	clearSignal  chan<- UniqueID
 
+	flushingSegCache *Cache
+
 	saveBinlog func(fu *segmentFlushUnit) error
 }
 
@@ -50,6 +52,7 @@ func newDataSyncService(ctx context.Context,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- UniqueID,
 	dataCoord types.DataCoord,
+	flushingSegCache *Cache,
 
 ) (*dataSyncService, error) {
 
@@ -60,16 +63,17 @@ func newDataSyncService(ctx context.Context,
 	ctx1, cancel := context.WithCancel(ctx)
 
 	service := &dataSyncService{
-		ctx:          ctx1,
-		cancelFn:     cancel,
-		fg:           nil,
-		flushChan:    flushChan,
-		replica:      replica,
-		idAllocator:  alloc,
-		msFactory:    factory,
-		collectionID: vchan.GetCollectionID(),
-		dataCoord:    dataCoord,
-		clearSignal:  clearSignal,
+		ctx:              ctx1,
+		cancelFn:         cancel,
+		fg:               nil,
+		flushChan:        flushChan,
+		replica:          replica,
+		idAllocator:      alloc,
+		msFactory:        factory,
+		collectionID:     vchan.GetCollectionID(),
+		dataCoord:        dataCoord,
+		clearSignal:      clearSignal,
+		flushingSegCache: flushingSegCache,
 	}
 
 	if err := service.initNodes(vchan); err != nil {
@@ -176,6 +180,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		dsService.flushChan,
 		saveBinlog,
 		vchanInfo.GetChannelName(),
+		dsService.flushingSegCache,
 	)
 	if err != nil {
 		return err
