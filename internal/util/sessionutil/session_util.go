@@ -335,3 +335,27 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 	}()
 	return eventCh
 }
+
+// LivenessCheck performs liveness check with provided context and channel
+// ctx controls the liveness check loop
+// ch is the liveness signal channel, ch is closed only when the session is expired
+// callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
+func (s *Session) LivenessCheck(ctx context.Context, ch <-chan bool, callback func()) {
+	for {
+		select {
+		case _, ok := <-ch:
+			// ok, still alive
+			if ok {
+				continue
+			}
+			// not ok, connection lost
+			log.Warn("connection lost detected, shuting down")
+			if callback != nil {
+				go callback()
+			}
+			return
+		case <-ctx.Done():
+			log.Debug("liveness exits due to context done")
+		}
+	}
+}
