@@ -50,6 +50,8 @@ type QueryCoord struct {
 	loopWg     sync.WaitGroup
 	kvClient   *etcdkv.EtcdKV
 
+	initOnce sync.Once
+
 	queryCoordID uint64
 	meta         Meta
 	cluster      Cluster
@@ -90,34 +92,37 @@ func (qc *QueryCoord) Init() error {
 		qc.kvClient = etcdKV
 		return nil
 	}
-	log.Debug("query coordinator try to connect etcd")
-	err := retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
-	if err != nil {
-		log.Debug("query coordinator try to connect etcd failed", zap.Error(err))
-		return err
-	}
-	log.Debug("query coordinator try to connect etcd success")
-	qc.meta, err = newMeta(qc.kvClient)
-	if err != nil {
-		log.Error("query coordinator init meta failed", zap.Error(err))
-		return err
-	}
+	var initError error = nil
+	qc.initOnce.Do(func() {
+		log.Debug("query coordinator try to connect etcd")
+		initError = retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
+		if initError != nil {
+			log.Debug("query coordinator try to connect etcd failed", zap.Error(initError))
+			return
+		}
+		log.Debug("query coordinator try to connect etcd success")
+		qc.meta, initError = newMeta(qc.kvClient)
+		if initError != nil {
+			log.Error("query coordinator init meta failed", zap.Error(initError))
+			return
+		}
 
-	qc.cluster, err = newQueryNodeCluster(qc.loopCtx, qc.meta, qc.kvClient, qc.newNodeFn, qc.session)
-	if err != nil {
-		log.Error("query coordinator init cluster failed", zap.Error(err))
-		return err
-	}
+		qc.cluster, initError = newQueryNodeCluster(qc.loopCtx, qc.meta, qc.kvClient, qc.newNodeFn, qc.session)
+		if initError != nil {
+			log.Error("query coordinator init cluster failed", zap.Error(initError))
+			return
+		}
 
-	qc.scheduler, err = NewTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.rootCoordClient, qc.dataCoordClient)
-	if err != nil {
-		log.Error("query coordinator init task scheduler failed", zap.Error(err))
-		return err
-	}
+		qc.scheduler, initError = NewTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.rootCoordClient, qc.dataCoordClient)
+		if initError != nil {
+			log.Error("query coordinator init task scheduler failed", zap.Error(initError))
+			return
+		}
 
-	qc.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
+		qc.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
+	})
 
-	return nil
+	return initError
 }
 
 func (qc *QueryCoord) Start() error {
