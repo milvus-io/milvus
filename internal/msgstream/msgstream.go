@@ -23,6 +23,7 @@ type Timestamp = typeutil.Timestamp
 type IntPrimaryKey = typeutil.IntPrimaryKey
 type MsgPosition = internalpb.MsgPosition
 
+// MsgPack represents a batch of msg in msgstream
 type MsgPack struct {
 	BeginTs        Timestamp
 	EndTs          Timestamp
@@ -33,6 +34,7 @@ type MsgPack struct {
 
 type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
 
+// MsgStream is an interface that can be used to produce and consume message on message queue
 type MsgStream interface {
 	Start()
 	Close()
@@ -48,6 +50,7 @@ type MsgStream interface {
 	Seek(offset []*MsgPosition) error
 }
 
+// Factory is an interface that can be used to generate a new msgstream object
 type Factory interface {
 	SetParams(params map[string]interface{}) error
 	NewMsgStream(ctx context.Context) (MsgStream, error)
