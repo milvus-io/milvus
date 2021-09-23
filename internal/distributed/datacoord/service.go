@@ -210,6 +210,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 	return s.dataCoord.GetSegmentStates(ctx, req)
 }
 
+// GetInsertBinlogPaths gets insert binlog paths of a segment
 func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	return s.dataCoord.GetInsertBinlogPaths(ctx, req)
 }
