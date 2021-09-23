@@ -9,7 +9,6 @@ from ruamel.yaml import YAML, yaml_object
 from ruamel.yaml.comments import CommentedSeq, CommentedMap
 from ruamel.yaml.tokens import CommentToken
 
-##
 yaml = YAML(typ="rt")
 ## format yaml file
 yaml.indent(mapping=2, sequence=4, offset=2)
