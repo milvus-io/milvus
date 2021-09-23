@@ -12,6 +12,7 @@ DIR=$( cd -P $( dirname $SOURCE ) && pwd )
 CMAKE_BUILD=${DIR}/../cwrapper_build
 OUTPUT_LIB=${DIR}/../internal/storage/cwrapper/output
 SRC_DIR=${DIR}/../internal/storage/cwrapper
+CORE_OUTPUT_LIB=${DIR}/../internal/core/output
 
 if [ ! -d ${CMAKE_BUILD} ];then
     mkdir ${CMAKE_BUILD}
@@ -61,6 +62,7 @@ pushd ${CMAKE_BUILD}
 CMAKE_CMD="cmake \
 -DCMAKE_INSTALL_PREFIX=${OUTPUT_LIB} \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+-DCORE_OUTPUT_LIB=${CORE_OUTPUT_LIB} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} ${SRC_DIR}"
 
 ${CMAKE_CMD}

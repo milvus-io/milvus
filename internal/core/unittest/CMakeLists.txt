@@ -38,11 +38,11 @@ set(MILVUS_TEST_FILES
         test_span.cpp
         test_timestamp_index.cpp
         test_reduce_c.cpp
-        )
+        test_arrow.cpp)
 
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
-        )
+        test_arrow.cpp)
 
 # check if memory leak exists in index builder
 set(INDEX_BUILDER_TEST_FILES
@@ -68,6 +68,7 @@ target_link_libraries(all_tests
         milvus_indexbuilder
         log
         pthread
+        arrow
         )
 
 install(TARGETS all_tests DESTINATION unittest)
