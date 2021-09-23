@@ -24,6 +24,10 @@ using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::query;
 
+namespace {
+const int64_t ROW_COUNT = 100 * 1000;
+}
+
 TEST(Sealed, without_predicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -52,7 +56,7 @@ TEST(Sealed, without_predicate) {
         }
     })";
 
-    int64_t N = 1000 * 1000;
+    auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
@@ -133,8 +137,8 @@ TEST(Sealed, with_predicate) {
             {
                 "range": {
                     "counter": {
-                        "GE": 420000,
-                        "LT": 420005
+                        "GE": 42000,
+                        "LT": 42005
                     }
                 }
             },
@@ -154,11 +158,11 @@ TEST(Sealed, with_predicate) {
         }
     })";
 
-    int64_t N = 1000 * 1000;
+    auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
-    auto query_ptr = vec_col.data() + 420000 * dim;
+    auto query_ptr = vec_col.data() + 42000 * dim;
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
@@ -205,7 +209,7 @@ TEST(Sealed, with_predicate) {
     auto post_sr = sr;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
-        ASSERT_EQ(post_sr.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(post_sr.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(post_sr.result_distances_[offset], 0.0);
     }
 }
@@ -213,7 +217,7 @@ TEST(Sealed, with_predicate) {
 TEST(Sealed, LoadFieldData) {
     auto dim = 16;
     auto topK = 5;
-    int64_t N = 1000 * 1000;
+    auto N = 1000 * 1000;
     auto metric_type = MetricType::METRIC_L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
