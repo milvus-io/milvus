@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 
-cmake_minimum_required (VERSION 3.12)
+cmake_minimum_required( VERSION 3.18 )
 
 project (SPTAGLib)
 

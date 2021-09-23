@@ -11,7 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-cmake_minimum_required( VERSION 3.14 )
+cmake_minimum_required( VERSION 3.18 )
 
 add_definitions(-DELPP_THREAD_SAFE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
