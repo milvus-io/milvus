@@ -1,4 +1,4 @@
-array=($(kubectl get pod|grep chaos-milvus|awk '{print $1}')) # change cahos-milvus to your own pod name prefix
+array=($(kubectl get pod|grep chaos-milvus|awk '{print $1}')) # change chaos-milvus to your own pod name prefix
 echo ${array[@]}
 log_dir="k8s_logs"
 mkdir $log_dir
