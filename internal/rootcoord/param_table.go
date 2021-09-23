@@ -21,9 +21,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// Params globle params
 var Params ParamTable
 var once sync.Once
 
+// ParamTable structure stores all params
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -58,12 +60,14 @@ type ParamTable struct {
 	RoleName string
 }
 
+// InitOnce initialize once
 func (p *ParamTable) InitOnce() {
 	once.Do(func() {
 		p.Init()
 	})
 }
 
+// Init initialize param table
 func (p *ParamTable) Init() {
 	// load yaml
 	p.BaseTable.Init()
