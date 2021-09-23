@@ -112,8 +112,8 @@ func (i *IndexCoord) Register() error {
 
 func (i *IndexCoord) Init() error {
 	var initErr error = nil
+	Params.InitOnce()
 	i.initOnce.Do(func() {
-		Params.Init()
 		log.Debug("IndexCoord", zap.Any("etcd endpoints", Params.EtcdEndpoints))
 		i.UpdateStateCode(internalpb.StateCode_Initializing)
 

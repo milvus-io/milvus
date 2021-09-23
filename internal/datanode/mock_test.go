@@ -99,11 +99,6 @@ func makeNewChannelNames(names []string, suffix string) []string {
 	return ret
 }
 
-func refreshChannelNames() {
-	Params.SegmentStatisticsChannelName = "datanode-refresh-segment-statistics"
-	Params.TimeTickChannelName = "datanode-refresh-hard-timetick"
-}
-
 func clearEtcd(rootPath string) error {
 	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, rootPath)
 	if err != nil {

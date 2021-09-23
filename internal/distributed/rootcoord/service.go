@@ -128,7 +128,7 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.Init()
 
-	rootcoord.Params.Init()
+	rootcoord.Params.InitOnce()
 	rootcoord.Params.Address = Params.Address
 	rootcoord.Params.Port = Params.Port
 	log.Debug("grpc init done ...")

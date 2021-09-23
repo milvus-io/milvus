@@ -15,10 +15,14 @@ import (
 	"log"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestParamTable_DataNode(t *testing.T) {
-
+func TestParamTable(t *testing.T) {
+	Params.Init()
+	Params.NodeID = 2
+	Params.initMsgChannelSubName()
 	t.Run("Test NodeID", func(t *testing.T) {
 		id := Params.NodeID
 		log.Println("NodeID:", id)
@@ -55,18 +59,27 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("PulsarAddress:", address)
 	})
 
+	t.Run("Test ClusterChannelPrefix", func(t *testing.T) {
+		path := Params.ClusterChannelPrefix
+		assert.Equal(t, path, "by-dev")
+		log.Println("ClusterChannelPrefix:", Params.ClusterChannelPrefix)
+	})
+
 	t.Run("Test SegmentStatisticsChannelName", func(t *testing.T) {
 		path := Params.SegmentStatisticsChannelName
+		assert.Equal(t, path, "by-dev-datacoord-statistics-channel")
 		log.Println("SegmentStatisticsChannelName:", path)
 	})
 
 	t.Run("Test TimeTickChannelName", func(t *testing.T) {
 		name := Params.TimeTickChannelName
+		assert.Equal(t, name, "by-dev-datacoord-timetick-channel")
 		log.Println("TimeTickChannelName:", name)
 	})
 
 	t.Run("Test msgChannelSubName", func(t *testing.T) {
 		name := Params.MsgChannelSubName
+		assert.Equal(t, name, "by-dev-dataNode-2")
 		log.Println("MsgChannelSubName:", name)
 	})
 

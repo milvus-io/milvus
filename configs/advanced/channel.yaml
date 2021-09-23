@@ -12,6 +12,7 @@
 msgChannel:
   # channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
+    cluster:           "by-dev"
     rootCoordTimeTick: "rootcoord-timetick"
     rootCoordStatistics: "rootcoord-statistics"
     rootCoordDml: "rootcoord-dml"
@@ -29,7 +30,7 @@ msgChannel:
 
   # sub name generation rule: ${subNamePrefix}-${NodeID}
   subNamePrefix:
-    rootCoordSubNamePrefix: "rootcoord"
+    rootCoordSubNamePrefix: "rootCoord"
     proxySubNamePrefix: "proxy"
     queryNodeSubNamePrefix: "queryNode"
     dataNodeSubNamePrefix: "dataNode"

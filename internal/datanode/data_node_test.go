@@ -17,6 +17,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -43,7 +44,9 @@ func TestMain(t *testing.M) {
 	rand.Seed(time.Now().Unix())
 	Params.InitAlias("datanode-alias-1")
 	Params.Init()
-	refreshChannelNames()
+	// change to specific channel for test
+	Params.TimeTickChannelName = Params.TimeTickChannelName + strconv.Itoa(rand.Int())
+	Params.SegmentStatisticsChannelName = Params.SegmentStatisticsChannelName + strconv.Itoa(rand.Int())
 	code := t.Run()
 	os.Exit(code)
 }

@@ -46,6 +46,13 @@ func (pt *ParamTable) Init() {
 
 		pt.initServerMaxSendSize()
 		pt.initServerMaxRecvSize()
+
+		if !funcutil.CheckPortAvailable(pt.Port) {
+			pt.Port = funcutil.GetAvailablePort()
+			log.Warn("IndexNode init", zap.Any("Port", pt.Port))
+		}
+		pt.LoadFromEnv()
+		pt.LoadFromArgs()
 	})
 }
 
