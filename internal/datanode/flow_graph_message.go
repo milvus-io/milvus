@@ -13,7 +13,6 @@ package datanode
 
 import (
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
@@ -35,7 +34,6 @@ type flushMsg struct {
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
-	dmlFlushedCh chan<- []*datapb.FieldBinlog
 }
 
 func (iMsg *insertMsg) TimeTick() Timestamp {
