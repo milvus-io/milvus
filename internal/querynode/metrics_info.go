@@ -48,6 +48,8 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			RetrieveReceiveBufSize:       Params.RetrieveReceiveBufSize,
 			RetrievePulsarBufSize:        Params.RetrievePulsarBufSize,
 			RetrieveResultReceiveBufSize: Params.RetrieveResultReceiveBufSize,
+
+			SimdType: Params.SimdType,
 		},
 	}
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
