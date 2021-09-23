@@ -218,6 +218,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	return s.dataCoord.GetCollectionStatistics(ctx, req)
 }
 
+// GetPartitionStatistics gets statistics of a partition
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	return s.dataCoord.GetPartitionStatistics(ctx, req)
 }
