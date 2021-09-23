@@ -405,7 +405,12 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 				zap.Any("channal Info", chanInfo),
 			)
 			if err := node.NewDataSyncService(chanInfo); err != nil {
-				log.Warn("Failed to new data sync service", zap.Any("channel", chanInfo))
+				log.Warn("Failed to new data sync service",
+					zap.Any("channel", chanInfo),
+					zap.Error(err))
+				// return error even partial success
+				status.Reason = err.Error()
+				return status, nil
 			}
 		}
 
