@@ -185,7 +185,7 @@ type GetSegmentInfoResponse struct {
 }
 ```
 
-#### 8.2 Query Channel
+#### 8.3 Query Channel
 
 * *SearchMsg*
 
@@ -231,7 +231,7 @@ type RetriveMsg struct {
 }
 ```
 
-#### 8.2 Query Node Interface
+#### 8.4 Query Node Interface
 
 ```go
 type QueryNode interface {
@@ -246,6 +246,7 @@ type QueryNode interface {
 	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
+	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
 }
 ```
 
@@ -256,6 +257,8 @@ type QueryNode interface {
 ```go
 type AddQueryChannelRequest struct {
 	Base             *commonpb.MsgBase
+	NodeID           int64
+	CollectionID     int64
 	RequestChannelID string
 	ResultChannelID  string
 }
@@ -265,8 +268,9 @@ type AddQueryChannelRequest struct {
 
 ```go
 type RemoveQueryChannelRequest struct {
-	Status           *commonpb.Status
 	Base             *commonpb.MsgBase
+	NodeID           int64
+	CollectionID     int64
 	RequestChannelID string
 	ResultChannelID  string
 }
@@ -275,17 +279,15 @@ type RemoveQueryChannelRequest struct {
 * *WatchDmChannels*
 
 ```go
-type WatchDmChannelInfo struct {
-	ChannelID        string
-	Pos              *internalpb.MsgPosition
-	ExcludedSegments []int64
-}
 
 type WatchDmChannelsRequest struct {
 	Base         *commonpb.MsgBase
+	NodeID       int64
 	CollectionID int64
-	ChannelIDs   []string
-	Infos        []*WatchDmChannelsInfo
+	PartitionID  int64
+	Infos        []*datapb.VchannelInfo
+	Schema       *schemapb.CollectionSchema
+	ExcludeInfos []*datapb.SegmentInfo
 }
 ```
 
@@ -294,13 +296,10 @@ type WatchDmChannelsRequest struct {
 ```go
 type LoadSegmentsRequest struct {
 	Base          *commonpb.MsgBase
-	DbID          UniqueID
-	CollectionID  UniqueID
-	PartitionID   UniqueID
-	SegmentIDs    []UniqueID
-	FieldIDs      []UniqueID
-	SegmentStates []*datapb.SegmentStateInfo
+	NodeID        int64
+	Infos         []*SegmentLoadInfo
 	Schema        *schemapb.CollectionSchema
+	LoadCondition TriggerCondition 
 }
 ```
 * *ReleaseCollection*
@@ -310,6 +309,7 @@ type ReleaseCollectionRequest struct {
 	Base         *commonpb.MsgBase
 	DbID         UniqueID
 	CollectionID UniqueID
+	NodeID       int64
 }
 ```
 
@@ -321,6 +321,7 @@ type ReleasePartitionsRequest struct {
 	DbID         UniqueID
 	CollectionID UniqueID
 	PartitionIDs []UniqueID
+	NodeID       int64
 }
 ```
 
@@ -329,6 +330,7 @@ type ReleasePartitionsRequest struct {
 ```go
 type ReleaseSegmentsRequest struct {
 	Base         *commonpb.MsgBase
+	NodeID       int64
 	DbID         UniqueID
 	CollectionID UniqueID
 	PartitionIDs []UniqueID
@@ -347,7 +349,6 @@ type GetSegmentInfoRequest struct {
 type GetSegmentInfoResponse struct {
 	Status *commonpb.Status
 	Infos  []*SegmentInfo
-
 }
 ```
 
@@ -358,7 +359,7 @@ type GetSegmentInfoResponse struct {
 $collectionReplica$ contains a in-memory local copy of persistent collections. In common cases, the system has multiple query nodes. Data of a collection will be distributed across all the available query nodes, and each query node's $collectionReplica$ will maintain its own share (only part of the collection).
 Every replica tracks a value called tSafe which is the maximum timestamp that the replica is up-to-date.
 
-###### 8.1.1 Collection
+* *Collection*
 
 ``` go
 type collectionReplica struct {
@@ -369,13 +370,13 @@ type collectionReplica struct {
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
 
-	excludedSegments map[UniqueID][]UniqueID // map[collectionID]segmentIDs
+	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 }
 ```
 
 
 
-###### 8.1.2 Collection
+* *Collection*
 
 ```go
 type FieldSchema struct {
@@ -400,23 +401,29 @@ type Collection struct {
 	id            UniqueID
 	partitionIDs  []UniqueID
 	schema        *schemapb.CollectionSchema
+	vChannels     []Channel
+	pChannels     []Channel
+	loadType      loadType
+
+	releaseMu          sync.RWMutex
+	releasedPartitions map[UniqueID]struct{}
+	releaseTime        Timestamp
 }
 ```
 
-###### 8.1.3 Partition
+* *Partition*
 
 ```go
 type Partition struct {
 	collectionID UniqueID
 	partitionID  UniqueID
 	segmentIDs   []UniqueID
-	enable       bool
 }
 ```
 
 
 
-###### 8.1.3 Segment
+* *Segment*
 
 ``` go
 type segmentType int32
@@ -435,12 +442,15 @@ type Segment struct {
 	segmentID    UniqueID
 	partitionID  UniqueID
 	collectionID UniqueID
+
+	onService bool
+
+	vChannelID   Channel
 	lastMemSize  int64
 	lastRowCount int64
 
 	once             sync.Once // guards enableIndex
 	enableIndex      bool
-	enableLoadBinLog bool
 
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
@@ -449,28 +459,32 @@ type Segment struct {
 	segmentType segmentType
 
 	paramMutex sync.RWMutex // guards index
-	indexParam map[int64]indexParam
-	indexName  string
-	indexID    UniqueID
+	indexInfos map[FieldID]*indexInfo
+
+	idBinlogRowSizes []int64
+
+	vectorFieldMutex sync.RWMutex // guards vectorFieldInfos
+	vectorFieldInfos map[UniqueID]*VectorFieldInfo
+
+	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segmen
 }
 ```
 
 
 
-#### 8.3 Data Sync Service
+* *Data Sync Service*
 
 ```go
 type dataSyncService struct {
 	ctx    context.Context
-	cancel context.CancelFunc
 
-	collectionID UniqueID
-	fg           *flowgraph.TimeTickedFlowGraph
+	mu                   sync.Mutex                                   // guards FlowGraphs
+	collectionFlowGraphs map[UniqueID]map[Channel]*queryNodeFlowGraph // map[collectionID]flowGraphs
+	partitionFlowGraphs  map[UniqueID]map[Channel]*queryNodeFlowGraph // map[partitionID]flowGraphs
 
-	dmStream  msgstream.MsgStream
-	msFactory msgstream.Factory
-
-	replica ReplicaInterface
+	streamingReplica ReplicaInterface
+	tSafeReplica     TSafeReplicaInterface
+	msFactory        msgstream.Factory
 }
 ```
 
