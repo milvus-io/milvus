@@ -234,7 +234,6 @@ class TestPartitionParams(TestcaseBase):
         assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("search_vectors", [cf.gen_vectors(1, ct.default_dim)])
     def test_partition_release(self):
         """
         target: verify release partition
