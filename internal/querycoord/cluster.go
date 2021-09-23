@@ -114,6 +114,8 @@ func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdK
 	return c, nil
 }
 
+// Reload trigger task, trigger task states, internal task, internal task state from etcd
+// Assign the internal task to the corresponding trigger task as a child task
 func (c *queryNodeCluster) reloadFromKV() error {
 	toLoadMetaNodeIDs := make([]int64, 0)
 	// get current online session
