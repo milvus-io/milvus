@@ -188,7 +188,7 @@ VS Code begin load and construct Devcontainer,  the progress bar display the con
 
 ![image](../docs/imgs/bar.png)
 
-After Construction finish, VS Code automatically connect to the container. Now you can coding and debugging in VS Code, just like developing in your host machine.
+After Construction, VS Code automatically connects to the container. Now you can coding and debugging in VS Code, just like developing in your host machine.
 
 You can also use terminal of VS Code to enter the Dev container to do something. Choose **Terminal >> New Terminal** in the navigation bar, then you can enter container:
 
