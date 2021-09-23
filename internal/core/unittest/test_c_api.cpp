@@ -37,6 +37,7 @@ using namespace milvus::knowhere;
 
 namespace {
 const int DIM = 16;
+const int64_t ROW_COUNT = 100 * 1000;
 
 const char*
 get_default_schema_config() {
@@ -706,10 +707,10 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + 42000 * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -829,10 +830,10 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + 42000 * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -947,10 +948,10 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + 42000 * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -964,8 +965,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
             {
                 "range": {
                     "counter": {
-                        "GE": 420000,
-                        "LT": 420010
+                        "GE": 42000,
+                        "LT": 42010
                     }
                 }
             },
@@ -1060,7 +1061,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
     }
@@ -1083,10 +1084,10 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + 42000 * DIM;
 
     {
         int64_t offset;
@@ -1109,7 +1110,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                                     >
                                                     op: GreaterEqual
                                                     value: <
-                                                      int64_val: 420000
+                                                      int64_val: 42000
                                                     >
                                                   >
                                                 >
@@ -1121,7 +1122,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                                     >
                                                     op: LessThan
                                                     value: <
-                                                      int64_val: 420010
+                                                      int64_val: 42010
                                                     >
                                                   >
                                                 >
@@ -1211,7 +1212,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
     }
@@ -1234,10 +1235,10 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + 42000 * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1251,7 +1252,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
             {
                 "term": {
                     "counter": {
-                        "values": [420000, 420001, 420002, 420003, 420004]
+                        "values": [42000, 42001, 42002, 42003, 42004]
                     }
                 }
             },
@@ -1346,7 +1347,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
     }
@@ -1369,10 +1370,10 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + 42000 * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1390,19 +1391,19 @@ vector_anns: <
         data_type: Int64
       >
       values: <
-        int64_val: 420000
+        int64_val: 42000
       >
       values: <
-        int64_val: 420001
+        int64_val: 42001
       >
       values: <
-        int64_val: 420002
+        int64_val: 42002
       >
       values: <
-        int64_val: 420003
+        int64_val: 42003
       >
       values: <
-        int64_val: 420004
+        int64_val: 42004
       >
     >
   >
@@ -1490,7 +1491,7 @@ vector_anns: <
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
     }
@@ -1513,10 +1514,10 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM / 8;
+    auto query_ptr = vec_col.data() + 42000 * DIM / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1530,8 +1531,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
             {
                 "range": {
                     "counter": {
-                        "GE": 420000,
-                        "LT": 420010
+                        "GE": 42000,
+                        "LT": 42010
                     }
                 }
             },
@@ -1627,7 +1628,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
     }
@@ -1650,10 +1651,10 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM / 8;
+    auto query_ptr = vec_col.data() + 42000 * DIM / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1674,7 +1675,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                                     >
                                                     op: GreaterEqual
                                                     value: <
-                                                      int64_val: 420000
+                                                      int64_val: 42000
                                                     >
                                                   >
                                                 >
@@ -1686,7 +1687,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                                     >
                                                     op: LessThan
                                                     value: <
-                                                      int64_val: 420010
+                                                      int64_val: 42010
                                                     >
                                                   >
                                                 >
@@ -1777,7 +1778,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
     }
@@ -1800,10 +1801,10 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM / 8;
+    auto query_ptr = vec_col.data() + 42000 * DIM / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1817,7 +1818,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
             {
                 "term": {
                     "counter": {
-                        "values": [420000, 420001, 420002, 420003, 420004]
+                        "values": [42000, 42001, 42002, 42003, 42004]
                     }
                 }
             },
@@ -1918,7 +1919,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
     }
@@ -1941,10 +1942,10 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(0);
-    auto query_ptr = vec_col.data() + 420000 * DIM / 8;
+    auto query_ptr = vec_col.data() + 42000 * DIM / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1961,19 +1962,19 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                                   data_type: Int64
                                                 >
                                                 values: <
-                                                  int64_val: 420000
+                                                  int64_val: 42000
                                                 >
                                                 values: <
-                                                  int64_val: 420001
+                                                  int64_val: 42001
                                                 >
                                                 values: <
-                                                  int64_val: 420002
+                                                  int64_val: 42002
                                                 >
                                                 values: <
-                                                  int64_val: 420003
+                                                  int64_val: 42003
                                                 >
                                                 values: <
-                                                  int64_val: 420004
+                                                  int64_val: 42004
                                                 >
                                               >
                                             >
@@ -2067,7 +2068,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
     }
@@ -2136,11 +2137,11 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Sealed);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
     auto counter_col = dataset.get_col<int64_t>(1);
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + 42000 * DIM;
 
     const char* dsl_string = R"({
         "bool": {
@@ -2148,8 +2149,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
             {
                 "range": {
                     "counter": {
-                        "GE": 420000,
-                        "LT": 420010
+                        "GE": 42000,
+                        "LT": 42010
                     }
                 }
             },
@@ -2269,7 +2270,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2288,11 +2289,11 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Sealed);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
     auto counter_col = dataset.get_col<int64_t>(1);
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + 42000 * DIM;
 
     const char* serialized_expr_plan = R"(vector_anns: <
                                             field_id: 100
@@ -2307,7 +2308,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                                     >
                                                     op: GreaterEqual
                                                     value: <
-                                                      int64_val: 420000
+                                                      int64_val: 42000
                                                     >
                                                   >
                                                 >
@@ -2319,7 +2320,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                                     >
                                                     op: LessThan
                                                     value: <
-                                                      int64_val: 420010
+                                                      int64_val: 42010
                                                     >
                                                   >
                                                 >
@@ -2435,7 +2436,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);

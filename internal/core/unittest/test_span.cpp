@@ -14,11 +14,15 @@
 #include "test_utils/DataGen.h"
 #include "segcore/SegmentGrowing.h"
 
+namespace {
+const int64_t ROW_COUNT = 100 * 1000;
+}
+
 TEST(Span, Naive) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     constexpr int64_t size_per_chunk = 32 * 1024;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("binaryvec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);

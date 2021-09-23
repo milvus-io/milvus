@@ -278,7 +278,7 @@ TEST(IVFFLATNMWrapper, Build) {
 }
 
 TEST(IVFFLATNMWrapper, Codec) {
-    int64_t flat_nb = 1000000;
+    int64_t flat_nb = 100000;
     auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     auto metric_type = milvus::knowhere::Metric::L2;
     indexcgo::TypeParams type_params;
