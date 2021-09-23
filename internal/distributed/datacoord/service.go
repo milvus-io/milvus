@@ -215,6 +215,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	return s.dataCoord.GetInsertBinlogPaths(ctx, req)
 }
 
+// GetCollectionStatistics gets statistics of a collection
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	return s.dataCoord.GetCollectionStatistics(ctx, req)
 }
