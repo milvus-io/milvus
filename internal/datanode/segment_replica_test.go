@@ -103,9 +103,9 @@ func TestSegmentReplica_getCollectionAndPartitionID(te *testing.T) {
 				}
 
 				collID, parID, err := sr.getCollectionAndPartitionID(test.segInFlushed)
-				assert.Error(t, err)
-				assert.Zero(t, collID)
-				assert.Zero(t, parID)
+				assert.NoError(t, err)
+				assert.Equal(t, test.inCollID, collID)
+				assert.Equal(t, test.inParID, parID)
 			} else {
 				sr := &SegmentReplica{}
 				collID, parID, err := sr.getCollectionAndPartitionID(1000)

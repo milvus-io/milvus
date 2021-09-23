@@ -179,6 +179,10 @@ func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (coll
 		return seg.collectionID, seg.partitionID, nil
 	}
 
+	if seg, ok := replica.flushedSegments[segID]; ok {
+		return seg.collectionID, seg.partitionID, nil
+	}
+
 	return 0, 0, fmt.Errorf("Cannot find segment, id = %v", segID)
 }
 

@@ -38,6 +38,7 @@ type ParamTable struct {
 	FlushInsertBufferSize   int64
 	InsertBinlogRootPath    string
 	StatsBinlogRootPath     string
+	DeleteBinlogRootPath    string
 	Alias                   string // Different datanode in one machine
 
 	// Pulsar address
@@ -103,6 +104,7 @@ func (p *ParamTable) Init() {
 	p.initFlushInsertBufferSize()
 	p.initInsertBinlogRootPath()
 	p.initStatsBinlogRootPath()
+	p.initDeleteBinlogRootPath()
 
 	p.initPulsarAddress()
 	p.initRocksmqPath()
@@ -151,6 +153,14 @@ func (p *ParamTable) initStatsBinlogRootPath() {
 		panic(err)
 	}
 	p.StatsBinlogRootPath = path.Join(rootPath, "stats_log")
+}
+
+func (p *ParamTable) initDeleteBinlogRootPath() {
+	rootPath, err := p.Load("minio.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	p.DeleteBinlogRootPath = path.Join(rootPath, "delta_log")
 }
 
 func (p *ParamTable) initPulsarAddress() {

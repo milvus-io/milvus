@@ -27,6 +27,7 @@ type (
 
 type flowGraphMsg struct {
 	insertMessages []*msgstream.InsertMsg
+	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
 	startPositions []*internalpb.MsgPosition
 	endPositions   []*internalpb.MsgPosition
