@@ -286,6 +286,10 @@ func (s *Server) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChanne
 	return s.querynode.WatchDmChannels(ctx, req)
 }
 
+func (s *Server) RemoveDmChannels(ctx context.Context, req *querypb.RemoveDmChannelsRequest) (*commonpb.Status, error) {
+	return s.querynode.RemoveDmChannels(ctx, req)
+}
+
 func (s *Server) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.LoadSegments(ctx, req)

@@ -232,6 +232,10 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 	return waitFunc()
 }
 
+func (node *QueryNode) RemoveDmChannels(ctx context.Context, in *queryPb.RemoveDmChannelsRequest) (*commonpb.Status, error) {
+	panic("TODO: implement")
+}
+
 func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {

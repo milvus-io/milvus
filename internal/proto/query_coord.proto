@@ -39,6 +39,7 @@ service QueryNode {
   rpc AddQueryChannel(AddQueryChannelRequest) returns (common.Status) {}
   rpc RemoveQueryChannel(RemoveQueryChannelRequest) returns (common.Status) {}
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
+  rpc RemoveDmChannels(RemoveDmChannelsRequest) returns (common.Status) {}
   rpc LoadSegments(LoadSegmentsRequest) returns (common.Status) {}
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
   rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
@@ -203,6 +204,14 @@ message WatchDmChannelsRequest {
   repeated data.VchannelInfo infos = 5;
   schema.CollectionSchema schema = 6;
   repeated data.SegmentInfo exclude_infos = 7;
+}
+
+message RemoveDmChannelsRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  repeated string channels = 5;
 }
 
 enum TriggerCondition {
