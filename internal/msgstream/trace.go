@@ -24,6 +24,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
+// ExtractFromPulsarMsgProperties extracts trace span from msg.properties.
+// And it will attach some default tags to the span.
 func ExtractFromPulsarMsgProperties(msg TsMsg, properties map[string]string) (opentracing.Span, bool) {
 	if !allowTrace(msg) {
 		return trace.NoopSpan(), false
@@ -42,6 +44,8 @@ func ExtractFromPulsarMsgProperties(msg TsMsg, properties map[string]string) (op
 	return opentracing.StartSpan(name, opts...), true
 }
 
+// MsgSpanFromCtx extracts the span from context.
+// And it will attach some default tags to the span.
 func MsgSpanFromCtx(ctx context.Context, msg TsMsg, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
 		return trace.NoopSpan(), ctx
