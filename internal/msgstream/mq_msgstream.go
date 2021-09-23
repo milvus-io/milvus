@@ -49,6 +49,7 @@ type mqMsgStream struct {
 	consumerLock     *sync.Mutex
 }
 
+// NewMqMsgStream is used to generate a new mqMsgStream object
 func NewMqMsgStream(ctx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
@@ -417,6 +418,7 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	return nil
 }
 
+// MqTtMsgStream is a msgstream that contains timeticks
 type MqTtMsgStream struct {
 	mqMsgStream
 	chanMsgBuf         map[mqclient.Consumer][]TsMsg
@@ -430,6 +432,7 @@ type MqTtMsgStream struct {
 	syncConsumer       chan int
 }
 
+// NewMqTtMsgStream is used to generate a new MqTtMsgStream object
 func NewMqTtMsgStream(ctx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
@@ -509,6 +512,7 @@ func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 	}
 }
 
+// Start will start a goroutine which keep carrying msg from pulsar/rocksmq to golang chan
 func (ms *MqTtMsgStream) Start() {
 	if ms.consumers != nil {
 		ms.wait.Add(1)
@@ -516,6 +520,7 @@ func (ms *MqTtMsgStream) Start() {
 	}
 }
 
+// Close will stop goroutine and free internal producers and consumers
 func (ms *MqTtMsgStream) Close() {
 	ms.streamCancel()
 	close(ms.syncConsumer)
