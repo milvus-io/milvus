@@ -56,7 +56,7 @@ pull_request_rules:
     conditions:
       - base=master
       - title~=\[skip ci\]
-      - -files~=^internal\/
+      - -files~=^(?!internal\/).*$
     actions:
       label:
         add:
