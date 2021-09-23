@@ -13,9 +13,9 @@
 
 set(KNOWHERE_THIRDPARTY_DEPENDENCIES
         Arrow
+        OpenBLAS
         FAISS
         GTest
-        OpenBLAS
         MKL
         )
 
@@ -309,15 +309,8 @@ endif ()
 
 # ----------------------------------------------------------------------
 # OpenBLAS
-set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
 macro(build_openblas)
     message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
-    set(OpenBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
-    set(OpenBLAS_LIB_DIR "${OPENBLAS_PREFIX}/lib")
-    set(OPENBLAS_SHARED_LIB
-            "${OPENBLAS_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    set(OPENBLAS_STATIC_LIB
-            "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(OPENBLAS_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             -DCMAKE_BUILD_TYPE=Release
@@ -333,46 +326,58 @@ macro(build_openblas)
             -DINTERFACE64=0
             -DNUM_THREADS=128
             -DNO_LAPACKE=1
-            "-DVERSION=${OPENBLAS_VERSION}"
-            "-DCMAKE_INSTALL_PREFIX=${OPENBLAS_PREFIX}"
-            -DCMAKE_INSTALL_LIBDIR=lib)
+            -DVERSION=${OPENBLAS_VERSION}
+            -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
+            )
 
-    externalproject_add(openblas_ep
-            URL
-            ${OPENBLAS_SOURCE_URL}
+    externalproject_add( openblas_ep
+            URL                 ${OPENBLAS_SOURCE_URL}
+            URL_MD5             "28cc19a6acbf636f5aab5f10b9a0dfe1"
+            CMAKE_ARGS          ${OPENBLAS_CMAKE_ARGS}
+            BUILD_COMMAND       ${MAKE} ${MAKE_BUILD_ARGS}
+            PREFIX              ${CMAKE_BINARY_DIR}/3rdparty_download/openblas-subbuild
+            BINARY_DIR          openblas-bin
+            INSTALL_DIR         ${CMAKE_INSTALL_PREFIX}
             ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${OPENBLAS_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE}
-            PREFIX=${OPENBLAS_PREFIX}
-            install
-            BUILD_BYPRODUCTS
-            ${OPENBLAS_SHARED_LIB}
-            ${OPENBLAS_STATIC_LIB})
+            )
 
-    file(MAKE_DIRECTORY "${OpenBLAS_INCLUDE_DIR}")
+    ExternalProject_Get_Property(openblas_ep INSTALL_DIR)
+    if( NOT IS_DIRECTORY ${INSTALL_DIR} )
+        file( MAKE_DIRECTORY ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR} )
+    endif()
+
+    include( GNUInstallDirs )
+
     add_library(openblas SHARED IMPORTED)
-    set_target_properties(
-            openblas
-            PROPERTIES
-            IMPORTED_LOCATION "${OPENBLAS_SHARED_LIB}"
-            LIBRARY_OUTPUT_NAME "openblas"
-            INTERFACE_INCLUDE_DIRECTORIES "${OpenBLAS_INCLUDE_DIR}")
-    add_dependencies(openblas openblas_ep)
-    get_target_property(OpenBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-    set(OpenBLAS_LIBRARIES "${OPENBLAS_SHARED_LIB}")
+    set_target_properties( openblas
+        PROPERTIES
+            IMPORTED_GLOBAL TRUE
+            IMPORTED_LOCATION ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/libopenblas.so
+            INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
+
+    add_dependencies( openblas openblas_ep )
 endmacro()
 
 if (KNOWHERE_WITH_OPENBLAS)
-    resolve_dependency(OpenBLAS)
-    include_directories(SYSTEM "${OpenBLAS_INCLUDE_DIR}")
-    link_directories(SYSTEM "${OpenBLAS_LIB_DIR}")
+    if( OpenBLAS_SOURCE STREQUAL "AUTO" )
+        set( BLA_VENDOR OpenBLAS )
+        find_package(BLAS)
+
+        message( STATUS "Knowhere openblas libraries: ${BLAS_LIBRARIES}" )
+        message( STATUS "Knowhere openblas found: ${BLAS_FOUND}" )
+
+        if (BLAS_FOUND)
+            add_library(openblas ALIAS BLAS::BLAS)
+        else()
+            build_openblas()
+        endif()
+    elseif( OpenBLAS_SOURCE STREQUAL "BUNDLED" )
+        build_openblas()
+    elseif( OpenBLAS_SOURCE STREQUAL "SYSTEM" )
+        set( BLA_VENDOR OpenBLAS )
+        find_package( BLAS REQUIRED )
+        add_library( openblas ALIAS BLAS::BLAS )
+    endif()
 endif()
 
 
@@ -450,12 +455,15 @@ macro(build_faiss)
                 )
     else ()
         message(STATUS "Build Faiss with OpenBlas/LAPACK")
-        if(OpenBLAS_FOUND)
+        if(BLAS_FOUND)
+            set( TEMP ${BLAS_LIBRARIES} )
+            string(REPLACE "/libopenblas.so" "" BLAS_DIR ${TEMP})
+            message( STATUS "Found openblas ${BLAS_DIR} ${BLAS_LIBRARIES}" )
             set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OpenBLAS_LIB_DIR}")
+                "LDFLAGS=-L${BLAS_DIR}")
         else()
             set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib")
+                "LDFLAGS=-L${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
         endif()
     endif ()
 
@@ -517,8 +525,8 @@ macro(build_faiss)
                 ${FAISS_STATIC_LIB})
     endif ()
 
-    if(NOT OpenBLAS_FOUND)
-        message("add faiss dependencies: openblas_ep")
+    if(NOT BLAS_FOUND)
+        message("Add faiss dependencies: openblas_ep")
         ExternalProject_Add_StepDependencies(faiss_ep configure openblas_ep)
     endif()
 
@@ -528,19 +536,17 @@ macro(build_faiss)
     set_target_properties(
             faiss
             PROPERTIES
-            IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
-    )
+            IMPORTED_GLOBAL                 TRUE
+            IMPORTED_LOCATION               "${FAISS_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES   "${FAISS_INCLUDE_DIR}")
+
     if (FAISS_WITH_MKL)
         set_target_properties(
                 faiss
                 PROPERTIES
                 INTERFACE_LINK_LIBRARIES "${MKL_LIBS}")
     else ()
-        set_target_properties(
-                faiss
-                PROPERTIES
-                INTERFACE_LINK_LIBRARIES "${OpenBLAS_LIBRARIES}")
+        target_link_libraries( faiss INTERFACE openblas )
     endif ()
 
     add_dependencies(faiss faiss_ep)

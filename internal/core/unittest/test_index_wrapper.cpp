@@ -15,8 +15,8 @@
 #include <google/protobuf/text_format.h>
 
 #include "pb/index_cgo_msg.pb.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
 #include "test_utils/DataGen.h"

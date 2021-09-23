@@ -35,8 +35,7 @@ if (MILVUS_GPU_VERSION)
                 )
     else ()
         set(depend_libs ${depend_libs}
-                ${OpenBLAS_LIBRARIES}
-                ${LAPACK_LIBRARIES}
+                openblas
                 )
     endif ()
 

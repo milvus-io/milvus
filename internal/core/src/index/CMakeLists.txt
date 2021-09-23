@@ -35,6 +35,12 @@ else ()
     set(KNOWHERE_BUILD_ARCH unknown)
 endif ()
 
+# This will set RPATH to all excutable TARGET
+# self-installed dynamic libraries will be correctly linked by excutable
+set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" )
+set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
+# **************************** Dependencies ****************************
+
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "release")
 else ()

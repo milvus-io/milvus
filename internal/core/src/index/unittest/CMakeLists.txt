@@ -31,8 +31,7 @@ if (FAISS_WITH_MKL)
             )
 else ()
     set(depend_libs ${depend_libs}
-            ${OpenBLAS_LIBRARIES}
-            ${LAPACK_LIBRARIES}
+            openblas
             )
 endif ()
 
