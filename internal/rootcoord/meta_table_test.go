@@ -68,53 +68,58 @@ func Test_MockKV(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 
+	// tenant
 	prefix[TenantMetaPrefix] = []string{"tenant-prefix"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.TenantMeta err:line 1.0: unknown field name \"tenant-prefix\" in milvus.proto.etcd.TenantMeta")
 
-	prefix[TenantMetaPrefix] = []string{proto.MarshalTextString(&pb.TenantMeta{})}
+	value, _ := proto.Marshal(&pb.TenantMeta{})
+	prefix[TenantMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
+	// proxy
 	prefix[ProxyMetaPrefix] = []string{"porxy-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.ProxyMeta err:line 1.0: unknown field name \"porxy-meta\" in milvus.proto.etcd.ProxyMeta")
 
-	prefix[ProxyMetaPrefix] = []string{proto.MarshalTextString(&pb.ProxyMeta{})}
+	value, _ = proto.Marshal(&pb.ProxyMeta{})
+	prefix[ProxyMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
+	// collection
 	prefix[CollectionMetaPrefix] = []string{"collection-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.CollectionInfo err:line 1.0: unknown field name \"collection-meta\" in milvus.proto.etcd.CollectionInfo")
 
-	prefix[CollectionMetaPrefix] = []string{proto.MarshalTextString(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})}
+	value, _ = proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
+	prefix[CollectionMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
+	// segment index
 	prefix[SegmentIndexMetaPrefix] = []string{"segment-index-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.SegmentIndexInfo err:line 1.0: unknown field name \"segment-index-meta\" in milvus.proto.etcd.SegmentIndexInfo")
 
-	prefix[SegmentIndexMetaPrefix] = []string{proto.MarshalTextString(&pb.SegmentIndexInfo{})}
+	value, _ = proto.Marshal(&pb.SegmentIndexInfo{})
+	prefix[SegmentIndexMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
-	prefix[SegmentIndexMetaPrefix] = []string{proto.MarshalTextString(&pb.SegmentIndexInfo{}), proto.MarshalTextString(&pb.SegmentIndexInfo{})}
+	prefix[SegmentIndexMetaPrefix] = []string{string(value), string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 
+	// index
 	prefix[IndexMetaPrefix] = []string{"index-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.IndexInfo err:line 1.0: unknown field name \"index-meta\" in milvus.proto.etcd.IndexInfo")
 
-	prefix[IndexMetaPrefix] = []string{proto.MarshalTextString(&pb.IndexInfo{})}
+	value, _ = proto.Marshal(&pb.IndexInfo{})
+	prefix[IndexMetaPrefix] = []string{string(value)}
 	m1, err := NewMetaTable(k1)
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
