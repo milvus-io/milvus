@@ -43,7 +43,7 @@ AssembleNegBitset(const BitsetSimple& bitset_simple) {
         auto acc_byte_count = 0;
         for (auto& bitset : bitset_simple) {
             auto size = bitset.size();
-            Assert(size % 8 == 0);
+            AssertInfo(size % 8 == 0, "[AssembleNegBitset]Bitset size isn't times of 8");
             auto byte_count = size / 8;
             auto src_ptr = boost_ext::get_data(bitset);
             memcpy(result.data() + acc_byte_count, src_ptr, byte_count);
@@ -73,9 +73,10 @@ SearchOnSealed(const Schema& schema,
     // Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
 
-    Assert(record.is_ready(field_offset));
+    AssertInfo(record.is_ready(field_offset), "[SearchOnSealed]Record isn't ready");
     auto field_indexing = record.get_field_indexing(field_offset);
-    Assert(field_indexing->metric_type_ == search_info.metric_type_);
+    AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
+               "Metric type of field index isn't the same with search info");
 
     auto final = [&] {
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);
@@ -85,7 +86,8 @@ SearchOnSealed(const Schema& schema,
         conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
         auto index_type = field_indexing->indexing_->index_type();
         auto adapter = milvus::knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-        Assert(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()));
+        AssertInfo(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()),
+                   "[SearchOnSealed]Search params check failed");
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
 

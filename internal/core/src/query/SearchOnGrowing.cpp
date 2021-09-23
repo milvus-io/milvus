@@ -45,7 +45,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     auto vecfield_offset = info.field_offset_;
     auto& field = schema[vecfield_offset];
 
-    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    AssertInfo(field.get_data_type() == DataType::VECTOR_FLOAT, "[FloatSearch]Field data type isn't VECTOR_FLOAT");
     auto dim = field.get_dim();
     auto topk = info.topk_;
     auto total_count = topk * num_queries;
@@ -64,7 +64,8 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         auto max_indexed_id = indexing_record.get_finished_ack();
         const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_offset);
         auto search_conf = field_indexing.get_search_params(topk);
-        Assert(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk());
+        AssertInfo(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk(),
+                   "[FloatSearch]Chunk size of vector not equal to chunk size of field index");
 
         for (int chunk_id = current_chunk_id; chunk_id < max_indexed_id; ++chunk_id) {
             auto size_per_chunk = field_indexing.get_size_per_chunk();
@@ -144,7 +145,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     auto vecfield_offset = info.field_offset_;
     auto& field = schema[vecfield_offset];
 
-    Assert(field.get_data_type() == DataType::VECTOR_BINARY);
+    AssertInfo(field.get_data_type() == DataType::VECTOR_BINARY, "[BinarySearch]Field data type isn't VECTOR_BINARY");
     auto dim = field.get_dim();
     auto topk = info.topk_;
     auto total_count = topk * num_queries;
@@ -197,7 +198,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 SearchResult& results) {
     // TODO: add data_type to info
     auto data_type = segment.get_schema()[info.field_offset_].get_data_type();
-    Assert(datatype_is_vector(data_type));
+    AssertInfo(datatype_is_vector(data_type), "[SearchOnGrowing]Data type isn't vector type");
     if (data_type == DataType::VECTOR_FLOAT) {
         auto typed_data = reinterpret_cast<const float*>(query_data);
         FloatSearch(segment, info, typed_data, num_queries, ins_barrier, bitset, results);
