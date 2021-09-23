@@ -83,6 +83,7 @@ type segmentFlushUnit struct {
 	flushed        bool
 }
 
+// BufferData buffers insert data, monitoring buffer size and limit
 type BufferData struct {
 	buffer *InsertData
 	size   int64
