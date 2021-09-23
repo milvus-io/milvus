@@ -68,6 +68,9 @@ Assemble(BinarySet& binarySet) {
         int64_t pos = 0;
         for (auto i = 0; i < slice_num; ++i) {
             auto slice_i_sp = binarySet.Erase(prefix + "_" + std::to_string(i));
+            if (slice_i_sp == nullptr) {
+                continue;
+            }
             memcpy(p_data.get() + pos, slice_i_sp->data.get(), static_cast<size_t>(slice_i_sp->size));
             pos += slice_i_sp->size;
         }

@@ -111,6 +111,10 @@ build-cpp-with-unittest:
 # Runs the tests.
 unittest: test-cpp test-go
 
+parse_index_file_meta: build-cpp
+	@echo "Building parse_index_file_meta ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/parse_index_file_meta $(PWD)/cmd/tools/parse_index_file_meta.go 1>/dev/null
+
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)

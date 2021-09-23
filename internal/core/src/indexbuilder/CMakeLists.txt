@@ -14,6 +14,7 @@ set(INDEXBUILDER_FILES
         IndexWrapper.cpp
         index_c.cpp
         init_c.cpp
+        codec_c.cpp
         )
 add_library(milvus_indexbuilder SHARED
         ${INDEXBUILDER_FILES}
