@@ -13,6 +13,7 @@ package storage
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 
@@ -23,14 +24,13 @@ import (
 type descriptorEventData struct {
 	DescriptorEventDataFixPart
 	PostHeaderLengths []uint8
+	ExtraLength       int32
+	ExtraBytes        []byte
+	Extras            map[string]interface{}
 }
 
 // DescriptorEventDataFixPart is a memorty struct saves events' DescriptorEventData.
 type DescriptorEventDataFixPart struct {
-	BinlogVersion   int16
-	ServerVersion   int64
-	CommitID        int64
-	HeaderLength    int8
 	CollectionID    int64
 	PartitionID     int64
 	SegmentID       int64
@@ -46,14 +46,32 @@ func (data *descriptorEventData) SetEventTimeStamp(start typeutil.Timestamp, end
 	data.EndTimestamp = end
 }
 
-// SetEventTimeStamp returns the memory size of DescriptorEventDataFixPart.
+// GetEventDataFixPartSize returns the memory size of DescriptorEventDataFixPart.
 func (data *descriptorEventData) GetEventDataFixPartSize() int32 {
 	return int32(binary.Size(data.DescriptorEventDataFixPart))
 }
 
-// SetEventTimeStamp returns the memory size of DescriptorEventDataFixPart.
+// GetMemoryUsageInBytes returns the memory size of DescriptorEventDataFixPart.
 func (data *descriptorEventData) GetMemoryUsageInBytes() int32 {
-	return data.GetEventDataFixPartSize() + int32(binary.Size(data.PostHeaderLengths))
+	return data.GetEventDataFixPartSize() + int32(binary.Size(data.PostHeaderLengths)) + int32(binary.Size(data.ExtraLength)) + data.ExtraLength
+
+}
+
+// AddExtra add extra params to description event.
+func (data *descriptorEventData) AddExtra(k string, v interface{}) {
+	data.Extras[k] = v
+}
+
+// FinishExtra marshal extras to json format.
+// Call before GetMemoryUsageInBytes to get a accurate length of description event.
+func (data *descriptorEventData) FinishExtra() error {
+	var err error
+	data.ExtraBytes, err = json.Marshal(data.Extras)
+	if err != nil {
+		return err
+	}
+	data.ExtraLength = int32(len(data.ExtraBytes))
+	return nil
 }
 
 // Write transfer DescriptorEventDataFixPart to binary buffer.
@@ -64,6 +82,13 @@ func (data *descriptorEventData) Write(buffer io.Writer) error {
 	if err := binary.Write(buffer, binary.LittleEndian, data.PostHeaderLengths); err != nil {
 		return err
 	}
+	if err := binary.Write(buffer, binary.LittleEndian, data.ExtraLength); err != nil {
+		return err
+	}
+	if err := binary.Write(buffer, binary.LittleEndian, data.ExtraBytes); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -75,6 +100,18 @@ func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
 	if err := binary.Read(buffer, binary.LittleEndian, &event.PostHeaderLengths); err != nil {
 		return nil, err
 	}
+
+	if err := binary.Read(buffer, binary.LittleEndian, &event.ExtraLength); err != nil {
+		return nil, err
+	}
+	event.ExtraBytes = make([]byte, event.ExtraLength)
+	if err := binary.Read(buffer, binary.LittleEndian, &event.ExtraBytes); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(event.ExtraBytes, &event.Extras); err != nil {
+		return nil, err
+	}
+
 	return event, nil
 }
 
@@ -253,9 +290,6 @@ func getEventFixPartSize(code EventTypeCode) int32 {
 func newDescriptorEventData() *descriptorEventData {
 	data := descriptorEventData{
 		DescriptorEventDataFixPart: DescriptorEventDataFixPart{
-			BinlogVersion:   BinlogVersion,
-			ServerVersion:   ServerVersion,
-			CommitID:        CommitID,
 			CollectionID:    -1,
 			PartitionID:     -1,
 			SegmentID:       -1,
@@ -265,6 +299,7 @@ func newDescriptorEventData() *descriptorEventData {
 			PayloadDataType: -1,
 		},
 		PostHeaderLengths: []uint8{},
+		Extras:            make(map[string]interface{}),
 	}
 	for i := DescriptorEventType; i < EventTypeEnd; i++ {
 		size := getEventFixPartSize(i)

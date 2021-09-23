@@ -14,6 +14,12 @@ package storage
 import "unsafe"
 
 /* #nosec G103 */
+func UnsafeReadByte(buf []byte, idx int) byte {
+	ptr := unsafe.Pointer(&(buf[idx]))
+	return *((*byte)(ptr))
+}
+
+/* #nosec G103 */
 func UnsafeReadInt8(buf []byte, idx int) int8 {
 	ptr := unsafe.Pointer(&(buf[idx]))
 	return *((*int8)(ptr))
