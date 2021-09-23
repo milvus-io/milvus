@@ -51,7 +51,7 @@ class TestMixBase:
         collection = gen_unique_str()
         query_vecs = [vectors[0], vectors[1]]
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
-        id_0 = 0;
+        id_0 = 0
         id_1 = 0
         milvus_instance = get_milvus(args["handler"])
         # milvus_instance.connect(uri=uri)
@@ -63,7 +63,7 @@ class TestMixBase:
             status, ids = milvus_instance.bulk_insert(collection, vectors)
             # logging.getLogger().info(ids)
             if i == 0:
-                id_0 = ids[0];
+                id_0 = ids[0]
                 id_1 = ids[1]
 
         # def create_index(milvus_instance):
