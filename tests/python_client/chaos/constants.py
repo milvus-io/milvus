@@ -14,14 +14,14 @@ RAW_DATA_DIR = "/test/milvus/raw_data/"
 
 DEFAULT_DEPLOY_MODE = "single"
 
-CHAOS_NAMESPACE = "chaos-testing"
-CHAOS_API_VERSION = 'chaos-mesh.org/v1alpha1'
-CHAOS_GROUP = 'chaos-mesh.org'
-CHAOS_VERSION = 'v1alpha1'
+CHAOS_NAMESPACE = "chaos-testing"                   # namespace of chaos
+CHAOS_API_VERSION = 'chaos-mesh.org/v1alpha1'       # chaos mesh api version
+CHAOS_GROUP = 'chaos-mesh.org'                      # chao mesh group
+CHAOS_VERSION = 'v1alpha1'                          # chao mesh version
 SUCC = 'succ'
 FAIL = 'fail'
-DELTA_PER_INS = 10
-ENTITIES_FOR_SEARCH = 1000
+DELTA_PER_INS = 10                                  # entities per insert
+ENTITIES_FOR_SEARCH = 1000                          # entities for search_collection
 
 CHAOS_CONFIG_ENV = 'CHAOS_CONFIG_PATH'      # env variables for chao path
 TESTS_CONFIG_LOCATION = 'chaos_objects/'    # path to the chaos CRD
