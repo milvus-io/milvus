@@ -170,7 +170,19 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 
 // defaultDataNodeCreatorFunc defines the default behavior to get a DataNode
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
-	return datanodeclient.NewClient(ctx, addr)
+	cli, err := datanodeclient.NewClient(ctx, addr)
+	if err != nil {
+		return nil, err
+	}
+	err = cli.Init()
+	if err != nil {
+		return nil, err
+	}
+	err = cli.Start()
+	if err != nil {
+		return nil, err
+	}
+	return cli, nil
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
@@ -246,7 +258,7 @@ func (s *Server) initCluster() error {
 	// cluster could be set by options
 	// by-pass default NewCluster process if already set
 	if s.cluster == nil {
-		s.cluster, err = NewCluster(s.ctx, s.kvClient, NewNodesInfo(), s)
+		s.cluster, err = NewCluster(s.ctx, s.kvClient, NewNodesInfo(), s, s.dataNodeCreator)
 	}
 	return err
 }

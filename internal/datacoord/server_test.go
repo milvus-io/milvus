@@ -179,6 +179,18 @@ func TestFlush(t *testing.T) {
 	})
 }
 
+func TestDefaultDataNodeCreator(t *testing.T) {
+	// empty addr
+	_, err := defaultDataNodeCreatorFunc(context.Background(), "")
+	assert.NotNil(t, err)
+
+	// canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = defaultDataNodeCreatorFunc(ctx, "dummy")
+	assert.NotNil(t, err)
+}
+
 //func TestGetComponentStates(t *testing.T) {
 //svr := newTestServer(t)
 //defer closeTestServer(t, svr)
@@ -1273,7 +1285,7 @@ func TestOptions(t *testing.T) {
 			NodesInfo: NewNodesInfo(),
 			ch:        ch,
 		}
-		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, withRegisterPolicy(registerPolicy))
+		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, mockDataNodeCreator, withRegisterPolicy(registerPolicy))
 		assert.Nil(t, err)
 		opt := SetCluster(cluster)
 		assert.NotNil(t, opt)
@@ -1312,7 +1324,7 @@ func TestHandleSessionEvent(t *testing.T) {
 		ch:        ch,
 	}
 	cluster, err := NewCluster(context.TODO(), kv, spyClusterStore,
-		dummyPosProvider{},
+		dummyPosProvider{}, mockDataNodeCreator,
 		withRegisterPolicy(registerPolicy),
 		withUnregistorPolicy(unregisterPolicy))
 	assert.Nil(t, err)

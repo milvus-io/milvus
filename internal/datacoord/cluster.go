@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -90,6 +89,7 @@ type Cluster struct {
 	unregisterPolicy dataNodeUnregisterPolicy
 	assignPolicy     channelAssignPolicy
 	eventCh          chan *Event
+	clientCreator    DataNodeCreatorFunc
 }
 
 // ClusterOption helper function used when creating a Cluster
@@ -129,7 +129,7 @@ func defaultAssignPolicy() channelAssignPolicy {
 // triggers loadFromKV to load previous meta from KV if exists
 // returns error when loadFromKV fails
 func NewCluster(ctx context.Context, kv kv.TxnKV, store ClusterStore,
-	posProvider positionProvider, opts ...ClusterOption) (*Cluster, error) {
+	posProvider positionProvider, clientCreator DataNodeCreatorFunc, opts ...ClusterOption) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &Cluster{
 		ctx:              ctx,
@@ -142,6 +142,7 @@ func NewCluster(ctx context.Context, kv kv.TxnKV, store ClusterStore,
 		unregisterPolicy: defaultUnregisterPolicy(),
 		assignPolicy:     defaultAssignPolicy(),
 		eventCh:          make(chan *Event, nodeEventChBufferSize),
+		clientCreator:    clientCreator,
 	}
 
 	for _, opt := range opts {
@@ -324,7 +325,7 @@ func (c *Cluster) getOrCreateClient(ctx context.Context, id UniqueID) (types.Dat
 		return cli, nil
 	}
 	var err error
-	cli, err = createClient(ctx, node.Info.GetAddress())
+	cli, err = c.clientCreator(ctx, node.Info.GetAddress())
 	if err != nil {
 		return nil, err
 	}
@@ -341,22 +342,6 @@ func parseChannelsFromReq(req *datapb.WatchDmChannelsRequest) []string {
 		channels = append(channels, vc.ChannelName)
 	}
 	return channels
-}
-
-// createClient create type.DataNode from specified address
-// needs to be deprecated, since this function hard-corded DataNode to be grpc client
-func createClient(ctx context.Context, addr string) (types.DataNode, error) {
-	cli, err := grpcdatanodeclient.NewClient(ctx, addr)
-	if err != nil {
-		return nil, err
-	}
-	if err := cli.Init(); err != nil {
-		return nil, err
-	}
-	if err := cli.Start(); err != nil {
-		return nil, err
-	}
-	return cli, nil
 }
 
 // Startup applies statup policy
