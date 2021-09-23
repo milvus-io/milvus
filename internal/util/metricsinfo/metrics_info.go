@@ -116,6 +116,8 @@ type ProxyInfos struct {
 // IndexNodeConfiguration records the configuration of index node.
 type IndexNodeConfiguration struct {
 	MinioBucketName string `json:"minio_bucket_name"`
+
+	SimdType string `json:"simd_type"`
 }
 
 // IndexNodeInfos implements ComponentInfos
