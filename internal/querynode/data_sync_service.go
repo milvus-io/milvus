@@ -204,6 +204,7 @@ func newDataSyncService(ctx context.Context,
 }
 
 func (dsService *dataSyncService) close() {
+	// close collection flow graphs
 	for _, nodeFGs := range dsService.collectionFlowGraphs {
 		for _, nodeFG := range nodeFGs {
 			if nodeFG != nil {
@@ -211,6 +212,7 @@ func (dsService *dataSyncService) close() {
 			}
 		}
 	}
+	// close partition flow graphs
 	for _, nodeFGs := range dsService.partitionFlowGraphs {
 		for _, nodeFG := range nodeFGs {
 			if nodeFG != nil {
