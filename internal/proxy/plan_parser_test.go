@@ -55,7 +55,7 @@ func TestParseQueryExpr_Naive(t *testing.T) {
 	schemaPb := newTestSchema()
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	assert.Nil(t, err)
-	exprProto, err := parseQueryExpr(schema, exprStr)
+	exprProto, err := parseExpr(schema, exprStr)
 	assert.Nil(t, err)
 	str := proto.MarshalTextString(exprProto)
 	println(str)

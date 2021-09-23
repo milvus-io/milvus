@@ -2226,7 +2226,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf(errMsg)
 	}
 
-	plan, err := CreateExprQueryPlan(schema, qt.query.Expr)
+	plan, err := CreateExprPlan(schema, qt.query.Expr)
 	if err != nil {
 		return err
 	}

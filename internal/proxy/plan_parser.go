@@ -23,14 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-func parseQueryExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
-	if exprStr == "" {
-		return nil, nil
-	}
-
-	return parseQueryExprAdvanced(schema, exprStr)
-}
-
 type ParserContext struct {
 	schema *typeutil.SchemaHelper
 }
@@ -168,7 +160,10 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 	}
 }
 
-func parseQueryExprAdvanced(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
+func parseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
+	if exprStr == "" {
+		return nil, nil
+	}
 	ast, err := ant_parser.Parse(exprStr)
 	if err != nil {
 		return nil, err
@@ -181,7 +176,6 @@ func parseQueryExprAdvanced(schema *typeutil.SchemaHelper, exprStr string) (*pla
 	}
 
 	context := ParserContext{schema}
-
 	expr, err := context.handleExpr(&ast.Node)
 	if err != nil {
 		return nil, err
@@ -199,8 +193,8 @@ func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *pla
 }
 
 func isSameOrder(opStr1, opStr2 string) bool {
-	isLess1 := opStr1 == "<" || opStr1 == "<="
-	isLess2 := opStr2 == "<" || opStr2 == "<="
+	isLess1 := (opStr1 == "<") || (opStr1 == "<=")
+	isLess2 := (opStr2 == "<") || (opStr2 == "<=")
 	return isLess1 == isLess2
 }
 
@@ -643,7 +637,7 @@ func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vector
 		return nil, err
 	}
 
-	expr, err := parseQueryExpr(schema, exprStr)
+	expr, err := parseExpr(schema, exprStr)
 	if err != nil {
 		return nil, err
 	}
@@ -672,13 +666,13 @@ func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vector
 	return planNode, nil
 }
 
-func CreateExprQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
+func CreateExprPlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	if err != nil {
 		return nil, err
 	}
 
-	expr, err := parseQueryExpr(schema, exprStr)
+	expr, err := parseExpr(schema, exprStr)
 	if err != nil {
 		return nil, err
 	}
