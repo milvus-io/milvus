@@ -20,20 +20,6 @@ endif()
 message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
 # ----------------------------------------------------------------------
 # Find pthreads
-set(KNOWHERE_THIRDPARTY_DEPENDENCIES
-        Arrow
-        FAISS
-        GTest
-        MKL
-        )
-message(STATUS "Using ${KNOWHERE_DEPENDENCY_SOURCE} approach to find dependencies")
-
-# For each dependency, set dependency source to global default, if unset
-foreach (DEPENDENCY ${KNOWHERE_THIRDPARTY_DEPENDENCIES})
-    if ("${${DEPENDENCY}_SOURCE}" STREQUAL "")
-        set(${DEPENDENCY}_SOURCE ${KNOWHERE_DEPENDENCY_SOURCE})
-    endif ()
-endforeach ()
 
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
@@ -41,52 +27,28 @@ find_package( Threads REQUIRED )
 
 # ****************************** Thirdparty googletest ***************************************
 if ( KNOWHERE_BUILD_TESTS )
-    if(NOT TARGET gtest)
-    	add_subdirectory( gtest )
-    	add_subdirectory( google_benchmark)
+    if(NOT TARGET gtest::gtest_main)
+        add_subdirectory( gtest )
+    endif()
+
+    if(NOT TARGET benchmark::benchmark_main)
+        add_subdirectory( google_benchmark )
     endif()
 endif()
 
 
-# ****************************** Thirdparty Arrow ***************************************
 if(NOT TARGET fiu)
     add_subdirectory(fiu)
 endif()
+
+# ****************************** Thirdparty Arrow ***************************************
 add_subdirectory( arrow )
-#add_subdirectory( OpenBLAS )
+
+# ****************************** Thirdparty NGT ***************************************
 add_subdirectory(NGT)
 
-# 编译faiss
+# ****************************** Thirdparty Faiss ***************************************
 set(FAISS_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/faiss)
-macro(build_mkl)
-    if (FAISS_WITH_MKL)
-        if (EXISTS "/proc/cpuinfo")
-            FILE(READ /proc/cpuinfo PROC_CPUINFO)
-
-            SET(VENDOR_ID_RX "vendor_id[ \t]*:[ \t]*([a-zA-Z]+)\n")
-            STRING(REGEX MATCH "${VENDOR_ID_RX}" VENDOR_ID "${PROC_CPUINFO}")
-            STRING(REGEX REPLACE "${VENDOR_ID_RX}" "\\1" VENDOR_ID "${VENDOR_ID}")
-
-            if (NOT ${VENDOR_ID} STREQUAL "GenuineIntel")
-                set(FAISS_WITH_MKL OFF)
-            endif ()
-        endif ()
-
-        find_path(MKL_LIB_PATH
-                NAMES "libmkl_intel_ilp64.a" "libmkl_gnu_thread.a" "libmkl_core.a"
-                PATH_SUFFIXES "intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64/")
-        if (${MKL_LIB_PATH} STREQUAL "MKL_LIB_PATH-NOTFOUND")
-            message(FATAL_ERROR "Could not find MKL libraries")
-        endif ()
-        message(STATUS "MKL lib path = ${MKL_LIB_PATH}")
-
-        set(MKL_LIBS
-                ${MKL_LIB_PATH}/libmkl_intel_ilp64.a
-                ${MKL_LIB_PATH}/libmkl_gnu_thread.a
-                ${MKL_LIB_PATH}/libmkl_core.a
-                )
-    endif ()
-endmacro()
 
 macro(build_faiss)
     message(STATUS "Building FAISS-${FAISS_VERSION} from source")
@@ -119,21 +81,13 @@ macro(build_faiss)
             --without-python)
 
     message(STATUS "${FAISS_CONFIGURE_ARGS}")
-    if (FAISS_WITH_MKL)
+
+    message(STATUS "Build Faiss with OpenBlas/LAPACK")
+    if(NOT BLAS_FOUND)
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "CPPFLAGS=-DFINTEGER=long -DMKL_ILP64 -m64 -I${MKL_LIB_PATH}/../../include"
-                "LDFLAGS=-L${MKL_LIB_PATH}"
-                )
-    else ()
-        message(STATUS "Build Faiss with OpenBlas/LAPACK")
-        if(OpenBLAS_FOUND)
-            set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OpenBLAS_LIB_DIR}")
-        else()
-            set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib")
-        endif()
-    endif ()
+            "LDFLAGS=-L${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+            )
+    endif()
 
     if (MILVUS_GPU_VERSION)
         if (NOT MILVUS_CUDA_ARCH OR MILVUS_CUDA_ARCH STREQUAL "DEFAULT")
@@ -193,39 +147,26 @@ macro(build_faiss)
                 ${FAISS_STATIC_LIB})
     endif ()
 
-    if(NOT OpenBLAS_FOUND)
-	message(STATUS "OpenBLAS FOUNDED")
+    if(NOT BLAS_FOUND)
+        message(STATUS "OpenBLAS BOUNDED")
         ExternalProject_Add_StepDependencies(faiss_ep configure openblas_ep)
     endif()
 
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss STATIC IMPORTED)
 
-    set_target_properties(
-            faiss
+    set_target_properties( faiss
             PROPERTIES
-	    IMPORTED_GLOBAL TRUE
-            IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
-    )
-    if (FAISS_WITH_MKL)
-        set_target_properties(
-                faiss
-                PROPERTIES
-                INTERFACE_LINK_LIBRARIES "${MKL_LIBS}")
-    else ()
-        set_target_properties(
-                faiss
-                PROPERTIES
-                INTERFACE_LINK_LIBRARIES "${OpenBLAS_LIBRARIES}")
-    endif ()
+                IMPORTED_GLOBAL                 TRUE
+                IMPORTED_LOCATION               "${FAISS_STATIC_LIB}"
+                INTERFACE_INCLUDE_DIRECTORIES   "${FAISS_INCLUDE_DIR}")
 
+    target_link_libraries( faiss INTERFACE openblas )
     add_dependencies(faiss faiss_ep)
 
 endmacro()
 
 if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
-
     if (FAISS_WITH_MKL)
         if (MKL_SOURCE STREQUAL "AUTO")
             find_package(MKL MODULE)
@@ -236,7 +177,7 @@ if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
             build_faiss()
         elseif (MKL_SOURCE STREQUAL "SYSTEM")
             find_package(FAISS_FOUND REQUIRED)
-        endif ()  
+        endif ()
     else ()
         message("faiss with no mkl")
     endif ()
@@ -250,7 +191,7 @@ if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
         build_faiss()
     elseif (FAISS_SOURCE STREQUAL "SYSTEM")
         find_package(FAISS REQUIRED)
-    endif ()    
+    endif ()
 
     get_target_property(FAISS_INCLUDE_DIR faiss INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")

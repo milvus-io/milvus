@@ -15,32 +15,21 @@ include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR})
 
-set(depend_libs
-        gtest gmock gtest_main gmock_main
-        faiss fiu
+set(DEPEND_LIBS
+        gtest
+        gmock
+        gtest_main
+        gmock_main
+        faiss
+        fiu
         ngt
         index_log
-        )
-if (FAISS_WITH_MKL)
-    set(depend_libs ${depend_libs}
-            "-Wl,--start-group \
-            ${MKL_LIB_PATH}/libmkl_intel_ilp64.a \
-            ${MKL_LIB_PATH}/libmkl_gnu_thread.a \
-            ${MKL_LIB_PATH}/libmkl_core.a \
-            -Wl,--end-group -lgomp -lpthread -lm -ldl"
-            )
-else ()
-    set(depend_libs ${depend_libs}
-            ${OpenBLAS_LIBRARIES}
-            ${LAPACK_LIBRARIES}
-            )
-endif ()
-
-set(basic_libs
-        gomp gfortran pthread
+        openblas
         )
 
-set(util_srcs
+set(BASIC_LIBS gomp gfortran pthread)
+
+set(UTIL_SRCS
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissIO.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
@@ -56,19 +45,17 @@ set(util_srcs
 if (MILVUS_GPU_VERSION)
     include_directories(${CUDA_INCLUDE_DIRS})
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
-    set(cuda_lib
+    set(CUDA_LIB
             cudart
             cublas
             )
-    set(basic_libs ${basic_libs}
-            ${cuda_lib}
-            )
-    set(util_srcs ${util_srcs}
+    set(BASIC_LIBS ${basic_libs} ${cuda_lib})
+    set(UTIL_SRCS ${util_srcs}
             ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
             )
 endif ()
 
-set(faiss_srcs
+set(FAISS_SRCS
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseIndex.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseBinaryIndex.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexBinaryIDMAP.cpp
@@ -81,8 +68,9 @@ set(faiss_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/OffsetBaseIndex.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexIVF_NM.cpp
         )
+
 if (MILVUS_GPU_VERSION)
-    set(faiss_srcs ${faiss_srcs}
+    set(FAISS_SRCS ${faiss_srcs}
             ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/ConfAdapter.cpp
             ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/Cloner.cpp
             ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexGPUIDMAP.cpp
@@ -106,8 +94,8 @@ else ()
     message(FATAL_ERROR "no OpenMP supprot")
 endif ()
 
-set(all_indexing_srcs
-        ${util_srcs}
+set(ALL_INDEXING_SRCS
+        ${UTIL_SRCS}
         test_instructionset.cpp
         test_common.cpp
         test_customized_index.cpp
@@ -127,21 +115,22 @@ set(all_indexing_srcs
         test_ngtpanng.cpp
         test_ngtonng.cpp
         )
+
 if (MILVUS_GPU_VERSION)
-    set(all_indexing_srcs
-            ${all_indexing_srcs}
+    set(ALL_INDEXING_SRCS
+            ${ALL_INDEXING_SRCS}
             test_ivf_gpu_nm.cpp
             test_gpuresource.cpp
             )
 endif ()
 
 if (MILVUS_SUPPORT_SPTAG)
-    set(all_indexing_srcs
+    set(ALL_INDEXING_SRCS
             test_sptag.cpp
             )
 endif()
 
-add_executable(test_knowhere ${all_indexing_srcs})
-target_link_libraries(test_knowhere knowhere ${depend_libs})
+add_executable(test_knowhere ${ALL_INDEXING_SRCS})
+target_link_libraries(test_knowhere knowhere ${DEPEND_LIBS})
 
-install(TARGETS test_knowhere DESTINATION unittest)
+install(TARGETS test_knowhere)
