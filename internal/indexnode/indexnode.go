@@ -84,11 +84,12 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 		loopCancel: cancel,
 	}
 	b.UpdateStateCode(internalpb.StateCode_Abnormal)
-	var err error
-	b.sched, err = NewTaskScheduler(b.loopCtx, b.kv)
+	sc, err := NewTaskScheduler(b.loopCtx, b.kv)
 	if err != nil {
 		return nil, err
 	}
+
+	b.sched = sc
 	return b, nil
 }
 

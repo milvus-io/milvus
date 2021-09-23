@@ -40,11 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
-const (
-	CollectionPrefix = "/collection/"
-	SegmentPrefix    = "/segment/"
-)
-
 type (
 	// InsertData of storage
 	InsertData = storage.InsertData
