@@ -65,7 +65,7 @@ To learn how to choose an appropriate index for your application scenarios, plea
 
 To learn how to choose an appropriate index for a metric, see [Distance Metrics](https://www.milvus.io/docs/v2.0.0/metric.md).
 
-Different index types use different index params in construction and query. All index params are represented by the structure of map. This doc shows the map code in python.
+Different index type uses different index params in construction and query. All index params are represented by the structure of map. This doc shows the map code in python.
 
 
 
@@ -84,7 +84,7 @@ Different index types use different index params in construction and query. All 
 
 ## IVF_FLAT
 
-**IVF** (*Inverted File*) is an index type based on quantization. It divides the points in space into `nlist` units by the clustering method. During searching vectors, it compares the distances between the target vector and the center of all the units, and then selects the `nprobe` nearest unit. Then, it compares all the vectors in these selected cells to get the final result.
+**IVF** (*Inverted File*) is an index type based on quantization. It divides the points in space into `nlist` units by the clustering method. During searching vectors, it compares the distances between the target vector and the center of all the units, and then selects the `nprobe` nearest unit. Afterwards, it compares all the vectors in these selected cells to get the final result.
 
 IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit is consistent with the original data.
 
