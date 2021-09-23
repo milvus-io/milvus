@@ -9,7 +9,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.utils import *
-from common.constants import *
+from common import constants as cons
 
 prefix = "collection"
 exp_name = "name"
@@ -1483,7 +1483,7 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid_count)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, cons.default_fields)
             connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
@@ -1506,7 +1506,7 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid_count)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_binary_fields)
+            connect.create_collection(collection_name, cons.default_binary_fields)
             connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
@@ -1527,13 +1527,13 @@ class TestCollectionMultiCollections:
         for i in range(0, int(collection_num / 2)):
             collection_name = gen_unique_str(uid_count)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
-            connect.insert(collection_name, default_entities)
+            connect.create_collection(collection_name, cons.default_fields)
+            connect.insert(collection_name, cons.default_entities)
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(uid_count)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_binary_fields)
-            res = connect.insert(collection_name, default_binary_entities)
+            connect.create_collection(collection_name, cons.default_binary_fields)
+            res = connect.insert(collection_name, cons.default_binary_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
@@ -1638,7 +1638,7 @@ class TestGetCollectionStats:
         method: add entities, check count in collection info
         expected: count as expected
         '''
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
@@ -1653,7 +1653,7 @@ class TestGetCollectionStats:
         '''
         nb = 10
         for i in range(nb):
-            connect.insert(collection, default_entity)
+            connect.insert(collection, cons.default_entity)
             connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == nb
@@ -1665,7 +1665,7 @@ class TestGetCollectionStats:
         method: add and delete entities, check count in collection info
         expected: status ok, count as expected
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.insert(collection, cons.default_entities)
         status = connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         connect.delete_entity_by_id(collection, delete_ids)
@@ -1684,7 +1684,7 @@ class TestGetCollectionStats:
         expected: status ok, count as expected
         '''
         delete_length = 1000
-        ids = connect.insert(collection, default_entities)
+        ids = connect.insert(collection, cons.default_entities)
         status = connect.flush([collection])
         delete_ids = ids[:delete_length]
         connect.delete_entity_by_id(collection, delete_ids)
@@ -1706,7 +1706,7 @@ class TestGetCollectionStats:
         method: add and delete one entity, and compact collection, check count in collection info
         expected: status ok, count as expected
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.insert(collection, cons.default_entities)
         status = connect.flush([collection])
         delete_ids = ids[:1]
         connect.delete_entity_by_id(collection, delete_ids)
@@ -1729,7 +1729,7 @@ class TestGetCollectionStats:
         expected: status ok, vectors added to partition
         '''
         connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
@@ -1745,15 +1745,15 @@ class TestGetCollectionStats:
         new_tag = "new_tag"
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, new_tag)
-        connect.insert(collection, default_entities, partition_name=default_tag)
+        connect.insert(collection, cons.default_entities, partition_name=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb
-        connect.insert(collection, default_entities, partition_name=new_tag)
+        connect.insert(collection, cons.default_entities, partition_name=new_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb * 2
-        connect.insert(collection, default_entities)
+        connect.insert(collection, cons.default_entities)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb * 3
@@ -1836,7 +1836,7 @@ class TestGetCollectionStats:
         method: create collection, add vectors, create index and call collection_stats
         expected: status ok, index created and shown in segments
         '''
-        connect.insert(collection, default_entities)
+        connect.insert(collection, cons.default_entities)
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
@@ -1851,7 +1851,7 @@ class TestGetCollectionStats:
         expected: status ok, index created and shown in segments
         '''
         get_simple_index["metric_type"] = "IP"
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         get_simple_index.update({"metric_type": "IP"})
@@ -1867,7 +1867,7 @@ class TestGetCollectionStats:
         method: create collection, add binary entities, create index and call collection_stats
         expected: status ok, index created and shown in segments
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.insert(binary_collection, cons.default_binary_entities)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, default_binary_vec_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
@@ -1880,7 +1880,7 @@ class TestGetCollectionStats:
         method: create collection, add vectors, create index and call collection_stats multiple times
         expected: status ok, index info shown in segments
         '''
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         connect.flush([collection])
         for index_type in ["IVF_FLAT", "IVF_SQ8"]:
             connect.create_index(collection, default_float_vec_field_name,
@@ -1901,8 +1901,8 @@ class TestGetCollectionStats:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid_stats)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
-            res = connect.insert(collection_name, default_entities)
+            connect.create_collection(collection_name, cons.default_fields)
+            res = connect.insert(collection_name, cons.default_entities)
             connect.flush(collection_list)
             index_1 = {"index_type": "IVF_SQ8", "params": {"nlist": 1024}, "metric_type": "L2"}
             index_2 = {"index_type": "IVF_FLAT", "params": {"nlist": 1024}, "metric_type": "L2"}
@@ -1960,7 +1960,7 @@ class TestCreateCollection:
         expected: no exception raised
         '''
         collection_name = gen_unique_str(uid_create)
-        fields = copy.deepcopy(default_fields)
+        fields = copy.deepcopy(cons.default_fields)
         # fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
@@ -1973,10 +1973,10 @@ class TestCreateCollection:
         expected: error raised
         '''
         # pdb.set_trace()
-        connect.insert(collection, default_entity)
+        connect.insert(collection, cons.default_entity)
 
         try:
-            connect.create_collection(collection, default_fields)
+            connect.create_collection(collection, cons.default_fields)
         except Exception as e:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
@@ -1991,10 +1991,10 @@ class TestCreateCollection:
         method: insert vector and create collection
         expected: error raised
         '''
-        connect.insert(collection, default_entity)
+        connect.insert(collection, cons.default_entity)
         connect.flush([collection])
         try:
-            connect.create_collection(collection, default_fields)
+            connect.create_collection(collection, cons.default_fields)
         except Exception as e:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
@@ -2016,7 +2016,7 @@ class TestCreateCollection:
         def create():
             collection_name = gen_unique_str(uid_create)
             collection_names.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, cons.default_fields)
 
         for i in range(threads_num):
             t = MyThread(target=create, args=())
@@ -2074,7 +2074,7 @@ class TestCreateCollectionInvalid(object):
     @pytest.mark.tags(CaseLabel.L2)
     def _test_create_collection_with_invalid_segment_row_limit(self, connect, get_segment_row_limit):
         collection_name = gen_unique_str()
-        fields = copy.deepcopy(default_fields)
+        fields = copy.deepcopy(cons.default_fields)
         fields["segment_row_limit"] = get_segment_row_limit
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
@@ -2087,7 +2087,7 @@ class TestCreateCollectionInvalid(object):
         expected: use default default_segment_row_limit
         '''
         collection_name = gen_unique_str(uid_create)
-        fields = copy.deepcopy(default_fields)
+        fields = copy.deepcopy(cons.default_fields)
         fields.pop("segment_row_limit")
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
@@ -2099,7 +2099,7 @@ class TestCreateCollectionInvalid(object):
     def test_create_collection_limit_fields(self, connect):
         collection_name = gen_unique_str(uid_create)
         limit_num = 64
-        fields = copy.deepcopy(default_fields)
+        fields = copy.deepcopy(cons.default_fields)
         for i in range(limit_num):
             field_name = gen_unique_str("field_name")
             field = {"name": field_name, "type": DataType.INT64}
@@ -2200,7 +2200,7 @@ class TestDescribeCollection:
         expected: False
         '''
         collection_name = gen_unique_str(uid_describe)
-        connect.create_collection(collection_name, default_fields)
+        connect.create_collection(collection_name, cons.default_fields)
         connect.describe_collection(collection_name)
         connect.drop_collection(collection_name)
         try:
@@ -2221,7 +2221,7 @@ class TestDescribeCollection:
         threads_num = 4
         threads = []
         collection_name = gen_unique_str(uid_describe)
-        connect.create_collection(collection_name, default_fields)
+        connect.create_collection(collection_name, cons.default_fields)
 
         def get_info():
             connect.describe_collection(collection_name)
@@ -2354,7 +2354,7 @@ class TestDropCollection:
         def create():
             collection_name = gen_unique_str(uid_drop)
             collection_names.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, cons.default_fields)
             connect.drop_collection(collection_name)
 
         for i in range(threads_num):
@@ -2420,7 +2420,7 @@ class TestHasCollection:
         expected: False
         '''
         collection_name = gen_unique_str(uid_has)
-        connect.create_collection(collection_name, default_fields)
+        connect.create_collection(collection_name, cons.default_fields)
         assert connect.has_collection(collection_name)
         connect.drop_collection(collection_name)
         assert not connect.has_collection(collection_name)
@@ -2435,7 +2435,7 @@ class TestHasCollection:
         threads_num = 4
         threads = []
         collection_name = gen_unique_str(uid_has)
-        connect.create_collection(collection_name, default_fields)
+        connect.create_collection(collection_name, cons.default_fields)
 
         def has():
             assert connect.has_collection(collection_name)
@@ -2500,7 +2500,7 @@ class TestListCollections:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid_list)
             collection_names.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, cons.default_fields)
             assert collection_name in connect.list_collections()
         for i in range(collection_num):
             connect.drop_collection(collection_names[i])
@@ -2540,7 +2540,7 @@ class TestListCollections:
         threads_num = 10
         threads = []
         collection_name = gen_unique_str(uid_list)
-        connect.create_collection(collection_name, default_fields)
+        connect.create_collection(collection_name, cons.default_fields)
 
         def _list():
             assert collection_name in connect.list_collections()
@@ -2582,7 +2582,7 @@ class TestLoadCollection:
         method: insert and create index, load collection with correct params
         expected: no error raised
         '''
-        connect.insert(collection, default_entities)
+        connect.insert(collection, cons.default_entities)
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         connect.load_collection(collection)
@@ -2595,7 +2595,7 @@ class TestLoadCollection:
         method: insert and create index, load binary_collection with correct params
         expected: no error raised
         '''
-        result = connect.insert(binary_collection, default_binary_entities)
+        result = connect.insert(binary_collection, cons.default_binary_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
@@ -2676,14 +2676,14 @@ class TestLoadCollection:
         method: release collection without load
         expected: release successfully
         """
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.release_collection(collection)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_collection_after_load_release(self, connect, collection):
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_collection(collection)
@@ -2692,7 +2692,7 @@ class TestLoadCollection:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_repeatedly(self, connect, collection):
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_collection(collection)
@@ -2701,8 +2701,8 @@ class TestLoadCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_collection(self, connect, collection):
         collection_name = gen_unique_str(uid_load)
-        connect.create_collection(collection_name, default_fields)
-        connect.insert(collection_name, default_entities)
+        connect.create_collection(collection_name, cons.default_fields)
+        connect.insert(collection_name, cons.default_entities)
         connect.flush([collection_name])
         connect.load_collection(collection_name)
         connect.release_collection(collection_name)
@@ -2730,7 +2730,7 @@ class TestLoadCollection:
         method: insert and flush, then release collection after load and drop
         expected: raise exception
         """
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_collection(collection)
@@ -2750,7 +2750,7 @@ class TestLoadCollection:
         method: insert entities without flush, then load collection
         expected: load collection failed
         """
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.load_collection(collection)
 
@@ -2770,10 +2770,10 @@ class TestLoadCollection:
         method: load collection and release part partitions
         expected: released partitions search empty
         """
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_collection(collection)
@@ -2790,10 +2790,10 @@ class TestLoadCollection:
         method: load collection and release all partitions
         expected: search empty
         """
-        result = connect.insert(collection, default_entities)
+        result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_collection(collection)
@@ -2809,7 +2809,7 @@ class TestLoadCollection:
         expected: search result empty
         """
         connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
@@ -2830,10 +2830,10 @@ class TestReleaseAdvanced:
         """
         nq = 1000
         top_k = 1
-        connect.insert(collection, default_entities)
+        connect.insert(collection, cons.default_entities)
         connect.flush([collection])
         connect.load_collection(collection)
-        query, _ = gen_query_vectors(field_name, default_entities, top_k, nq)
+        query, _ = gen_query_vectors(field_name, cons.default_entities, top_k, nq)
         future = connect.search(collection, query, _async=True)
         connect.release_collection(collection)
         with pytest.raises(Exception):
@@ -2849,8 +2849,8 @@ class TestReleaseAdvanced:
         nq = 1000
         top_k = 1
         connect.create_partition(collection, default_tag)
-        query, _ = gen_query_vectors(field_name, default_entities, top_k, nq)
-        connect.insert(collection, default_entities, partition_name=default_tag)
+        query, _ = gen_query_vectors(field_name, cons.default_entities, top_k, nq)
+        connect.insert(collection, cons.default_entities, partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, query, _async=True)
@@ -2868,8 +2868,8 @@ class TestReleaseAdvanced:
         nq = 1000
         top_k = 1
         connect.create_partition(collection, default_tag)
-        query, _ = gen_query_vectors(field_name, default_entities, top_k, nq)
-        connect.insert(collection, default_entities, partition_name=default_tag)
+        query, _ = gen_query_vectors(field_name, cons.default_entities, top_k, nq)
+        connect.insert(collection, cons.default_entities, partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, query, _async=True)
@@ -2883,7 +2883,7 @@ class TestReleaseAdvanced:
         method: insert entities into collection, flush, release collection during loading
         expected:
         """
-        connect.insert(collection, default_entities)
+        connect.insert(collection, cons.default_entities)
         connect.flush([collection])
 
         def load():
@@ -2902,7 +2902,7 @@ class TestReleaseAdvanced:
         expected:
         """
         connect.create_partition(collection, default_tag)
-        connect.insert(collection, default_entities, partition_name=default_tag)
+        connect.insert(collection, cons.default_entities, partition_name=default_tag)
         connect.flush([collection])
 
         def load():
@@ -2920,12 +2920,12 @@ class TestReleaseAdvanced:
         method: load collection, do release collection during inserting
         expected:
         """
-        connect.insert(collection, default_entities)
+        connect.insert(collection, cons.default_entities)
         connect.flush([collection])
         connect.load_collection(collection)
 
         def insert():
-            connect.insert(collection, default_entities)
+            connect.insert(collection, cons.default_entities)
 
         t = threading.Thread(target=insert, args=())
         t.start()
@@ -3012,7 +3012,7 @@ class TestLoadPartition:
         expected: no error raised
         '''
         connect.create_partition(binary_collection, default_tag)
-        result = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
+        result = connect.insert(binary_collection, cons.default_binary_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
@@ -3072,7 +3072,7 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.release_partitions(collection, [default_tag])
@@ -3085,7 +3085,7 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
@@ -3115,7 +3115,7 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
@@ -3136,7 +3136,7 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
