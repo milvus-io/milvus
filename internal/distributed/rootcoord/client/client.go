@@ -86,6 +86,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*G
 	}, nil
 }
 
+// Init initialize grpc parameters
 func (c *GrpcClient) Init() error {
 	Params.Init()
 	return nil
@@ -171,10 +172,12 @@ func (c *GrpcClient) getGrpcClient() (rootcoordpb.RootCoordClient, error) {
 	return c.grpcClient, nil
 }
 
+// Start dummy
 func (c *GrpcClient) Start() error {
 	return nil
 }
 
+// Stop terminate grpc connection
 func (c *GrpcClient) Stop() error {
 	c.cancel()
 	c.grpcClientMtx.Lock()
@@ -231,6 +234,8 @@ func (c *GrpcClient) GetComponentStates(ctx context.Context) (*internalpb.Compon
 	}
 	return ret.(*internalpb.ComponentStates), err
 }
+
+// GetTimeTickChannel get timetick channel name
 func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -262,7 +267,7 @@ func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 	return ret.(*milvuspb.StringResponse), err
 }
 
-//DDL request
+// CreateCollection create collection
 func (c *GrpcClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -278,6 +283,7 @@ func (c *GrpcClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCo
 	return ret.(*commonpb.Status), err
 }
 
+// DropCollection drop collection
 func (c *GrpcClient) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -293,6 +299,7 @@ func (c *GrpcClient) DropCollection(ctx context.Context, in *milvuspb.DropCollec
 	return ret.(*commonpb.Status), err
 }
 
+// HasCollection check collection existence
 func (c *GrpcClient) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -307,6 +314,8 @@ func (c *GrpcClient) HasCollection(ctx context.Context, in *milvuspb.HasCollecti
 	}
 	return ret.(*milvuspb.BoolResponse), err
 }
+
+// DescribeCollection return collection info
 func (c *GrpcClient) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -322,6 +331,7 @@ func (c *GrpcClient) DescribeCollection(ctx context.Context, in *milvuspb.Descri
 	return ret.(*milvuspb.DescribeCollectionResponse), err
 }
 
+// ShowCollections list all collection names
 func (c *GrpcClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -336,6 +346,8 @@ func (c *GrpcClient) ShowCollections(ctx context.Context, in *milvuspb.ShowColle
 	}
 	return ret.(*milvuspb.ShowCollectionsResponse), err
 }
+
+// CreatePartition create partition
 func (c *GrpcClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -351,6 +363,7 @@ func (c *GrpcClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePar
 	return ret.(*commonpb.Status), err
 }
 
+// DropPartition drop partition
 func (c *GrpcClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -366,6 +379,7 @@ func (c *GrpcClient) DropPartition(ctx context.Context, in *milvuspb.DropPartiti
 	return ret.(*commonpb.Status), err
 }
 
+// HasPartition check partition existence
 func (c *GrpcClient) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -381,6 +395,7 @@ func (c *GrpcClient) HasPartition(ctx context.Context, in *milvuspb.HasPartition
 	return ret.(*milvuspb.BoolResponse), err
 }
 
+// ShowPartitions list all partitions in collection
 func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -396,7 +411,7 @@ func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartit
 	return ret.(*milvuspb.ShowPartitionsResponse), err
 }
 
-// CreateIndex index builder service
+// CreateIndex create index
 func (c *GrpcClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -412,6 +427,7 @@ func (c *GrpcClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRe
 	return ret.(*commonpb.Status), err
 }
 
+// DropIndex drop index
 func (c *GrpcClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -424,6 +440,7 @@ func (c *GrpcClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexReques
 	return ret.(*commonpb.Status), err
 }
 
+// DescribeIndex return index info
 func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -455,6 +472,7 @@ func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTi
 	return ret.(*rootcoordpb.AllocTimestampResponse), err
 }
 
+// AllocID global ID allocator
 func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -502,6 +520,7 @@ func (c *GrpcClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeS
 	return ret.(*milvuspb.DescribeSegmentResponse), err
 }
 
+// ShowSegments list all segments
 func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -516,6 +535,8 @@ func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegments
 	}
 	return ret.(*milvuspb.ShowSegmentsResponse), err
 }
+
+// ReleaseDQLMessageStream release DQL msgstream
 func (c *GrpcClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -530,6 +551,8 @@ func (c *GrpcClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Re
 	}
 	return ret.(*commonpb.Status), err
 }
+
+// SegmentFlushCompleted check whether segment flush is completed
 func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -545,6 +568,7 @@ func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.Segme
 	return ret.(*commonpb.Status), err
 }
 
+// GetMetrics get metrics
 func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -560,6 +584,7 @@ func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequ
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
 
+// CreateAlias create collection alias
 func (c *GrpcClient) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -575,6 +600,7 @@ func (c *GrpcClient) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasR
 	return ret.(*commonpb.Status), err
 }
 
+// DropAlias drop collection alias
 func (c *GrpcClient) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -590,6 +616,7 @@ func (c *GrpcClient) DropAlias(ctx context.Context, req *milvuspb.DropAliasReque
 	return ret.(*commonpb.Status), err
 }
 
+// AlterAlias alter collection alias
 func (c *GrpcClient) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()

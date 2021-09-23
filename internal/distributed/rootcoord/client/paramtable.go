@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// ParamTable structure stored all parameters
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -29,9 +30,11 @@ type ParamTable struct {
 	ClientMaxRecvSize int
 }
 
+// Params rootcoord parameter table
 var Params ParamTable
 var once sync.Once
 
+// Init initialize param table
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
