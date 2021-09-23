@@ -12,6 +12,7 @@
 package rocksmq
 
 import (
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -25,18 +26,35 @@ import (
 	"go.uber.org/zap"
 )
 
-var path string = "/tmp/rmq_retention"
+var retentionPath string = "/tmp/rmq_retention/"
+
+func TestMain(m *testing.M) {
+	os.MkdirAll(retentionPath, os.ModePerm)
+	code := m.Run()
+	os.Exit(code)
+}
+
+func genRandonName() string {
+	len := 6
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	bytes := make([]byte, len)
+	for i := 0; i < len; i++ {
+		b := r.Intn(26) + 65
+		bytes[i] = byte(b)
+	}
+	return string(bytes)
+}
 
 func TestRmqRetention(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
-	kvPath := path + "_kv"
+	kvPath := retentionPath + kvPathSuffix
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := path + "_db"
+	rocksdbPath := retentionPath + dbPathSuffix
 	defer os.RemoveAll(rocksdbPath)
-	metaPath := path + "_meta_kv"
+	metaPath := retentionPath + metaPathSuffix
 	defer os.RemoveAll(metaPath)
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
@@ -87,23 +105,43 @@ func TestRmqRetention(t *testing.T) {
 	assert.Equal(t, len(newRes), 0)
 }
 
-func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
-	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqPageSize, 100)
-	kvPath := path + "_kv_load"
+func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
+	suffix := "init"
+	kvPath := retentionPath + kvPathSuffix + suffix
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := path + "_db_load"
+	rocksdbPath := retentionPath + dbPathSuffix + suffix
 	defer os.RemoveAll(rocksdbPath)
-	metaPath := path + "_meta_load"
+	metaPath := retentionPath + metaPathSuffix + suffix
 
 	defer os.RemoveAll(metaPath)
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
-	defer rmq.stopRetention()
+	assert.NotNil(t, rmq)
+
+	rmq.retentionInfo.kv.DB = nil
+	_, err = initRetentionInfo(rmq.retentionInfo.kv, rmq.retentionInfo.db)
+	assert.Error(t, err)
+}
+
+func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
+	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
+	atomic.StoreInt64(&RocksmqPageSize, 100)
+	kvPath := retentionPath + "kv_" + genRandonName()
+	defer os.RemoveAll(kvPath)
+	idAllocator := InitIDAllocator(kvPath)
+
+	rocksdbPath := retentionPath + "db_" + genRandonName()
+	defer os.RemoveAll(rocksdbPath)
+	metaPath := retentionPath + "meta_" + genRandonName()
+	defer os.RemoveAll(metaPath)
+
+	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
@@ -164,19 +202,107 @@ func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 
 	err = DeleteMessages(rmq.store, topicName, 0, 0)
 	assert.NoError(t, err)
+
+	//////////////////////////////////////////////////
+	ackedTsPrefix, _ := constructKey(AckedTsTitle, topicName)
+	ackedTsKey0 := ackedTsPrefix + "/1"
+	rmq.retentionInfo.kv.Save(ackedTsKey0, "dummy")
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(ackedTsKey0)
+
+	//////////////////////////////////////////////////
+	ackedTsKey1 := ackedTsPrefix + "/dummy"
+	rmq.retentionInfo.kv.Save(ackedTsKey1, "dummy")
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(ackedTsKey1)
+
+	//////////////////////////////////////////////////
+	lastRetentionTsKey := LastRetTsTitle + topicName
+	rmq.retentionInfo.kv.Save(lastRetentionTsKey, strconv.FormatInt(1, 10))
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(lastRetentionTsKey)
+
+	//////////////////////////////////////////////////
+	rmq.retentionInfo.kv.Save(lastRetentionTsKey, "dummy")
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(lastRetentionTsKey)
+
+	//////////////////////////////////////////////////
+	ackedSizeKey := AckedSizeTitle + topicName
+	rmq.retentionInfo.kv.Save(ackedSizeKey, strconv.FormatInt(1, 10))
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(ackedSizeKey)
+
+	//////////////////////////////////////////////////
+	rmq.retentionInfo.kv.Save(ackedSizeKey, "")
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(ackedSizeKey)
+
+	//////////////////////////////////////////////////
+	rmq.retentionInfo.kv.Save(ackedSizeKey, "dummy")
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(ackedSizeKey)
+
+	//////////////////////////////////////////////////
+	topicBeginIDKey := TopicBeginIDTitle + topicName
+	rmq.retentionInfo.kv.Save(topicBeginIDKey, "dummy")
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(topicBeginIDKey)
+
+	////////////////////////////////////////////////////
+	fixedPageSizeKey0, _ := constructKey(PageMsgSizeTitle, topicName)
+	pageMsgSizeKey0 := fixedPageSizeKey0 + "/" + "1"
+	rmq.retentionInfo.kv.Save(pageMsgSizeKey0, "dummy")
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(pageMsgSizeKey0)
+
+	//////////////////////////////////////////////////
+	fixedPageSizeKey1, _ := constructKey(PageMsgSizeTitle, topicName)
+	pageMsgSizeKey1 := fixedPageSizeKey1 + "/" + "dummy"
+	rmq.retentionInfo.kv.Save(pageMsgSizeKey1, "dummy")
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(pageMsgSizeKey1)
+
+	//////////////////////////////////////////////////
+	rmq.retentionInfo.kv.DB = nil
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+
+	//////////////////////////////////////////////////
+	topicMu.Delete(topicName)
+	topicMu.Store(topicName, topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
+
+	//////////////////////////////////////////////////
+	topicMu.Delete(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
+
+	//////////////////////////////////////////////////
+	rmq.retentionInfo.ackedInfo.Delete(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 }
 
 func TestRmqRetention_Complex(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 1)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
-	kvPath := path + "_kv_com"
+	kvPath := retentionPath + "kv_com"
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := path + "_db_com"
+	rocksdbPath := retentionPath + "db_com"
 	defer os.RemoveAll(rocksdbPath)
-	metaPath := path + "_meta_kv_com"
+	metaPath := retentionPath + "meta_kv_com"
 	defer os.RemoveAll(metaPath)
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
@@ -234,13 +360,13 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
-	kvPath := path + "_kv_com1"
+	kvPath := retentionPath + "kv_com1"
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := path + "_db_com1"
+	rocksdbPath := retentionPath + "db_com1"
 	defer os.RemoveAll(rocksdbPath)
-	metaPath := path + "_meta_kv_com1"
+	metaPath := retentionPath + "meta_kv_com1"
 	defer os.RemoveAll(metaPath)
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)

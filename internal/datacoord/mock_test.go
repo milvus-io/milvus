@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -114,6 +115,10 @@ func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, 
 	}, nil
 }
 
+var mockDataNodeCreator DataNodeCreatorFunc = func(_ context.Context, addr string) (types.DataNode, error) {
+	return newMockDataNodeClient(0, nil)
+}
+
 func (c *mockDataNodeClient) Init() error {
 	return nil
 }
@@ -190,6 +195,18 @@ func (c *mockDataNodeClient) Stop() error {
 type mockRootCoordService struct {
 	state internalpb.StateCode
 	cnt   int64
+}
+
+func (m *mockRootCoordService) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
 }
 
 func newMockRootCoordService() *mockRootCoordService {

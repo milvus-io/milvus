@@ -11,52 +11,28 @@
 
 #include <iostream>
 
-#include "exceptions/EasyAssert.h"
-#include "knowhere/archive/KnowhereConfig.h"
 #include "segcore/segcore_init_c.h"
 #include "segcore/SegcoreConfig.h"
 #include "utils/Log.h"
+#include "config/ConfigKnowhere.h"
 
 namespace milvus::segcore {
-static void
-SegcoreInitImpl() {
-    namespace eg = milvus::engine;
-    eg::KnowhereConfig::SetSimdType(eg::KnowhereConfig::SimdType::AUTO);
-    eg::KnowhereConfig::SetBlasThreshold(16384);
-    eg::KnowhereConfig::SetEarlyStopThreshold(0);
-    eg::KnowhereConfig::SetLogHandler();
-    eg::KnowhereConfig::SetStatisticsLevel(0);
-    el::Configurations el_conf;
-    el_conf.setGlobally(el::ConfigurationType::Enabled, std::to_string(false));
-}
-}  // namespace milvus::segcore
-
 extern "C" void
 SegcoreInit() {
-    milvus::segcore::SegcoreInitImpl();
+    milvus::config::KnowhereInitImpl();
 }
 
 extern "C" void
 SegcoreSetChunkRows(const int64_t value) {
     milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
     config.set_chunk_rows(value);
-    std::cout << "set config chunk_size: " << config.get_chunk_rows() << std::endl;
+    LOG_SEGCORE_DEBUG_ << "set config chunk_size: " << config.get_chunk_rows();
 }
 
 extern "C" void
 SegcoreSetSimdType(const char* value) {
-    milvus::engine::KnowhereConfig::SimdType simd_type;
-    if (strcmp(value, "auto") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::AUTO;
-    } else if (strcmp(value, "avx512") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::AVX512;
-    } else if (strcmp(value, "avx2") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::AVX2;
-    } else if (strcmp(value, "sse") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::SSE;
-    } else {
-        PanicInfo("invalid SIMD type: " + std::string(value));
-    }
-    milvus::engine::KnowhereConfig::SetSimdType(simd_type);
-    std::cout << "set config simd_type: " << int(simd_type) << std::endl;
+    milvus::config::KnowhereSetSimdType(value);
+    LOG_SEGCORE_DEBUG_ << "set config simd_type: " << value;
 }
+
+}  // namespace milvus::segcore

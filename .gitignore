@@ -76,15 +76,16 @@ gtags.conf
 # Delve generated file
 **/__debug_bin
 
-# go-codecov
+# codecov-go generated files
 coverage.txt
 profile.out
+profile.txt
+go_coverage.html
 cover.out
-coverage.html
 
-#cpp-codecov
-*.info
-lcov_out/
+# codecov-cpp generated files
+lcov_*.info
+cpp_coverage/
 
 # virtualenv
 venv/

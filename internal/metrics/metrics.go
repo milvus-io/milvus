@@ -595,7 +595,7 @@ var (
 
 //RegisterDataCoord register DataCoord metrics
 func RegisterDataCoord() {
-	prometheus.Register(DataCoordDataNodeList)
+	prometheus.MustRegister(DataCoordDataNodeList)
 }
 
 var (
@@ -620,8 +620,8 @@ var (
 
 //RegisterDataNode register DataNode metrics
 func RegisterDataNode() {
-	prometheus.Register(DataNodeFlushSegmentsCounter)
-	prometheus.Register(DataNodeWatchDmChannelsCounter)
+	prometheus.MustRegister(DataNodeFlushSegmentsCounter)
+	prometheus.MustRegister(DataNodeWatchDmChannelsCounter)
 }
 
 //RegisterIndexCoord register IndexCoord metrics

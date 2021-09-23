@@ -20,7 +20,7 @@ const (
 	DefaultServiceRoot = "session/"
 	DefaultIDKey       = "id"
 	DefaultRetryTimes  = 30
-	DefaultTTL         = 10
+	DefaultTTL         = 60
 )
 
 type SessionEventType int

@@ -28,4 +28,3 @@ queryNode:
 
   segcore:
     chunkRows: 32768
-    simdType: auto    # auto, avx512, avx2, sse

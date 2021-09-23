@@ -120,10 +120,18 @@ test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
-# Run go-codecov
-go-codecov:
-	@echo "Running go unittests..."
+# Runs code coverage.
+codecov: codecov-go codecov-cpp
+
+# Run codecov-go
+codecov-go: build-cpp-with-unittest
+	@echo "Running go coverage..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
+
+# Run codecov-cpp
+codecov-cpp: build-cpp-with-unittest
+	@echo "Running cpp coverage..."
+	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
 #TODO: build each component to docker
 docker: verifiers

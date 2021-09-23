@@ -72,6 +72,3 @@ for mp := seeking(p1) {
     }
 }
 ```
-
-
-

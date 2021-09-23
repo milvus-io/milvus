@@ -94,9 +94,11 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
                     logger.error(traceback.format_exc())
                 logger.info(result)
                 if result:
+                    # Save the result of this test as true, and save the related test value results
                     case_metric.update_status(status="RUN_SUCC")
                     case_metric.update_result(result)
                 else:
+                    # The test run fails, save the related errors of the run method
                     case_metric.update_status(status="RUN_FAILED")
                     case_metric.update_message(err_message)
                     suite_status = False
@@ -116,6 +118,7 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
         metric.update_status(status="RUN_FAILED")
     finally:
         if deploy_mode:
+            # Save all reported data to the database
             api.save(metric)
         # time.sleep(10)
         env.tear_down()

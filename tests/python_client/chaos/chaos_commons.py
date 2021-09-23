@@ -1,7 +1,6 @@
 import os
 import threading
 import glob
-import delayed_assert
 from chaos import constants
 from yaml import full_load
 from utils.util_log import test_log as log
@@ -63,10 +62,9 @@ def get_chaos_yamls():
         else:
             # not a valid directory, return default
             pass
-    log.debug("not a valid directory or file, return default")
+    log.debug("not a valid directory or file, return default chaos config path")
     return glob.glob(constants.TESTS_CONFIG_LOCATION + constants.ALL_CHAOS_YAMLS)
 
 
-def reconnect(conn, host, port):
-    conn.add_connection(default={"host": host, "port": port})
-    return conn.connect(alias='default')
+def reconnect(connections, alias='default'):
+    return connections.connect(alias=alias)

@@ -229,16 +229,10 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// add flow graph
 	if loadPartition {
-		err = w.node.streaming.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, vChannels)
-		if err != nil {
-			return err
-		}
+		w.node.streaming.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, vChannels)
 		log.Debug("query node add partition flow graphs", zap.Any("channels", vChannels))
 	} else {
-		err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, vChannels)
-		if err != nil {
-			return err
-		}
+		w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, vChannels)
 		log.Debug("query node add collection flow graphs", zap.Any("channels", vChannels))
 	}
 

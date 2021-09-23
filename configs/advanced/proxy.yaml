@@ -10,7 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 proxy:
-  timeTickInterval: 200 # ms
+  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
 
   msgStream:
     insert:
@@ -29,6 +29,6 @@ proxy:
   maxNameLength: 255
   maxFieldNum: 64
   maxDimension: 32768
-  maxShardNum: 256
+  maxShardNum: 256 # max shard number of a collection
 
-  maxTaskNum: 1024
+  maxTaskNum: 1024 # max task number of proxy task queue

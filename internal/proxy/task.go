@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -80,6 +81,11 @@ const (
 	LoadPartitionTaskName           = "LoadPartitionsTask"
 	ReleasePartitionTaskName        = "ReleasePartitionsTask"
 	deleteTaskName                  = "DeleteTask"
+	CreateAliasTaskName             = "CreateAliasTask"
+	DropAliasTaskName               = "DropAliasTask"
+	AlterAliasTaskName              = "AlterAliasTask"
+
+	minFloat32 = -1 * float32(math.MaxFloat32)
 )
 
 type task interface {
@@ -726,6 +732,8 @@ func (it *insertTask) checkFieldAutoID() error {
 }
 
 func (it *insertTask) PreExecute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
+	defer sp.Finish()
 	it.Base.MsgType = commonpb.MsgType_Insert
 	it.Base.SourceID = Params.ProxyID
 
@@ -903,6 +911,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	threshold := Params.PulsarMaxMessageSize / factor
 	log.Debug("Proxy", zap.Int("threshold of message size: ", threshold))
 	// not accurate
+	/* #nosec G103 */
 	getFixedSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
 		size := 0
 
@@ -971,6 +980,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 			curMsg.Timestamps = append(curMsg.Timestamps, ts)
 			curMsg.RowIDs = append(curMsg.RowIDs, rowID)
 			curMsg.RowData = append(curMsg.RowData, row)
+			/* #nosec G103 */
 			curMsgSize += 4 + 8 + int(unsafe.Sizeof(row.Value))
 			curMsgSize += len(row.Value)
 
@@ -993,6 +1003,8 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 }
 
 func (it *insertTask) Execute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-Execute")
+	defer sp.Finish()
 	collectionName := it.BaseInsertTask.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
@@ -1427,6 +1439,8 @@ func (st *searchTask) getVChannels() ([]vChan, error) {
 }
 
 func (st *searchTask) PreExecute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-PreExecute")
+	defer sp.Finish()
 	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
 
@@ -1618,6 +1632,8 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 }
 
 func (st *searchTask) Execute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-Execute")
+	defer sp.Finish()
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: *st.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
@@ -1750,8 +1766,6 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 		}
 	}
 
-	const minFloat32 = -1 * float32(math.MaxFloat32)
-
 	// TODO(yukun): Use parallel function
 	var realTopK int64 = -1
 	var idx int64
@@ -1761,17 +1775,14 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 
 		j = 0
 		for ; j < topk; j++ {
-			valid := true
-			choice, maxDistance := 0, minFloat32
+			choice, maxDistance := -1, minFloat32
 			for q, loc := range locs { // query num, the number of ways to merge
 				if loc >= topk {
 					continue
 				}
 				curIdx := idx*topk + loc
 				id := searchResultData[q].Ids.GetIntId().Data[curIdx]
-				if id == -1 {
-					valid = false
-				} else {
+				if id != -1 {
 					distance := searchResultData[q].Scores[curIdx]
 					if distance > maxDistance {
 						choice = q
@@ -1779,7 +1790,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					}
 				}
 			}
-			if !valid {
+			if choice == -1 {
 				break
 			}
 			choiceOffset := locs[choice]
@@ -1950,6 +1961,8 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, avail
 //}
 
 func (st *searchTask) PostExecute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-PostExecute")
+	defer sp.Finish()
 	t0 := time.Now()
 	defer func() {
 		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))
@@ -2127,36 +2140,6 @@ func (qt *queryTask) getVChannels() ([]vChan, error) {
 	return qt.chMgr.getVChannels(collID)
 }
 
-/* not used
-func parseIdsFromExpr(exprStr string, schema *typeutil.SchemaHelper) ([]int64, error) {
-	expr, err := parseQueryExpr(schema, exprStr)
-	if err != nil {
-		return nil, err
-	}
-
-	switch xExpr := expr.Expr.(type) {
-	case *planpb.Expr_TermExpr:
-		var ids []int64
-		for _, value := range xExpr.TermExpr.Values {
-			switch v := value.Val.(type) {
-			case *planpb.GenericValue_Int64Val:
-				ids = append(ids, v.Int64Val)
-			default:
-				return nil, errors.New("column is not int64")
-			}
-		}
-
-		if !xExpr.TermExpr.ColumnInfo.IsPrimaryKey {
-			return nil, errors.New("column is not primary key")
-		}
-
-		return ids, nil
-	default:
-		return nil, errors.New("not top level term")
-	}
-}
-*/
-
 func IDs2Expr(fieldName string, ids []int64) string {
 	idsStr := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids)), ", "), "[]")
 	return fieldName + " in [ " + idsStr + " ]"
@@ -2227,32 +2210,6 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	schema, _ := globalMetaCache.GetCollectionSchema(ctx, qt.query.CollectionName)
-	// schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// TODO(dragondriver): necessary to check if partition was loaded into query node?
-
-	// if qt.Ids == nil {
-	// 	if qt.query.Expr == "" {
-	// 		errMsg := "Query expression is empty"
-	// 		return fmt.Errorf(errMsg)
-	// 	}
-
-	// 	ids, err := parseIdsFromExpr(qt.query.Expr, schemaHelper)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	qt.Base.MsgType = commonpb.MsgType_Retrieve
-	// 	qt.Ids = &schemapb.IDs{
-	// 		IdField: &schemapb.IDs_IntId{
-	// 			IntId: &schemapb.LongArray{
-	// 				Data: ids,
-	// 			},
-	// 		},
-	// 	}
-	// }
 
 	if qt.ids != nil {
 		pkField := ""
@@ -2271,7 +2228,6 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 
 	plan, err := CreateExprQueryPlan(schema, qt.query.Expr)
 	if err != nil {
-		//return errors.New("invalid expression: " + st.query.Dsl)
 		return err
 	}
 	qt.query.OutputFields, err = translateOutputFields(qt.query.OutputFields, schema, true)
@@ -2464,13 +2420,14 @@ func (qt *queryTask) PostExecute(ctx context.Context) error {
 			},
 			FieldsData: make([]*schemapb.FieldData, 0),
 		}
-		for idx, partialRetrieveResult := range retrieveResult {
+		for _, partialRetrieveResult := range retrieveResult {
 			availableQueryNodeNum++
 			if partialRetrieveResult.Ids == nil {
 				reason += "ids is nil\n"
 				continue
 			} else {
-				if idx == 0 {
+				// handles initialization, cannot use idx==0 since first result may be empty
+				if len(qt.result.FieldsData) == 0 {
 					qt.result.FieldsData = append(qt.result.FieldsData, partialRetrieveResult.FieldsData...)
 				} else {
 					for k, fieldData := range partialRetrieveResult.FieldsData {
@@ -2501,7 +2458,6 @@ func (qt *queryTask) PostExecute(ctx context.Context) error {
 						}
 					}
 				}
-				// rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
 			}
 		}
 
@@ -4687,5 +4643,215 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 }
 
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type CreateAliasTask struct {
+	Condition
+	*milvuspb.CreateAliasRequest
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
+}
+
+func (c *CreateAliasTask) TraceCtx() context.Context {
+	return c.ctx
+}
+
+func (c *CreateAliasTask) ID() UniqueID {
+	return c.Base.MsgID
+}
+
+func (c *CreateAliasTask) SetID(uid UniqueID) {
+	c.Base.MsgID = uid
+}
+
+func (c *CreateAliasTask) Name() string {
+	return CreateAliasTaskName
+}
+
+func (c *CreateAliasTask) Type() commonpb.MsgType {
+	return c.Base.MsgType
+}
+
+func (c *CreateAliasTask) BeginTs() Timestamp {
+	return c.Base.Timestamp
+}
+
+func (c *CreateAliasTask) EndTs() Timestamp {
+	return c.Base.Timestamp
+}
+
+func (c *CreateAliasTask) SetTs(ts Timestamp) {
+	c.Base.Timestamp = ts
+}
+
+func (c *CreateAliasTask) OnEnqueue() error {
+	c.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
+	c.Base.MsgType = commonpb.MsgType_CreateAlias
+	c.Base.SourceID = Params.ProxyID
+
+	collAlias := c.Alias
+	// collection alias uses the same format as collection name
+	if err := ValidateCollectionAlias(collAlias); err != nil {
+		return err
+	}
+
+	collName := c.CollectionName
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *CreateAliasTask) Execute(ctx context.Context) error {
+	var err error
+	c.result, err = c.rootCoord.CreateAlias(ctx, c.CreateAliasRequest)
+	return err
+}
+
+func (c *CreateAliasTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type DropAliasTask struct {
+	Condition
+	*milvuspb.DropAliasRequest
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
+}
+
+func (d *DropAliasTask) TraceCtx() context.Context {
+	return d.ctx
+}
+
+func (d *DropAliasTask) ID() UniqueID {
+	return d.Base.MsgID
+}
+
+func (d *DropAliasTask) SetID(uid UniqueID) {
+	d.Base.MsgID = uid
+}
+
+func (d *DropAliasTask) Name() string {
+	return DropAliasTaskName
+}
+
+func (d *DropAliasTask) Type() commonpb.MsgType {
+	return d.Base.MsgType
+}
+
+func (d *DropAliasTask) BeginTs() Timestamp {
+	return d.Base.Timestamp
+}
+
+func (d *DropAliasTask) EndTs() Timestamp {
+	return d.Base.Timestamp
+}
+
+func (d *DropAliasTask) SetTs(ts Timestamp) {
+	d.Base.Timestamp = ts
+}
+
+func (d *DropAliasTask) OnEnqueue() error {
+	d.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (d *DropAliasTask) PreExecute(ctx context.Context) error {
+	d.Base.MsgType = commonpb.MsgType_DropAlias
+	d.Base.SourceID = Params.ProxyID
+	collAlias := d.Alias
+	if err := ValidateCollectionAlias(collAlias); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *DropAliasTask) Execute(ctx context.Context) error {
+	var err error
+	d.result, err = d.rootCoord.DropAlias(ctx, d.DropAliasRequest)
+	return err
+}
+
+func (d *DropAliasTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type AlterAliasTask struct {
+	Condition
+	*milvuspb.AlterAliasRequest
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
+}
+
+func (a *AlterAliasTask) TraceCtx() context.Context {
+	return a.ctx
+}
+
+func (a *AlterAliasTask) ID() UniqueID {
+	return a.Base.MsgID
+}
+
+func (a *AlterAliasTask) SetID(uid UniqueID) {
+	a.Base.MsgID = uid
+}
+
+func (a *AlterAliasTask) Name() string {
+	return AlterAliasTaskName
+}
+
+func (a *AlterAliasTask) Type() commonpb.MsgType {
+	return a.Base.MsgType
+}
+
+func (a *AlterAliasTask) BeginTs() Timestamp {
+	return a.Base.Timestamp
+}
+
+func (a *AlterAliasTask) EndTs() Timestamp {
+	return a.Base.Timestamp
+}
+
+func (a *AlterAliasTask) SetTs(ts Timestamp) {
+	a.Base.Timestamp = ts
+}
+
+func (a *AlterAliasTask) OnEnqueue() error {
+	a.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (a *AlterAliasTask) PreExecute(ctx context.Context) error {
+	a.Base.MsgType = commonpb.MsgType_AlterAlias
+	a.Base.SourceID = Params.ProxyID
+
+	collAlias := a.Alias
+	// collection alias uses the same format as collection name
+	if err := ValidateCollectionAlias(collAlias); err != nil {
+		return err
+	}
+
+	collName := a.CollectionName
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *AlterAliasTask) Execute(ctx context.Context) error {
+	var err error
+	a.result, err = a.rootCoord.AlterAlias(ctx, a.AlterAliasRequest)
+	return err
+}
+
+func (a *AlterAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }

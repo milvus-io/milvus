@@ -393,6 +393,8 @@ func (context *ParserContext) handleArrayExpr(node *ant_ast.Node, dataType schem
 	}
 	var arr []*planpb.GenericValue
 	for _, element := range arrayNode.Nodes {
+		// use value inside
+		// #nosec G601
 		val, err := context.handleLeafValue(&element, dataType)
 		if err != nil {
 			return nil, err

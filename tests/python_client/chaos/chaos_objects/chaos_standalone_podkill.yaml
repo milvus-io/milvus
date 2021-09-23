@@ -13,5 +13,3 @@ spec:
       app.kubernetes.io/instance: milvus-chaos
       app.kubernetes.io/name: milvus
       component: standalone
-  scheduler:
-    cron: '@every 5s'

@@ -13,8 +13,8 @@ package grpcdatanodeclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -38,12 +38,49 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	grpc datapb.DataNodeClient
-	conn *grpc.ClientConn
+	grpc    datapb.DataNodeClient
+	conn    *grpc.ClientConn
+	grpcMtx sync.RWMutex
 
 	addr string
 
 	retryOptions []retry.Option
+}
+
+func (c *Client) getGrpcClient() (datapb.DataNodeClient, error) {
+	c.grpcMtx.RLock()
+	if c.grpc != nil {
+		defer c.grpcMtx.RUnlock()
+		return c.grpc, nil
+	}
+	c.grpcMtx.RUnlock()
+
+	c.grpcMtx.Lock()
+	defer c.grpcMtx.Unlock()
+
+	if c.grpc != nil {
+		return c.grpc, nil
+	}
+
+	// FIXME(dragondriver): how to handle error here?
+	// if we return nil here, then we should check if client is nil outside,
+	err := c.connect(retry.Attempts(20))
+	if err != nil {
+		return nil, err
+	}
+
+	return c.grpc, nil
+}
+
+func (c *Client) resetConnection() {
+	c.grpcMtx.Lock()
+	defer c.grpcMtx.Unlock()
+
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
+	c.conn = nil
+	c.grpc = nil
 }
 
 func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (*Client, error) {
@@ -97,6 +134,9 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		if err != nil {
 			return err
 		}
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
 		c.conn = conn
 		return nil
 	}
@@ -117,10 +157,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	log.Debug("DataNode Client grpc error", zap.Error(err))
-	err = c.connect()
-	if err != nil {
-		return ret, errors.New("Connect to datanode failed with error:\n" + err.Error())
-	}
+
+	c.resetConnection()
+
 	ret, err = caller()
 	if err == nil {
 		return ret, nil
@@ -134,7 +173,12 @@ func (c *Client) Start() error {
 
 func (c *Client) Stop() error {
 	c.cancel()
-	return c.conn.Close()
+	c.grpcMtx.Lock()
+	defer c.grpcMtx.Unlock()
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }
 
 // Register dummy
@@ -144,35 +188,75 @@ func (c *Client) Register() error {
 
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*internalpb.ComponentStates), err
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.WatchDmChannels(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.WatchDmChannels(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.FlushSegments(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.FlushSegments(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.GetMetrics(ctx, req)
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetMetrics(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.GetMetricsResponse), err
 }

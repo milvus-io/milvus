@@ -1,6 +1,6 @@
 # Create Collections
 
-`Milvus 2.0` use `Collection` to represent a set of data, like `Table` in traditional database. Users can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `CreateCollection`, at the end of this article, you should know which components are involved in `CreateCollection`.
+`Milvus 2.0` use `Collection` to represent a set of data, like `Table` in a traditional database. Users can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `CreateCollection`, at the end of this article, you should know which components are involved in `CreateCollection`.
 
 
 The execution flow of `CreateCollection` is shown in the following figure:
@@ -18,12 +18,17 @@ service MilvusService {
 }
 
 message CreateCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  // `schema` is the serialized `schema.CollectionSchema`
-  bytes schema = 4; // must
-  int32 shards_num = 5; // must. Once set, no modification is allowed
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3; 
+  // The serialized `schema.CollectionSchema`(Required)
+  bytes schema = 4; 
+  // Once set, no modification is allowed (Optional)
+  // https://github.com/milvus-io/milvus/issues/6690
+  int32 shards_num = 5;
 }
 
 message CollectionSchema {
@@ -54,20 +59,19 @@ type task interface {
 	Notify(err error)
 Notify(err error)
 
-type CreateCollectionTask struct {
+type createCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
-	ctx context.Context
+	ctx       context.Context
 	rootCoord types.RootCoord
-	dataCoordClient types.DataCoord
-	result *commonpb.Status
-	schema *schemapb.CollectionSchema
+	result    *commonpb.Status
+	schema    *schemapb.CollectionSchema
 }
 ```
 
 3. There is a background service in `Proxy`, this service would get the `CreateCollectionTask` from `DdTaskQueue`, and execute it in three phases.
     - `PreExecute`, do some static checking at this phase, such as check if `Collection Name` and `Field Name` are legal, if there are duplicate columns, etc.
-    - `Execute`, at this phase, `Proxy` would send `CreateCollection` request to `RootCoord` via `Grpc`, and wait for response, the `proto` is defined as follow:
+    - `Execute`, at this phase, `Proxy` would send `CreateCollection` request to `RootCoord` via `Grpc`, and wait for response, the `proto` is defined as follows:
     ```proto
     service RootCoord {
         ...

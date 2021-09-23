@@ -12,15 +12,23 @@
 
 set(INDEXBUILDER_FILES
         IndexWrapper.cpp
-        index_c.cpp)
+        index_c.cpp
+        init_c.cpp
+        )
 add_library(milvus_indexbuilder SHARED
         ${INDEXBUILDER_FILES}
         )
 
+# link order matters
 target_link_libraries(milvus_indexbuilder
-        tbb milvus_utils pthread knowhere log milvus_proto
-        dl
+        milvus_config
         milvus_common
-        milvus_query
+        milvus_utils
+        milvus_proto
+        knowhere
+        tbb
+        log
+        dl
+        pthread
         )
 

@@ -25,6 +25,7 @@ type descriptorEventData struct {
 	PostHeaderLengths []uint8
 }
 
+// DescriptorEventDataFixPart is a memorty struct saves events' DescriptorEventData.
 type DescriptorEventDataFixPart struct {
 	BinlogVersion   int16
 	ServerVersion   int64
@@ -39,19 +40,23 @@ type DescriptorEventDataFixPart struct {
 	PayloadDataType schemapb.DataType
 }
 
+// SetEventTimeStamp set the timestamp value of DescriptorEventDataFixPart.
 func (data *descriptorEventData) SetEventTimeStamp(start typeutil.Timestamp, end typeutil.Timestamp) {
 	data.StartTimestamp = start
 	data.EndTimestamp = end
 }
 
+// SetEventTimeStamp returns the memory size of DescriptorEventDataFixPart.
 func (data *descriptorEventData) GetEventDataFixPartSize() int32 {
 	return int32(binary.Size(data.DescriptorEventDataFixPart))
 }
 
+// SetEventTimeStamp returns the memory size of DescriptorEventDataFixPart.
 func (data *descriptorEventData) GetMemoryUsageInBytes() int32 {
 	return data.GetEventDataFixPartSize() + int32(binary.Size(data.PostHeaderLengths))
 }
 
+// Write transfer DescriptorEventDataFixPart to binary buffer.
 func (data *descriptorEventData) Write(buffer io.Writer) error {
 	if err := binary.Write(buffer, binary.LittleEndian, data.DescriptorEventDataFixPart); err != nil {
 		return err

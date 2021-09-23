@@ -31,6 +31,18 @@ type mockRootCoord struct {
 	returnError bool // TODO: add error tests
 }
 
+func (m *mockRootCoord) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoord) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoord) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func newMockRootCoord() *mockRootCoord {
 	return &mockRootCoord{
 		state: internalpb.StateCode_Healthy,

@@ -647,25 +647,180 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 }
 
 func TestSegment_segmentLoadFieldData(t *testing.T) {
-	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	genSchemas := func(dataType schemapb.DataType) (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
+		constField := constFieldParam{
+			id: 101,
+		}
+		constField.dataType = dataType
+		field := genConstantField(constField)
+		schema1 := &schemapb.CollectionSchema{
+			Name:   defaultCollectionName,
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				field,
+			},
+		}
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.ID(), collectionID)
+		fieldUID := genConstantField(uidField)
+		fieldTimestamp := genConstantField(timestampField)
+		schema2 := &schemapb.CollectionSchema{
+			Name:   defaultCollectionName,
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				fieldUID,
+				fieldTimestamp,
+				field,
+			},
+		}
+		return schema1, schema2
+	}
 
-	segmentID := UniqueID(0)
-	partitionID := UniqueID(0)
-	segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
-	assert.Equal(t, segmentID, segment.segmentID)
-	assert.Equal(t, partitionID, segment.partitionID)
+	t.Run("test bool", func(t *testing.T) {
+		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Bool)
+		_, err := genSealedSegment(schemaForCreate,
+			schemaForLoad,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			defaultMsgLength)
+		assert.NoError(t, err)
 
-	const N = 16
-	var ages = []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	err := segment.segmentLoadFieldData(101, N, ages)
-	assert.NoError(t, err)
+		_, err = genSealedSegment(schemaForCreate,
+			schemaForCreate,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			0)
+		assert.Error(t, err)
+	})
 
-	deleteSegment(segment)
-	deleteCollection(collection)
+	t.Run("test int8", func(t *testing.T) {
+		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Int8)
+		_, err := genSealedSegment(schemaForCreate,
+			schemaForLoad,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			defaultMsgLength)
+		assert.NoError(t, err)
+
+		_, err = genSealedSegment(schemaForCreate,
+			schemaForCreate,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			0)
+		assert.Error(t, err)
+	})
+
+	t.Run("test int16", func(t *testing.T) {
+		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Int16)
+		_, err := genSealedSegment(schemaForCreate,
+			schemaForLoad,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			defaultMsgLength)
+		assert.NoError(t, err)
+
+		_, err = genSealedSegment(schemaForCreate,
+			schemaForCreate,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			0)
+		assert.Error(t, err)
+	})
+
+	t.Run("test int32", func(t *testing.T) {
+		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Int32)
+		_, err := genSealedSegment(schemaForCreate,
+			schemaForLoad,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			defaultMsgLength)
+		assert.NoError(t, err)
+
+		_, err = genSealedSegment(schemaForCreate,
+			schemaForCreate,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			0)
+		assert.Error(t, err)
+	})
+
+	t.Run("test int64", func(t *testing.T) {
+		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Int64)
+		_, err := genSealedSegment(schemaForCreate,
+			schemaForLoad,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			defaultMsgLength)
+		assert.NoError(t, err)
+
+		_, err = genSealedSegment(schemaForCreate,
+			schemaForCreate,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			0)
+		assert.Error(t, err)
+	})
+
+	t.Run("test float", func(t *testing.T) {
+		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Float)
+		_, err := genSealedSegment(schemaForCreate,
+			schemaForLoad,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			defaultMsgLength)
+		assert.NoError(t, err)
+
+		_, err = genSealedSegment(schemaForCreate,
+			schemaForCreate,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			0)
+		assert.Error(t, err)
+	})
+
+	t.Run("test double", func(t *testing.T) {
+		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Double)
+		_, err := genSealedSegment(schemaForCreate,
+			schemaForLoad,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			defaultMsgLength)
+		assert.NoError(t, err)
+
+		_, err = genSealedSegment(schemaForCreate,
+			schemaForCreate,
+			defaultCollectionID,
+			defaultPartitionID,
+			defaultSegmentID,
+			defaultVChannel,
+			0)
+		assert.Error(t, err)
+	})
 }
 
 func TestSegment_ConcurrentOperation(t *testing.T) {

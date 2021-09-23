@@ -27,6 +27,7 @@ const (
 	ServerVersion = 1
 )
 
+// BinlogType is to distinguish different files saving different data.
 type BinlogType int32
 
 const (
@@ -129,10 +130,12 @@ func (writer *baseBinlogWriter) Close() error {
 	return nil
 }
 
+// InsertBinlogWriter is an object to write binlog file which saves insert data.
 type InsertBinlogWriter struct {
 	baseBinlogWriter
 }
 
+// NextInsertEventWriter returns an event writer to write insert data to an event.
 func (writer *InsertBinlogWriter) NextInsertEventWriter() (*insertEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -145,10 +148,12 @@ func (writer *InsertBinlogWriter) NextInsertEventWriter() (*insertEventWriter, e
 	return event, nil
 }
 
+// DeleteBinlogWriter is an object to write binlog file which saves delete data.
 type DeleteBinlogWriter struct {
 	baseBinlogWriter
 }
 
+// NextDeleteEventWriter returns an event writer to write delete data to an event.
 func (writer *DeleteBinlogWriter) NextDeleteEventWriter() (*deleteEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -161,10 +166,13 @@ func (writer *DeleteBinlogWriter) NextDeleteEventWriter() (*deleteEventWriter, e
 	return event, nil
 }
 
+// DDLBinlogWriter is an object to write binlog file which saves ddl information.
 type DDLBinlogWriter struct {
 	baseBinlogWriter
 }
 
+// NextCreateCollectionEventWriter returns an event writer to write CreateCollection
+// information to an event.
 func (writer *DDLBinlogWriter) NextCreateCollectionEventWriter() (*createCollectionEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -177,6 +185,8 @@ func (writer *DDLBinlogWriter) NextCreateCollectionEventWriter() (*createCollect
 	return event, nil
 }
 
+// NextDropCollectionEventWriter returns an event writer to write DropCollection
+// information to an event.
 func (writer *DDLBinlogWriter) NextDropCollectionEventWriter() (*dropCollectionEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -189,6 +199,8 @@ func (writer *DDLBinlogWriter) NextDropCollectionEventWriter() (*dropCollectionE
 	return event, nil
 }
 
+// NextCreatePartitionEventWriter returns an event writer to write CreatePartition
+// information to an event.
 func (writer *DDLBinlogWriter) NextCreatePartitionEventWriter() (*createPartitionEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -201,6 +213,8 @@ func (writer *DDLBinlogWriter) NextCreatePartitionEventWriter() (*createPartitio
 	return event, nil
 }
 
+// NextDropPartitionEventWriter returns an event writer to write DropPartition
+// information to an event.
 func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -213,6 +227,7 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	return event, nil
 }
 
+// NewInsertBinlogWriter creates InsertBinlogWriter to write binlog file.
 func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64) *InsertBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
@@ -231,6 +246,7 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 	}
 }
 
+// NewDeleteBinlogWriter creates DeleteBinlogWriter to write binlog file.
 func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *DeleteBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
@@ -246,6 +262,7 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *Dele
 	}
 }
 
+// NewDDLBinlogWriter creates DDLBinlogWriter to write binlog file.
 func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType

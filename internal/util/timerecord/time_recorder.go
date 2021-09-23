@@ -33,19 +33,30 @@ func NewTimeRecorder(header string) *TimeRecorder {
 	}
 }
 
-// Record calculates the time span from previous Record call
-func (tr *TimeRecorder) Record(msg string) time.Duration {
+func (tr *TimeRecorder) RecordSpan() time.Duration {
 	curr := time.Now()
 	span := curr.Sub(tr.last)
 	tr.last = curr
+	return span
+}
+
+func (tr *TimeRecorder) ElapseSpan() time.Duration {
+	curr := time.Now()
+	span := curr.Sub(tr.start)
+	tr.last = curr
+	return span
+}
+
+// Record calculates the time span from previous Record call
+func (tr *TimeRecorder) Record(msg string) time.Duration {
+	span := tr.RecordSpan()
 	tr.printTimeRecord(msg, span)
 	return span
 }
 
 // Elapse calculates the time span from the beginning of this TimeRecorder
 func (tr *TimeRecorder) Elapse(msg string) time.Duration {
-	curr := time.Now()
-	span := curr.Sub(tr.start)
+	span := tr.ElapseSpan()
 	tr.printTimeRecord(msg, span)
 	return span
 }

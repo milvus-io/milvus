@@ -13,7 +13,9 @@ package rocksmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -48,6 +50,7 @@ type topicAckedInfo struct {
 
 type retentionInfo struct {
 	ctx    context.Context
+	cancel context.CancelFunc
 	topics []string
 	// pageInfo  map[string]*topicPageInfo
 	pageInfo sync.Map
@@ -65,6 +68,9 @@ type retentionInfo struct {
 // which will cause crash when other goroutines operate the db instance. So here implement a
 // prefixLoad without reopen db instance.
 func prefixLoad(db *gorocksdb.DB, prefix string) ([]string, []string, error) {
+	if db == nil {
+		return nil, nil, errors.New("Rocksdb instance is nil when do prefixLoad")
+	}
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
 	readOpts.SetPrefixSameAsStart(true)
@@ -85,8 +91,10 @@ func prefixLoad(db *gorocksdb.DB, prefix string) ([]string, []string, error) {
 }
 
 func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	ri := &retentionInfo{
-		ctx:               context.Background(),
+		ctx:               ctx,
+		cancel:            cancel,
 		topics:            make([]string, 0),
 		pageInfo:          sync.Map{},
 		ackedInfo:         sync.Map{},
@@ -109,7 +117,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 
 // Before do retention, load retention info from rocksdb to retention info structure in goroutines.
 // Because loadRetentionInfo may need some time, so do this asynchronously. Finally start retention goroutine.
-func (ri *retentionInfo) startRetentionInfo() error {
+func (ri *retentionInfo) startRetentionInfo() {
 	var wg sync.WaitGroup
 	ri.kv.ResetPrefixLength(FixedChannelNameLen)
 	for _, topic := range ri.topics {
@@ -121,8 +129,6 @@ func (ri *retentionInfo) startRetentionInfo() error {
 	wg.Wait()
 	log.Debug("Finish load retention info, start retention")
 	go ri.retention()
-
-	return nil
 }
 
 // Read retention infos from rocksdb so that retention check can be done based on memory data
@@ -219,10 +225,15 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 		log.Debug("Load failed", zap.Any("error", err))
 		return
 	}
-	ackedSize, err := strconv.ParseInt(ackedSizeVal, 10, 64)
-	if err != nil {
-		log.Debug("PrefixLoad failed", zap.Any("error", err))
-		return
+	var ackedSize int64
+	if ackedSizeVal == "" {
+		ackedSize = 0
+	} else {
+		ackedSize, err = strconv.ParseInt(ackedSizeVal, 10, 64)
+		if err != nil {
+			log.Debug("PrefixLoad failed", zap.Any("error", err))
+			return
+		}
 	}
 
 	ackedInfo := &topicAckedInfo{
@@ -238,10 +249,15 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 		log.Debug("Load failed", zap.Any("error", err))
 		return
 	}
-	lastRetentionTs, err := strconv.ParseInt(lastRetentionTsVal, 10, 64)
-	if err != nil {
-		log.Debug("ParseInt failed", zap.Any("error", err))
-		return
+	var lastRetentionTs int64
+	if lastRetentionTsVal == "" {
+		lastRetentionTs = math.MaxInt64
+	} else {
+		lastRetentionTs, err = strconv.ParseInt(lastRetentionTsVal, 10, 64)
+		if err != nil {
+			log.Debug("ParseInt failed", zap.Any("error", err))
+			return
+		}
 	}
 
 	ri.ackedInfo.Store(topic, ackedInfo)

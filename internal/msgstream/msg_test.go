@@ -15,11 +15,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestBaseMsg(t *testing.T) {
@@ -125,6 +126,54 @@ func TestInsertMsg(t *testing.T) {
 func TestInsertMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	insertMsg := &InsertMsg{}
 	tsMsg, err := insertMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestDeleteMsg(t *testing.T) {
+	deleteMsg := &DeleteMsg{
+		BaseMsg: generateBaseMsg(),
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+
+			CollectionName: "test_collection",
+			ChannelID:      "test-channel",
+			Timestamps:     []uint64{2, 1, 3},
+			PrimaryKeys:    []int64{5, 6, 7},
+		},
+	}
+
+	assert.NotNil(t, deleteMsg.TraceCtx())
+
+	ctx := context.Background()
+	deleteMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, deleteMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), deleteMsg.ID())
+	assert.Equal(t, commonpb.MsgType_Delete, deleteMsg.Type())
+	assert.Equal(t, int64(3), deleteMsg.SourceID())
+
+	bytes, err := deleteMsg.Marshal(deleteMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := deleteMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	deleteMsg2, ok := tsMsg.(*DeleteMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), deleteMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_Delete, deleteMsg2.Type())
+	assert.Equal(t, int64(3), deleteMsg2.SourceID())
+}
+
+func TestDeleteMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	deleteMsg := &DeleteMsg{}
+	tsMsg, err := deleteMsg.Unmarshal(10)
 	assert.NotNil(t, err)
 	assert.Nil(t, tsMsg)
 }
@@ -402,6 +451,51 @@ func TestTimeTickMsg(t *testing.T) {
 func TestTimeTickMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	timeTickMsg := &TimeTickMsg{}
 	tsMsg, err := timeTickMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestQueryNodeStatsMsg(t *testing.T) {
+	queryNodeStatsMsg := &QueryNodeStatsMsg{
+		BaseMsg: generateBaseMsg(),
+		QueryNodeStats: internalpb.QueryNodeStats{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			SegStats:   []*internalpb.SegmentStats{},
+			FieldStats: []*internalpb.FieldStats{},
+		},
+	}
+
+	assert.NotNil(t, queryNodeStatsMsg.TraceCtx())
+
+	ctx := context.Background()
+	queryNodeStatsMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, queryNodeStatsMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), queryNodeStatsMsg.ID())
+	assert.Equal(t, commonpb.MsgType_TimeTick, queryNodeStatsMsg.Type())
+	assert.Equal(t, int64(3), queryNodeStatsMsg.SourceID())
+
+	bytes, err := queryNodeStatsMsg.Marshal(queryNodeStatsMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := queryNodeStatsMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	queryNodeStatsMsg2, ok := tsMsg.(*QueryNodeStatsMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), queryNodeStatsMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_TimeTick, queryNodeStatsMsg2.Type())
+	assert.Equal(t, int64(3), queryNodeStatsMsg2.SourceID())
+}
+
+func TestQueryNodeStatsMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	queryNodeStatsMsg := &QueryNodeStatsMsg{}
+	tsMsg, err := queryNodeStatsMsg.Unmarshal(10)
 	assert.NotNil(t, err)
 	assert.Nil(t, tsMsg)
 }

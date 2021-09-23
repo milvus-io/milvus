@@ -41,6 +41,7 @@ type Option struct {
 	CreateBucket      bool // when bucket not existed, create it
 }
 
+// NewMinIOKV creates MinIOKV to save and load object to MinIOKV.
 func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 	var minIOClient *minio.Client
 	var err error
@@ -81,16 +82,17 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		bucketName:  option.BucketName,
 	}
 	log.Debug("MinioKV new MinioKV success.")
-	//go kv.performanceTest(false, 16<<20)
 
 	return kv, nil
 }
 
+// Exist check whether a key exists in MinIO.
 func (kv *MinIOKV) Exist(key string) bool {
 	_, err := kv.minioClient.StatObject(kv.ctx, kv.bucketName, key, minio.StatObjectOptions{})
 	return err == nil
 }
 
+// LoadWithPrefix load objects with the same prefix @key from minio .
 func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	objects := kv.minioClient.ListObjects(kv.ctx, kv.bucketName, minio.ListObjectsOptions{Prefix: key})
 
@@ -108,6 +110,7 @@ func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return objectsKeys, objectsValues, nil
 }
 
+// LoadWithPrefix load an object with @key.
 func (kv *MinIOKV) Load(key string) (string, error) {
 	object, err := kv.minioClient.GetObject(kv.ctx, kv.bucketName, key, minio.GetObjectOptions{})
 	if object != nil {
@@ -158,6 +161,7 @@ func (kv *MinIOKV) FGetObjects(keys []string, localPath string) error {
 	return nil
 }
 
+// MultiLoad loads objects with multi @keys.
 func (kv *MinIOKV) MultiLoad(keys []string) ([]string, error) {
 	var resultErr error
 	var objectsValues []string
@@ -174,6 +178,7 @@ func (kv *MinIOKV) MultiLoad(keys []string) ([]string, error) {
 	return objectsValues, resultErr
 }
 
+// Save object with @key to Minio. Object value is @value.
 func (kv *MinIOKV) Save(key, value string) error {
 	reader := strings.NewReader(value)
 	_, err := kv.minioClient.PutObject(kv.ctx, kv.bucketName, key, reader, int64(len(value)), minio.PutObjectOptions{})
@@ -185,6 +190,8 @@ func (kv *MinIOKV) Save(key, value string) error {
 	return err
 }
 
+// Save MultiObject, the path is the key of @kvs. The object value is the value
+// of @kvs.
 func (kv *MinIOKV) MultiSave(kvs map[string]string) error {
 	var resultErr error
 	for key, value := range kvs {
@@ -198,6 +205,7 @@ func (kv *MinIOKV) MultiSave(kvs map[string]string) error {
 	return resultErr
 }
 
+// LoadWithPrefix remove all objects with the same prefix @prefix from minio .
 func (kv *MinIOKV) RemoveWithPrefix(prefix string) error {
 	objectsCh := make(chan minio.ObjectInfo)
 
@@ -217,11 +225,13 @@ func (kv *MinIOKV) RemoveWithPrefix(prefix string) error {
 	return nil
 }
 
+// Remove delete an object with @key.
 func (kv *MinIOKV) Remove(key string) error {
 	err := kv.minioClient.RemoveObject(kv.ctx, kv.bucketName, string(key), minio.RemoveObjectOptions{})
 	return err
 }
 
+// MultiRemove delete a objects with @keys.
 func (kv *MinIOKV) MultiRemove(keys []string) error {
 	var resultErr error
 	for _, key := range keys {

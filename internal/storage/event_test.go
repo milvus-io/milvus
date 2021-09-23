@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+/* #nosec G103 */
 func checkEventHeader(
 	t *testing.T,
 	buf []byte,
@@ -44,6 +45,7 @@ func checkEventHeader(
 	assert.Equal(t, nPos, length)
 }
 
+/* #nosec G103 */
 func TestDescriptorEvent(t *testing.T) {
 	desc := newDescriptorEvent()
 
@@ -167,6 +169,7 @@ func TestDescriptorEvent(t *testing.T) {
 	}
 }
 
+/* #nosec G103 */
 func TestInsertEvent(t *testing.T) {
 	insertT := func(t *testing.T,
 		dt schemapb.DataType,
@@ -414,6 +417,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 }
 
+/* #nosec G103 */
 func TestDeleteEvent(t *testing.T) {
 	deleteT := func(t *testing.T,
 		dt schemapb.DataType,
@@ -661,6 +665,7 @@ func TestDeleteEvent(t *testing.T) {
 	})
 }
 
+/* #nosec G103 */
 func TestCreateCollectionEvent(t *testing.T) {
 	t.Run("create_event", func(t *testing.T) {
 		w, err := newCreateCollectionEventWriter(schemapb.DataType_Float)
@@ -782,6 +787,7 @@ func TestCreateCollectionEvent(t *testing.T) {
 	})
 }
 
+/* #nosec G103 */
 func TestDropCollectionEvent(t *testing.T) {
 	t.Run("drop_event", func(t *testing.T) {
 		w, err := newDropCollectionEventWriter(schemapb.DataType_Float)
@@ -903,6 +909,7 @@ func TestDropCollectionEvent(t *testing.T) {
 	})
 }
 
+/* #nosec G103 */
 func TestCreatePartitionEvent(t *testing.T) {
 	t.Run("create_event", func(t *testing.T) {
 		w, err := newCreatePartitionEventWriter(schemapb.DataType_Float)
@@ -1024,6 +1031,7 @@ func TestCreatePartitionEvent(t *testing.T) {
 	})
 }
 
+/* #nosec G103 */
 func TestDropPartitionEvent(t *testing.T) {
 	t.Run("drop_event", func(t *testing.T) {
 		w, err := newDropPartitionEventWriter(schemapb.DataType_Float)

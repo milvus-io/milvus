@@ -28,6 +28,7 @@ import (
 var tracingCloserMtx sync.Mutex
 var tracingCloser io.Closer
 
+// InitTracing init global trace from env. If not specified, use default config.
 func InitTracing(serviceName string) io.Closer {
 	tracingCloserMtx.Lock()
 	defer tracingCloserMtx.Unlock()
@@ -44,7 +45,7 @@ func InitTracing(serviceName string) io.Closer {
 		},
 	}
 	if true {
-		cfg = InitFromEnv(serviceName)
+		cfg = initFromEnv(serviceName)
 	}
 	tracer, closer, err := cfg.NewTracer()
 	tracingCloser = closer
@@ -57,7 +58,7 @@ func InitTracing(serviceName string) io.Closer {
 	return tracingCloser
 }
 
-func InitFromEnv(serviceName string) *config.Configuration {
+func initFromEnv(serviceName string) *config.Configuration {
 	cfg, err := config.FromEnv()
 	if err != nil {
 		log.Error(err)
@@ -67,10 +68,14 @@ func InitFromEnv(serviceName string) *config.Configuration {
 	return cfg
 }
 
+// StartSpanFromContext starts a opentracing span. The default operation name is
+// upper two call stacks of the function
 func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	return StartSpanFromContextWithSkip(ctx, 2, opts...)
 }
 
+// StartSpanFromContext starts a opentracing span with call skip. The operation
+// name is upper @skip call stacks of the function
 func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
 		return NoopSpan(), ctx
@@ -100,10 +105,14 @@ func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentra
 	return span, opentracing.ContextWithSpan(ctx, span)
 }
 
+// StartSpanFromContext starts a opentracing span with specific operation name.
+// And will log print the current call line number and file name.
 func StartSpanFromContextWithOperationName(ctx context.Context, operationName string, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	return StartSpanFromContextWithOperationNameWithSkip(ctx, operationName, 2, opts...)
 }
 
+// StartSpanFromContext starts a opentracing span with specific operation name.
+// And will log print the current call line number and file name.
 func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operationName string, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
 		return NoopSpan(), ctx
@@ -129,6 +138,7 @@ func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operatio
 	return span, ctx
 }
 
+// LogError is a method to log error with span.
 func LogError(span opentracing.Span, err error) error {
 	if err == nil {
 		return nil
@@ -149,6 +159,7 @@ func LogError(span opentracing.Span, err error) error {
 	return err
 }
 
+// InfoFromSpan is a method return span details.
 func InfoFromSpan(span opentracing.Span) (traceID string, sampled bool, found bool) {
 	if span != nil {
 		if spanContext, ok := span.Context().(jaeger.SpanContext); ok {
@@ -160,6 +171,7 @@ func InfoFromSpan(span opentracing.Span) (traceID string, sampled bool, found bo
 	return "", false, false
 }
 
+// InfoFromContext is a method return details of span associated with context.
 func InfoFromContext(ctx context.Context) (traceID string, sampled bool, found bool) {
 	if ctx != nil {
 		if span := opentracing.SpanFromContext(ctx); span != nil {
@@ -169,6 +181,7 @@ func InfoFromContext(ctx context.Context) (traceID string, sampled bool, found b
 	return "", false, false
 }
 
+// InjectContextToPulsarMsgProperties is a method inject span to pulsr message.
 func InjectContextToPulsarMsgProperties(sc opentracing.SpanContext, properties map[string]string) {
 	tracer := opentracing.GlobalTracer()
 	tracer.Inject(sc, opentracing.TextMap, PropertiesReaderWriter{properties})

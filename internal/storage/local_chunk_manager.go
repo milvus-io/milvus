@@ -22,16 +22,19 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// LocalChunkManager is responsible for read and write local file.
 type LocalChunkManager struct {
 	localPath string
 }
 
+// NewLocalChunkManager create a new local manager object.
 func NewLocalChunkManager(localPath string) *LocalChunkManager {
 	return &LocalChunkManager{
 		localPath: localPath,
 	}
 }
 
+// GetPath returns the path of local data if exist.
 func (lcm *LocalChunkManager) GetPath(key string) (string, error) {
 	if !lcm.Exist(key) {
 		return "", errors.New("local file cannot be found with key:" + key)
@@ -40,6 +43,7 @@ func (lcm *LocalChunkManager) GetPath(key string) (string, error) {
 	return path, nil
 }
 
+// Write writes the data to local storage.
 func (lcm *LocalChunkManager) Write(key string, content []byte) error {
 	filePath := path.Join(lcm.localPath, key)
 	dir := path.Dir(filePath)
@@ -49,13 +53,14 @@ func (lcm *LocalChunkManager) Write(key string, content []byte) error {
 			return err
 		}
 	}
-	err := ioutil.WriteFile(filePath, content, 0644)
+	err := ioutil.WriteFile(filePath, content, 0600)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
+// Exist checks whether chunk is saved to local storage.
 func (lcm *LocalChunkManager) Exist(key string) bool {
 	path := path.Join(lcm.localPath, key)
 	_, err := os.Stat(path)
@@ -65,6 +70,7 @@ func (lcm *LocalChunkManager) Exist(key string) bool {
 	return true
 }
 
+// Read reads the local storage data if exist.
 func (lcm *LocalChunkManager) Read(key string) ([]byte, error) {
 	path := path.Join(lcm.localPath, key)
 	file, err := os.Open(path)
@@ -79,6 +85,7 @@ func (lcm *LocalChunkManager) Read(key string) ([]byte, error) {
 	return content, nil
 }
 
+// ReadAt reads specific position data of local storage if exist.
 func (lcm *LocalChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
 	path := path.Join(lcm.localPath, key)
 	at, err := mmap.Open(path)

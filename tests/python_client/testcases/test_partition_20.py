@@ -15,8 +15,6 @@ class TestPartitionParams(TestcaseBase):
     """ Test case of partition interface in parameters"""
 
     @pytest.mark.tags(CaseLabel.L0)
-    # @pytest.mark.parametrize("partition_name, description",
-                             # [(cf.gen_unique_str(prefix), cf.gen_unique_str("desc_"))])
     def test_partition_default(self):
         """
         target: verify create a partition
@@ -40,7 +38,6 @@ class TestPartitionParams(TestcaseBase):
         assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.xfail(reason="issue #5375")
     @pytest.mark.parametrize("partition_name", [""])
     def test_partition_empty_name(self, partition_name):
         """
@@ -57,7 +54,6 @@ class TestPartitionParams(TestcaseBase):
                                            check_items={ct.err_code: 1, ct.err_msg: "Partition name should not be empty"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name, description", [(cf.gen_unique_str(prefix), "")])
     def test_partition_empty_description(self):
         """
         target: verify create a partition with empty description
@@ -81,8 +77,6 @@ class TestPartitionParams(TestcaseBase):
         assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name, description",
-                             # [(cf.gen_str_by_length(255), cf.gen_str_by_length(2048))])
     def test_partition_max_description_length(self):
         """
         target: verify create a partition with 255 length name and 1024 length description
@@ -103,8 +97,6 @@ class TestPartitionParams(TestcaseBase):
                                  )
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("collection_name, partition_name, description",
-                             # [(cf.gen_unique_str(), cf.gen_unique_str(prefix), cf.gen_unique_str())])
     def test_partition_dup_name(self):
         """
         target: verify create partitions with duplicate name
@@ -128,7 +120,6 @@ class TestPartitionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("description", ct.get_invalid_strs)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_special_chars_description(self, description):
         """
         target: verify create a partition with special characters in description
@@ -170,7 +161,6 @@ class TestPartitionParams(TestcaseBase):
         assert collection.name == partition_w.name
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_str_by_length(256)])
     def test_partition_maxlength_name(self):
         """
         target: verify create a partition with maxlength(256) name
@@ -206,7 +196,6 @@ class TestPartitionParams(TestcaseBase):
         # TODO: need an error code issue #5144 and assert independently
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_none_collection(self):
         """
         target: verify create a partition with none collection
@@ -221,7 +210,6 @@ class TestPartitionParams(TestcaseBase):
                                                         ct.err_msg: "must be pymilvus.Collection"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop(self):
         """
         target: verify drop a partition in one collection
@@ -298,7 +286,6 @@ class TestPartitionParams(TestcaseBase):
         assert len(res2) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
                                       cf.gen_default_list_data(10),
                                       cf.gen_default_tuple_data(10)])
@@ -339,7 +326,6 @@ class TestPartitionOperations(TestcaseBase):
     """ Test case of partition interface in operations """
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_dropped_collection(self):
         """
         target: verify create partition against a dropped collection
@@ -709,7 +695,6 @@ class TestPartitionOperations(TestcaseBase):
         # TODO: update the assert error
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_insert_dropped_collection(self):
         """
         target: verify insert data into dropped collection

@@ -117,6 +117,49 @@ func TestStreaming_search(t *testing.T) {
 			Timestamp(0))
 		assert.Error(t, err)
 	})
+
+	t.Run("test no partitions in collection", func(t *testing.T) {
+		streaming, err := genSimpleStreaming(ctx)
+		assert.NoError(t, err)
+		defer streaming.close()
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		err = streaming.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		res, err := streaming.search(searchReqs,
+			defaultCollectionID,
+			[]UniqueID{},
+			defaultVChannel,
+			plan,
+			Timestamp(0))
+		assert.NoError(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test search failed", func(t *testing.T) {
+		streaming, err := genSimpleStreaming(ctx)
+		assert.NoError(t, err)
+		defer streaming.close()
+
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		assert.NoError(t, err)
+
+		seg, err := streaming.replica.getSegmentByID(defaultSegmentID)
+		assert.NoError(t, err)
+
+		seg.segmentPtr = nil
+
+		_, err = streaming.search(searchReqs,
+			defaultCollectionID,
+			[]UniqueID{},
+			defaultVChannel,
+			plan,
+			Timestamp(0))
+		assert.Error(t, err)
+	})
 }
 
 func TestStreaming_retrieve(t *testing.T) {

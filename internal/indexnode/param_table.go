@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -45,6 +47,8 @@ type ParamTable struct {
 	MinIOUseSSL          bool
 	MinioBucketName      string
 
+	SimdType string
+
 	Log log.Config
 }
 
@@ -58,8 +62,12 @@ func (pt *ParamTable) InitAlias(alias string) {
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
+		if err := pt.LoadYaml("advanced/knowhere.yaml"); err != nil {
+			panic(err)
+		}
 		pt.initLogCfg()
 		pt.initParams()
+		pt.initKnowhereSimdType()
 	})
 }
 
@@ -160,4 +168,19 @@ func (pt *ParamTable) initLogCfg() {
 	} else {
 		pt.Log.File.Filename = ""
 	}
+}
+
+func (pt *ParamTable) initKnowhereSimdType() {
+	simdType, err := pt.LoadWithDefault("knowhere.simdType", "auto")
+	if err != nil {
+		log.Error("failed to initialize the simd type",
+			zap.Error(err))
+
+		panic(err)
+	}
+
+	pt.SimdType = simdType
+
+	log.Debug("initialize the knowhere simd type",
+		zap.String("simd_type", pt.SimdType))
 }

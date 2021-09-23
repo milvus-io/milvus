@@ -14,6 +14,8 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
@@ -49,4 +51,8 @@ func (n *Proxy) Stop() error {
 		return err
 	}
 	return nil
+}
+
+func (n *Proxy) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return n.svr.GetComponentStates(ctx, request)
 }

@@ -51,11 +51,21 @@ Run a single test scenario manually(take query node pod is killed as instance):
 1. update `ALL_CHAOS_YAMLS = 'chaos_querynode_podkill.yaml'` in `constants.py`
 
 2. run the commands below:
-```bash
-cd /milvus/tests/python_client/chaos
+   ```bash
+   cd /milvus/tests/python_client/chaos
 
-pytest test_chaos.py --host ${Milvus_IP} -v
-```
+   pytest test_chaos.py --host ${Milvus_IP} -v
+   ```
+Run multiple test scenario in a category manually(take network partition chaos for all pods as instance):
+
+1. update `ALL_CHAOS_YAMLS = 'chaos_*_network_partition.yaml'` in `constants.py`
+
+2. run the commands below:
+   ```bash
+   cd /milvus/tests/python_client/chaos
+
+   pytest test_chaos.py --host ${Milvus_IP} -v
+   ```
 
 ### Nightly 
 still in planning 
@@ -64,3 +74,11 @@ still in planning
 * pod_failure
 * container_kill
 * network attack
+
+## How to contribute
+* Get familiar with chaos engineering and [Chaos Mesh](https://chaos-mesh.org)
+* Design chaos scenarios, preferring to pick from todo list
+* Generate yaml file for your chaos scenarios. You can create a chaos experiment in chaos-dashboard, then download the yaml file of it.
+* Add yaml file to chaos_objects dir and rename it as `chaos_${component_name}_${chaos_type}.yaml`. Make sure `kubectl apply -f ${your_chaos_yaml_file}` can take effect
+* Add testcase in `testcases.yaml`. You should figure out the expectation of milvus during the chaos
+* Run your added testcase according to `Manually` above and check whether it as your expectation 

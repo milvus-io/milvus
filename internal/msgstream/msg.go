@@ -145,7 +145,6 @@ func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 /////////////////////////////////////////Delete//////////////////////////////////////////
-// TODO(wxyu): comment it until really needed
 type DeleteMsg struct {
 	BaseMsg
 	internalpb.DeleteRequest
@@ -763,7 +762,7 @@ func (dp *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 /////////////////////////////////////////LoadIndex//////////////////////////////////////////
-// TODO(wxyu): comment it until really needed
+// FIXME(wxyu): comment it until really needed
 /*
 type LoadIndexMsg struct {
 	BaseMsg

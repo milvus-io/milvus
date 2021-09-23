@@ -10,7 +10,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 | Suitable for                             | Projects                                                     | Resources                                                    |
 | ---------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| Go developers                            | [milvus](https://github.com/milvus-io/milvus), [milvus-sdk-go](https://github.com/milvus-io/milvus-sdk-go),       |                                                              |
+| Go developers                            | [milvus](https://github.com/milvus-io/milvus), [milvus-sdk-go](https://github.com/milvus-io/milvus-sdk-go)       |                                                              |
 | CPP developers                           | [milvus](https://github.com/milvus-io/milvus)                |                                                              |
 | Developers interested in other languages | [pymilvus](https://github.com/milvus-io/pymilvus), [milvus-sdk-node](https://github.com/milvus-io/milvus-sdk-node), [milvus-sdk-java](https://github.com/milvus-io/milvus-sdk-java) | [Contributing to PyMilvus](https://github.com/milvus-io/pymilvus/blob/master/CONTRIBUTING.md) |
 | Kubernetes enthusiasts                   | [milvus-helm](https://github.com/milvus-io/milvus-helm)      |                                                              |
@@ -104,6 +104,11 @@ Keeping a consistent style for code, code comments, commit messages, and PR desc
 ### Go
 - Coding style: refer to the [Effictive Go Style Guide](https://golang.org/doc/effective_go)
 
+We also use `golangci-lint` to perform code check. Run the following command before submit your pull request and make sure there is no issue reported:
+```shell
+$ make static-check
+```
+
 ###C++
 The c++ coding style used in Milvus generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 And we made the following changes based on the guide:
@@ -155,22 +160,3 @@ Run unit test and generate code for code coverage check
 ```shell 
 $ ./build.sh -u -c
 ```
-
-Run MySQL docker
-```shell 
-docker pull mysql:latest
-docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:latest
-```
-
-Run code coverage
-
-```shell  
-$ ./coverage.sh -u root -p 123456 -t 127.0.0.1
-```
-
-Or start your own MySQL server, and then run code coverage
-
-```shell
-$ ./coverage.sh -u ${MYSQL_USERNAME} -p ${MYSQL_PASSWORD} -t ${MYSQL_SERVER_IP}
-```
-

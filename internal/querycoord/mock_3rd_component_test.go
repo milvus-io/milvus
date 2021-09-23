@@ -41,6 +41,7 @@ const (
 	defaultCollectionID = UniqueID(2021)
 	defaultPartitionID  = UniqueID(2021)
 	defaultSegmentID    = UniqueID(2021)
+	defaultQueryNodeID  = int64(100)
 )
 
 func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.CollectionSchema {

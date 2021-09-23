@@ -82,4 +82,6 @@ class Tasks(TaskSet):
 
     @task
     def scene_test(self):
-        pass
+        op = "scene_test"
+        collection_name = op + '_' + str(random.randint(1, 10000)) + '_' + str(random.randint(10001, 999999))
+        self.client.scene_test(collection_name, vectors=self.values["X"][:3000], ids=self.values["ids"][:3000])

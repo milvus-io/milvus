@@ -84,6 +84,8 @@ type ReplicaInterface interface {
 	printReplica()
 }
 
+// collectionReplica is the data replication of memory data in query node.
+// It implements `ReplicaInterface` interface.
 type collectionReplica struct {
 	mu          sync.RWMutex // guards all
 	collections map[UniqueID]*Collection

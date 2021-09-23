@@ -10,21 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
-#include <iostream>
-#include <string>
-
-// #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-// #include "segment/SegmentReader.h"
-// #include "segment/SegmentWriter.h"
-#include "segcore/SegmentGrowing.h"
-// #include "utils/Json.h"
-#include "test_utils/DataGen.h"
 #include <random>
-#include <optional>
-using std::cin;
-using std::cout;
-using std::endl;
+#include <string>
+#include "segcore/SegmentGrowing.h"
+#include "test_utils/DataGen.h"
+
 using namespace milvus;
 
 namespace {
