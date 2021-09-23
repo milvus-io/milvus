@@ -2306,7 +2306,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.MetaTable = &metaTable{}
+	c.MetaTable = &MetaTable{}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
