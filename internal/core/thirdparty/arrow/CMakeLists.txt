@@ -60,7 +60,7 @@ macro( build_arrow )
                 IMPORTED_GLOBAL                 TRUE
                 IMPORTED_LOCATION               ${INSTALL_DIR}/lib/libarrow.so
                 INTERFACE_INCLUDE_DIRECTORIES   ${INSTALL_DIR}/include )
-    add_dependencies(arrow arrow_ep)
+    add_dependencies( arrow arrow_ep )
 
     add_library( parquet SHARED IMPORTED )
     set_target_properties( parquet
@@ -68,8 +68,8 @@ macro( build_arrow )
             IMPORTED_GLOBAL                 TRUE
             IMPORTED_LOCATION               ${INSTALL_DIR}/lib/libparquet.so
             INTERFACE_INCLUDE_DIRECTORIES   ${INSTALL_DIR}/include )
-    add_dependencies(parquet arrow-ep)
-    target_link_libraries(parquet INTERFACE arrow)
+    add_dependencies( parquet arrow-ep )
+    target_link_libraries( parquet INTERFACE arrow )
 
 endmacro()
 
