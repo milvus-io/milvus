@@ -65,7 +65,8 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	Params.Init()
-	indexcoord.Params.Init()
+
+	indexcoord.Params.InitOnce()
 	indexcoord.Params.Address = Params.ServiceAddress
 	indexcoord.Params.Port = Params.ServicePort
 

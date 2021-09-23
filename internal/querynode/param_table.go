@@ -30,11 +30,16 @@ type ParamTable struct {
 	EtcdEndpoints []string
 	MetaRootPath  string
 
-	Alias                    string
-	QueryNodeIP              string
-	QueryNodePort            int64
-	QueryNodeID              UniqueID
+	Alias         string
+	QueryNodeIP   string
+	QueryNodePort int64
+	QueryNodeID   UniqueID
+
+	// channel prefix
+	ClusterChannelPrefix     string
 	QueryTimeTickChannelName string
+	StatsChannelName         string
+	MsgChannelSubName        string
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -57,16 +62,14 @@ type ParamTable struct {
 	RetrieveChannelNames         []string
 	RetrieveResultChannelNames   []string
 	RetrieveReceiveBufSize       int64
-	retrievePulsarBufSize        int64
+	RetrievePulsarBufSize        int64
 	RetrieveResultReceiveBufSize int64
 
 	// stats
 	StatsPublishInterval int
-	StatsChannelName     string
 
-	GracefulTime      int64
-	MsgChannelSubName string
-	SliceIndex        int
+	GracefulTime int64
+	SliceIndex   int
 
 	// segcore
 	ChunkRows int64
@@ -82,55 +85,53 @@ func (p *ParamTable) InitAlias(alias string) {
 	p.Alias = alias
 }
 
-func (p *ParamTable) Init() {
+func (p *ParamTable) InitOnce() {
 	once.Do(func() {
-		p.BaseTable.Init()
-		if err := p.LoadYaml("advanced/query_node.yaml"); err != nil {
-			panic(err)
-		}
-		if err := p.LoadYaml("advanced/knowhere.yaml"); err != nil {
-			panic(err)
-		}
-
-		//p.initQueryTimeTickChannelName()
-
-		p.initMinioEndPoint()
-		p.initMinioAccessKeyID()
-		p.initMinioSecretAccessKey()
-		p.initMinioUseSSLStr()
-		p.initMinioBucketName()
-
-		p.initPulsarAddress()
-		p.initRocksmqPath()
-		p.initEtcdEndpoints()
-		p.initMetaRootPath()
-
-		p.initGracefulTime()
-
-		p.initFlowGraphMaxQueueLength()
-		p.initFlowGraphMaxParallelism()
-
-		p.initSearchReceiveBufSize()
-		p.initSearchPulsarBufSize()
-		p.initSearchResultReceiveBufSize()
-
-		p.initStatsPublishInterval()
-		p.initStatsChannelName()
-
-		p.initSegcoreChunkRows()
-		p.initKnowhereSimdType()
-
-		p.initLogCfg()
+		p.Init()
 	})
 }
 
-// ---------------------------------------------------------- query node
-func (p *ParamTable) initQueryTimeTickChannelName() {
-	ch, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
-	if err != nil {
-		log.Warn(err.Error())
+func (p *ParamTable) Init() {
+	p.BaseTable.Init()
+	if err := p.LoadYaml("advanced/query_node.yaml"); err != nil {
+		panic(err)
 	}
-	p.QueryTimeTickChannelName = ch
+	if err := p.LoadYaml("advanced/knowhere.yaml"); err != nil {
+		panic(err)
+	}
+
+	p.initMinioEndPoint()
+	p.initMinioAccessKeyID()
+	p.initMinioSecretAccessKey()
+	p.initMinioUseSSLStr()
+	p.initMinioBucketName()
+
+	p.initPulsarAddress()
+	p.initRocksmqPath()
+	p.initEtcdEndpoints()
+	p.initMetaRootPath()
+
+	p.initGracefulTime()
+
+	p.initFlowGraphMaxQueueLength()
+	p.initFlowGraphMaxParallelism()
+
+	p.initSearchReceiveBufSize()
+	p.initSearchPulsarBufSize()
+	p.initSearchResultReceiveBufSize()
+
+	// Has to init global msgchannel prefix before other channel names
+	p.initClusterMsgChannelPrefix()
+	p.initQueryTimeTickChannelName()
+	p.initStatsChannelName()
+	p.initMsgChannelSubName()
+
+	p.initStatsPublishInterval()
+
+	p.initSegcoreChunkRows()
+	p.initKnowhereSimdType()
+
+	p.initLogCfg()
 }
 
 // ---------------------------------------------------------- minio
@@ -222,6 +223,44 @@ func (p *ParamTable) initSearchResultReceiveBufSize() {
 	p.SearchResultReceiveBufSize = p.ParseInt64("queryNode.msgStream.searchResult.recvBufSize")
 }
 
+// ------------------------  channel names
+func (p *ParamTable) initClusterMsgChannelPrefix() {
+	name, err := p.Load("msgChannel.chanNamePrefix.cluster")
+	if err != nil {
+		panic(err)
+	}
+	p.ClusterChannelPrefix = name
+}
+
+func (p *ParamTable) initQueryTimeTickChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
+	if err != nil {
+		log.Warn(err.Error())
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.QueryTimeTickChannelName = strings.Join(s, "-")
+}
+
+func (p *ParamTable) initMsgChannelSubName() {
+	namePrefix, err := p.Load("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
+	if err != nil {
+		log.Warn(err.Error())
+	}
+
+	s := []string{p.ClusterChannelPrefix, namePrefix, strconv.FormatInt(p.QueryNodeID, 10)}
+	p.MsgChannelSubName = strings.Join(s, "-")
+}
+
+func (p *ParamTable) initStatsChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.queryNodeStats")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.StatsChannelName = strings.Join(s, "-")
+}
+
+// ETCD configs
 func (p *ParamTable) initEtcdEndpoints() {
 	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
@@ -244,23 +283,6 @@ func (p *ParamTable) initMetaRootPath() {
 
 func (p *ParamTable) initGracefulTime() {
 	p.GracefulTime = p.ParseInt64("queryNode.gracefulTime")
-}
-
-func (p *ParamTable) initMsgChannelSubName() {
-	namePrefix, err := p.Load("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
-	if err != nil {
-		log.Warn(err.Error())
-	}
-	subName := namePrefix + "-" + strconv.FormatInt(p.QueryNodeID, 10)
-	p.MsgChannelSubName = subName
-}
-
-func (p *ParamTable) initStatsChannelName() {
-	channels, err := p.Load("msgChannel.chanNamePrefix.queryNodeStats")
-	if err != nil {
-		panic(err)
-	}
-	p.StatsChannelName = channels
 }
 
 func (p *ParamTable) initSegcoreChunkRows() {

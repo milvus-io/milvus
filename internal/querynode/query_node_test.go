@@ -38,9 +38,6 @@ type queryCoordMock struct {
 func setup() {
 	os.Setenv("QUERY_NODE_ID", "1")
 	Params.Init()
-	//Params.QueryNodeID = 1
-	Params.initQueryTimeTickChannelName()
-	Params.initStatsChannelName()
 	Params.MetaRootPath = "/etcd/test/root/querynode"
 }
 
@@ -209,11 +206,6 @@ func makeNewChannelNames(names []string, suffix string) []string {
 	return ret
 }
 
-func refreshChannelNames() {
-	suffix := "-test-query-node" + strconv.FormatInt(rand.Int63n(1000000), 10)
-	Params.StatsChannelName = Params.StatsChannelName + suffix
-}
-
 func newMessageStreamFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
@@ -229,7 +221,7 @@ func newMessageStreamFactory() (msgstream.Factory, error) {
 
 func TestMain(m *testing.M) {
 	setup()
-	refreshChannelNames()
+	Params.StatsChannelName = Params.StatsChannelName + strconv.Itoa(rand.Int())
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

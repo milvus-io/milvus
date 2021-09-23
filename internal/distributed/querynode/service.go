@@ -75,10 +75,8 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 
 func (s *Server) init() error {
 	Params.Init()
-	Params.LoadFromEnv()
-	Params.LoadFromArgs()
 
-	qn.Params.Init()
+	qn.Params.InitOnce()
 	qn.Params.QueryNodeIP = Params.QueryNodeIP
 	qn.Params.QueryNodePort = int64(Params.QueryNodePort)
 	qn.Params.QueryNodeID = Params.QueryNodeID

@@ -13,6 +13,8 @@ package proxy
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParamTable_Normal(t *testing.T) {
@@ -39,10 +41,12 @@ func TestParamTable_Normal(t *testing.T) {
 	})
 
 	t.Run("ProxySubName", func(t *testing.T) {
+		assert.Equal(t, Params.ProxySubName, "by-dev-proxy-0")
 		t.Logf("ProxySubName: %s", Params.ProxySubName)
 	})
 
 	t.Run("ProxyTimeTickChannelNames", func(t *testing.T) {
+		assert.Equal(t, Params.ProxyTimeTickChannelNames, []string{"by-dev-proxyTimeTick-0"})
 		t.Logf("ProxyTimeTickChannelNames: %v", Params.ProxyTimeTickChannelNames)
 	})
 

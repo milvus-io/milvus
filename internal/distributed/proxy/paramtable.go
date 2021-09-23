@@ -47,6 +47,10 @@ func (pt *ParamTable) Init() {
 		pt.BaseTable.Init()
 		pt.initParams()
 
+		pt.LoadFromEnv()
+		pt.LoadFromArgs()
+		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
+
 		pt.initServerMaxSendSize()
 		pt.initServerMaxRecvSize()
 	})

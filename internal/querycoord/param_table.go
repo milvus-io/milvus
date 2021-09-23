@@ -43,7 +43,8 @@ type ParamTable struct {
 	Log      log.Config
 	RoleName string
 
-	// search
+	// channels
+	ClusterChannelPrefix      string
 	SearchChannelPrefix       string
 	SearchResultChannelPrefix string
 
@@ -63,40 +64,46 @@ type ParamTable struct {
 var Params ParamTable
 var once sync.Once
 
-func (p *ParamTable) Init() {
+func (p *ParamTable) InitOnce() {
 	once.Do(func() {
-		p.BaseTable.Init()
-		err := p.LoadYaml("advanced/query_node.yaml")
-		if err != nil {
-			panic(err)
-		}
-
-		err = p.LoadYaml("milvus.yaml")
-		if err != nil {
-			panic(err)
-		}
-
-		p.initLogCfg()
-
-		p.initStatsChannelName()
-		p.initTimeTickChannelName()
-		p.initQueryCoordAddress()
-		p.initRoleName()
-		p.initSearchChannelPrefix()
-		p.initSearchResultChannelPrefix()
-
-		// --- ETCD ---
-		p.initEtcdEndpoints()
-		p.initMetaRootPath()
-		p.initKvRootPath()
-
-		//--- Minio ----
-		p.initMinioEndPoint()
-		p.initMinioAccessKeyID()
-		p.initMinioSecretAccessKey()
-		p.initMinioUseSSLStr()
-		p.initMinioBucketName()
+		p.Init()
 	})
+}
+func (p *ParamTable) Init() {
+	p.BaseTable.Init()
+	err := p.LoadYaml("advanced/query_node.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	err = p.LoadYaml("milvus.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	p.initLogCfg()
+
+	p.initQueryCoordAddress()
+	p.initRoleName()
+
+	// --- Channels ---
+	p.initClusterMsgChannelPrefix()
+	p.initSearchChannelPrefix()
+	p.initSearchResultChannelPrefix()
+	p.initStatsChannelName()
+	p.initTimeTickChannelName()
+
+	// --- ETCD ---
+	p.initEtcdEndpoints()
+	p.initMetaRootPath()
+	p.initKvRootPath()
+
+	//--- Minio ----
+	p.initMinioEndPoint()
+	p.initMinioAccessKeyID()
+	p.initMinioSecretAccessKey()
+	p.initMinioUseSSLStr()
+	p.initMinioBucketName()
 }
 
 func (p *ParamTable) initLogCfg() {
@@ -125,23 +132,6 @@ func (p *ParamTable) initLogCfg() {
 	}
 }
 
-func (p *ParamTable) initStatsChannelName() {
-	channels, err := p.Load("msgChannel.chanNamePrefix.queryNodeStats")
-	if err != nil {
-		panic(err)
-	}
-	p.StatsChannelName = channels
-}
-
-func (p *ParamTable) initTimeTickChannelName() {
-	timeTickChannelName, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
-	if err != nil {
-		panic(err)
-	}
-	p.TimeTickChannelName = timeTickChannelName
-
-}
-
 func (p *ParamTable) initQueryCoordAddress() {
 	url, err := p.Load("_QueryCoordAddress")
 	if err != nil {
@@ -154,22 +144,49 @@ func (p *ParamTable) initRoleName() {
 	p.RoleName = fmt.Sprintf("%s-%d", "QueryCoord", p.NodeID)
 }
 
+func (p *ParamTable) initClusterMsgChannelPrefix() {
+	config, err := p.Load("msgChannel.chanNamePrefix.cluster")
+	if err != nil {
+		panic(err)
+	}
+	p.ClusterChannelPrefix = config
+}
+
 func (p *ParamTable) initSearchChannelPrefix() {
-	channelName, err := p.Load("msgChannel.chanNamePrefix.search")
+	config, err := p.Load("msgChannel.chanNamePrefix.search")
 	if err != nil {
 		log.Error(err.Error())
 	}
 
-	p.SearchChannelPrefix = channelName
+	s := []string{p.ClusterChannelPrefix, config}
+	p.SearchChannelPrefix = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initSearchResultChannelPrefix() {
-	channelName, err := p.Load("msgChannel.chanNamePrefix.searchResult")
+	config, err := p.Load("msgChannel.chanNamePrefix.searchResult")
 	if err != nil {
 		log.Error(err.Error())
 	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.SearchResultChannelPrefix = strings.Join(s, "-")
+}
 
-	p.SearchResultChannelPrefix = channelName
+func (p *ParamTable) initStatsChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.queryNodeStats")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.StatsChannelName = strings.Join(s, "-")
+}
+
+func (p *ParamTable) initTimeTickChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.TimeTickChannelName = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initEtcdEndpoints() {

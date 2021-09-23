@@ -60,14 +60,25 @@ func (pt *ParamTable) InitAlias(alias string) {
 }
 
 func (pt *ParamTable) Init() {
+	pt.BaseTable.Init()
+	if err := pt.LoadYaml("advanced/knowhere.yaml"); err != nil {
+		panic(err)
+	}
+
+	// TODO, load index_node.yaml
+	/*err := pt.LoadYaml("advanced/index_node.yaml")
+	if err != nil {
+		panic(err)
+	}*/
+
+	pt.initLogCfg()
+	pt.initParams()
+	pt.initKnowhereSimdType()
+}
+
+func (pt *ParamTable) InitOnce() {
 	once.Do(func() {
-		pt.BaseTable.Init()
-		if err := pt.LoadYaml("advanced/knowhere.yaml"); err != nil {
-			panic(err)
-		}
-		pt.initLogCfg()
-		pt.initParams()
-		pt.initKnowhereSimdType()
+		pt.Init()
 	})
 }
 

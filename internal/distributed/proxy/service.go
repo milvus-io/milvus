@@ -132,11 +132,8 @@ func (s *Server) init() error {
 		Params.Port = funcutil.GetAvailablePort()
 		log.Warn("Proxy init", zap.Any("Port", Params.Port))
 	}
-	Params.LoadFromEnv()
-	Params.LoadFromArgs()
-	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 
-	proxy.Params.Init()
+	proxy.Params.InitOnce()
 	log.Debug("init params done ...")
 
 	// NetworkPort & IP don't matter here, NetworkAddress matters
