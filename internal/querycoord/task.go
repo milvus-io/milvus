@@ -716,7 +716,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
-
+	// if nodeID ==0, it means that the release request has not been assigned to the specified query node
 	if rpt.NodeID <= 0 {
 		nodes, err := rpt.cluster.onlineNodes()
 		if err != nil {
