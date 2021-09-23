@@ -108,6 +108,4 @@ TEST(SegmentCoreTest, SmallIndex) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
-    int N = 1024 * 1024;
-    auto data = DataGen(schema, N);
 }
