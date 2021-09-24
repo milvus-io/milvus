@@ -16,6 +16,7 @@ class CustomResourceOperations(object):
         self.plural = kind.lower()
 
     def create(self, body):
+        """create or apply a custom resource in k8s"""
         pretty = 'true'
         config.load_kube_config()
         api_instance = client.CustomObjectsApi()
@@ -28,6 +29,7 @@ class CustomResourceOperations(object):
             raise Exception(str(e))
 
     def delete(self, metadata_name, raise_ex=True):
+        """delete or uninstall a custom resource in k8s"""
         print(metadata_name)
         try:
             config.load_kube_config()
