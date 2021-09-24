@@ -66,13 +66,13 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 ## 快速开始
 
-### 开始使用 Milvus
+### 启动 Milvus
 
-- [Standalone Quick Start Guide](https://milvus.io/cn/docs/v2.0.0/install_standalone-docker.md)
+- [安装 Milvus 单机版](https://milvus.io/cn/docs/v2.0.0/install_standalone-docker.md)
 
-- [Cluster Quick Start Guide](https://milvus.io/cn/docs/v2.0.0/install_cluster-docker.md)
+- [安装 Milvus 分布式版本](https://milvus.io/cn/docs/v2.0.0/install_cluster-docker.md)
 
-### 开发 Milvus
+### 源码编译 Milvus
 
 ```bash
 # Clone github repository.
