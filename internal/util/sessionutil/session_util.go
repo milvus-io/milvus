@@ -356,6 +356,7 @@ func (s *Session) LivenessCheck(ctx context.Context, ch <-chan bool, callback fu
 			return
 		case <-ctx.Done():
 			log.Debug("liveness exits due to context done")
+			return
 		}
 	}
 }
