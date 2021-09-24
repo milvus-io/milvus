@@ -28,10 +28,13 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 )
 
+// UniqueID is the type of message ID
 type UniqueID = typeutil.UniqueID
 
+// RocksmqPageSize is the size of a message page, default 2GB
 var RocksmqPageSize int64 = 2 << 30
 
+// Const variable that will be used in rocksmqs
 const (
 	DefaultMessageID        = "-1"
 	FixedChannelNameLen     = 320
@@ -109,6 +112,9 @@ type rocksmq struct {
 	retentionInfo *retentionInfo
 }
 
+// 1. New rocksmq instance based on rocksdb with name and rocksdbkv with kvname
+// 2. Init retention info, load retention info to memory
+// 3. Start retention goroutine
 func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))

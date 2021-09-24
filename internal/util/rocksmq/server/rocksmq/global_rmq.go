@@ -24,16 +24,23 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 )
 
+// Global rocksmq instance that will be initialized only once
 var Rmq *rocksmq
+
+// once is used to init global rocksmq
 var once sync.Once
+
+// Params provide params that rocksmq needs
 var params paramtable.BaseTable
 
+// InitRmq is deprecate implementation of global rocksmq. will be removed later
 func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 	var err error
 	Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
 	return err
 }
 
+// InitRocksMQ init global rocksmq single instance
 func InitRocksMQ() error {
 	var err error
 	once.Do(func() {
@@ -68,6 +75,7 @@ func InitRocksMQ() error {
 	return err
 }
 
+// CloseRocksMQ is used to close global rocksmq
 func CloseRocksMQ() {
 	log.Debug("Close Rocksmq!")
 	if Rmq != nil && Rmq.store != nil {
