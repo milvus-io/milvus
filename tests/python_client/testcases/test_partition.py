@@ -90,7 +90,7 @@ class TestCreateBase:
             assert message == "create partition failed: can't find collection: %s" % collection_name
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_create_partition_name_name_None(self, connect, collection):
+    def test_create_partition_name_name_none(self, connect, collection):
         '''
         target: test create partition, tag name set None, check status returned
         method: call function: create_partition
