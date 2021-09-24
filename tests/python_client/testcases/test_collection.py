@@ -78,7 +78,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: default_schema, exp_num: 0,
                                                           exp_primary: ct.default_int64_field_name})
-        assert c_name, _ in self.utility_wrap.list_collections()
+        assert c_name in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="exception not MilvusException")
@@ -136,7 +136,7 @@ class TestCollectionParams(TestcaseBase):
         assert collection_w.name == self.collection_wrap.name
         assert collection_w.schema == self.collection_wrap.schema
         assert collection_w.num_entities == self.collection_wrap.num_entities
-        assert collection_w.name, _ in self.utility_wrap.list_collections()[0]
+        assert collection_w.name in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_dup_name_with_desc(self):
@@ -879,7 +879,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=default_binary_schema,
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: default_binary_schema})
-        assert c_name, _ in self.utility_wrap.list_collections()
+        assert c_name in self.utility_wrap.list_collections()[0]
 
 
 class TestCollectionOperation(TestcaseBase):
@@ -925,7 +925,7 @@ class TestCollectionOperation(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
             self.collection_wrap.drop()
-            assert c_name, _ not in self.utility_wrap.list_collections()
+            assert c_name not in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_dup_name_drop(self):
