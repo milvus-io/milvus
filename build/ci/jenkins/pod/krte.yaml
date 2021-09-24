@@ -55,6 +55,8 @@ spec:
       value: "1000"
     - name: ETCD_SNAPSHOT_COUNT
       value: "10000"
+    - name: GODEBUG
+      value: "gctrace=1"
     command:
     - etcd
     - -advertise-client-urls=http://127.0.0.1:2379
