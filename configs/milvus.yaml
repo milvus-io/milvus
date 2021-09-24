@@ -21,6 +21,7 @@ etcd:
   flushStreamPosSubPath: datacoord/flushstream # Full path = rootPath/metaSubPath/flushStreamPosSubPath
   statsStreamPosSubPath: datacoord/statsstream # Full path = rootPath/metaSubPath/statsStreamPosSubPath
 
+# Related configuration of minio, which is responsible for data persistence for Milvus.
 minio:
   address: localhost
   port: 9000
