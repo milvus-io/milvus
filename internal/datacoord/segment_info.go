@@ -74,7 +74,7 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 // if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetRowCount(segmentID UniqueID, rowCount int64) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetRowCount(rowCount))
+		s.segments[segmentID] = segment.Clone(SetRowCount(rowCount))
 	}
 }
 
@@ -82,7 +82,7 @@ func (s *SegmentsInfo) SetRowCount(segmentID UniqueID, rowCount int64) {
 // if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetState(segmentID UniqueID, state commonpb.SegmentState) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetState(state))
+		s.segments[segmentID] = segment.Clone(SetState(state))
 	}
 }
 
