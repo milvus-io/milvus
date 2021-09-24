@@ -229,11 +229,12 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegme
 	return s.dataCoord.GetSegmentInfoChannel(ctx)
 }
 
-//SaveBinlogPaths implement DataCoordServer, saves segment, collection binlog according to datanode request
+// SaveBinlogPaths implement DataCoordServer, saves segment, collection binlog according to datanode request
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	return s.dataCoord.SaveBinlogPaths(ctx, req)
 }
 
+// GetRecoveryInfo gets information for recovering channels
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	return s.dataCoord.GetRecoveryInfo(ctx, req)
 }
