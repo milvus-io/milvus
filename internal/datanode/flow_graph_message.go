@@ -18,7 +18,10 @@ import (
 )
 
 type (
-	Msg          = flowgraph.Msg
+	// Msg is flowgraph.Msg
+	Msg = flowgraph.Msg
+
+	// MsgStreamMsg is flowgraph.MsgStreamMsg
 	MsgStreamMsg = flowgraph.MsgStreamMsg
 )
 
