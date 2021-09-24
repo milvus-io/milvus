@@ -1,4 +1,4 @@
-# Compile and install milvus-dustributed
+# Compile and install milvus-distributed
 
 ## Environment
 
