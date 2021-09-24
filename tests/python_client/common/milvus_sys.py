@@ -45,6 +45,7 @@ class MilvusSys:
 
     @property
     def query_nodes(self):
+        """get all query nodes in Milvus deployment"""
         query_nodes = []
         for node in self.nodes:
             if 'QueryNode' == node.get('infos').get('type'):
@@ -53,6 +54,7 @@ class MilvusSys:
 
     @property
     def data_nodes(self):
+        """get all data nodes in Milvus deployment"""
         data_nodes = []
         for node in self.nodes:
             if 'DataNode' == node.get('infos').get('type'):
@@ -61,6 +63,7 @@ class MilvusSys:
 
     @property
     def index_nodes(self):
+        """get all index nodes in Milvus deployment"""
         index_nodes = []
         for node in self.nodes:
             if 'IndexNode' == node.get('infos').get('type'):
