@@ -26,6 +26,7 @@ const (
 	InsertBinlog BinlogType = iota
 	DeleteBinlog
 	DDLBinlog
+	IndexFileBinlog
 )
 const (
 	MagicNumber int32 = 0xfffabc
@@ -219,6 +220,22 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	return event, nil
 }
 
+type IndexFileBinlogWriter struct {
+	baseBinlogWriter
+}
+
+func (writer *IndexFileBinlogWriter) NextIndexFileEventWriter() (*indexFileEventWriter, error) {
+	if writer.isClosed() {
+		return nil, fmt.Errorf("binlog has closed")
+	}
+	event, err := newIndexFileEventWriter()
+	if err != nil {
+		return nil, err
+	}
+	writer.eventWriters = append(writer.eventWriters, event)
+	return event, nil
+}
+
 // NewInsertBinlogWriter creates InsertBinlogWriter to write binlog file.
 func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64) *InsertBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
@@ -264,6 +281,39 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
 			binlogType:      DDLBinlog,
+			eventWriters:    make([]EventWriter, 0),
+			buffer:          nil,
+		},
+	}
+}
+
+func NewIndexFileBinlogWriter(
+	indexBuildID UniqueID,
+	version int64,
+	collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	fieldID UniqueID,
+	indexName string,
+	indexID UniqueID,
+	key string,
+) *IndexFileBinlogWriter {
+	descriptorEvent := newDescriptorEvent()
+	descriptorEvent.CollectionID = collectionID
+	descriptorEvent.PartitionID = partitionID
+	descriptorEvent.SegmentID = segmentID
+	descriptorEvent.FieldID = fieldID
+	descriptorEvent.PayloadDataType = schemapb.DataType_String
+	descriptorEvent.AddExtra("indexBuildID", fmt.Sprintf("%d", indexBuildID))
+	descriptorEvent.AddExtra("version", fmt.Sprintf("%d", version))
+	descriptorEvent.AddExtra("indexName", indexName)
+	descriptorEvent.AddExtra("indexID", fmt.Sprintf("%d", indexID))
+	descriptorEvent.AddExtra("key", key)
+	return &IndexFileBinlogWriter{
+		baseBinlogWriter: baseBinlogWriter{
+			descriptorEvent: *descriptorEvent,
+			magicNumber:     MagicNumber,
+			binlogType:      IndexFileBinlog,
 			eventWriters:    make([]EventWriter, 0),
 			buffer:          nil,
 		},
