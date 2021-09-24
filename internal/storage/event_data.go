@@ -23,10 +23,10 @@ import (
 
 type descriptorEventData struct {
 	DescriptorEventDataFixPart
-	PostHeaderLengths []uint8
 	ExtraLength       int32
 	ExtraBytes        []byte
 	Extras            map[string]interface{}
+	PostHeaderLengths []uint8
 }
 
 // DescriptorEventDataFixPart is a memorty struct saves events' DescriptorEventData.
