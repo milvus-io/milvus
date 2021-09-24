@@ -101,7 +101,7 @@ func TestGetPulsarConfig_Error(t *testing.T) {
 	port := "17777"
 	url := "/admin/v2/brokers/configuration/runtime"
 
-	ret, err := GetPulsarConfig(protocol, ip, port, url)
+	ret, err := GetPulsarConfig(protocol, ip, port, url, 1, 1)
 	assert.NotNil(t, err)
 	assert.Nil(t, ret)
 }
