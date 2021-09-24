@@ -332,6 +332,8 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 ### SDK
 
 - [PyMilvus](https://github.com/milvus-io/pymilvus)
+- [Java SDK](https://github.com/milvus-io/milvus-sdk-java)(开发中)
+- [Go SDK](https://github.com/milvus-io/milvus-sdk-go)(开发中)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
 ## 社区
