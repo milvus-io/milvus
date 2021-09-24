@@ -3006,11 +3006,11 @@ class TestLoadPartition:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_partition_after_index_binary(self, connect, binary_collection, get_binary_index):
-        '''
+        """
         target: test load binary_collection, after index created
         method: insert and create index, load binary_collection with correct params
         expected: no error raised
-        '''
+        """
         connect.create_partition(binary_collection, default_tag)
         result = connect.insert(binary_collection, cons.default_binary_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
@@ -3027,11 +3027,11 @@ class TestLoadPartition:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_dis_connect(self, connect, dis_connect, collection):
-        '''
+        """
         target: test load collection, without connection
         method: load collection with correct params, with a disconnected instance
         expected: load raise exception
-        '''
+        """
         connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
             dis_connect.load_partitions(collection, [default_tag])
