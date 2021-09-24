@@ -14,6 +14,7 @@ package mqclient
 import "context"
 
 type ProducerOptions struct {
+	// The topic that this Producer will publish
 	Topic string
 }
 
