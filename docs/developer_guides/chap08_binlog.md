@@ -19,13 +19,11 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 | header +----------------------------+---------------------------------------------------------------------+
 |        | TypeCode          8 : 1    | event type code                                                     |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | ServerID          9 : 4    | write node id                                                       |
+|        | EventLength       9 : 4    | length of event, including header and data                          |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | EventLength      13 : 4    | length of event, including header and data                          |
-|        +----------------------------+---------------------------------------------------------------------+
-|        | NextPosition     17 : 4    | offset of next event from the start of file                         |
+|        | NextPosition     13 : 4    | offset of next event from the start of file                         |
 +=====================================+=====================================================================+
-| event  | fixed part       21 : x    |                                                                     |
+| event  | fixed part       17 : x    |                                                                     |
 | data   +----------------------------+---------------------------------------------------------------------+
 |        | variable part              |                                                                     |
 +=====================================+=====================================================================+
@@ -40,33 +38,29 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 | header +----------------------------+---------------------------------------------------------------------+
 |        | TypeCode          8 : 1    | event type code                                                     |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | ServerID          9 : 4    | write node id                                                       |
+|        | EventLength       9 : 4    | length of event, including header and data                          |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | EventLength      13 : 4    | length of event, including header and data                          |
-|        +----------------------------+---------------------------------------------------------------------+
-|        | NextPosition     17 : 4    | offset of next event from the start of file                         |
+|        | NextPosition     13 : 4    | offset of next event from the start of file                         |
 +=====================================+=====================================================================+
-| event  | BinlogVersion    21 : 2    | binlog version                                                      |
+| event  | CollectionID     17 : 8    | collection id                                                       |
 | data   +----------------------------+---------------------------------------------------------------------+
-|        | ServerVersion    23 : 8    | write node version                                                  |
+|        | PartitionID      25 : 8    | partition id (schema column does not need)                          |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | CommitID         31 : 8    | commit id of the programe in git                                    |
+|        | SegmentID        33 : 8    | segment id (schema column does not need)                            |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | HeaderLength     39 : 1    | header length of other event                                        |
+|        | FieldID          41 : 8    | field id (schema column does not need)                              |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | CollectionID     40 : 8    | collection id                                                       |
+|        | StartTimestamp   49 : 8    | minimum timestamp allocated by master of all events in this file    |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | PartitionID      48 : 8    | partition id (schema column does not need)                          |
+|        | EndTimestamp     57 : 8    | maximum timestamp allocated by master of all events in this file    |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | SegmentID        56 : 8    | segment id (schema column does not need)                            |
+|        | PayloadDataType  65 : 4    | data type of payload                                                |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | StartTimestamp   64 : 1    | minimum timestamp allocated by master of all events in this file    |
+|        | ExtraLength      69 : 4    | length of extra information                                         |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | EndTimestamp     65 : 1    | maximum timestamp allocated by master of all events in this file    |
+|        | ExtraBytes       73 : n    | extra information in json format                                    |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | PayloadDataType  66 : 1    | data type of payload                                                |
-|        +----------------------------+---------------------------------------------------------------------+
-|        | PostHeaderLength 67 : n    | header lengths for all event types                                  |
+|        | PostHeaderLengths n : n    | header lengths for all event types                                  |
 +=====================================+=====================================================================|
 ```
 
