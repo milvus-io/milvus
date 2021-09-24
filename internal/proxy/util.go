@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
-func GetPulsarConfig(protocol, ip, port, url string) (map[string]interface{}, error) {
+func GetPulsarConfig(protocol, ip, port, url string, args ...int64) (map[string]interface{}, error) {
 	var resp *http.Response
 	var err error
 
@@ -36,13 +36,25 @@ func GetPulsarConfig(protocol, ip, port, url string) (map[string]interface{}, er
 		return err
 	}
 
-	err = retry.Do(context.TODO(), getResp, retry.Attempts(10), retry.Sleep(time.Second))
+	var attempt uint = 10
+	var interval time.Duration = time.Second
+	if len(args) > 0 && args[0] > 0 {
+		attempt = uint(args[0])
+	}
+	if len(args) > 1 && args[1] > 0 {
+		interval = time.Duration(args[1])
+	}
+
+	err = retry.Do(context.TODO(), getResp, retry.Attempts(attempt), retry.Sleep(interval))
 	if err != nil {
+		log.Debug("failed to get config", zap.String("error", err.Error()))
 		return nil, err
 	}
+
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
+	log.Debug("get config", zap.String("config", string(body)))
 	if err != nil {
 		return nil, err
 	}
