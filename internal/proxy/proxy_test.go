@@ -389,7 +389,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	time.Sleep(time.Second)
+	time.Sleep(10 * time.Millisecond)
 
 	proxy, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
@@ -926,7 +926,7 @@ func TestProxy(t *testing.T) {
 				break
 			}
 			// avoid too frequent rpc call
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 			counter++
 		}
 	})
@@ -1026,7 +1026,7 @@ func TestProxy(t *testing.T) {
 				break
 			}
 			// avoid too frequent rpc call
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 			counter++
 		}
 	})
