@@ -143,8 +143,7 @@ func TestDeleteMsg(t *testing.T) {
 
 			CollectionName: "test_collection",
 			ChannelID:      "test-channel",
-			Timestamps:     []uint64{2, 1, 3},
-			PrimaryKeys:    []int64{5, 6, 7},
+			Timestamp:      uint64(1),
 		},
 	}
 

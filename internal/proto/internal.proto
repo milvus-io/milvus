@@ -197,10 +197,15 @@ message RetrieveResults {
 
 message DeleteRequest {
   common.MsgBase base = 1;
-  string collection_name = 2;
-  string channelID = 3;
-  repeated uint64 timestamps = 4;
-  repeated int64 primary_keys = 5;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  int64 dbID = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
+  string channelID = 8;
+  bytes expr_plan = 9;
+  uint64 timestamp = 10;
 }
 
 message LoadBalanceSegmentsRequest {

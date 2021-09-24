@@ -217,8 +217,8 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 		switch msgType {
 		case commonpb.MsgType_Insert:
 			result, err = InsertRepackFunc(tsMsgs, reBucketValues)
-		case commonpb.MsgType_Delete:
-			result, err = DeleteRepackFunc(tsMsgs, reBucketValues)
+		//case commonpb.MsgType_Delete:
+		//	result, err = DeleteRepackFunc(tsMsgs, reBucketValues)
 		default:
 			result, err = DefaultRepackFunc(tsMsgs, reBucketValues)
 		}
