@@ -51,8 +51,7 @@ Your Milvus installation may fail when images are not properly loaded from publi
 
 The Docker images will be stored under **images** directory.
 
-### Step 2: Load Docker images:
-
+### Step 2: Load Docker images
 Enter the following command to load the Docker images:
 
 ```shell
