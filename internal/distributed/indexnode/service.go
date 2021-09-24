@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc"
 )
 
+// Server is the grpc wrapper of IndexNode.
 type Server struct {
 	indexnode types.IndexNode
 
@@ -48,6 +49,7 @@ type Server struct {
 	closer io.Closer
 }
 
+// Run initializes and starts IndexNode's grpc service.
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
@@ -89,6 +91,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 }
 
+// init initializes IndexNode's grpc service.
 func (s *Server) init() error {
 	var err error
 	Params.Init()
@@ -136,6 +139,7 @@ func (s *Server) init() error {
 	return nil
 }
 
+// start starts IndexNode's grpc service.
 func (s *Server) start() error {
 	err := s.indexnode.Start()
 	if err != nil {
@@ -144,6 +148,7 @@ func (s *Server) start() error {
 	return nil
 }
 
+// Stop stops IndexNode's grpc service.
 func (s *Server) Stop() error {
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
@@ -162,31 +167,38 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// SetClient sets the IndexNode's instance.
 func (s *Server) SetClient(indexNodeClient types.IndexNode) error {
 	s.indexnode = indexNodeClient
 	return nil
 }
 
+// GetComponentStates gets the component states of IndexNode.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.indexnode.GetComponentStates(ctx)
 }
 
+// GetTimeTickChannel gets the time tick channel of IndexNode.
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.indexnode.GetTimeTickChannel(ctx)
 }
 
+// GetStatisticsChannel gets the statistics channel of IndexNode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.indexnode.GetStatisticsChannel(ctx)
 }
 
+// CreateIndex sends the create index request to IndexNode.
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	return s.indexnode.CreateIndex(ctx, req)
 }
 
+// GetMetrics gets the metrics info of IndexNode.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.indexnode.GetMetrics(ctx, request)
 }
 
+// NewServer create a new IndexNode grpc server.
 func NewServer(ctx context.Context) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	node, err := indexnode.NewIndexNode(ctx1)
