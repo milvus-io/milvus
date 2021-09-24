@@ -118,7 +118,8 @@ test-go: build-cpp-with-unittest
 
 test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
-	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
+	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
+#	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
 # Runs code coverage.
 codecov: codecov-go codecov-cpp
