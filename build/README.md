@@ -190,7 +190,7 @@ VS Code begin load and construct Devcontainer,  the progress bar display the con
 
 After Construction, VS Code automatically connects to the container. Now you can code and debug in VS Code, just like developing in your host machine.
 
-You can also use terminal of VS Code to enter the Dev container to do something. Choose **Terminal >> New Terminal** in the navigation bar, then you can enter container:
+You can also use terminal of VS Code to enter the Dev container to do something. Choose **Terminal >> New Terminal** in the navigation bar, then you can enter the container:
 
 ![image](../docs/imgs/terminal.png)
 
