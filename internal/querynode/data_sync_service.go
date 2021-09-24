@@ -179,9 +179,15 @@ func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID)
 	defer dsService.mu.Unlock()
 
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
-		for _, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
+		for channel, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
 			// close flow graph
 			nodeFG.close()
+			// remove tSafe record
+			// no tSafe in tSafeReplica, don't return error
+			err := dsService.tSafeReplica.removeRecord(channel, partitionID)
+			if err != nil {
+				log.Warn(err.Error())
+			}
 		}
 		dsService.partitionFlowGraphs[partitionID] = nil
 	}

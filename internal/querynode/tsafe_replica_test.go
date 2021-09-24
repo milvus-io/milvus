@@ -23,30 +23,39 @@ func TestTSafeReplica_valid(t *testing.T) {
 	replica.addTSafe(defaultVChannel)
 
 	watcher := newTSafeWatcher()
-	replica.registerTSafeWatcher(defaultVChannel, watcher)
+	err := replica.registerTSafeWatcher(defaultVChannel, watcher)
+	assert.NoError(t, err)
 
 	timestamp := Timestamp(1000)
-	replica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
+	err = replica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
+	assert.NoError(t, err)
 	time.Sleep(20 * time.Millisecond)
-	resT := replica.getTSafe(defaultVChannel)
+	resT, err := replica.getTSafe(defaultVChannel)
+	assert.NoError(t, err)
 	assert.Equal(t, timestamp, resT)
 
-	replica.removeTSafe(defaultVChannel)
+	err = replica.removeTSafe(defaultVChannel)
+	assert.NoError(t, err)
 }
 
 func TestTSafeReplica_invalid(t *testing.T) {
 	replica := newTSafeReplica()
+	replica.addTSafe(defaultVChannel)
 
 	watcher := newTSafeWatcher()
-	replica.registerTSafeWatcher(defaultVChannel, watcher)
+	err := replica.registerTSafeWatcher(defaultVChannel, watcher)
+	assert.NoError(t, err)
 
 	timestamp := Timestamp(1000)
-	replica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
+	err = replica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
+	assert.NoError(t, err)
 	time.Sleep(20 * time.Millisecond)
-	resT := replica.getTSafe(defaultVChannel)
-	assert.Equal(t, Timestamp(0), resT)
+	resT, err := replica.getTSafe(defaultVChannel)
+	assert.NoError(t, err)
+	assert.Equal(t, timestamp, resT)
 
-	replica.removeTSafe(defaultVChannel)
+	err = replica.removeTSafe(defaultVChannel)
+	assert.NoError(t, err)
 
 	replica.addTSafe(defaultVChannel)
 	replica.addTSafe(defaultVChannel)

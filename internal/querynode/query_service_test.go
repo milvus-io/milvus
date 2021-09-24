@@ -154,7 +154,8 @@ func TestSearch_Search(t *testing.T) {
 	err = loadFields(segment, DIM, N)
 	assert.NoError(t, err)
 
-	node.queryService.addQueryCollection(collectionID)
+	err = node.queryService.addQueryCollection(collectionID)
+	assert.Error(t, err)
 
 	err = sendSearchRequest(node.queryNodeLoopCtx, DIM)
 	assert.NoError(t, err)
@@ -184,7 +185,8 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		node.historical,
 		node.streaming,
 		msFactory)
-	node.queryService.addQueryCollection(collectionID)
+	err = node.queryService.addQueryCollection(collectionID)
+	assert.Error(t, err)
 
 	// load segments
 	err = node.historical.replica.addSegment(segmentID1, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
@@ -227,13 +229,16 @@ func TestQueryService_addQueryCollection(t *testing.T) {
 	qs := newQueryService(ctx, his, str, fac)
 	assert.NotNil(t, qs)
 
-	qs.addQueryCollection(defaultCollectionID)
+	err = qs.addQueryCollection(defaultCollectionID)
+	assert.NoError(t, err)
 	assert.Len(t, qs.queryCollections, 1)
 
-	qs.addQueryCollection(defaultCollectionID)
+	err = qs.addQueryCollection(defaultCollectionID)
+	assert.Error(t, err)
 	assert.Len(t, qs.queryCollections, 1)
 
 	const invalidCollectionID = 10000
-	qs.addQueryCollection(invalidCollectionID)
-	assert.Len(t, qs.queryCollections, 2)
+	err = qs.addQueryCollection(invalidCollectionID)
+	assert.Error(t, err)
+	assert.Len(t, qs.queryCollections, 1)
 }

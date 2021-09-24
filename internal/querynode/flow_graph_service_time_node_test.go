@@ -77,4 +77,18 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 		in := []flowgraph.Msg{msg, msg}
 		node.Operate(in)
 	})
+
+	t.Run("test no tSafe", func(t *testing.T) {
+		node := genServiceTimeNode()
+		err := node.tSafeReplica.removeTSafe(defaultVChannel)
+		assert.NoError(t, err)
+		msg := &serviceTimeMsg{
+			timeRange: TimeRange{
+				timestampMin: 0,
+				timestampMax: 1000,
+			},
+		}
+		in := []flowgraph.Msg{msg, msg}
+		node.Operate(in)
+	})
 }

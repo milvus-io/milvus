@@ -65,7 +65,10 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	} else {
 		id = stNode.collectionID
 	}
-	stNode.tSafeReplica.setTSafe(stNode.vChannel, id, serviceTimeMsg.timeRange.timestampMax)
+	err := stNode.tSafeReplica.setTSafe(stNode.vChannel, id, serviceTimeMsg.timeRange.timestampMax)
+	if err != nil {
+		log.Warn(err.Error())
+	}
 	//log.Debug("update tSafe:",
 	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
 	//	zap.Any("collectionID", stNode.collectionID),
