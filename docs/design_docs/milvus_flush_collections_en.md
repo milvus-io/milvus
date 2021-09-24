@@ -1,5 +1,5 @@
-# Flush Collection 
-`Flush` operation is used to make sure that inserted data will be written into persistent storage. This document will introduce how `Flush` operation works in `Milvus 2.0`. The following figure shows the execution flow of `Flush`.
+# Flush Collection
+The `Flush` operation is used to make sure that inserted data will be written into persistent storage. This document will introduce how the `Flush` operation works in `Milvus 2.0`. The following figure shows the execution flow of `Flush`.
 
 ![flush_collections](./graphs/flush_data_coord.png)
 
@@ -55,25 +55,25 @@ type FlushTask struct {
 
 3. There is a backgroud service in `Proxy`. This service gets `FlushTask` from `DdTaskQueue`, and executes in three phases:
     - `PreExecute`
-    
+
       `FlushTask` does nothing at this phase, and returns directly
-    
+
     - `Execute`
 
-      `Proxy` sends `Flush` request to `DataCoord` via `Grpc`, and waits for the response, the `proto` is defined as follow:
+      `Proxy` sends a `Flush` request to `DataCoord` via `Grpc`, and waits for the response, the `proto` is defined as follows:
     ```proto
     service DataCoord {
       ...
       rpc Flush(FlushRequest) returns (FlushResponse) {}
       ...
     }
-    
+
     message FlushRequest {
       common.MsgBase base = 1;
       int64 dbID = 2;
       int64 collectionID = 4;
     }
-    
+
     message FlushResponse {
       common.Status status = 1;
       int64 dbID = 2;
@@ -82,17 +82,17 @@ type FlushTask struct {
     }
     ```
     - `PostExecute`
-    
+
       `FlushTask` does nothing at this phase, and returns directly
-    
-4. After receiving `Flush` request from `Proxy`, `DataCoord` would call `SealAllSegments` to seal all the growing segments belonging to this `Collection`, and do not allocate new `ID`s for these segments any more. After that, `DataCoord` would send response to `Proxy`, which contain all the sealed segment `ID`s.
+
+4. After receiving a `Flush` request from `Proxy`, `DataCoord` would call `SealAllSegments` to seal all the growing segments belonging to this `Collection`, and will not allocate new `ID`s for these segments any more. After that, `DataCoord` would send a response to `Proxy`, which contains all the sealed segment `ID`s.
 
 5. In `Milvus 2.0`,  `Flush` is an asynchronous operation. So when `SDK` receives the response of `Flush`, it only means that the `DataCoord` has sealed these segments. There are 2 problems that we have to solve.
     - The sealed segments might still in memory, and have not been written into persistent storage yet.
     - `DataCoord` would no longer allocate new `ID`s for these sealed segments, but how to make sure all the allocated `ID`s have been consumed by `DataNode`.
 
 
-6. For the first problem, `SDK` should send `GetSegmentInfo` request to `DataCoord` periodically, until all sealed segments are in state of `Flushed`. The `proto` is defined as following.
+6. For the first problem, `SDK` should send `GetSegmentInfo` request to `DataCoord` periodically, until all sealed segments are in state of `Flushed`. The `proto` is defined as follows.
 ```proto
 service DataCoord {
   ...
@@ -134,7 +134,7 @@ enum SegmentState {
 
 ```
 
-7. For the second problem, `DataNode` would report a timestamp to `DataCoord` every time it consumes a package from `MsgStream`, the `proto` is define as follow.
+7. For the second problem, `DataNode` would report a timestamp to `DataCoord` every time it consumes a package from `MsgStream`, the `proto` is defined as follows.
 
  ```proto
 message DataNodeTtMsg {
@@ -145,8 +145,8 @@ message DataNodeTtMsg {
  ```
 
 8. There is a backgroud service, `startDataNodeTsLoop`, in `DataCoord` to process the message of `DataNodeTtMsg`.
-    - Firstly, `DataCoord` would extract `channel_name` from `DataNodeTtMsg`, and filter out all sealed segments that attached on this `channel_name`
-    - Compare the timestamp when the segment enters into state of `Sealed` with the `DataNodeTtMsg.timestamp`, if `DataNodeTtMsg.timestamp` is greater, which means that all `ID`s belonging to that segment have been consumed by `DataNode`, it's safe to notify `DataNode` to write that segment into persistent storage. The `proto` is defined as follow:
+    - Firstly, `DataCoord` would extract `channel_name` from `DataNodeTtMsg`, and filter out all sealed segments that are attached on this `channel_name`
+    - Compare the timestamp when the segment enters into state of `Sealed` with the `DataNodeTtMsg.timestamp`, if `DataNodeTtMsg.timestamp` is greater, which means that all `ID`s belonging to that segment have been consumed by `DataNode`, it's safe to notify `DataNode` to write that segment into persistent storage. The `proto` is defined as follows:
 ```proto
 service DataNode {
   ...
@@ -161,4 +161,3 @@ message FlushSegmentsRequest {
   repeated int64 segmentIDs = 4;
 }
 ```
-
