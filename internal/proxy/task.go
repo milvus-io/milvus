@@ -2348,21 +2348,15 @@ func (qt *queryTask) Execute(ctx context.Context) error {
 	}
 	msgPack.Msgs[0] = tsMsg
 
-	collectionName := qt.query.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	stream, err := qt.chMgr.getDQLStream(qt.CollectionID)
 	if err != nil {
-		return err
-	}
-
-	stream, err := qt.chMgr.getDQLStream(collID)
-	if err != nil {
-		err = qt.chMgr.createDQLStream(collID)
+		err = qt.chMgr.createDQLStream(qt.CollectionID)
 		if err != nil {
 			qt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			qt.result.Status.Reason = err.Error()
 			return err
 		}
-		stream, err = qt.chMgr.getDQLStream(collID)
+		stream, err = qt.chMgr.getDQLStream(qt.CollectionID)
 		if err != nil {
 			qt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			qt.result.Status.Reason = err.Error()
