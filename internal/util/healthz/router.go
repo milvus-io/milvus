@@ -11,4 +11,4 @@
 
 package healthz
 
-const HealthzRouterPath = "healthz"
+const HealthzRouterPath = "/healthz"
