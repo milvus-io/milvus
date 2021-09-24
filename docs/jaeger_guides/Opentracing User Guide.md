@@ -71,7 +71,7 @@ The detailed information of search result.
 1. The upper left corner identifies the service name: tracing, Root span name: Insert grpc received and The first half of the Trace ID 46874e2.
 2. The duration of the entire request is shown in the upper right corner.
 3. 10675 Span means that there are 10675 operations, see the number of operations for each service in the middle. And the trace time is shown in the right.
-4. The user can select multiple trace with the box in the upper left, and then compare with them to find something different. For example, different insert request may take a different time. At this time, you can select two for comparison, and the comparison can be very easy to know which trace went wrong
+4. The user can select multiple traces with the box in the upper left, and then compare with them to find something different. For example, different insert request may take a different time. At this time, you can select two for comparison, and the comparison can be very easy to know which trace went wrong
 
 
 
