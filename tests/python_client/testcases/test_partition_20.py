@@ -161,9 +161,9 @@ class TestPartitionParams(TestcaseBase):
         assert collection.name == partition_w.name
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_partition_maxlength_name(self):
+    def test_partition_max_length_name(self):
         """
-        target: verify create a partition with maxlength(256) name
+        target: verify create a partition with max length(256) name
         method: 1. create a partition with max length names
         expected: 1. raise exception
         """
