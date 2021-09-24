@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"math"
 	"math/rand"
-	"reflect"
 	"testing"
 	"time"
 
@@ -52,7 +50,7 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 		return nil, err
 	}
 
-	queryCollection := newQueryCollection(ctx, cancel,
+	queryCollection, err := newQueryCollection(ctx, cancel,
 		defaultCollectionID,
 		historical,
 		streaming,
@@ -60,22 +58,15 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 		localCM,
 		remoteCM,
 		false)
-	if queryCollection == nil {
-		return nil, errors.New("nil simple query collection")
-	}
-	return queryCollection, nil
+	return queryCollection, err
 }
 
 func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) {
 	// register
-	queryCollection.watcherSelectCase = make([]reflect.SelectCase, 0)
 	queryCollection.tSafeWatchers[defaultVChannel] = newTSafeWatcher()
 	queryCollection.streaming.tSafeReplica.addTSafe(defaultVChannel)
 	queryCollection.streaming.tSafeReplica.registerTSafeWatcher(defaultVChannel, queryCollection.tSafeWatchers[defaultVChannel])
-	queryCollection.watcherSelectCase = append(queryCollection.watcherSelectCase, reflect.SelectCase{
-		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(queryCollection.tSafeWatchers[defaultVChannel].watcherChan()),
-	})
+	queryCollection.addTSafeWatcher(defaultVChannel)
 
 	queryCollection.streaming.tSafeReplica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
 }
@@ -125,7 +116,8 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	queryCollection := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil, false)
+	queryCollection, err := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil, false)
+	assert.NoError(t, err)
 
 	producerChannels := []string{"testResultChannel"}
 	queryCollection.queryResultMsgStream.AsProducer(producerChannels)
@@ -484,6 +476,15 @@ func TestQueryCollection_serviceableTime(t *testing.T) {
 	assert.Equal(t, st+gracefulTime, resST)
 }
 
+func TestQueryCollection_addTSafeWatcher(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	queryCollection.addTSafeWatcher(defaultVChannel)
+}
+
 func TestQueryCollection_waitNewTSafe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -493,7 +494,8 @@ func TestQueryCollection_waitNewTSafe(t *testing.T) {
 	timestamp := Timestamp(1000)
 	updateTSafe(queryCollection, timestamp)
 
-	resTimestamp := queryCollection.waitNewTSafe()
+	resTimestamp, err := queryCollection.waitNewTSafe()
+	assert.NoError(t, err)
 	assert.Equal(t, timestamp, resTimestamp)
 }
 

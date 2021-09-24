@@ -14,9 +14,9 @@ package querynode
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"sync"
 	"unsafe"
 
@@ -50,15 +50,16 @@ type queryCollection struct {
 	cancel     context.CancelFunc
 
 	collectionID UniqueID
-	collection   *Collection
 	historical   *historical
 	streaming    *streaming
 
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []queryMsg
 
-	tSafeWatchers     map[Channel]*tSafeWatcher
-	watcherSelectCase []reflect.SelectCase
+	tSafeWatchersMu sync.Mutex // guards tSafeWatchers
+	tSafeWatchers   map[Channel]*tSafeWatcher
+	tSafeUpdate     bool
+	watcherCond     *sync.Cond
 
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
 	serviceableTime      Timestamp
@@ -83,25 +84,26 @@ func newQueryCollection(releaseCtx context.Context,
 	localChunkManager storage.ChunkManager,
 	remoteChunkManager storage.ChunkManager,
 	localCacheEnabled bool,
-) *queryCollection {
+) (*queryCollection, error) {
 
 	unsolvedMsg := make([]queryMsg, 0)
 
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
 	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
 
-	collection, _ := streaming.replica.getCollectionByID(collectionID)
+	condMu := sync.Mutex{}
 
 	qc := &queryCollection{
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
 		collectionID: collectionID,
-		collection:   collection,
 		historical:   historical,
 		streaming:    streaming,
 
 		tSafeWatchers: make(map[Channel]*tSafeWatcher),
+		tSafeUpdate:   false,
+		watcherCond:   sync.NewCond(&condMu),
 
 		unsolvedMsg: unsolvedMsg,
 
@@ -113,8 +115,11 @@ func newQueryCollection(releaseCtx context.Context,
 		localCacheEnabled:  localCacheEnabled,
 	}
 
-	qc.register()
-	return qc
+	err := qc.registerCollectionTSafe()
+	if err != nil {
+		return nil, err
+	}
+	return qc, nil
 }
 
 func (q *queryCollection) start() {
@@ -133,26 +138,61 @@ func (q *queryCollection) close() {
 	}
 }
 
-func (q *queryCollection) register() {
+// registerCollectionTSafe registers tSafe watcher if vChannels exists
+func (q *queryCollection) registerCollectionTSafe() error {
 	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
-		log.Warn(err.Error())
-		return
+		return err
 	}
 
-	//TODO:: can't add new vChannel to selectCase
-	q.watcherSelectCase = make([]reflect.SelectCase, 0)
 	log.Debug("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("dml channels", collection.getVChannels()),
 	)
 	for _, channel := range collection.getVChannels() {
-		q.tSafeWatchers[channel] = newTSafeWatcher()
-		q.streaming.tSafeReplica.registerTSafeWatcher(channel, q.tSafeWatchers[channel])
-		q.watcherSelectCase = append(q.watcherSelectCase, reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(q.tSafeWatchers[channel].watcherChan()),
-		})
+		err = q.addTSafeWatcher(channel)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (q *queryCollection) addTSafeWatcher(vChannel Channel) error {
+	q.tSafeWatchersMu.Lock()
+	defer q.tSafeWatchersMu.Unlock()
+	if _, ok := q.tSafeWatchers[vChannel]; ok {
+		err := errors.New(fmt.Sprintln("tSafeWatcher of queryCollection has been exists, ",
+			"collectionID = ", q.collectionID, ", ",
+			"channel = ", vChannel))
+		return err
+	}
+	q.tSafeWatchers[vChannel] = newTSafeWatcher()
+	err := q.streaming.tSafeReplica.registerTSafeWatcher(vChannel, q.tSafeWatchers[vChannel])
+	if err != nil {
+		return err
+	}
+	log.Debug("add tSafeWatcher to queryCollection",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", vChannel),
+	)
+	go q.startWatcher(q.tSafeWatchers[vChannel].watcherChan())
+	return nil
+}
+
+// TODO: add stopWatcher(), add close() to tSafeWatcher
+func (q *queryCollection) startWatcher(channel <-chan bool) {
+	for {
+		select {
+		case <-q.releaseCtx.Done():
+			return
+		case <-channel:
+			// TODO: check if channel is closed
+			q.watcherCond.L.Lock()
+			q.tSafeUpdate = true
+			q.watcherCond.Broadcast()
+			q.watcherCond.L.Unlock()
+		}
 	}
 }
 
@@ -171,22 +211,24 @@ func (q *queryCollection) popAllUnsolvedMsg() []queryMsg {
 	return ret
 }
 
-func (q *queryCollection) waitNewTSafe() Timestamp {
-	// block until any vChannel updating tSafe
-	_, _, recvOK := reflect.Select(q.watcherSelectCase)
-	if !recvOK {
-		//log.Warn("tSafe has been closed", zap.Any("collectionID", q.collectionID))
-		return Timestamp(math.MaxInt64)
+func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
+	q.watcherCond.L.Lock()
+	for !q.tSafeUpdate {
+		q.watcherCond.Wait()
 	}
+	q.watcherCond.L.Unlock()
 	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
 	t := Timestamp(math.MaxInt64)
 	for channel := range q.tSafeWatchers {
-		ts := q.streaming.tSafeReplica.getTSafe(channel)
+		ts, err := q.streaming.tSafeReplica.getTSafe(channel)
+		if err != nil {
+			return 0, err
+		}
 		if ts <= t {
 			t = ts
 		}
 	}
-	return t
+	return t, nil
 }
 
 func (q *queryCollection) getServiceableTime() Timestamp {
@@ -397,7 +439,11 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			return
 		default:
 			//time.Sleep(10 * time.Millisecond)
-			serviceTime := q.waitNewTSafe()
+			serviceTime, err := q.waitNewTSafe()
+			if err != nil {
+				log.Error(err.Error())
+				return
+			}
 			//st, _ := tsoutil.ParseTS(serviceTime)
 			//log.Debug("get tSafe from flow graph",
 			//	zap.Int64("collectionID", q.collectionID),
@@ -769,7 +815,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 	searchTimestamp := searchMsg.BeginTs()
 	travelTimestamp := searchMsg.TravelTimestamp
 
-	schema, err := typeutil.CreateSchemaHelper(q.collection.schema)
+	collection, err := q.streaming.replica.getCollectionByID(searchMsg.CollectionID)
+	if err != nil {
+		return err
+	}
+
+	schema, err := typeutil.CreateSchemaHelper(collection.schema)
 	if err != nil {
 		return err
 	}
@@ -777,13 +828,13 @@ func (q *queryCollection) search(msg queryMsg) error {
 	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
-		plan, err = createSearchPlanByExpr(q.collection, expr)
+		plan, err = createSearchPlanByExpr(collection, expr)
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
-		plan, err = createSearchPlan(q.collection, dsl)
+		plan, err = createSearchPlan(collection, dsl)
 		if err != nil {
 			return err
 		}
@@ -821,13 +872,13 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if len(searchMsg.PartitionIDs) > 0 {
 		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(q.collection.id)
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collection.id)
 	}
 
 	searchResults := make([]*SearchResult, 0)
 
 	// historical search
-	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, q.collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
+	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err1 != nil {
 		log.Warn(err1.Error())
 		return err1
@@ -837,9 +888,9 @@ func (q *queryCollection) search(msg queryMsg) error {
 
 	// streaming search
 	var err2 error
-	for _, channel := range q.collection.getVChannels() {
+	for _, channel := range collection.getVChannels() {
 		var strSearchResults []*SearchResult
-		strSearchResults, err2 = q.streaming.search(searchRequests, q.collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+		strSearchResults, err2 = q.streaming.search(searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
 		if err2 != nil {
 			log.Warn(err2.Error())
 			return err2
@@ -870,14 +921,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 					SlicedOffset:             1,
 					SlicedNumCount:           1,
 					SealedSegmentIDsSearched: sealedSegmentSearched,
-					ChannelIDsSearched:       q.collection.getVChannels(),
+					ChannelIDsSearched:       collection.getVChannels(),
 					GlobalSealedSegmentIDs:   globalSealedSegments,
 				},
 			}
 			log.Debug("QueryNode Empty SearchResultMsg",
-				zap.Any("collectionID", q.collection.id),
+				zap.Any("collectionID", collection.id),
 				zap.Any("msgID", searchMsg.ID()),
-				zap.Any("vChannels", q.collection.getVChannels()),
+				zap.Any("vChannels", collection.getVChannels()),
 				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 			)
 			err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
@@ -962,14 +1013,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 				SlicedOffset:             1,
 				SlicedNumCount:           1,
 				SealedSegmentIDsSearched: sealedSegmentSearched,
-				ChannelIDsSearched:       q.collection.getVChannels(),
+				ChannelIDsSearched:       collection.getVChannels(),
 				GlobalSealedSegmentIDs:   globalSealedSegments,
 			},
 		}
 		log.Debug("QueryNode SearchResultMsg",
-			zap.Any("collectionID", q.collection.id),
+			zap.Any("collectionID", collection.id),
 			zap.Any("msgID", searchMsg.ID()),
-			zap.Any("vChannels", q.collection.getVChannels()),
+			zap.Any("vChannels", collection.getVChannels()),
 			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 		)
 

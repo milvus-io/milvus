@@ -17,13 +17,14 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestImpl_GetComponentStates(t *testing.T) {
@@ -104,6 +105,26 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 		}
 
 		node.queryService = nil
+		status, err := node.AddQueryChannel(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
+	t.Run("test add query collection failed", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.streaming.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		req := &queryPb.AddQueryChannelRequest{
+			Base:             genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			NodeID:           0,
+			CollectionID:     defaultCollectionID,
+			RequestChannelID: genQueryChannel(),
+			ResultChannelID:  genQueryResultChannel(),
+		}
+
 		status, err := node.AddQueryChannel(ctx, req)
 		assert.Error(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
