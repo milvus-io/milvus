@@ -1,18 +1,18 @@
 
 
-## 8. Index Service
+## 3. Index Service
 
 
 
-#### 8.1 Overview
+#### 3.1 Overview
 
 <img src="./figs/index_coord.png" width=700>
 
-#### 8.2 Index Service Interface
+#### 3.2 Index Service Interface
 
 ```go
 type IndexCoord interface {
-  Component
+	Component
 	TimeTickProvider
 
 	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
@@ -150,7 +150,7 @@ type NotifyBuildIndexRequest struct {
 
 
 
-#### 8.3 Index Node Interface
+#### 3.3 Index Node Interface
 
 ```go
 type IndexNode interface {
