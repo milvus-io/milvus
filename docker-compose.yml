@@ -39,6 +39,10 @@ services:
   etcd:
     image: quay.io/coreos/etcd:v3.5.0
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
 
   pulsar:
     image: apachepulsar/pulsar:2.7.3
