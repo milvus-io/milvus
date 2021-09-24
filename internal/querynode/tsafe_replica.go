@@ -36,6 +36,7 @@ type tSafeRef struct {
 	ref    int
 }
 
+// tSafeReplica implements `TSafeReplicaInterface` interface.
 type tSafeReplica struct {
 	mu     sync.Mutex            // guards tSafes
 	tSafes map[Channel]*tSafeRef // map[vChannel]tSafeRef
