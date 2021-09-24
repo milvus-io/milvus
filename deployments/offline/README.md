@@ -2,7 +2,7 @@
 
 ## Manually downloading Docker images
 
-Your Milvus installation may fail when images are not properly loaded from public Docker registries. To pull all images and save them into a directory that can be moved to the target host and loaded manually, perform the following procedure:
+Your Milvus installation may fail when images are not properly loaded from public Docker registries. To pull all images and save them into a directory that can be moved to the target host and loaded manually, perform the following procedures:
 
 ### Step 1: Save Milvus manifest and Docker images
 
