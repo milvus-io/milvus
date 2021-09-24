@@ -28,7 +28,7 @@ proxy:
 
   maxNameLength: 255
   maxFieldNum: 64
-  maxDimension: 32768
-  maxShardNum: 256 # max shard number of a collection
+  maxDimension: 32768 # Maximum dimension of vector
+  maxShardNum: 256 # Maximum number of shards in a collection
 
   maxTaskNum: 1024 # max task number of proxy task queue
