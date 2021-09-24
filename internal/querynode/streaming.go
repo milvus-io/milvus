@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
+// streaming is in charge of streaming data in query node
 type streaming struct {
 	ctx context.Context
 
