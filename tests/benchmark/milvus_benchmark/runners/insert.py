@@ -48,6 +48,7 @@ class InsertRunner(BaseRunner):
             flush = False
         self.init_metric(self.name, collection_info, index_info, None)
         case_metric = copy.deepcopy(self.metric)
+        # set metric type as case
         case_metric.set_case_metric_type()
         case_metrics = list()
         case_params = list()
