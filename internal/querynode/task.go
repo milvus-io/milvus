@@ -236,6 +236,18 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		log.Debug("query node add collection flow graphs", zap.Any("channels", vChannels))
 	}
 
+	// add tSafe watcher if queryCollection exists
+	qc, err := w.node.queryService.getQueryCollection(collectionID)
+	if err == nil {
+		for _, channel := range vChannels {
+			err = qc.addTSafeWatcher(channel)
+			if err != nil {
+				// tSafe have been exist, not error
+				log.Warn(err.Error())
+			}
+		}
+	}
+
 	// channels as consumer
 	var nodeFGs map[Channel]*queryNodeFlowGraph
 	if loadPartition {
@@ -467,7 +479,11 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 			zap.Any("collectionID", r.req.CollectionID),
 			zap.Any("vChannel", channel),
 		)
-		r.node.streaming.tSafeReplica.removeTSafe(channel)
+		// no tSafe in tSafeReplica, don't return error
+		err = r.node.streaming.tSafeReplica.removeTSafe(channel)
+		if err != nil {
+			log.Warn(err.Error())
+		}
 	}
 
 	// remove excludedSegments record
@@ -561,7 +577,11 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 					zap.Any("partitionID", id),
 					zap.Any("vChannel", channel),
 				)
-				r.node.streaming.tSafeReplica.removeTSafe(channel)
+				// no tSafe in tSafeReplica, don't return error
+				err = r.node.streaming.tSafeReplica.removeTSafe(channel)
+				if err != nil {
+					log.Warn(err.Error())
+				}
 			}
 		}
 
