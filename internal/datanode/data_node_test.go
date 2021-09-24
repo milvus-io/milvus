@@ -386,7 +386,7 @@ func TestDataNode(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(node.vchan2FlushCh))
 		require.Equal(t, 1, len(node.vchan2SyncService))
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 
 		node.ReleaseDataSyncService(dmChannelName)
 		assert.Equal(t, 0, len(node.vchan2FlushCh))

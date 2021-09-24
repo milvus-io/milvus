@@ -170,7 +170,7 @@ func TestIndexNode(t *testing.T) {
 		err = proto.UnmarshalText(value, &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Finished {
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 			value, err = in.etcdKV.Load(metaPath1)
 			assert.Nil(t, err)
 			err = proto.UnmarshalText(value, &indexMetaTmp)
@@ -280,7 +280,7 @@ func TestIndexNode(t *testing.T) {
 		err = proto.UnmarshalText(value, &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Finished {
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 			value, err = in.etcdKV.Load(metaPath2)
 			assert.Nil(t, err)
 			err = proto.UnmarshalText(value, &indexMetaTmp)
@@ -574,7 +574,7 @@ func TestCreateIndexFailed(t *testing.T) {
 		err = proto.UnmarshalText(value, &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Failed {
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 			value, err = in.etcdKV.Load(metaPath1)
 			assert.Nil(t, err)
 			err = proto.UnmarshalText(value, &indexMetaTmp)
@@ -692,7 +692,7 @@ func TestCreateIndexFailed(t *testing.T) {
 		err = proto.UnmarshalText(value, &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Failed {
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 			value, err = in.etcdKV.Load(metaPath2)
 			assert.Nil(t, err)
 			err = proto.UnmarshalText(value, &indexMetaTmp)

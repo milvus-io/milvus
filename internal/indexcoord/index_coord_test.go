@@ -112,7 +112,7 @@ func TestIndexCoord(t *testing.T) {
 				resp.States[0].State == commonpb.IndexState_Failed {
 				break
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(100 * time.Millisecond)
 		}
 	})
 
@@ -182,7 +182,7 @@ func TestIndexCoord(t *testing.T) {
 		indexMeta := ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
 		for indexMeta != nil {
 			indexMeta = ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 		}
 	})
 
