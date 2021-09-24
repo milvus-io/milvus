@@ -174,6 +174,7 @@ class AccAccuracyRunner(AccuracyRunner):
                                     "params": search_param}
                                 # TODO: only update search_info
                                 case_metric = copy.deepcopy(self.metric)
+                                # set metric type as case
                                 case_metric.set_case_metric_type()
                                 case_metric.index = index_info
                                 case_metric.search = {
