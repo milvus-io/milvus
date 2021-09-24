@@ -11,8 +11,8 @@
 
 rootcoord:
   dmlChannelNum: 256
-  maxPartitionNum: 4096
+  maxPartitionNum: 4096 # Maximum number of partitions in a collection. 
   minSegmentSizeToEnableIndex: 1024
   timeout: 3600 # time out, 5 seconds
-  timeTickInterval: 200 # ms
+  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
 
