@@ -1,3 +1,4 @@
+--extra-index-url https://test.pypi.org/simple/
 docker==5.0.0
 grpcio==1.37.1
 grpcio-tools==1.37.1
