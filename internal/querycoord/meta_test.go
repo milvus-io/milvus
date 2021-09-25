@@ -304,23 +304,26 @@ func TestReloadMetaFromKV(t *testing.T) {
 	collectionInfo := &querypb.CollectionInfo{
 		CollectionID: defaultCollectionID,
 	}
-	collectionBlobs := proto.MarshalTextString(collectionInfo)
+	collectionBlobs, err := proto.Marshal(collectionInfo)
+	assert.Nil(t, err)
 	collectionKey := fmt.Sprintf("%s/%d", collectionMetaPrefix, defaultCollectionID)
-	kvs[collectionKey] = collectionBlobs
+	kvs[collectionKey] = string(collectionBlobs)
 
 	segmentInfo := &querypb.SegmentInfo{
 		SegmentID: defaultSegmentID,
 	}
-	segmentBlobs := proto.MarshalTextString(segmentInfo)
+	segmentBlobs, err := proto.Marshal(segmentInfo)
+	assert.Nil(t, err)
 	segmentKey := fmt.Sprintf("%s/%d", segmentMetaPrefix, defaultSegmentID)
-	kvs[segmentKey] = segmentBlobs
+	kvs[segmentKey] = string(segmentBlobs)
 
 	queryChannelInfo := &querypb.QueryChannelInfo{
 		CollectionID: defaultCollectionID,
 	}
-	queryChannelBlobs := proto.MarshalTextString(queryChannelInfo)
+	queryChannelBlobs, err := proto.Marshal(queryChannelInfo)
+	assert.Nil(t, err)
 	queryChannelKey := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, defaultCollectionID)
-	kvs[queryChannelKey] = queryChannelBlobs
+	kvs[queryChannelKey] = string(queryChannelBlobs)
 
 	err = kv.MultiSave(kvs)
 	assert.Nil(t, err)

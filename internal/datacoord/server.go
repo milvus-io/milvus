@@ -231,15 +231,8 @@ func (s *Server) Start() error {
 	}
 
 	s.startServerLoop()
-
-	helper := NewMoveBinlogPathHelper(s.kvClient, s.meta)
-	if err := helper.Execute(); err != nil {
-		return err
-	}
-
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()
-
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
 	log.Debug("dataCoordinator startup success")
 

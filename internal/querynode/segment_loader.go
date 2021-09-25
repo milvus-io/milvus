@@ -123,7 +123,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 				return err
 			}
 			segmentInfo := &querypb.SegmentInfo{}
-			err = proto.UnmarshalText(value, segmentInfo)
+			err = proto.Unmarshal([]byte(value), segmentInfo)
 			if err != nil {
 				deleteSegment(segment)
 				log.Warn("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
@@ -132,7 +132,14 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			}
 			segmentInfo.SegmentState = querypb.SegmentState_sealed
 			newKey := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
-			err = loader.etcdKV.Save(newKey, proto.MarshalTextString(segmentInfo))
+			newValue, err := proto.Marshal(segmentInfo)
+			if err != nil {
+				deleteSegment(segment)
+				log.Warn("error when marshal segment info", zap.Error(err))
+				segmentGC()
+				return err
+			}
+			err = loader.etcdKV.Save(newKey, string(newValue))
 			if err != nil {
 				deleteSegment(segment)
 				log.Warn("error when update segment info to etcd", zap.Any("error", err.Error()))

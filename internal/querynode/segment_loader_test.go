@@ -102,8 +102,9 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 
 		key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, defaultSegmentID)
 		segmentInfo := &querypb.SegmentInfo{}
-		value := proto.MarshalTextString(segmentInfo)
-		err = kv.Save(key, value)
+		value, err := proto.Marshal(segmentInfo)
+		assert.Nil(t, err)
+		err = kv.Save(key, string(value))
 		assert.NoError(t, err)
 
 		err = loader.loadSegment(req, true)
@@ -139,8 +140,9 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 
 		key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, defaultSegmentID)
 		segmentInfo := &querypb.SegmentInfo{}
-		value := proto.MarshalTextString(segmentInfo)
-		err = kv.Save(key, value)
+		value, err := proto.Marshal(segmentInfo)
+		assert.Nil(t, err)
+		err = kv.Save(key, string(value))
 		assert.NoError(t, err)
 
 		err = loader.loadSegment(req, true)

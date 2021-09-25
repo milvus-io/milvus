@@ -73,7 +73,8 @@ func Test_MockKV(t *testing.T) {
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
-	value, _ := proto.Marshal(&pb.TenantMeta{})
+	value, err := proto.Marshal(&pb.TenantMeta{})
+	assert.Nil(t, err)
 	prefix[TenantMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
@@ -83,7 +84,8 @@ func Test_MockKV(t *testing.T) {
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
-	value, _ = proto.Marshal(&pb.ProxyMeta{})
+	value, err = proto.Marshal(&pb.ProxyMeta{})
+	assert.Nil(t, err)
 	prefix[ProxyMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
@@ -93,7 +95,8 @@ func Test_MockKV(t *testing.T) {
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
-	value, _ = proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
+	value, err = proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
+	assert.Nil(t, err)
 	prefix[CollectionMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
@@ -103,7 +106,8 @@ func Test_MockKV(t *testing.T) {
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
-	value, _ = proto.Marshal(&pb.SegmentIndexInfo{})
+	value, err = proto.Marshal(&pb.SegmentIndexInfo{})
+	assert.Nil(t, err)
 	prefix[SegmentIndexMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
@@ -118,7 +122,8 @@ func Test_MockKV(t *testing.T) {
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
-	value, _ = proto.Marshal(&pb.IndexInfo{})
+	value, err = proto.Marshal(&pb.IndexInfo{})
+	assert.Nil(t, err)
 	prefix[IndexMetaPrefix] = []string{string(value)}
 	m1, err := NewMetaTable(k1)
 	assert.NotNil(t, err)

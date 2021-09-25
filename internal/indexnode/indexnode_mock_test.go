@@ -161,8 +161,9 @@ func TestIndexNodeMockFiled(t *testing.T) {
 			Version:      0,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err := inm.etcdKV.Save(key, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = inm.etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
 		resp, err := inm.CreateIndex(ctx, req)
 		assert.Nil(t, err)

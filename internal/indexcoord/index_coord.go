@@ -704,7 +704,7 @@ func (i *IndexCoord) watchMetaLoop() {
 			for _, event := range resp.Events {
 				eventRevision := event.Kv.Version
 				indexMeta := &indexpb.IndexMeta{}
-				err := proto.UnmarshalText(string(event.Kv.Value), indexMeta)
+				err := proto.Unmarshal(event.Kv.Value, indexMeta)
 				indexBuildID := indexMeta.IndexBuildID
 				log.Debug("IndexCoord watchMetaLoop", zap.Any("event.Key", event.Kv.Key),
 					zap.Any("event.V", indexMeta), zap.Int64("IndexBuildID", indexBuildID), zap.Error(err))

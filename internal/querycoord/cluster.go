@@ -174,7 +174,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 		}
 		for _, value := range collectionValues {
 			collectionInfo := &querypb.CollectionInfo{}
-			err = proto.UnmarshalText(value, collectionInfo)
+			err = proto.Unmarshal([]byte(value), collectionInfo)
 			if err != nil {
 				return err
 			}

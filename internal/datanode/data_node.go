@@ -234,7 +234,11 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 			return
 		}
 		watchInfo.State = datapb.ChannelWatchState_Complete
-		v, _ := proto.Marshal(&watchInfo)
+		v, err := proto.Marshal(&watchInfo)
+		if err != nil {
+			log.Warn("fail to Marshal watchInfo", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
+			return
+		}
 		err = node.kvClient.Save(fmt.Sprintf("channel/%d/%s", node.NodeID, watchInfo.Vchan.ChannelName), string(v))
 		if err != nil {
 			log.Warn("fail to change WatchState to complete", zap.String("key", string(evt.Kv.Key)), zap.Error(err))

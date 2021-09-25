@@ -578,10 +578,14 @@ func (qn *queryNode) releaseSegments(ctx context.Context, in *querypb.ReleaseSeg
 //****************************************************//
 
 func saveNodeCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, nodeID int64, kv *etcdkv.EtcdKV) error {
-	infoBytes := proto.MarshalTextString(info)
+	infoBytes, err := proto.Marshal(info)
+	if err != nil {
+		log.Error("QueryNode::saveNodeCollectionInfo ", zap.Error(err))
+		return err
+	}
 
 	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, nodeID, collectionID)
-	return kv.Save(key, infoBytes)
+	return kv.Save(key, string(infoBytes))
 }
 
 func removeNodeCollectionInfo(collectionID UniqueID, nodeID int64, kv *etcdkv.EtcdKV) error {

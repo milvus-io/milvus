@@ -128,8 +128,9 @@ func TestIndexNode(t *testing.T) {
 			Version:      1,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err = in.etcdKV.Save(metaPath1, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath1, string(value))
 		assert.Nil(t, err)
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: indexBuildID1,
@@ -160,20 +161,20 @@ func TestIndexNode(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err = in.etcdKV.Load(metaPath1)
-		assert.Nil(t, err)
+		strValue, err3 := in.etcdKV.Load(metaPath1)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Finished {
 			time.Sleep(100 * time.Millisecond)
-			value, err = in.etcdKV.Load(metaPath1)
+			strValue, err := in.etcdKV.Load(metaPath1)
 			assert.Nil(t, err)
-			err = proto.UnmarshalText(value, &indexMetaTmp)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
@@ -242,8 +243,9 @@ func TestIndexNode(t *testing.T) {
 			Version:      1,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err = in.etcdKV.Save(metaPath2, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath2, string(value))
 		assert.Nil(t, err)
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: indexBuildID2,
@@ -270,20 +272,20 @@ func TestIndexNode(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err = in.etcdKV.Load(metaPath2)
-		assert.Nil(t, err)
+		strValue, err3 := in.etcdKV.Load(metaPath2)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Finished {
 			time.Sleep(100 * time.Millisecond)
-			value, err = in.etcdKV.Load(metaPath2)
+			strValue, err = in.etcdKV.Load(metaPath2)
 			assert.Nil(t, err)
-			err = proto.UnmarshalText(value, &indexMetaTmp)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
@@ -354,8 +356,9 @@ func TestIndexNode(t *testing.T) {
 			MarkDeleted:  true,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err = in.etcdKV.Save(metaPath3, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath3, string(value))
 		assert.Nil(t, err)
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: indexBuildID1,
@@ -386,20 +389,20 @@ func TestIndexNode(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err = in.etcdKV.Load(metaPath3)
-		assert.Nil(t, err)
+		strValue, err3 := in.etcdKV.Load(metaPath3)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Finished {
-			time.Sleep(time.Second)
-			value, err = in.etcdKV.Load(metaPath3)
+			time.Sleep(100 * time.Millisecond)
+			strValue, err := in.etcdKV.Load(metaPath3)
 			assert.Nil(t, err)
-			err = proto.UnmarshalText(value, &indexMetaTmp)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
@@ -528,8 +531,9 @@ func TestCreateIndexFailed(t *testing.T) {
 			Version:      1,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err = in.etcdKV.Save(metaPath1, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath1, string(value))
 		assert.Nil(t, err)
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: indexBuildID1,
@@ -564,20 +568,20 @@ func TestCreateIndexFailed(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err = in.etcdKV.Load(metaPath1)
-		assert.Nil(t, err)
+		strValue, err3 := in.etcdKV.Load(metaPath1)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Failed {
 			time.Sleep(100 * time.Millisecond)
-			value, err = in.etcdKV.Load(metaPath1)
+			strValue, err = in.etcdKV.Load(metaPath1)
 			assert.Nil(t, err)
-			err = proto.UnmarshalText(value, &indexMetaTmp)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
@@ -645,8 +649,9 @@ func TestCreateIndexFailed(t *testing.T) {
 			Version:      1,
 		}
 
-		value2 := proto.MarshalTextString(indexMeta2)
-		err = in.etcdKV.Save(metaPath2, value2)
+		value2, err := proto.Marshal(indexMeta2)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath2, string(value2))
 		assert.Nil(t, err)
 
 		req2 := &indexpb.CreateIndexRequest{
@@ -682,20 +687,20 @@ func TestCreateIndexFailed(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req2)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req2)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err := in.etcdKV.Load(metaPath2)
-		assert.Nil(t, err)
+		strValue, err3 := in.etcdKV.Load(metaPath2)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
 		for indexMetaTmp.State != commonpb.IndexState_Failed {
 			time.Sleep(100 * time.Millisecond)
-			value, err = in.etcdKV.Load(metaPath2)
+			strValue, err = in.etcdKV.Load(metaPath2)
 			assert.Nil(t, err)
-			err = proto.UnmarshalText(value, &indexMetaTmp)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
