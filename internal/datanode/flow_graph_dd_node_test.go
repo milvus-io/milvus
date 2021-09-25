@@ -83,9 +83,9 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		}{
 			{[]Msg{},
 				"Invalid input length == 0"},
-			{[]Msg{&insertMsg{}, &insertMsg{}, &insertMsg{}},
+			{[]Msg{&flowGraphMsg{}, &flowGraphMsg{}, &flowGraphMsg{}},
 				"Invalid input length == 3"},
-			{[]Msg{&insertMsg{}},
+			{[]Msg{&flowGraphMsg{}},
 				"Invalid input length == 1 but input message is not msgStreamMsg"},
 		}
 
@@ -190,7 +190,7 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 
 				// Test
 				rt := ddn.Operate([]Msg{msgStreamMsg})
-				assert.Equal(t, test.expectedRtLen, len(rt[0].(*insertMsg).insertMessages))
+				assert.Equal(t, test.expectedRtLen, len(rt[0].(*flowGraphMsg).insertMessages))
 			})
 		}
 	})

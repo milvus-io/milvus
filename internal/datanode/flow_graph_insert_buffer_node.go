@@ -165,7 +165,6 @@ func (ibNode *insertBufferNode) Close() {
 }
 
 func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
-
 	// log.Debug("InsertBufferNode Operating")
 
 	if len(in) != 1 {
@@ -173,36 +172,36 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		return []Msg{}
 	}
 
-	iMsg, ok := in[0].(*insertMsg)
+	fgMsg, ok := in[0].(*flowGraphMsg)
 	if !ok {
-		log.Error("type assertion failed for insertMsg")
+		log.Error("type assertion failed for flowGraphMsg")
 		ibNode.Close()
 		return []Msg{}
 	}
 
 	var spans []opentracing.Span
-	for _, msg := range iMsg.insertMessages {
+	for _, msg := range fgMsg.insertMessages {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
 
 	// replace pchannel with vchannel
-	startPositions := make([]*internalpb.MsgPosition, 0, len(iMsg.startPositions))
-	for idx := range iMsg.startPositions {
-		pos := proto.Clone(iMsg.startPositions[idx]).(*internalpb.MsgPosition)
+	startPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.startPositions))
+	for idx := range fgMsg.startPositions {
+		pos := proto.Clone(fgMsg.startPositions[idx]).(*internalpb.MsgPosition)
 		pos.ChannelName = ibNode.channelName
 		startPositions = append(startPositions, pos)
 	}
-	endPositions := make([]*internalpb.MsgPosition, 0, len(iMsg.endPositions))
-	for idx := range iMsg.endPositions {
-		pos := proto.Clone(iMsg.endPositions[idx]).(*internalpb.MsgPosition)
+	endPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.endPositions))
+	for idx := range fgMsg.endPositions {
+		pos := proto.Clone(fgMsg.endPositions[idx]).(*internalpb.MsgPosition)
 		pos.ChannelName = ibNode.channelName
 		endPositions = append(endPositions, pos)
 	}
 
 	// Updating segment statistics in replica
-	seg2Upload, err := ibNode.updateSegStatesInReplica(iMsg.insertMessages, startPositions[0], endPositions[0])
+	seg2Upload, err := ibNode.updateSegStatesInReplica(fgMsg.insertMessages, startPositions[0], endPositions[0])
 	if err != nil {
 		log.Warn("update segment states in Replica wrong", zap.Error(err))
 		return []Msg{}
@@ -216,7 +215,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	}
 
 	// insert messages -> buffer
-	for _, msg := range iMsg.insertMessages {
+	for _, msg := range fgMsg.insertMessages {
 		err := ibNode.bufferInsertMsg(msg, endPositions[0])
 		if err != nil {
 			log.Warn("msg to buffer failed", zap.Error(err))
@@ -224,7 +223,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	}
 
 	// TODO GOOSE: log updated segments' states
-	if len(iMsg.insertMessages) > 0 {
+	if len(fgMsg.insertMessages) > 0 {
 		log.Debug("---insert buffer status---")
 		var stopSign int = 0
 		for k := range ibNode.insertBuffer.insertData {
@@ -246,7 +245,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			log.Debug(". Insert Buffer full, auto flushing ",
 				zap.Int64("num of rows", ibNode.insertBuffer.size(segToFlush)))
 
-			collMeta, err := ibNode.getCollMetabySegID(segToFlush, iMsg.timeRange.timestampMax)
+			collMeta, err := ibNode.getCollMetabySegID(segToFlush, fgMsg.timeRange.timestampMax)
 			if err != nil {
 				log.Error("Auto flush failed .. cannot get collection meta ..", zap.Error(err))
 				continue
@@ -320,7 +319,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 				// TODO add error handling
 			}
 
-			collMeta, err := ibNode.getCollMetabySegID(currentSegID, iMsg.timeRange.timestampMax)
+			collMeta, err := ibNode.getCollMetabySegID(currentSegID, fgMsg.timeRange.timestampMax)
 			if err != nil {
 				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
 				clearFn()
@@ -347,7 +346,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	default:
 	}
 
-	if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
+	if err := ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax); err != nil {
 		log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
 	}
 

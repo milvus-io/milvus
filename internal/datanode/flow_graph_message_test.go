@@ -29,9 +29,8 @@ func TestInsertMsg_TimeTick(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			im := &insertMsg{timeRange: TimeRange{timestampMax: test.timeTimestanpMax}}
-
-			assert.Equal(t, test.timeTimestanpMax, im.TimeTick())
+			fgMsg := &flowGraphMsg{timeRange: TimeRange{timestampMax: test.timeTimestanpMax}}
+			assert.Equal(t, test.timeTimestanpMax, fgMsg.TimeTick())
 		})
 	}
 
