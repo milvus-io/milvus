@@ -140,6 +140,8 @@ func TestParseExpr_Naive(t *testing.T) {
 			"FloatField > aa / 2.0",
 			// "%"
 			"FloatField > 1 % aa",
+			"FloatField > 1 % 0",
+			"FloatField > 1 % 0.0",
 			// "**"
 			"FloatField > 1 ** aa",
 			"FloatField > aa ** 2.0",
