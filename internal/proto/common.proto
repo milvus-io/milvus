@@ -161,3 +161,9 @@ enum DslType {
 message MsgHeader {
     common.MsgBase base = 1;
 }
+
+// Don't Modify This. @czs
+message DMLMsgHeader {
+    common.MsgBase base = 1;
+    string shardName = 2;
+}

@@ -71,7 +71,7 @@ func TestDataSyncService_Start(t *testing.T) {
 				CollectionID: collectionID,
 				PartitionID:  defaultPartitionID,
 				SegmentID:    UniqueID(0),
-				ChannelID:    "0",
+				ShardName:    "0",
 				Timestamps:   []Timestamp{Timestamp(i + 1000), Timestamp(i + 1000)},
 				RowIDs:       []int64{int64(i), int64(i)},
 				RowData: []*commonpb.Blob{

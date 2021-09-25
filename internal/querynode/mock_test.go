@@ -705,7 +705,7 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 			CollectionID:   defaultCollectionID,
 			PartitionID:    defaultPartitionID,
 			SegmentID:      defaultSegmentID,
-			ChannelID:      defaultVChannel,
+			ShardName:      defaultVChannel,
 			Timestamps:     genSimpleTimestampFieldData(),
 			RowIDs:         genSimpleRowIDField(),
 			RowData:        rowData,

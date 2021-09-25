@@ -52,7 +52,7 @@ func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 			CollectionName: "Collection",
 			PartitionName:  "Partition",
 			SegmentID:      1,
-			ChannelID:      "0",
+			ShardName:      "0",
 			Timestamps:     []Timestamp{uint64(1)},
 			RowIDs:         []int64{1},
 			RowData:        []*commonpb.Blob{{}},

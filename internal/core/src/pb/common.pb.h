@@ -48,7 +48,7 @@ struct TableStruct_common_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[6]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[7]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -64,6 +64,9 @@ extern AddressDefaultTypeInternal _Address_default_instance_;
 class Blob;
 class BlobDefaultTypeInternal;
 extern BlobDefaultTypeInternal _Blob_default_instance_;
+class DMLMsgHeader;
+class DMLMsgHeaderDefaultTypeInternal;
+extern DMLMsgHeaderDefaultTypeInternal _DMLMsgHeader_default_instance_;
 class KeyValuePair;
 class KeyValuePairDefaultTypeInternal;
 extern KeyValuePairDefaultTypeInternal _KeyValuePair_default_instance_;
@@ -82,6 +85,7 @@ extern StatusDefaultTypeInternal _Status_default_instance_;
 PROTOBUF_NAMESPACE_OPEN
 template<> ::milvus::proto::common::Address* Arena::CreateMaybeMessage<::milvus::proto::common::Address>(Arena*);
 template<> ::milvus::proto::common::Blob* Arena::CreateMaybeMessage<::milvus::proto::common::Blob>(Arena*);
+template<> ::milvus::proto::common::DMLMsgHeader* Arena::CreateMaybeMessage<::milvus::proto::common::DMLMsgHeader>(Arena*);
 template<> ::milvus::proto::common::KeyValuePair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyValuePair>(Arena*);
 template<> ::milvus::proto::common::MsgBase* Arena::CreateMaybeMessage<::milvus::proto::common::MsgBase>(Arena*);
 template<> ::milvus::proto::common::MsgHeader* Arena::CreateMaybeMessage<::milvus::proto::common::MsgHeader>(Arena*);
@@ -1160,6 +1164,153 @@ class MsgHeader :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_common_2eproto;
 };
+// -------------------------------------------------------------------
+
+class DMLMsgHeader :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.DMLMsgHeader) */ {
+ public:
+  DMLMsgHeader();
+  virtual ~DMLMsgHeader();
+
+  DMLMsgHeader(const DMLMsgHeader& from);
+  DMLMsgHeader(DMLMsgHeader&& from) noexcept
+    : DMLMsgHeader() {
+    *this = ::std::move(from);
+  }
+
+  inline DMLMsgHeader& operator=(const DMLMsgHeader& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline DMLMsgHeader& operator=(DMLMsgHeader&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const DMLMsgHeader& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const DMLMsgHeader* internal_default_instance() {
+    return reinterpret_cast<const DMLMsgHeader*>(
+               &_DMLMsgHeader_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    6;
+
+  friend void swap(DMLMsgHeader& a, DMLMsgHeader& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(DMLMsgHeader* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline DMLMsgHeader* New() const final {
+    return CreateMaybeMessage<DMLMsgHeader>(nullptr);
+  }
+
+  DMLMsgHeader* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<DMLMsgHeader>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const DMLMsgHeader& from);
+  void MergeFrom(const DMLMsgHeader& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(DMLMsgHeader* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.common.DMLMsgHeader";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kShardNameFieldNumber = 2,
+    kBaseFieldNumber = 1,
+  };
+  // string shardName = 2;
+  void clear_shardname();
+  const std::string& shardname() const;
+  void set_shardname(const std::string& value);
+  void set_shardname(std::string&& value);
+  void set_shardname(const char* value);
+  void set_shardname(const char* value, size_t size);
+  std::string* mutable_shardname();
+  std::string* release_shardname();
+  void set_allocated_shardname(std::string* shardname);
+
+  // .milvus.proto.common.MsgBase base = 1;
+  bool has_base() const;
+  void clear_base();
+  const ::milvus::proto::common::MsgBase& base() const;
+  ::milvus::proto::common::MsgBase* release_base();
+  ::milvus::proto::common::MsgBase* mutable_base();
+  void set_allocated_base(::milvus::proto::common::MsgBase* base);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.common.DMLMsgHeader)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr shardname_;
+  ::milvus::proto::common::MsgBase* base_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_common_2eproto;
+};
 // ===================================================================
 
 
@@ -1581,9 +1732,117 @@ inline void MsgHeader::set_allocated_base(::milvus::proto::common::MsgBase* base
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.MsgHeader.base)
 }
 
+// -------------------------------------------------------------------
+
+// DMLMsgHeader
+
+// .milvus.proto.common.MsgBase base = 1;
+inline bool DMLMsgHeader::has_base() const {
+  return this != internal_default_instance() && base_ != nullptr;
+}
+inline void DMLMsgHeader::clear_base() {
+  if (GetArenaNoVirtual() == nullptr && base_ != nullptr) {
+    delete base_;
+  }
+  base_ = nullptr;
+}
+inline const ::milvus::proto::common::MsgBase& DMLMsgHeader::base() const {
+  const ::milvus::proto::common::MsgBase* p = base_;
+  // @@protoc_insertion_point(field_get:milvus.proto.common.DMLMsgHeader.base)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::MsgBase*>(
+      &::milvus::proto::common::_MsgBase_default_instance_);
+}
+inline ::milvus::proto::common::MsgBase* DMLMsgHeader::release_base() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.DMLMsgHeader.base)
+  
+  ::milvus::proto::common::MsgBase* temp = base_;
+  base_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::MsgBase* DMLMsgHeader::mutable_base() {
+  
+  if (base_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::MsgBase>(GetArenaNoVirtual());
+    base_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.DMLMsgHeader.base)
+  return base_;
+}
+inline void DMLMsgHeader::set_allocated_base(::milvus::proto::common::MsgBase* base) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete base_;
+  }
+  if (base) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      base = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, base, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  base_ = base;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.DMLMsgHeader.base)
+}
+
+// string shardName = 2;
+inline void DMLMsgHeader::clear_shardname() {
+  shardname_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& DMLMsgHeader::shardname() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.DMLMsgHeader.shardName)
+  return shardname_.GetNoArena();
+}
+inline void DMLMsgHeader::set_shardname(const std::string& value) {
+  
+  shardname_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.DMLMsgHeader.shardName)
+}
+inline void DMLMsgHeader::set_shardname(std::string&& value) {
+  
+  shardname_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.DMLMsgHeader.shardName)
+}
+inline void DMLMsgHeader::set_shardname(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  shardname_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.DMLMsgHeader.shardName)
+}
+inline void DMLMsgHeader::set_shardname(const char* value, size_t size) {
+  
+  shardname_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.DMLMsgHeader.shardName)
+}
+inline std::string* DMLMsgHeader::mutable_shardname() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.DMLMsgHeader.shardName)
+  return shardname_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* DMLMsgHeader::release_shardname() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.DMLMsgHeader.shardName)
+  
+  return shardname_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void DMLMsgHeader::set_allocated_shardname(std::string* shardname) {
+  if (shardname != nullptr) {
+    
+  } else {
+    
+  }
+  shardname_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), shardname);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.DMLMsgHeader.shardName)
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
