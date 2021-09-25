@@ -24,6 +24,7 @@ type FieldSchema struct {
 	DataType     DataType
 	TypeParams   []*commonpb.KeyValuePair
 	IndexParams  []*commonpb.KeyValuePair
+    AutoID       bool
 }
 ```
 
@@ -58,13 +59,13 @@ enum DataType {
 
 # Intro to Index
 
-For more detailed information about indexes, please refer to [Milvus documentation index chapter.](https://milvus.io/docs/v0.11.0/index.md)
+For more detailed information about indexes, please refer to [Milvus documentation index chapter.](https://milvus.io/docs/v2.0.0/index.md)
 
 To learn how to choose an appropriate index for your application scenarios, please read [How to Select an Index in Milvus](https://medium.com/@milvusio/how-to-choose-an-index-in-milvus-4f3d15259212).
 
-To learn how to choose an appropriate index for a metric, see [Distance Metrics](https://www.milvus.io/docs/v0.11.0/metric.md).
+To learn how to choose an appropriate index for a metric, see [Distance Metrics](https://www.milvus.io/docs/v2.0.0/metric.md).
 
-Different index types use different index params in construction and query. All index params are represented by the structure of map. This doc shows the map code in python.
+Different index type uses different index params in construction and query. All index params are represented by the structure of map. This doc shows the map code in python.
 
 
 
@@ -83,7 +84,7 @@ Different index types use different index params in construction and query. All 
 
 ## IVF_FLAT
 
-**IVF** (*Inverted File*) is an index type based on quantization. It divides the points in space into `nlist` units by clustering method. During searching vectors, it compares the distances between the target vector and the center of all the units, and then select the `nprobe` nearest unit. Then, it compares all the vectors in these selected cells to get the final result.
+**IVF** (*Inverted File*) is an index type based on quantization. It divides the points in space into `nlist` units by the clustering method. During searching vectors, it compares the distance between the target vector and the center of all units, and then selects the `nprobe` nearest unit. Afterwards, it compares all the vectors in these selected cells to get the final result.
 
 IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit is consistent with the original data.
 
@@ -106,7 +107,7 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
 
 - search parameters:
 
-  **nprobe**: Number of inverted file cell to probe.
+  **nprobe**: Number of inverted file cells to probe.
 
 ```python
 # IVF_FLAT
@@ -142,7 +143,7 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
 
 - search parameters:
 
-  **nprobe**: Number of inverted file cell to probe.
+  **nprobe**: Number of inverted file cells to probe.
 
 ```python
 # BIN_IVF_FLAT
@@ -160,7 +161,7 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
 
 ## IVF_PQ
 
-**PQ** (*Product Quantization*) uniformly decomposes the original high-dimensional vector space into Cartesian products of `m` low-dimensional vector spaces, and then quantizes the decomposed low-dimensional vector spaces. Instead of calculating the distances between the target vector and the center of all the units, product quantization enables the calculation of distances between the target vector and the clustering center of each low-dimensional space and greatly reduces the time complexity and space complexity of the algorithm.
+**PQ** (*Product Quantization*) uniformly decomposes the original high-dimensional vector space into Cartesian products of `m` low-dimensional vector spaces and then quantizes the decomposed low-dimensional vector spaces. Instead of calculating the distances between the target vector and the center of all the units, product quantization enables the calculation of distances between the target vector and the clustering center of each low-dimensional space and greatly reduces the time complexity and space complexity of the algorithm.
 
 IVF_PQ performs IVF index clustering, and then quantizes the product of vectors. Its index file is even smaller than IVF_SQ8, but it also causes a loss of accuracy during searching.
 
@@ -184,7 +185,7 @@ IVF_PQ performs IVF index clustering, and then quantizes the product of vectors.
 
 - search parameters:
 
-  **nprobe**: Number of inverted file cell to probe.
+  **nprobe**: Number of inverted file cells to probe.
 
 ```python
 # IVF_PQ
@@ -219,7 +220,7 @@ IVF_PQ performs IVF index clustering, and then quantizes the product of vectors.
 
 - search parameters:
 
-  **nprobe**: Number of inverted file cell to probe.
+  **nprobe**: Number of inverted file cells to probe.
 
 ```python
 # IVF_SQ8
@@ -235,7 +236,7 @@ IVF_PQ performs IVF index clustering, and then quantizes the product of vectors.
 
 ## IVF_SQ8_HYBRID
 
-Optimized version of IVF_SQ8 that requires both CPU and GPU to work. Unlike IVF_SQ8, IVF_SQ8H uses a GPU-based coarse quantizer, which greatly reduces time to quantize.
+An optimized version of IVF_SQ8 that requires both CPU and GPU to work. Unlike IVF_SQ8, IVF_SQ8H uses a GPU-based coarse quantizer, which greatly reduces the time to quantize.
 
 IVF_SQ8H is an IVF_SQ8 index that optimizes query execution.
 
@@ -261,7 +262,7 @@ The query method is as follows:
 
 - search parameters:
 
-  **nprobe**: Number of inverted file cell to probe.
+  **nprobe**: Number of inverted file cells to probe.
 
 ```python
 # IVF_SQ8_HYBRID
@@ -316,14 +317,14 @@ When searching for vectors, ANNOY follows the tree structure to find subspaces c
 
 **HNSW** (*Hierarchical Navigable Small World Graph*) is a graph-based indexing algorithm. It builds a multi-layer navigation structure for an image according to certain rules. In this structure, the upper layers are more sparse and the distances between nodes are farther; the lower layers are denser and the distances between nodes are closer. The search starts from the uppermost layer, finds the node closest to the target in this layer, and then enters the next layer to begin another search. After multiple iterations, it can quickly approach the target position.
 
-In order to improve performance, HNSW limits the maximum degree of nodes on each layer of the graph to `M`.
+To improve performance, HNSW limits the maximum degree of nodes on each layer of the graph to `M`.
 In addition, you can use `efConstruction` (when building index) or `ef` (when searching targets) to specify a search range.
 
 - building parameters:
 
   **M**: Maximum degree of the node.
 
-  **efConstruction**: Take the effect in stage of index construction.
+  **efConstruction**: Take the effect in the stage of index construction.
 
 ```python
 # HNSW
@@ -339,7 +340,7 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 
 - search parameters:
 
-  **ef**: Take the effect in stage of search scope, should be larger than `top_k`.
+  **ef**: Take the effect in the stage of search scope, should be larger than `top_k`.
 
 ```python
 # HNSW
@@ -362,7 +363,7 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 
   **M**: Maximum degree of the node.
 
-  **efConstruction**: Take effect in stage of index construction.
+  **efConstruction**: Take effect in the stage of index construction.
 
   **PQM**: m for PQ.
 
@@ -381,7 +382,7 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 
 - search parameters:
 
-  **ef**: Take the effect in stage of search scope, should be larger than `top_k`.
+  **ef**: Take the effect in the stage of search scope, should be larger than `top_k`.
 
 ```python
 # RHNSW_PQ
@@ -404,7 +405,7 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 
   **M**: Maximum degree of the node.
 
-  **efConstruction**: Take effect in stage of index construction, search scope.
+  **efConstruction**: Take effect in the stage of index construction, search scope.
 
 ```python
 # RHNSW_SQ
@@ -420,7 +421,7 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 
 - search parameters:
 
-  **ef**: Take the effect in stage of search scope, should be larger than `top_k`.
+  **ef**: Take the effect in the stage of search scope, should be larger than `top_k`.
 
 ```python
 # RHNSW_SQ

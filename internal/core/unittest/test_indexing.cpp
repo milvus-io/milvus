@@ -201,7 +201,7 @@ TEST(Indexing, IVFFlatNM) {
     constexpr auto DIM = 16;
     constexpr auto K = 10;
 
-    auto N = 1024 * 1024 * 10;
+    auto N = 1024 * 1024;
     auto num_query = 100;
     Timer timer;
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);

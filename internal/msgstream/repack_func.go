@@ -74,54 +74,54 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 	return result, nil
 }
 
-func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
-	result := make(map[int32]*MsgPack)
-	for i, request := range tsMsgs {
-		if request.Type() != commonpb.MsgType_Delete {
-			return nil, errors.New("msg's must be Delete")
-		}
-		deleteRequest := request.(*DeleteMsg)
-		keys := hashKeys[i]
-
-		timestampLen := len(deleteRequest.Timestamps)
-		primaryKeysLen := len(deleteRequest.PrimaryKeys)
-		keysLen := len(keys)
-
-		if keysLen != timestampLen || keysLen != primaryKeysLen {
-			return nil, errors.New("the length of hashValue, timestamps, primaryKeys are not equal")
-		}
-
-		for index, key := range keys {
-			_, ok := result[key]
-			if !ok {
-				msgPack := MsgPack{}
-				result[key] = &msgPack
-			}
-
-			sliceRequest := internalpb.DeleteRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Delete,
-					MsgID:     deleteRequest.Base.MsgID,
-					Timestamp: deleteRequest.Timestamps[index],
-					SourceID:  deleteRequest.Base.SourceID,
-				},
-				CollectionName: deleteRequest.CollectionName,
-				ChannelID:      deleteRequest.ChannelID,
-				Timestamps:     []uint64{deleteRequest.Timestamps[index]},
-				PrimaryKeys:    []int64{deleteRequest.PrimaryKeys[index]},
-			}
-
-			deleteMsg := &DeleteMsg{
-				BaseMsg: BaseMsg{
-					Ctx: request.TraceCtx(),
-				},
-				DeleteRequest: sliceRequest,
-			}
-			result[key].Msgs = append(result[key].Msgs, deleteMsg)
-		}
-	}
-	return result, nil
-}
+//func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
+//	result := make(map[int32]*MsgPack)
+//	for i, request := range tsMsgs {
+//		if request.Type() != commonpb.MsgType_Delete {
+//			return nil, errors.New("msg's must be Delete")
+//		}
+//		deleteRequest := request.(*DeleteMsg)
+//		keys := hashKeys[i]
+//
+//		timestampLen := len(deleteRequest.Timestamps)
+//		primaryKeysLen := len(deleteRequest.PrimaryKeys)
+//		keysLen := len(keys)
+//
+//		if keysLen != timestampLen || keysLen != primaryKeysLen {
+//			return nil, errors.New("the length of hashValue, timestamps, primaryKeys are not equal")
+//		}
+//
+//		for index, key := range keys {
+//			_, ok := result[key]
+//			if !ok {
+//				msgPack := MsgPack{}
+//				result[key] = &msgPack
+//			}
+//
+//			sliceRequest := internalpb.DeleteRequest{
+//				Base: &commonpb.MsgBase{
+//					MsgType:   commonpb.MsgType_Delete,
+//					MsgID:     deleteRequest.Base.MsgID,
+//					Timestamp: deleteRequest.Timestamps[index],
+//					SourceID:  deleteRequest.Base.SourceID,
+//				},
+//				CollectionName: deleteRequest.CollectionName,
+//				ChannelID:      deleteRequest.ChannelID,
+//				Timestamps:     []uint64{deleteRequest.Timestamps[index]},
+//				PrimaryKeys:    []int64{deleteRequest.PrimaryKeys[index]},
+//			}
+//
+//			deleteMsg := &DeleteMsg{
+//				BaseMsg: BaseMsg{
+//					Ctx: request.TraceCtx(),
+//				},
+//				DeleteRequest: sliceRequest,
+//			}
+//			result[key].Msgs = append(result[key].Msgs, deleteMsg)
+//		}
+//	}
+//	return result, nil
+//}
 
 func DefaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)

@@ -152,6 +152,52 @@ TEST(Retrieve, AUTOID) {
     ASSERT_EQ(field1_data.data_size(), DIM * req_size);
 }
 
+TEST(Retrieve2, LargeTimestamp) {
+    auto schema = std::make_shared<Schema>();
+    auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
+    auto DIM = 16;
+    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
+    schema->set_primary_key(FieldOffset(0));
+
+    int64_t N = 100;
+    int64_t req_size = 10;
+    int choose_sep = 3;
+    auto choose = [=](int i) { return i * choose_sep % N; };
+    uint64_t ts_offset = 100;
+    auto dataset = DataGen(schema, N, 42, ts_offset + 1);
+    auto segment = CreateSealedSegment(schema);
+    SealedLoader(dataset, *segment);
+    auto i64_col = dataset.get_col<int64_t>(0);
+
+    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>();
+    term_expr->field_offset_ = FieldOffset(0);
+    term_expr->data_type_ = DataType::INT64;
+    for (int i = 0; i < req_size; ++i) {
+        term_expr->terms_.emplace_back(i64_col[choose(i)]);
+    }
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->predicate_ = std::move(term_expr);
+    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
+    plan->field_offsets_ = target_offsets;
+
+    std::vector<int> filter_timestamps{-1, 0, 1, 10, 20};
+    filter_timestamps.push_back(N / 2);
+    for (const auto& f_ts : filter_timestamps) {
+        auto retrieve_results = segment->Retrieve(plan.get(), ts_offset + 1 + f_ts);
+        Assert(retrieve_results->fields_data_size() == 2);
+        auto field0 = retrieve_results->fields_data(0);
+        auto field1 = retrieve_results->fields_data(1);
+        int target_num = (f_ts + choose_sep) / choose_sep;
+        if (target_num > req_size) {
+            target_num = req_size;
+        }
+        Assert(field0.scalars().long_data().data_size() == target_num);
+        Assert(field1.vectors().float_vector().data_size() == target_num * DIM);
+    }
+}
+
 TEST(GetEntityByIds, PrimaryKey) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("counter_i64", DataType::INT64);

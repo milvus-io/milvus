@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -43,6 +44,9 @@ type ParamTable struct {
 	// --- Rocksmq ---
 	RocksmqPath string
 
+	// --- Cluster channels ---
+	ClusterChannelPrefix string
+
 	// - seg statistics channel -
 	SegmentStatisticsChannelName string
 
@@ -62,6 +66,9 @@ type ParamTable struct {
 	MinioSecretAccessKey string
 	MinioUseSSL          bool
 	MinioBucketName      string
+
+	CreatedTime time.Time
+	UpdatedTime time.Time
 }
 
 var Params ParamTable
@@ -71,45 +78,52 @@ func (p *ParamTable) InitAlias(alias string) {
 	p.Alias = alias
 }
 
-func (p *ParamTable) Init() {
+func (p *ParamTable) InitOnce() {
 	once.Do(func() {
-		p.BaseTable.Init()
-		err := p.LoadYaml("advanced/data_node.yaml")
-		if err != nil {
-			panic(err)
-		}
-
-		// === DataNode Internal Components Configs ===
-		p.initFlowGraphMaxQueueLength()
-		p.initFlowGraphMaxParallelism()
-		p.initFlushInsertBufferSize()
-		p.initInsertBinlogRootPath()
-		p.initStatsBinlogRootPath()
-		p.initLogCfg()
-
-		// === DataNode External Components Configs ===
-		// --- Pulsar ---
-		p.initPulsarAddress()
-
-		p.initRocksmqPath()
-
-		// - seg statistics channel -
-		p.initSegmentStatisticsChannelName()
-
-		// - timetick channel -
-		p.initTimeTickChannelName()
-
-		// --- ETCD ---
-		p.initEtcdEndpoints()
-		p.initMetaRootPath()
-
-		// --- MinIO ---
-		p.initMinioAddress()
-		p.initMinioAccessKeyID()
-		p.initMinioSecretAccessKey()
-		p.initMinioUseSSL()
-		p.initMinioBucketName()
+		p.Init()
 	})
+}
+
+func (p *ParamTable) Init() {
+	p.BaseTable.Init()
+	err := p.LoadYaml("advanced/data_node.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	// === DataNode Internal Components Configs ===
+	p.initFlowGraphMaxQueueLength()
+	p.initFlowGraphMaxParallelism()
+	p.initFlushInsertBufferSize()
+	p.initInsertBinlogRootPath()
+	p.initStatsBinlogRootPath()
+	p.initLogCfg()
+
+	// === DataNode External Components Configs ===
+	// --- Pulsar ---
+	p.initPulsarAddress()
+
+	p.initRocksmqPath()
+
+	// Has to init global msgchannel prefix before other channel names
+	p.initClusterMsgChannelPrefix()
+
+	// - seg statistics channel -
+	p.initSegmentStatisticsChannelName()
+
+	// - timetick channel -
+	p.initTimeTickChannelName()
+
+	// --- ETCD ---
+	p.initEtcdEndpoints()
+	p.initMetaRootPath()
+
+	// --- MinIO ---
+	p.initMinioAddress()
+	p.initMinioAccessKeyID()
+	p.initMinioSecretAccessKey()
+	p.initMinioUseSSL()
+	p.initMinioBucketName()
 }
 
 // ==== DataNode internal components configs ====
@@ -129,7 +143,7 @@ func (p *ParamTable) initFlushInsertBufferSize() {
 
 func (p *ParamTable) initInsertBinlogRootPath() {
 	// GOOSE TODO: rootPath change to  TenentID
-	rootPath, err := p.Load("etcd.rootPath")
+	rootPath, err := p.Load("minio.rootPath")
 	if err != nil {
 		panic(err)
 	}
@@ -137,7 +151,7 @@ func (p *ParamTable) initInsertBinlogRootPath() {
 }
 
 func (p *ParamTable) initStatsBinlogRootPath() {
-	rootPath, err := p.Load("etcd.rootPath")
+	rootPath, err := p.Load("minio.rootPath")
 	if err != nil {
 		panic(err)
 	}
@@ -161,30 +175,40 @@ func (p *ParamTable) initRocksmqPath() {
 	p.RocksmqPath = path
 }
 
-func (p *ParamTable) initSegmentStatisticsChannelName() {
-
-	path, err := p.Load("msgChannel.chanNamePrefix.dataCoordStatistic")
+func (p *ParamTable) initClusterMsgChannelPrefix() {
+	name, err := p.Load("msgChannel.chanNamePrefix.cluster")
 	if err != nil {
 		panic(err)
 	}
-	p.SegmentStatisticsChannelName = path
+	p.ClusterChannelPrefix = name
+}
+
+func (p *ParamTable) initSegmentStatisticsChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.dataCoordStatistic")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.SegmentStatisticsChannelName = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initTimeTickChannelName() {
-	path, err := p.Load("msgChannel.chanNamePrefix.dataCoordTimeTick")
+	config, err := p.Load("msgChannel.chanNamePrefix.dataCoordTimeTick")
 	if err != nil {
 		panic(err)
 	}
-	p.TimeTickChannelName = path
+	s := []string{p.ClusterChannelPrefix, config}
+	p.TimeTickChannelName = strings.Join(s, "-")
 }
 
 // - msg channel subname -
 func (p *ParamTable) initMsgChannelSubName() {
-	name, err := p.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
+	config, err := p.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
 	if err != nil {
 		panic(err)
 	}
-	p.MsgChannelSubName = name + "-" + strconv.FormatInt(p.NodeID, 10)
+	s := []string{p.ClusterChannelPrefix, config, strconv.FormatInt(p.NodeID, 10)}
+	p.MsgChannelSubName = strings.Join(s, "-")
 }
 
 // --- ETCD ---

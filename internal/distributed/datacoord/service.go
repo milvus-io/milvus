@@ -69,12 +69,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory, opts ...datacoord
 
 func (s *Server) init() error {
 	Params.Init()
-	Params.LoadFromEnv()
 
 	closer := trace.InitTracing("datacoord")
 	s.closer = closer
 
-	datacoord.Params.Init()
+	datacoord.Params.InitOnce()
 	datacoord.Params.IP = Params.IP
 	datacoord.Params.Port = Params.Port
 
@@ -177,14 +176,17 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// GetComponentStates gets states of datacoord and datanodes
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.dataCoord.GetComponentStates(ctx)
 }
 
+// GetTimeTickChannel gets timetick channel
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataCoord.GetTimeTickChannel(ctx)
 }
 
+// GetStatisticsChannel gets statistics channel
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataCoord.GetStatisticsChannel(ctx)
 }
@@ -193,26 +195,32 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return s.dataCoord.GetSegmentInfo(ctx, req)
 }
 
+// Flush flushes a collection's data
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	return s.dataCoord.Flush(ctx, req)
 }
 
+// AssignSegmentID requests to allocate segment space for insert
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	return s.dataCoord.AssignSegmentID(ctx, req)
 }
 
+// GetSegmentStates gets states of segments
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	return s.dataCoord.GetSegmentStates(ctx, req)
 }
 
+// GetInsertBinlogPaths gets insert binlog paths of a segment
 func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	return s.dataCoord.GetInsertBinlogPaths(ctx, req)
 }
 
+// GetCollectionStatistics gets statistics of a collection
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	return s.dataCoord.GetCollectionStatistics(ctx, req)
 }
 
+// GetPartitionStatistics gets statistics of a partition
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	return s.dataCoord.GetPartitionStatistics(ctx, req)
 }
@@ -221,19 +229,22 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegme
 	return s.dataCoord.GetSegmentInfoChannel(ctx)
 }
 
-//SaveBinlogPaths implement DataCoordServer, saves segment, collection binlog according to datanode request
+// SaveBinlogPaths implement DataCoordServer, saves segment, collection binlog according to datanode request
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	return s.dataCoord.SaveBinlogPaths(ctx, req)
 }
 
+// GetRecoveryInfo gets information for recovering channels
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	return s.dataCoord.GetRecoveryInfo(ctx, req)
 }
 
+// GetFlushedSegments get all flushed segments of a partition
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	return s.dataCoord.GetFlushedSegments(ctx, req)
 }
 
+// GetMetrics gets metrics of data coordinator and datanodes
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.dataCoord.GetMetrics(ctx, req)
 }

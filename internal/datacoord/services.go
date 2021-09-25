@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus/internal/util/trace"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -14,8 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"go.uber.org/zap"
 )
-
-const serverNotServingErrMsg = "server is not serving"
 
 // checks whether server in Healthy State
 func (s *Server) isClosed() bool {
@@ -47,6 +47,8 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	log.Debug("receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "DataCoord-Flush")
+	defer sp.Finish()
 	resp := &datapb.FlushResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -306,7 +308,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return resp, nil
 }
 
-// todo deprecated rpc
+// GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	resp := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{

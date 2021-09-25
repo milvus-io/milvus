@@ -11,6 +11,6 @@
 
 datacoord:
   segment:
-    maxSize: 512 # MB
-    sealProportion: 0.75
+    maxSize: 512 # Maximum size of a segment in MB
+    sealProportion: 0.75 # It's the minimum proportion for a segment which can be sealed, 
     assignmentExpiration: 2000 # ms

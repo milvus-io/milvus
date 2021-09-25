@@ -18,16 +18,19 @@ import (
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 )
 
+// MinioChunkManager is responsible for read and write data stored in minio.
 type MinioChunkManager struct {
 	minio *miniokv.MinIOKV
 }
 
+// NewMinioChunkManager create a new local manager object.
 func NewMinioChunkManager(minio *miniokv.MinIOKV) *MinioChunkManager {
 	return &MinioChunkManager{
 		minio: minio,
 	}
 }
 
+// GetPath returns the path of minio data if exist.
 func (mcm *MinioChunkManager) GetPath(key string) (string, error) {
 	if !mcm.Exist(key) {
 		return "", errors.New("minio file manage cannot be found with key:" + key)
@@ -35,19 +38,23 @@ func (mcm *MinioChunkManager) GetPath(key string) (string, error) {
 	return key, nil
 }
 
+// Write writes the data to minio storage.
 func (mcm *MinioChunkManager) Write(key string, content []byte) error {
 	return mcm.minio.Save(key, string(content))
 }
 
+// Exist checks whether chunk is saved to minio storage.
 func (mcm *MinioChunkManager) Exist(key string) bool {
 	return mcm.minio.Exist(key)
 }
 
+// Read reads the minio storage data if exist.
 func (mcm *MinioChunkManager) Read(key string) ([]byte, error) {
 	results, err := mcm.minio.Load(key)
 	return []byte(results), err
 }
 
+// ReadAt reads specific position data of minio storage if exist.
 func (mcm *MinioChunkManager) ReadAt(key string, p []byte, off int64) (int, error) {
 	results, err := mcm.minio.Load(key)
 	if err != nil {

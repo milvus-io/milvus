@@ -1,4 +1,3 @@
-import datetime
 from enum import Enum
 from random import randint
 
@@ -27,6 +26,11 @@ timeout = 20
 
 
 class Checker:
+    """
+    A base class of milvus operation checker to
+       a. check whether milvus is servicing
+       b. count operations and success rate
+    """
     def __init__(self):
         self._succ = 0
         self._fail = 0
@@ -54,6 +58,7 @@ class Checker:
 
 
 class SearchChecker(Checker):
+    """check search operations in a dependent thread"""
     def __init__(self):
         super().__init__()
         self.c_wrap.load()   # do load before search

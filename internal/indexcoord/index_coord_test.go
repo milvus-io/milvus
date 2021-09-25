@@ -38,8 +38,19 @@ import (
 
 func TestIndexCoord(t *testing.T) {
 	ctx := context.Background()
+	inm0 := &indexnode.Mock{}
+	err := inm0.Init()
+	assert.Nil(t, err)
+	err = inm0.Register()
+	assert.Nil(t, err)
+	err = inm0.Start()
+	assert.Nil(t, err)
 	ic, err := NewIndexCoord(ctx)
 	assert.Nil(t, err)
+	ic.reqTimeoutInterval = time.Second * 10
+	ic.durationInterval = time.Second
+	ic.assignTaskInterval = time.Second
+	ic.taskLimit = 20
 	Params.Init()
 	err = ic.Register()
 	assert.Nil(t, err)
@@ -47,6 +58,9 @@ func TestIndexCoord(t *testing.T) {
 	err = ic.Init()
 	assert.Nil(t, err)
 	err = ic.Start()
+	assert.Nil(t, err)
+
+	err = inm0.Stop()
 	assert.Nil(t, err)
 
 	in, err := grpcindexnode.NewServer(ctx)
@@ -94,7 +108,8 @@ func TestIndexCoord(t *testing.T) {
 			resp, err := ic.GetIndexStates(ctx, req)
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			if resp.States[0].State == commonpb.IndexState_Finished {
+			if resp.States[0].State == commonpb.IndexState_Finished ||
+				resp.States[0].State == commonpb.IndexState_Failed {
 				break
 			}
 			time.Sleep(1 * time.Second)
@@ -113,8 +128,6 @@ func TestIndexCoord(t *testing.T) {
 		assert.Equal(t, "IndexFilePath-1", resp.FilePaths[0].IndexFilePaths[0])
 		assert.Equal(t, "IndexFilePath-2", resp.FilePaths[0].IndexFilePaths[1])
 	})
-
-	time.Sleep(10 * time.Second)
 
 	t.Run("Drop Index", func(t *testing.T) {
 		req := &indexpb.DropIndexRequest{
@@ -158,7 +171,25 @@ func TestIndexCoord(t *testing.T) {
 	})
 
 	t.Run("GetMetrics when request is illegal", func(t *testing.T) {
-		req := &milvuspb.GetMetricsRequest{}
+		req, err := metricsinfo.ConstructRequestByMetricType("GetIndexNodeMetrics")
+		assert.Nil(t, err)
+		resp, err := ic.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+
+	t.Run("Recycle IndexMeta", func(t *testing.T) {
+		indexMeta := ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
+		for indexMeta != nil {
+			indexMeta = ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
+			time.Sleep(time.Second)
+		}
+	})
+
+	t.Run("GetMetrics request without metricType", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{
+			Request: "GetIndexCoordMetrics",
+		}
 		resp, err := ic.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
@@ -166,8 +197,6 @@ func TestIndexCoord(t *testing.T) {
 
 	err = in.Stop()
 	assert.Nil(t, err)
-	time.Sleep(11 * time.Second)
 	err = ic.Stop()
 	assert.Nil(t, err)
-
 }

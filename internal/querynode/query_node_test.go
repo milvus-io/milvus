@@ -30,11 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-const ctxTimeInMillisecond = 5000
-const debug = false
-
-const defaultPartitionID = UniqueID(2021)
-
+// mock of query coordinator client
 type queryCoordMock struct {
 	types.QueryCoord
 }
@@ -42,9 +38,6 @@ type queryCoordMock struct {
 func setup() {
 	os.Setenv("QUERY_NODE_ID", "1")
 	Params.Init()
-	//Params.QueryNodeID = 1
-	Params.initQueryTimeTickChannelName()
-	Params.initStatsChannelName()
 	Params.MetaRootPath = "/etcd/test/root/querynode"
 }
 
@@ -213,11 +206,6 @@ func makeNewChannelNames(names []string, suffix string) []string {
 	return ret
 }
 
-func refreshChannelNames() {
-	suffix := "-test-query-node" + strconv.FormatInt(rand.Int63n(1000000), 10)
-	Params.StatsChannelName = Params.StatsChannelName + suffix
-}
-
 func newMessageStreamFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
@@ -233,7 +221,7 @@ func newMessageStreamFactory() (msgstream.Factory, error) {
 
 func TestMain(m *testing.M) {
 	setup()
-	refreshChannelNames()
+	Params.StatsChannelName = Params.StatsChannelName + strconv.Itoa(rand.Int())
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
@@ -244,4 +232,43 @@ func TestQueryNode_Start(t *testing.T) {
 	localNode.Start()
 	<-localNode.queryNodeLoopCtx.Done()
 	localNode.Stop()
+}
+
+func TestQueryNode_SetCoord(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	err = node.SetIndexCoord(nil)
+	assert.Error(t, err)
+
+	err = node.SetRootCoord(nil)
+	assert.Error(t, err)
+
+	// TODO: add mock coords
+	//err = node.SetIndexCoord(newIndexCorrd)
+}
+
+func TestQueryNode_register(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	err = node.Register()
+	assert.NoError(t, err)
+}
+
+func TestQueryNode_init(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	err = node.Init()
+	assert.NoError(t, err)
 }

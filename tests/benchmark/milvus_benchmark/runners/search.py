@@ -158,6 +158,7 @@ class InsertSearchRunner(BaseRunner):
         }
         vector_type = utils.get_vector_type(data_type)
         index_field_name = utils.get_default_field_name(vector_type)
+        # Get the path of the query.npy file stored on the NAS and get its data
         base_query_vectors = utils.get_vectors_from_binary(utils.MAX_NQ, dimension, data_type)
         cases = list()
         case_metrics = list()
@@ -177,6 +178,7 @@ class InsertSearchRunner(BaseRunner):
                     # filter_param.append(filter["term"])
                 # logger.info("filter param: %s" % json.dumps(filter_param))
                 for nq in nqs:
+                    # Take nq groups of data for query
                     query_vectors = base_query_vectors[0:nq]
                     for top_k in top_ks:
                         search_info = {
@@ -257,6 +259,7 @@ class InsertSearchRunner(BaseRunner):
             start_time = time.time()
             self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"], index_param=case_param["index_param"])
             build_time = round(time.time()-start_time, 2)
+        # build_time includes flush and index time
         logger.debug({"flush_time": flush_time, "build_time": build_time})
         self.build_time = build_time
         logger.info(self.milvus.count())
@@ -271,6 +274,7 @@ class InsertSearchRunner(BaseRunner):
         min_query_time = 0.0
         total_query_time = 0.0        
         for i in range(run_count):
+            # Number of successive queries
             logger.debug("Start run query, run %d of %s" % (i+1, run_count))
             logger.info(case_metric.search)
             start_time = time.time()
@@ -281,6 +285,7 @@ class InsertSearchRunner(BaseRunner):
                 min_query_time = round(interval_time, 2)
         avg_query_time = round(total_query_time/run_count, 2)
         logger.info("Min query time: %.2f, avg query time: %.2f" % (min_query_time, avg_query_time))
+        # insert_result: "total_time", "rps", "ni_time"
         tmp_result = {"insert": self.insert_result, "build_time": self.build_time, "search_time": min_query_time, "avc_search_time": avg_query_time}
         # 
         # logger.info("Start load collection")

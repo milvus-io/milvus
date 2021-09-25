@@ -13,6 +13,7 @@ package indexcoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -28,6 +29,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
+// Meta is used to record the state of the index.
+// revision: The number of times IndexMeta has been changed in ETCD. It's the same as Event.Kv.Version in ETCD.
+// indexMeta:A structure that records the state of the index defined by proto.
 type Meta struct {
 	indexMeta *indexpb.IndexMeta
 	revision  int64
@@ -40,6 +44,7 @@ type metaTable struct {
 	lock sync.RWMutex
 }
 
+// NewMetaTable is used to create a new meta table.
 func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 	mt := &metaTable{
 		client: kv,
@@ -103,6 +108,11 @@ func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
 	log.Debug("IndexCoord reloadMeta mt.client.LoadWithPrefix2", zap.Any("indexBuildID", indexBuildID), zap.Error(err))
 	if err != nil {
 		return nil, err
+	}
+
+	if len(values) == 0 {
+		log.Error("IndexCoord reload Meta", zap.Any("indexBuildID", indexBuildID), zap.Error(errors.New("meta doesn't exist in KV")))
+		return nil, errors.New("meta doesn't exist in KV")
 	}
 	im := &indexpb.IndexMeta{}
 	err = proto.UnmarshalText(values[0], im)
@@ -223,6 +233,8 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.Req.IndexID == indexID && !meta.indexMeta.MarkDeleted {
 			meta.indexMeta.MarkDeleted = true
+			// marshal inside
+			/* #nosec G601 */
 			if err := mt.saveIndexMeta(&meta); err != nil {
 				log.Debug("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
 				fn := func() error {
@@ -487,4 +499,17 @@ func (mt *metaTable) GetNodeTaskStats() map[UniqueID]int {
 		}
 	}
 	return nodePriority
+}
+
+func (mt *metaTable) GetIndexMetaByIndexBuildID(indexBuildID UniqueID) *indexpb.IndexMeta {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
+
+	log.Debug("IndexCoord MetaTable GetIndexMeta", zap.Int64("IndexBuildID", indexBuildID))
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if !ok {
+		log.Error("IndexCoord MetaTable GetIndexMeta not exist", zap.Int64("IndexBuildID", indexBuildID))
+		return nil
+	}
+	return meta.indexMeta
 }

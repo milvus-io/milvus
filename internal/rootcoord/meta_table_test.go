@@ -68,55 +68,62 @@ func Test_MockKV(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 
+	// tenant
 	prefix[TenantMetaPrefix] = []string{"tenant-prefix"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.TenantMeta err:line 1.0: unknown field name \"tenant-prefix\" in milvus.proto.etcd.TenantMeta")
 
-	prefix[TenantMetaPrefix] = []string{proto.MarshalTextString(&pb.TenantMeta{})}
+	value, _ := proto.Marshal(&pb.TenantMeta{})
+	prefix[TenantMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
+	// proxy
 	prefix[ProxyMetaPrefix] = []string{"porxy-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.ProxyMeta err:line 1.0: unknown field name \"porxy-meta\" in milvus.proto.etcd.ProxyMeta")
 
-	prefix[ProxyMetaPrefix] = []string{proto.MarshalTextString(&pb.ProxyMeta{})}
+	value, _ = proto.Marshal(&pb.ProxyMeta{})
+	prefix[ProxyMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
+	// collection
 	prefix[CollectionMetaPrefix] = []string{"collection-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.CollectionInfo err:line 1.0: unknown field name \"collection-meta\" in milvus.proto.etcd.CollectionInfo")
 
-	prefix[CollectionMetaPrefix] = []string{proto.MarshalTextString(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})}
+	value, _ = proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
+	prefix[CollectionMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
+	// segment index
 	prefix[SegmentIndexMetaPrefix] = []string{"segment-index-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.SegmentIndexInfo err:line 1.0: unknown field name \"segment-index-meta\" in milvus.proto.etcd.SegmentIndexInfo")
 
-	prefix[SegmentIndexMetaPrefix] = []string{proto.MarshalTextString(&pb.SegmentIndexInfo{})}
+	value, _ = proto.Marshal(&pb.SegmentIndexInfo{})
+	prefix[SegmentIndexMetaPrefix] = []string{string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 
-	prefix[SegmentIndexMetaPrefix] = []string{proto.MarshalTextString(&pb.SegmentIndexInfo{}), proto.MarshalTextString(&pb.SegmentIndexInfo{})}
+	prefix[SegmentIndexMetaPrefix] = []string{string(value), string(value)}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 
+	// index
 	prefix[IndexMetaPrefix] = []string{"index-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "RootCoord UnmarshalText pb.IndexInfo err:line 1.0: unknown field name \"index-meta\" in milvus.proto.etcd.IndexInfo")
 
-	prefix[IndexMetaPrefix] = []string{proto.MarshalTextString(&pb.IndexInfo{})}
+	value, _ = proto.Marshal(&pb.IndexInfo{})
+	prefix[IndexMetaPrefix] = []string{string(value)}
 	m1, err := NewMetaTable(k1)
-	assert.Nil(t, err)
+	assert.NotNil(t, err)
+	assert.EqualError(t, err, "load prefix error")
+	prefix[CollectionAliasMetaPrefix] = []string{"alias-meta"}
 
 	k1.save = func(key string, value string, ts typeutil.Timestamp) error {
 		return fmt.Errorf("save tenant error")
@@ -269,11 +276,31 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, "false", flag)
 	})
 
+	t.Run("add alias", func(t *testing.T) {
+		ts := ftso()
+		err = mt.AddAlias("alias1", "testColl", ts, ddOp)
+		assert.Nil(t, err)
+		aliases := mt.ListAliases(collID)
+		assert.Equal(t, aliases, []string{"alias1"})
+	})
+
+	t.Run("alter alias", func(t *testing.T) {
+		ts := ftso()
+		err = mt.AlterAlias("alias1", "testColl", ts, ddOp)
+		assert.Nil(t, err)
+	})
+
+	t.Run("delete alias", func(t *testing.T) {
+		ts := ftso()
+		err = mt.DeleteAlias("alias1", ts, ddOp)
+		assert.Nil(t, err)
+	})
+
 	t.Run("add partition", func(t *testing.T) {
 		ts := ftso()
 		err = mt.AddPartition(collID, partName, partID, ts, ddOp)
 		assert.Nil(t, err)
-		assert.Equal(t, ts, uint64(2))
+		//assert.Equal(t, ts, uint64(2))
 
 		collMeta, ok := mt.collID2Meta[collID]
 		assert.True(t, ok)
@@ -441,8 +468,14 @@ func TestMetaTable(t *testing.T) {
 		ts := ftso()
 		err = mt.DeleteCollection(collIDInvalid, ts, nil)
 		assert.NotNil(t, err)
+		ts2 := ftso()
+		err = mt.AddAlias("alias1", "testColl", ts2, ddOp)
+		assert.Nil(t, err)
 		err = mt.DeleteCollection(collID, ts, nil)
 		assert.Nil(t, err)
+		ts3 := ftso()
+		err = mt.DeleteAlias("alias1", ts3, ddOp)
+		assert.NotNil(t, err)
 
 		// check DD operation flag
 		flag, err := mt.client.Load(DDMsgSendPrefix, 0)
@@ -511,7 +544,7 @@ func TestMetaTable(t *testing.T) {
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
 		_, err = mt.GetCollectionByName(collInfo.Schema.Name, 0)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("can't find collection: %s", collInfo.Schema.Name))
+		assert.EqualError(t, err, fmt.Sprintf("can't find collection %s with id %d", collInfo.Schema.Name, collInfo.ID))
 
 	})
 

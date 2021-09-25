@@ -83,12 +83,13 @@ func (d *dmlChannels) GetNumChannels() int {
 func (d *dmlChannels) Broadcast(chanNames []string, pack *msgstream.MsgPack) error {
 	for _, chanName := range chanNames {
 		// only in-use chanName exist in refcnt
-		if _, ok := d.refcnt.Load(chanName); !ok {
+		if _, ok := d.refcnt.Load(chanName); ok {
+			v, _ := d.pool.Load(chanName)
+			if err := (*(v.(*msgstream.MsgStream))).Broadcast(pack); err != nil {
+				return err
+			}
+		} else {
 			return fmt.Errorf("channel %s not exist", chanName)
-		}
-		v, _ := d.pool.Load(chanName)
-		if err := (*(v.(*msgstream.MsgStream))).Broadcast(pack); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -97,10 +98,7 @@ func (d *dmlChannels) Broadcast(chanNames []string, pack *msgstream.MsgPack) err
 // AddProducerChannels add named channels as producer
 func (d *dmlChannels) AddProducerChannels(names ...string) {
 	for _, name := range names {
-		if _, ok := d.pool.Load(name); !ok {
-			log.Error("invalid channel name", zap.String("chanName", name))
-			panic("invalid channel name")
-		} else {
+		if _, ok := d.pool.Load(name); ok {
 			var cnt int64
 			if _, ok := d.refcnt.Load(name); !ok {
 				cnt = 1
@@ -110,6 +108,9 @@ func (d *dmlChannels) AddProducerChannels(names ...string) {
 			}
 			d.refcnt.Store(name, cnt)
 			log.Debug("assign dml channel", zap.String("chanName", name), zap.Int64("refcnt", cnt))
+		} else {
+			log.Error("invalid channel name", zap.String("chanName", name))
+			panic("invalid channel name: " + name)
 		}
 	}
 }
@@ -117,8 +118,7 @@ func (d *dmlChannels) AddProducerChannels(names ...string) {
 // RemoveProducerChannels removes specified channels
 func (d *dmlChannels) RemoveProducerChannels(names ...string) {
 	for _, name := range names {
-		v, ok := d.refcnt.Load(name)
-		if ok {
+		if v, ok := d.refcnt.Load(name); ok {
 			cnt := v.(int64)
 			if cnt > 1 {
 				d.refcnt.Store(name, cnt-1)

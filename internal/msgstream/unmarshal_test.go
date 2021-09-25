@@ -16,9 +16,10 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/stretchr/testify/assert"
 )
 
 func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
@@ -33,7 +34,7 @@ func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
 	return insertMsg, nil
 }
 
-func TestStream_unmarshal_Insert(t *testing.T) {
+func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 	msgPack := MsgPack{}
 	insertMsg := &InsertMsg{
 		BaseMsg: BaseMsg{

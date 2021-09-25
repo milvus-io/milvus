@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/golang/protobuf/proto"
@@ -55,7 +56,7 @@ import (
 
 // DdOperation used to save ddMsg into ETCD
 type DdOperation struct {
-	Body string `json:"body"`
+	Body []byte `json:"body"`
 	Type string `json:"type"`
 }
 
@@ -73,7 +74,7 @@ func metricProxy(v int64) string {
 
 // Core root coordinator core
 type Core struct {
-	MetaTable *metaTable
+	MetaTable *MetaTable
 	//id allocator
 	IDAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
 	IDAllocatorUpdate func() error
@@ -85,11 +86,14 @@ type Core struct {
 	//inner members
 	ctx     context.Context
 	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 	etcdCli *clientv3.Client
-	kvBase  *etcdkv.EtcdKV
+	kvBase  kv.TxnKV //*etcdkv.EtcdKV
 
 	//DDL lock
 	ddlLock sync.Mutex
+
+	kvBaseCreate func(root string) (kv.TxnKV, error)
 
 	//setMsgStreams, send time tick into dd channel and time tick channel
 	SendTimeTick func(t typeutil.Timestamp, reason string) error
@@ -155,6 +159,7 @@ type Core struct {
 
 // --------------------- function --------------------------
 
+// NewCore create rootcoord core
 func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
@@ -168,6 +173,7 @@ func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	return core, nil
 }
 
+// UpdateStateCode update state code
 func (c *Core) UpdateStateCode(code internalpb.StateCode) {
 	c.stateCode.Store(code)
 }
@@ -240,6 +246,7 @@ func (c *Core) checkInit() error {
 }
 
 func (c *Core) startTimeTickLoop() {
+	defer c.wg.Done()
 	ticker := time.NewTicker(time.Duration(Params.TimeTickInterval) * time.Millisecond)
 	for {
 		select {
@@ -257,6 +264,7 @@ func (c *Core) startTimeTickLoop() {
 }
 
 func (c *Core) tsLoop() {
+	defer c.wg.Done()
 	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsoTicker.Stop()
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -281,6 +289,7 @@ func (c *Core) tsLoop() {
 }
 
 func (c *Core) sessionLoop() {
+	defer c.wg.Done()
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -299,6 +308,7 @@ func (c *Core) sessionLoop() {
 }
 
 func (c *Core) checkFlushedSegmentsLoop() {
+	defer c.wg.Done()
 	ticker := time.NewTicker(10 * time.Minute)
 	for {
 		select {
@@ -340,6 +350,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 						}
 					}
 					for _, idxInfo := range indexInfos {
+						/* #nosec G601 */
 						field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
 						if err != nil {
 							log.Debug("GetFieldSchemaByID",
@@ -559,7 +570,7 @@ func (c *Core) setMsgStreams() error {
 	return nil
 }
 
-//SetNewProxyClient create proxy node by this func
+// SetNewProxyClient set client to create proxy
 func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.Proxy, error)) {
 	if c.NewProxyClient == nil {
 		c.NewProxyClient = f
@@ -568,6 +579,7 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.Proxy,
 	}
 }
 
+// SetDataCoord set datacoord
 func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 	initCh := make(chan struct{})
 	go func() {
@@ -683,6 +695,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 	return nil
 }
 
+// SetIndexCoord set indexcoord
 func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	initCh := make(chan struct{})
 	go func() {
@@ -743,6 +756,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	return nil
 }
 
+// SetQueryCoord set querycoord
 func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 	initCh := make(chan struct{})
 	go func() {
@@ -838,8 +852,7 @@ func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *s
 		}
 	}
 	log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-		zap.String("field name", field.Name),
-		zap.Int64("segment id", segID))
+		zap.String("field name", field.Name), zap.Int64("segment id", segID), zap.Int64("num rows", rows))
 	return bldID, nil
 }
 
@@ -853,26 +866,37 @@ func (c *Core) Register() error {
 	return nil
 }
 
+// Init initialize routine
 func (c *Core) Init() error {
 	var initError error = nil
+	if c.kvBaseCreate == nil {
+		c.kvBaseCreate = func(root string) (kv.TxnKV, error) {
+			return etcdkv.NewEtcdKV(Params.EtcdEndpoints, root)
+		}
+	}
 	c.initOnce.Do(func() {
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second}); initError != nil {
 				log.Error("RootCoord, Failed to new Etcd client", zap.Any("reason", initError))
 				return initError
 			}
-			var ms *metaSnapshot
-			ms, initError = newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024)
-			if initError != nil {
-				log.Error("RootCoord, Failed to new MetaSnapshot", zap.Any("reason", initError))
-				return initError
-			}
-			if c.MetaTable, initError = NewMetaTable(ms); initError != nil {
-				log.Error("RootCoord, Failed to new MetaTable", zap.Any("reason", initError))
-				return initError
-			}
-			if c.kvBase, initError = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.KvRootPath); initError != nil {
+			if c.kvBase, initError = c.kvBaseCreate(Params.KvRootPath); initError != nil {
 				log.Error("RootCoord, Failed to new EtcdKV", zap.Any("reason", initError))
+				return initError
+			}
+			var metaKV kv.TxnKV
+			metaKV, initError = c.kvBaseCreate(Params.MetaRootPath)
+			if initError != nil {
+				log.Error("RootCoord, Failed to new EtcdKV", zap.Any("reason", initError))
+				return initError
+			}
+			var ss *suffixSnapshot
+			if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.MetaRootPath, "snapshots"); initError != nil {
+				log.Error("RootCoord, Failed to new suffixSnapshot", zap.Error(initError))
+				return initError
+			}
+			if c.MetaTable, initError = NewMetaTable(ss); initError != nil {
+				log.Error("RootCoord, Failed to new MetaTable", zap.Any("reason", initError))
 				return initError
 			}
 
@@ -988,7 +1012,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	switch ddOp.Type {
 	case CreateCollectionDDType:
 		var ddReq = internalpb.CreateCollectionRequest{}
-		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
+		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
 		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
@@ -1001,7 +1025,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		invalidateCache = false
 	case DropCollectionDDType:
 		var ddReq = internalpb.DropCollectionRequest{}
-		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
+		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
 		ts = ddReq.Base.Timestamp
@@ -1016,7 +1040,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		invalidateCache = true
 	case CreatePartitionDDType:
 		var ddReq = internalpb.CreatePartitionRequest{}
-		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
+		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
 		ts = ddReq.Base.Timestamp
@@ -1034,7 +1058,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		invalidateCache = true
 	case DropPartitionDDType:
 		var ddReq = internalpb.DropPartitionRequest{}
-		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
+		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
 		ts = ddReq.Base.Timestamp
@@ -1072,6 +1096,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	return c.setDdMsgSendFlag(true)
 }
 
+// Start start rootcoord
 func (c *Core) Start() error {
 	if err := c.checkInit(); err != nil {
 		log.Debug("RootCoord Start checkInit failed", zap.Error(err))
@@ -1090,23 +1115,33 @@ func (c *Core) Start() error {
 			log.Debug("RootCoord Start reSendDdMsg failed", zap.Error(err))
 			return
 		}
+		c.wg.Add(5)
 		go c.startTimeTickLoop()
 		go c.tsLoop()
 		go c.sessionLoop()
-		go c.chanTimeTick.StartWatch()
+		go c.chanTimeTick.StartWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
+
+		Params.CreatedTime = time.Now()
+		Params.UpdatedTime = time.Now()
+
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
+
 	log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
+
 	return nil
 }
 
+// Stop stop rootcoord
 func (c *Core) Stop() error {
 	c.cancel()
+	c.wg.Wait()
 	c.stateCode.Store(internalpb.StateCode_Abnormal)
 	return nil
 }
 
+// GetComponentStates get states of components
 func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	log.Debug("GetComponentStates", zap.String("State Code", internalpb.StateCode_name[int32(code)]))
@@ -1133,6 +1168,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 	}, nil
 }
 
+// GetTimeTickChannel get timetick channel name
 func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -1143,6 +1179,7 @@ func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse
 	}, nil
 }
 
+// GetStatisticsChannel get statistics channel name
 func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -1153,6 +1190,7 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 	}, nil
 }
 
+// CreateCollection create collection
 func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	metrics.RootCoordCreateCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1186,6 +1224,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	}, nil
 }
 
+// DropCollection drop collection
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	metrics.RootCoordDropCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1205,7 +1244,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("DropCollection Failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
+		log.Warn("DropCollection Failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Drop collection failed: " + err.Error(),
@@ -1219,6 +1258,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	}, nil
 }
 
+// HasCollection check collection existence
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	metrics.RootCoordHasCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1262,6 +1302,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	}, nil
 }
 
+// DescribeCollection return collection info
 func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	metrics.RootCoordDescribeCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1305,6 +1346,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	return t.Rsp, nil
 }
 
+// ShowCollections list all collection names
 func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	metrics.RootCoordShowCollectionsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1331,7 +1373,8 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("ShowCollections failed", zap.String("dbname", in.DbName), zap.Int64("msgID", in.Base.MsgID))
+		log.Warn("ShowCollections failed", zap.String("dbname", in.DbName), zap.Int64("msgID", in.Base.MsgID),
+			zap.Error(err))
 		return &milvuspb.ShowCollectionsResponse{
 			CollectionNames: nil,
 			Status: &commonpb.Status{
@@ -1349,6 +1392,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	return t.Rsp, nil
 }
 
+// CreatePartition create partition
 func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	metrics.RootCoordCreatePartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1368,7 +1412,8 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("CreatePartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
+		log.Warn("CreatePartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID),
+			zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "create partition failed: " + err.Error(),
@@ -1382,6 +1427,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	}, nil
 }
 
+// DropPartition drop partition
 func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	metrics.RootCoordDropPartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1401,7 +1447,8 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("DropPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
+		log.Warn("DropPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID),
+			zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "DropPartition failed: " + err.Error(),
@@ -1415,6 +1462,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	}, nil
 }
 
+// HasPartition check partition existence
 func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	metrics.RootCoordHasPartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1458,6 +1506,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	}, nil
 }
 
+// ShowPartitions list all partition names
 func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	metrics.RootCoordShowPartitionsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	log.Debug("ShowPartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", in.Base.MsgID),
@@ -1507,6 +1556,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	return t.Rsp, nil
 }
 
+// CreateIndex create index
 func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	metrics.RootCoordCreateIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1542,6 +1592,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 	}, nil
 }
 
+// DescribeIndex return index info
 func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	metrics.RootCoordDescribeIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1597,6 +1648,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	return t.Rsp, nil
 }
 
+// DropIndex drop index
 func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	metrics.RootCoordDropIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1630,6 +1682,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 	}, nil
 }
 
+// DescribeSegment return segment info
 func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	metrics.RootCoordDescribeSegmentCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1674,6 +1727,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 	return t.Rsp, nil
 }
 
+// ShowSegments list all segments
 func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	metrics.RootCoordShowSegmentsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
@@ -1718,6 +1772,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	return t.Rsp, nil
 }
 
+// AllocTimestamp alloc timestamp
 func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1756,6 +1811,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 	}, nil
 }
 
+// AllocID alloc ids
 func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1821,6 +1877,7 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 	}, nil
 }
 
+// ReleaseDQLMessageStream release DQL msgstream
 func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1832,6 +1889,7 @@ func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseD
 	return c.proxyClientManager.ReleaseDQLMessageStream(ctx, in)
 }
 
+// SegmentFlushCompleted check whether segment flush has completed
 func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1903,6 +1961,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 	}, nil
 }
 
+// GetMetrics get metrics
 func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("RootCoord.GetMetrics",
 		zap.Int64("node_id", c.session.ServerID),
@@ -1975,5 +2034,101 @@ func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) 
 			Reason:    metricsinfo.MsgUnimplementedMetric,
 		},
 		Response: "",
+	}, nil
+}
+
+// CreateAlias create collection alias
+func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("CreateAlias ", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	t := &CreateAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("CreateAlias failed", zap.String("alias", in.Alias), zap.String("name", in.CollectionName), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Create alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("CreateAlias Success", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+// DropAlias drop collection alias
+func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("DropAlias ", zap.String("alias", in.Alias))
+	t := &DropAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("DropAlias failed", zap.String("alias", in.Alias), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Drop alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("DropAlias Success", zap.String("alias", in.Alias))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+// AlterAlias alter collection alias
+func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Debug("AlterAlias ", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	t := &AlterAliasReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+	}
+	err := executeTask(t)
+	if err != nil {
+		log.Debug("AlterAlias failed", zap.String("alias", in.Alias), zap.String("name", in.CollectionName), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Alter alias failed: " + err.Error(),
+		}, nil
+	}
+	log.Debug("AlterAlias Success", zap.String("alias", in.Alias), zap.String("name", in.CollectionName))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
 	}, nil
 }

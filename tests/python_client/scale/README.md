@@ -35,16 +35,16 @@ For instance, if the dataNode pod expands from one to two:
 ### Manually
 Run a single test scenario manually(take scale dataNode as instance):  
   
-- update milvus helm chart path (choose one of the following)  
-  - `export MILVUS_CHART_ENV=/your/milvus-helm/charts/milvus`  
-  
-  - update <code>MILVUS_CHART = '/home/zong/milvus-helm/charts/milvus'</code> in <code>scale/constants.py</code>  
+- update milvus helm chart path
+```bash  
+  export MILVUS_CHART_ENV=/your/milvus-helm/charts/milvus  
+``` 
   
 - run the commands below:  
 ```bash  
-    cd /milvus/tests/python_client/scale  
+  cd /milvus/tests/python_client/scale  
   
-    pytest test_data_node_scale.py::TestDataNodeScale::test_expand_data_node -v -s  
+  pytest test_data_node_scale.py::TestDataNodeScale::test_expand_data_node -v -s  
 ```
 
 ### Nightly 

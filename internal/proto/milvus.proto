@@ -24,6 +24,10 @@ service MilvusService {
   rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
   rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {}
 
+  rpc CreateAlias(CreateAliasRequest) returns (common.Status) {}
+  rpc DropAlias(DropAliasRequest) returns (common.Status) {}
+  rpc AlterAlias(AlterAliasRequest) returns (common.Status) {}
+
   rpc CreateIndex(CreateIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
   rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
@@ -49,27 +53,66 @@ service MilvusService {
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
 }
 
+message CreateAliasRequest {
+  common.MsgBase base = 1;
+  string collection_name = 2;
+  string alias = 3;
+}
+
+message DropAliasRequest {
+  common.MsgBase base = 1;
+  string alias = 2;
+}
+
+message AlterAliasRequest{
+  common.MsgBase base = 1;
+  string collection_name = 2;
+  string alias = 3;
+}
+
+/**
+* Create collection in milvus
+*/
 message CreateCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  // `schema` is the serialized `schema.CollectionSchema`
-  bytes schema = 4; // must
-  int32 shards_num = 5; // must. Once set, no modification is allowed
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3; 
+  // The serialized `schema.CollectionSchema`(Required)
+  bytes schema = 4; 
+  // Once set, no modification is allowed (Optional)
+  // https://github.com/milvus-io/milvus/issues/6690
+  int32 shards_num = 5;
 }
 
+/**
+* Drop collection in milvus, also will drop data in collection. 
+*/
 message DropCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1; 
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3;
 }
 
+/**
+* Check collection exist in milvus or not.
+*/
 message HasCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to check.
+  string collection_name = 3; 
+  // Not useful for now
   uint64 time_stamp = 4;
 }
+
 
 message BoolResponse {
   common.Status status = 1;
@@ -81,74 +124,148 @@ message StringResponse {
   string value = 2;
 }
 
+/**
+* Get collection meta datas like: schema, collectionID, shards number ...
+*/
 message DescribeCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to describe
+  string collection_name = 3;
+  // Not useful for now
   int64 collectionID = 4;
+  // Not useful for now
   uint64 time_stamp = 5;
 }
 
+/**
+* DescribeCollection Response
+*/
 message DescribeCollectionResponse {
+  // Contain error_code and reason
   common.Status status = 1;
+  // The schema param when you created collection.
   schema.CollectionSchema schema = 2;
+  // The collection id
   int64 collectionID = 3;
+  // System design related, users should not perceive
   repeated string virtual_channel_names = 4;
+  // System design related, users should not perceive
   repeated string physical_channel_names = 5;
-  uint64 created_timestamp = 6; // hybrid timestamp
-  uint64 created_utc_timestamp = 7; // physical timestamp
+  // Hybrid timestamp in milvus
+  uint64 created_timestamp = 6;
+  // The utc timestamp calculated by created_timestamp
+  uint64 created_utc_timestamp = 7;
+  // The shards number you set.
+  int32 shards_num = 8;
+  // The aliases of this collection
+  repeated string aliases = 9;
 }
 
+/**
+* Load collection data into query nodes, then you can do vector search on this collection.
+*/
 message LoadCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to load
+  string collection_name = 3;
 }
 
+/**
+* Release collection data from query nodes, then you can't do vector search on this collection.
+*/
 message ReleaseCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to release
+  string collection_name = 3;
 }
 
+/**
+* Get collection statistics like row_count.
+*/
 message GetCollectionStatisticsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want get statistics
+  string collection_name = 3;
 }
 
+/**
+* Will return collection statistics in stats field like [{key:"row_count",value:"1"}]
+*/
 message GetCollectionStatisticsResponse {
+  // Contain error_code and reason
   common.Status status = 1;
+  // Collection statistics data
   repeated common.KeyValuePair stats = 2;
 }
 
+/*
+* This is for ShowCollectionsRequest type field.
+*/
 enum ShowType {
+  // Will return all colloections 
   All = 0;
+  // Will return loaded collections with their inMemory_percentages
   InMemory = 1;
 }
 
+/*
+* List collections 
+*/
 message ShowCollectionsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
+  // Not useful for now
   uint64 time_stamp = 3;
+  // Decide return Loaded collections or All collections(Optional)
   ShowType type = 4;
-  repeated string collection_names = 5; // show collection in querynode, showType = InMemory
+  // When type is InMemory, will return these collection's inMemory_percentages.(Optional)
+  repeated string collection_names = 5; 
 }
 
+/*
+* Return basic collection infos.
+*/
 message ShowCollectionsResponse {
+  // Contain error_code and reason
   common.Status status = 1;
+  // Collection name array
   repeated string collection_names = 2;
+  // Collection Id array
   repeated int64 collection_ids = 3;
-  repeated uint64 created_timestamps = 4; // hybrid timestamps
-  repeated uint64 created_utc_timestamps = 5; // physical timestamps
-  repeated int64 inMemory_percentages = 6; // load percentage on querynode
+  // Hybrid timestamps in milvus
+  repeated uint64 created_timestamps = 4;
+  // The utc timestamp calculated by created_timestamp
+  repeated uint64 created_utc_timestamps = 5;
+  // Load percentage on querynode when type is InMemory
+  repeated int64 inMemory_percentages = 6; 
 }
 
+/*
+* Create partition in created collection.
+*/
 message CreatePartitionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  string partition_name = 4; // must
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition name you want to create.
+  string partition_name = 4;
 }
 
 message DropPartitionRequest {

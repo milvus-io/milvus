@@ -57,12 +57,12 @@
 	<tr>
 		<th>SDKs</th>
 		<td><li>Python</li><li>Java</li><li>Go</li><li>RESTful</li><li>C++</li></td>
-		<td><li>Python</li><li>Go (in planning)</li><li>Java (in planning)</li><li>RESTful (in planning)</li><li>C++ (in planning)</li></td>
+		<td><li>Python</li><li>Node</li><li>Go (under development)</li><li>Java (under development)</li><li>RESTful (in planning)</li><li>C++ (in planning)</li></td>
 	</tr>
 	<tr>
 		<th>Release status</th>
 		<td>Long-term support (LTS)</td>
-		<td>Release candidate. A stable version will be released in August.</td>
+		<td>Release candidate. A stable version will be released in October.</td>
 	</tr>
 </tbody>
 </table>

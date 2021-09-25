@@ -14,12 +14,20 @@ package datanode
 import "github.com/milvus-io/milvus/internal/util/typeutil"
 
 type (
-	UniqueID      = typeutil.UniqueID
-	Timestamp     = typeutil.Timestamp
+	// UniqueID is type int64
+	UniqueID = typeutil.UniqueID
+
+	// Timestamp is type uint64
+	Timestamp = typeutil.Timestamp
+
+	// IntPrimaryKey is type int64
 	IntPrimaryKey = typeutil.IntPrimaryKey
-	DSL           = string
+
+	// DSL is type string
+	DSL = string
 )
 
+// TimeRange is a range of timestamp contains the min-timestamp and max-timestamp
 type TimeRange struct {
 	timestampMin Timestamp
 	timestampMax Timestamp

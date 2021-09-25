@@ -11,6 +11,8 @@
 
 package storage
 
+// ChunkManager is to manager chunks.
+// Include Read, Write, Remove chunks.
 type ChunkManager interface {
 	GetPath(key string) (string, error)
 	Write(key string, content []byte) error

@@ -26,10 +26,11 @@ import (
 type loadType = int32
 
 const (
-	loadTypeCollection = 0
-	loadTypePartition  = 1
+	loadTypeCollection loadType = 0
+	loadTypePartition  loadType = 1
 )
 
+// dataSyncService manages a lot of flow graphs for collections and partitions
 type dataSyncService struct {
 	ctx context.Context
 
@@ -43,7 +44,7 @@ type dataSyncService struct {
 }
 
 // collection flow graph
-func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
+func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -66,7 +67,6 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", vChannel))
 	}
-	return nil
 }
 
 func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
@@ -119,7 +119,7 @@ func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueI
 }
 
 // partition flow graph
-func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) error {
+func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -137,7 +137,6 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 			dsService.msFactory)
 		dsService.partitionFlowGraphs[partitionID][vChannel] = newFlowGraph
 	}
-	return nil
 }
 
 func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
@@ -180,9 +179,15 @@ func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID)
 	defer dsService.mu.Unlock()
 
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
-		for _, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
+		for channel, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
 			// close flow graph
 			nodeFG.close()
+			// remove tSafe record
+			// no tSafe in tSafeReplica, don't return error
+			err := dsService.tSafeReplica.removeRecord(channel, partitionID)
+			if err != nil {
+				log.Warn(err.Error())
+			}
 		}
 		dsService.partitionFlowGraphs[partitionID] = nil
 	}
@@ -205,6 +210,7 @@ func newDataSyncService(ctx context.Context,
 }
 
 func (dsService *dataSyncService) close() {
+	// close collection flow graphs
 	for _, nodeFGs := range dsService.collectionFlowGraphs {
 		for _, nodeFG := range nodeFGs {
 			if nodeFG != nil {
@@ -212,6 +218,7 @@ func (dsService *dataSyncService) close() {
 			}
 		}
 	}
+	// close partition flow graphs
 	for _, nodeFGs := range dsService.partitionFlowGraphs {
 		for _, nodeFG := range nodeFGs {
 			if nodeFG != nil {

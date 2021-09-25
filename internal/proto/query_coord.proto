@@ -52,6 +52,7 @@ service QueryNode {
 //--------------------query coordinator proto------------------
 message ShowCollectionsRequest {
   common.MsgBase base = 1;
+  // Not useful for now
   int64 dbID = 2;
   repeated int64 collectionIDs = 3;
 }
@@ -238,6 +239,7 @@ message LoadSegmentsRequest {
 message ReleaseSegmentsRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
+  // Not useful for now
   int64 dbID = 3;
   int64 collectionID = 4;
   repeated int64 partitionIDs = 5;

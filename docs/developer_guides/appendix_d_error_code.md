@@ -4,33 +4,35 @@
 
 ```protobuf
 enum ErrorCode {
-  SUCCESS = 0;
-  UNEXPECTED_ERROR = 1;
-  CONNECT_FAILED = 2;
-  PERMISSION_DENIED = 3;
-  COLLECTION_NOT_EXISTS = 4;
-  ILLEGAL_ARGUMENT = 5;
-  ILLEGAL_DIMENSION = 7;
-  ILLEGAL_INDEX_TYPE = 8;
-  ILLEGAL_COLLECTION_NAME = 9;
-  ILLEGAL_TOPK = 10;
-  ILLEGAL_ROWRECORD = 11;
-  ILLEGAL_VECTOR_ID = 12;
-  ILLEGAL_SEARCH_RESULT = 13;
-  FILE_NOT_FOUND = 14;
-  META_FAILED = 15;
-  CACHE_FAILED = 16;
-  CANNOT_CREATE_FOLDER = 17;
-  CANNOT_CREATE_FILE = 18;
-  CANNOT_DELETE_FOLDER = 19;
-  CANNOT_DELETE_FILE = 20;
-  BUILD_INDEX_ERROR = 21;
-  ILLEGAL_NLIST = 22;
-  ILLEGAL_METRIC_TYPE = 23;
-  OUT_OF_MEMORY = 24;
+    Success = 0;
+    UnexpectedError = 1;
+    ConnectFailed = 2;
+    PermissionDenied = 3;
+    CollectionNotExists = 4;
+    IllegalArgument = 5;
+    IllegalDimension = 7;
+    IllegalIndexType = 8;
+    IllegalCollectionName = 9;
+    IllegalTOPK = 10;
+    IllegalRowRecord = 11;
+    IllegalVectorID = 12;
+    IllegalSearchResult = 13;
+    FileNotFound = 14;
+    MetaFailed = 15;
+    CacheFailed = 16;
+    CannotCreateFolder = 17;
+    CannotCreateFile = 18;
+    CannotDeleteFolder = 19;
+    CannotDeleteFile = 20;
+    BuildIndexError = 21;
+    IllegalNLIST = 22;
+    IllegalMetricType = 23;
+    OutOfMemory = 24;
+    IndexNotExist = 25;
+    EmptyCollection = 26;
 
-  // internal error code.
-  DD_REQUEST_RACE = 1000;
+    // internal error code.
+    DDRequestRace = 1000;
 }
 ```
 

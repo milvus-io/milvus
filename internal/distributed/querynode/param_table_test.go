@@ -16,7 +16,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,4 +39,15 @@ func TestParamTable(t *testing.T) {
 
 	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
 	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
+
+	Params.Remove("queryNode.grpc.ServerMaxSendSize")
+	Params.initServerMaxSendSize()
+	assert.Equal(t, Params.ServerMaxSendSize, grpcconfigs.DefaultServerMaxSendSize)
+
+	Params.Remove("queryNode.grpc.ServerMaxRecvSize")
+	Params.initServerMaxRecvSize()
+	assert.Equal(t, Params.ServerMaxRecvSize, grpcconfigs.DefaultServerMaxRecvSize)
+
+	Params.LoadFromEnv()
+	assert.Equal(t, Params.QueryNodeIP, funcutil.GetLocalIP())
 }

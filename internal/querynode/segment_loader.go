@@ -83,14 +83,15 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			deleteSegment(s)
 		}
 	}
-	setSegments := func() {
+	setSegments := func() error {
 		for _, s := range newSegments {
 			err := loader.historicalReplica.setSegment(s)
 			if err != nil {
-				log.Warn(err.Error())
-				deleteSegment(s)
+				segmentGC()
+				return err
 			}
 		}
+		return nil
 	}
 
 	// start to load
@@ -142,10 +143,8 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 		}
 		newSegments = append(newSegments, segment)
 	}
-	setSegments()
 
-	// sendQueryNodeStats
-	return loader.indexLoader.sendQueryNodeStats()
+	return setSegments()
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
@@ -165,7 +164,7 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		}
 	}
 
-	indexedFieldIDs := make([]int64, 0)
+	indexedFieldIDs := make([]FieldID, 0)
 	for _, vecFieldID := range vectorFieldIDs {
 		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
 		if err != nil {

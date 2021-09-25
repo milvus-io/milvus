@@ -2,51 +2,51 @@
 
 ### E2E Test
 
-#### 配置清单
+#### Configuration Requirements
 
-##### 操作系统
+##### Operating System
 
-| 操作系统   | 版本        |
+| Operating System   | Version        |
 | ------ | --------- |
-| CentOS | 7.5 或以上   |
-| Ubuntu | 16.04 或以上 |
-| Mac    | 10.14 或以上 |
+| CentOS | 7.5 or above   |
+| Ubuntu | 16.04 or above |
+| Mac    | 10.14 or above |
 
-##### 硬件
+##### Hardware
 
-| 硬件名称 | 建议配置                                                                                                |
+| Hardware Type | Recommended Configuration                                                                                                |
 | ---- | --------------------------------------------------------------------------------------------------- |
-| CPU  | x86_64 平台<br> Intel CPU Sandy Bridge 或以上<br> CPU 指令集<br> _ SSE42<br> _ AVX<br> _ AVX2<br> _ AVX512 |
-| 内存   | 16 GB 或以上                                                                                           |
+| CPU  | x86_64 architechture <br> Intel CPU Sandy Bridge or above<br> CPU Instruction Set<br> _ SSE42<br> _ AVX<br> _ AVX2<br> _ AVX512 |
+| Memory   | 16 GB or more                                                                                           |
 
-##### 软件
+##### Software
 
-| 软件名称           | 版本         |
+| Software Name           | Version         |
 | -------------- | ---------- |
-| Docker         | 19.05 或以上  |
-| Docker Compose | 1.25.5 或以上 |
-| jq             | 1.3 或以上    |
-| kubectl        | 1.14 或以上   |
-| helm           | 3.0 或以上    |
-| kind           | 0.10.0 或以上 |
+| Docker         | 19.05 or above  |
+| Docker Compose | 1.25.5 or above |
+| jq             | 1.3 or above    |
+| kubectl        | 1.14 or above   |
+| helm           | 3.0 or above    |
+| kind           | 0.10.0 or above |
 
-#### 安装依赖
+#### Installing Dependencies
 
-##### 检查 Docker 和 Docker Compose 状态
+##### Troubleshooting Docker and Docker Compose
 
-  1. 确认 Docker Daemon 正在运行：
+  1. Confirm that Docker Daemon is running：
 
 ```shell
 $ docker info
 ```
 
--   安装 Docker 步骤见 [Docker CE/EE 官方安装说明](https://docs.docker.com/get-docker/)进行安装
+-   Ensure that Docker is installed. Refer to the official installation instructions for [Docker CE/EE](https://docs.docker.com/get-docker/).
 
--   如果无法正常打印 Docker 相关信息，请启动 Docker Daemon。
+-   Start the Docker Daemon if it is not already started.
 
--   要在没有 `root` 权限的情况下运行 Docker 命令，请创建 `docker` 组并添加用户，以运行：`sudo usermod -aG docker $USER`， 退出终端并重新登录，以使更改生效 ，详见 [使用非 root 用户管理 docker](https://docs.docker.com/install/linux/linux-postinstall/)。
+-   To run Docker without `root` priveleges, create a user group labeled `docker`, then add a user to the group with `sudo usermod -aG docker $USER`. Log out and log back into the terminal for the changes to take effect. For more invormation, see the official Docker documentation for [Managing Docker as a Non-Root User](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
 
-  2. 确认 Docker Compose 版本
+  2. Check the version of Docker-Compose
 
 ```shell
 $ docker-compose version
@@ -57,25 +57,25 @@ CPython version: 3.7.5
 OpenSSL version: OpenSSL 1.1.1f  31 Mar 2020
 ```
 
--   安装 Docker Compose 步骤见 [Install Docker Compose](https://docs.docker.com/compose/install/)
+-   To install Docker-Compose, see [Install Docker Compose](https://docs.docker.com/compose/install/)
 
-##### 安装 jq
+##### Install jq
 
--   安装方式见 <https://stedolan.github.io/jq/download/>
+-   Refer to <https://stedolan.github.io/jq/download/>
 
-##### 安装 kubectl
+##### Install kubectl
 
--   安装方式见 <https://kubernetes.io/docs/tasks/tools/>
+-   Refer to <https://kubernetes.io/docs/tasks/tools/>
 
-##### 安装 helm
+##### Install helm
 
--   安装方式见 <https://helm.sh/docs/intro/install/>
+-   Refer to <https://helm.sh/docs/intro/install/>
 
-##### 安装 kind
+##### Install kind
 
--   安装方式见 <https://kind.sigs.k8s.io/docs/user/quick-start/#installation>
+-   Refer to <https://kind.sigs.k8s.io/docs/user/quick-start/#installation>
 
-#### 运行 E2E Test
+#### Run E2E Tests
 
 ```shell
 $ cd tests/scripts
@@ -84,7 +84,7 @@ $ ./e2e-k8s.sh
 
 > Getting help
 >
-> 你可以执行以下命令获取帮助
+> You can get help with the following command:
 >
 > ```shell
 > $ ./e2e-k8s.sh --help

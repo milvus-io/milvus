@@ -15,6 +15,8 @@ import (
 	"context"
 	"os"
 
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -23,6 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
+
+type getMetricsFuncType func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
 func getSystemInfoMetrics(
 	ctx context.Context,
@@ -39,7 +43,7 @@ func getSystemInfoMetrics(
 	identifierMap := make(map[string]int)
 
 	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyID)
-	identifierMap[proxyRoleName] = getUniqueIntGeneratorIns().get()
+	identifierMap[proxyRoleName] = uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 	proxyTopologyNode := metricsinfo.SystemTopologyNode{
 		Identifier: identifierMap[proxyRoleName],
 		Connected:  make([]metricsinfo.ConnectionEdge, 0),
@@ -75,28 +79,28 @@ func getSystemInfoMetrics(
 	queryCoordRoleName := ""
 	if queryCoordErr == nil && queryCoordResp != nil {
 		queryCoordRoleName = queryCoordResp.ComponentName
-		identifierMap[queryCoordRoleName] = getUniqueIntGeneratorIns().get()
+		identifierMap[queryCoordRoleName] = uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 	}
 
 	dataCoordResp, dataCoordErr := node.dataCoord.GetMetrics(ctx, request)
 	dataCoordRoleName := ""
 	if dataCoordErr == nil && dataCoordResp != nil {
 		dataCoordRoleName = dataCoordResp.ComponentName
-		identifierMap[dataCoordRoleName] = getUniqueIntGeneratorIns().get()
+		identifierMap[dataCoordRoleName] = uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 	}
 
 	indexCoordResp, indexCoordErr := node.indexCoord.GetMetrics(ctx, request)
 	indexCoordRoleName := ""
 	if indexCoordErr == nil && indexCoordResp != nil {
 		indexCoordRoleName = indexCoordResp.ComponentName
-		identifierMap[indexCoordRoleName] = getUniqueIntGeneratorIns().get()
+		identifierMap[indexCoordRoleName] = uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 	}
 
 	rootCoordResp, rootCoordErr := node.rootCoord.GetMetrics(ctx, request)
 	rootCoordRoleName := ""
 	if rootCoordErr == nil && rootCoordResp != nil {
 		rootCoordRoleName = rootCoordResp.ComponentName
-		identifierMap[rootCoordRoleName] = getUniqueIntGeneratorIns().get()
+		identifierMap[rootCoordRoleName] = uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 	}
 
 	if queryCoordErr == nil && queryCoordResp != nil {
@@ -154,12 +158,13 @@ func getSystemInfoMetrics(
 
 			// add query nodes to system topology graph
 			for _, queryNode := range queryCoordTopology.Cluster.ConnectedNodes {
-				identifier := getUniqueIntGeneratorIns().get()
+				node := queryNode
+				identifier := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 				identifierMap[queryNode.Name] = identifier
 				queryNodeTopologyNode := metricsinfo.SystemTopologyNode{
 					Identifier: identifier,
 					Connected:  nil,
-					Infos:      &queryNode,
+					Infos:      &node,
 				}
 				systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryNodeTopologyNode)
 				queryCoordTopologyNode.Connected = append(queryCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
@@ -229,12 +234,13 @@ func getSystemInfoMetrics(
 
 			// add data nodes to system topology graph
 			for _, dataNode := range dataCoordTopology.Cluster.ConnectedNodes {
-				identifier := getUniqueIntGeneratorIns().get()
+				node := dataNode
+				identifier := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 				identifierMap[dataNode.Name] = identifier
 				dataNodeTopologyNode := metricsinfo.SystemTopologyNode{
 					Identifier: identifier,
 					Connected:  nil,
-					Infos:      &dataNode,
+					Infos:      &node,
 				}
 				systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataNodeTopologyNode)
 				dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
@@ -304,12 +310,13 @@ func getSystemInfoMetrics(
 
 			// add index nodes to system topology graph
 			for _, indexNode := range indexCoordTopology.Cluster.ConnectedNodes {
-				identifier := getUniqueIntGeneratorIns().get()
+				node := indexNode
+				identifier := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 				identifierMap[indexNode.Name] = identifier
 				indexNodeTopologyNode := metricsinfo.SystemTopologyNode{
 					Identifier: identifier,
 					Connected:  nil,
-					Infos:      &indexNode,
+					Infos:      &node,
 				}
 				systemTopology.NodesInfo = append(systemTopology.NodesInfo, indexNodeTopologyNode)
 				indexCoordTopologyNode.Connected = append(indexCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{

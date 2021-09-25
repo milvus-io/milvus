@@ -105,7 +105,7 @@ build-cpp:
 
 build-cpp-with-unittest:
 	@echo "Building Milvus cpp library with unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -u -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
 # Runs the tests.
@@ -113,7 +113,6 @@ unittest: test-cpp test-go
 
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
-	@echo "disable go unittest for now, enable it later"
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 # 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
@@ -121,10 +120,18 @@ test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
-# Run go-codecov
-go-codecov:
-	@echo "Running go unittests..."
+# Runs code coverage.
+codecov: codecov-go codecov-cpp
+
+# Run codecov-go
+codecov-go: build-cpp-with-unittest
+	@echo "Running go coverage..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
+
+# Run codecov-cpp
+codecov-cpp: build-cpp-with-unittest
+	@echo "Running cpp coverage..."
+	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
 #TODO: build each component to docker
 docker: verifiers
@@ -142,7 +149,7 @@ clean:
 	@find . -name '*~' | xargs rm -fv
 	@rm -rf bin/
 	@rm -rf lib/
-	@rm $(GOPATH)/bin/milvus
+	@rm -rf $(GOPATH)/bin/milvus
 
 milvus-tools: 
 	@echo "Building tools ..."

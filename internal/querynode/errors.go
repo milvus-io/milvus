@@ -16,6 +16,7 @@ import (
 	"fmt"
 )
 
+// error msg of unhealthy query node
 func msgQueryNodeIsUnhealthy(nodeID UniqueID) string {
 	return fmt.Sprintf("query node %d is not ready", nodeID)
 }

@@ -11,17 +11,20 @@
 
 queryNode:
   stats:
-    publishInterval: 1000 # milliseconds
+    publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
 
   dataSync:
     flowGraph:
-      maxQueueLength: 1024
-      maxParallelism: 1024
+      maxQueueLength: 1024 # Maximum length of task queue in flowgraph
+      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
 
   msgStream:
     search:
-      recvBufSize: 512
-      pulsarBufSize: 512
+      recvBufSize: 512 # msgPack channel buffer size
+      pulsarBufSize: 512 # pulsar channel buffer size
 
     searchResult:
-      recvBufSize: 64
+      recvBufSize: 64 # msgPack channel buffer size
+
+  segcore:
+    chunkRows: 32768

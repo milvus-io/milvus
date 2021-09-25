@@ -1,0 +1,25 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: test-pulsar-network-partition
+  namespace: chaos-testing
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: chaos-testing
+      app.kubernetes.io/name: milvus
+  duration: 5m
+  direction: both
+  target:
+    selector:
+      namespaces:
+        - chaos-testing
+      labelSelectors:
+        app.kubernetes.io/instance: chaos-testing
+        app.kubernetes.io/name: milvus
+        component: pulsar
+    mode: one

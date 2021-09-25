@@ -55,7 +55,7 @@ func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 
-	rConsumer := &RmqConsumer{c: cli}
+	rConsumer := &RmqConsumer{c: cli, closeCh: make(chan struct{})}
 
 	return rConsumer, nil
 }
@@ -82,5 +82,6 @@ func (rc *rmqClient) BytesToMsgID(id []byte) (MessageID, error) {
 }
 
 func (rc *rmqClient) Close() {
-	rc.client.Close()
+	// TODO(yukun): What to do here?
+	// rc.client.Close()
 }

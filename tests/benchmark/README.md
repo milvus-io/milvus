@@ -14,30 +14,30 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
 -  Using jenkins:
    Use `ci/main_jenkinsfile` as the jenkins pipeline file
 -  Using argo： 
-   example argo workflow yaml configuration: `ci/argo.yaml`
+   Example argo workflow yaml configuration: `ci/argo.yaml`
 
    The client environment can be found in file `Dockerfile`
 
 -  Local test：
 
-   1. set PYTHONPATH:
+   1. Set PYTHONPATH:
    
       `export PYTHONPATH=/your/project/path/milvus_benchmark`
    
-   2. prepare data: 
+   2. Prepare data: 
    
       if we need to use the sift/deep dataset as the raw data input, we need to mount NAS and update `RAW_DATA_DIR` in `config.py`, the example mount command:
         `sudo mount -t cifs -o username=test,vers=1.0 //172.16.70.249/test /test`
    
-   3. install requirements:
+   3. Install requirements:
 
       `pip install -r requirements.txt`
 
-   4. install the Python-SDK for milvus
+   4. Install the [Python-SDK for milvus](https://github.com/milvus-io/pymilvus).
    
-   5. write test yaml and run with the yaml param:
+   5. Write test yaml and run with the yaml param:
    
-      `cd milvus-benchmark/ && python main.py --local --host=* --port=19530 --suite=suites/2_insert_data.yaml`
+      `cd milvus_benchmark/ && python main.py --local --host=* --port=19530 --suite=suites/2_insert_data.yaml`
 
 ### Test suite
 
@@ -200,7 +200,7 @@ Also, you should provide the field value of the source data file path `source_fi
 
    The following diagram shows the runtime execution graph of the benchmark (local mode based on argo workflow)
 
-   <img src="asserts/uml.jpg" />
+   <img src="assets/uml.jpg" />
 
 ## Test report
 
@@ -256,6 +256,6 @@ The query expression:
 
 After the execution of the above query is complete, we will get its charts:
 
- <img src="asserts/dash.png" />
+ <img src="assets/dash.png" />
 
 In this chart, we will found there has an improvement from 2.0.0-RC3 to 2.0.0-RC5.

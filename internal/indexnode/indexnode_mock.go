@@ -14,20 +14,19 @@ package indexnode
 import (
 	"context"
 	"errors"
-	"strconv"
 	"sync"
-	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -35,6 +34,7 @@ import (
 type Mock struct {
 	Build   bool
 	Failure bool
+	Err     bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -46,7 +46,7 @@ type Mock struct {
 }
 
 func (inm *Mock) Init() error {
-	if inm.Failure {
+	if inm.Err {
 		return errors.New("IndexNode init failed")
 	}
 	inm.ctx, inm.cancel = context.WithCancel(context.Background())
@@ -62,67 +62,111 @@ func (inm *Mock) buildIndexTask() {
 		case <-inm.ctx.Done():
 			return
 		case req := <-inm.buildIndex:
-			if inm.Failure && inm.Build {
-				indexMeta := indexpb.IndexMeta{}
+			if inm.Failure {
+				saveIndexMeta := func() error {
+					indexMeta := indexpb.IndexMeta{}
 
-				_, values, versions, _ := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
-				_ = proto.UnmarshalText(values[0], &indexMeta)
-				indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
-				indexMeta.State = commonpb.IndexState_Failed
-				time.Sleep(time.Second)
-				_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-					proto.MarshalTextString(&indexMeta))
-			}
-			if inm.Build {
-				indexMeta := indexpb.IndexMeta{}
-				_, values, versions, _ := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
-				_ = proto.UnmarshalText(values[0], &indexMeta)
-				indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
-				indexMeta.State = commonpb.IndexState_Failed
-				time.Sleep(time.Second)
-				_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-					proto.MarshalTextString(&indexMeta))
-				indexMeta.Version = indexMeta.Version + 1
-				indexMeta.State = commonpb.IndexState_Finished
-				_ = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0]+1,
-					proto.MarshalTextString(&indexMeta))
+					_, values, versions, err := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
+					if err != nil {
+						return err
+					}
+					err = proto.UnmarshalText(values[0], &indexMeta)
+					if err != nil {
+						return err
+					}
+					indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
+					indexMeta.State = commonpb.IndexState_Failed
+					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
+						proto.MarshalTextString(&indexMeta))
+					if err != nil {
+						return err
+					}
+					return nil
+				}
+				err := retry.Do(context.Background(), saveIndexMeta, retry.Attempts(3))
+				if err != nil {
+					log.Debug("IndexNode Mock saveIndexMeta error", zap.Error(err))
+				}
+			} else {
+				saveIndexMeta := func() error {
+					indexMeta := indexpb.IndexMeta{}
+					_, values, versions, err := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
+					if err != nil {
+						return err
+					}
+					err = proto.UnmarshalText(values[0], &indexMeta)
+					if err != nil {
+						return err
+					}
+					indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
+					indexMeta.State = commonpb.IndexState_Failed
+					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
+						proto.MarshalTextString(&indexMeta))
+					if err != nil {
+						return err
+					}
+
+					indexMeta2 := indexpb.IndexMeta{}
+					_, values2, versions2, err := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
+					if err != nil {
+						return err
+					}
+					err = proto.UnmarshalText(values2[0], &indexMeta2)
+					if err != nil {
+						return err
+					}
+					indexMeta2.Version = indexMeta.Version + 1
+					indexMeta2.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
+					indexMeta2.State = commonpb.IndexState_Finished
+					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions2[0],
+						proto.MarshalTextString(&indexMeta2))
+					if err != nil {
+						return err
+					}
+					return nil
+				}
+				err := retry.Do(context.Background(), saveIndexMeta, retry.Attempts(3))
+				if err != nil {
+					log.Debug("IndexNode Mock saveIndexMeta error", zap.Error(err))
+				}
 			}
 		}
 	}
 }
 
 func (inm *Mock) Start() error {
-	inm.wg.Add(1)
-	go inm.buildIndexTask()
-	if inm.Failure {
+	if inm.Err {
 		return errors.New("IndexNode start failed")
 	}
+	inm.wg.Add(1)
+	go inm.buildIndexTask()
 	return nil
 }
 
 func (inm *Mock) Stop() error {
+	if inm.Err {
+		return errors.New("IndexNode stop failed")
+	}
 	inm.cancel()
 	inm.wg.Wait()
 	inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole)
-	if inm.Failure {
-		return errors.New("IndexNode stop failed")
-	}
 	return nil
 }
 
 func (inm *Mock) Register() error {
-	if inm.Failure {
+	if inm.Err {
 		return errors.New("IndexNode register failed")
 	}
+	Params.Init()
 	inm.etcdKV, _ = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole)
 	session := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-	session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	session.Init(typeutil.IndexNodeRole, "localhost:21121", false)
 	return nil
 }
 
 func (inm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	if inm.Failure {
+	if inm.Err {
 		return &internalpb.ComponentStates{
 			State: &internalpb.ComponentInfo{
 				StateCode: internalpb.StateCode_Abnormal,
@@ -130,7 +174,7 @@ func (inm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}, nil
+		}, errors.New("IndexNode GetComponentStates Failed")
 	}
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
@@ -143,7 +187,7 @@ func (inm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 }
 
 func (inm *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	if inm.Failure {
+	if inm.Err {
 		return &milvuspb.StringResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -159,7 +203,7 @@ func (inm *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 }
 
 func (inm *Mock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	if inm.Failure {
+	if inm.Err {
 		return &milvuspb.StringResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -179,7 +223,7 @@ func (inm *Mock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		inm.buildIndex <- req
 	}
 
-	if inm.Failure {
+	if inm.Err {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, errors.New("IndexNode CreateIndex failed")
@@ -191,7 +235,7 @@ func (inm *Mock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 }
 
 func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if inm.Failure {
+	if inm.Err {
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -199,6 +243,16 @@ func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 			},
 			Response: "",
 		}, errors.New("IndexNode GetMetrics failed")
+	}
+
+	if inm.Failure {
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    metricsinfo.MsgUnimplementedMetric,
+			},
+			Response: "",
+		}, nil
 	}
 
 	return &milvuspb.GetMetricsResponse{
@@ -210,38 +264,3 @@ func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		ComponentName: "IndexNode",
 	}, nil
 }
-
-//func getSystemInfoMetricsByIndexNodeMock(
-//	ctx context.Context,
-//	req *milvuspb.GetMetricsRequest,
-//	in *IndexNodeMock,
-//) (*milvuspb.GetMetricsResponse, error) {
-//
-//	id := UniqueID(16384)
-//
-//	nodeInfos := metricsinfo.IndexNodeInfos{
-//		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-//			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
-//		},
-//	}
-//	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
-//	if err != nil {
-//		return &milvuspb.GetMetricsResponse{
-//			Status: &commonpb.Status{
-//				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-//				Reason:    err.Error(),
-//			},
-//			Response:      "",
-//			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
-//		}, nil
-//	}
-//
-//	return &milvuspb.GetMetricsResponse{
-//		Status: &commonpb.Status{
-//			ErrorCode: commonpb.ErrorCode_Success,
-//			Reason:    "",
-//		},
-//		Response:      resp,
-//		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
-//	}, nil
-//}

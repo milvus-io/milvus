@@ -16,6 +16,7 @@ class LocustRunner(BaseRunner):
         super(LocustRunner, self).__init__(env, metric)
 
     def run_case(self, case_metric, **case_param):
+        """ start running locust test """
         collection_name = case_param["collection_name"]
         task = case_param["task"]
         connection_type = case_param["connection_type"]

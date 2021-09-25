@@ -56,7 +56,11 @@ func (index *CIndex) Serialize() ([]*Blob, error) {
 	var cBinary C.CBinary
 
 	status := C.SerializeToSlicedBuffer(index.indexPtr, &cBinary)
-	defer C.DeleteCBinary(cBinary)
+	defer func() {
+		if cBinary != nil {
+			C.DeleteCBinary(cBinary)
+		}
+	}()
 	errorCode := status.error_code
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)

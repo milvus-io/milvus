@@ -16,16 +16,18 @@ import (
 )
 
 const (
-	rowIDFieldID     = 0
-	timestampFieldID = 1
+	rowIDFieldID     FieldID = 0
+	timestampFieldID FieldID = 1
 )
 
 const invalidTimestamp = Timestamp(0)
 
 type (
+	// UniqueID is an identifier that is guaranteed to be unique among all the collections, partitions and segments
 	UniqueID = typeutil.UniqueID
 	// Timestamp is timestamp
 	Timestamp = typeutil.Timestamp
+	FieldID   = int64
 	// IntPrimaryKey is the primary key of int type
 	IntPrimaryKey = typeutil.IntPrimaryKey
 	// DSL is the Domain Specific Language
@@ -36,6 +38,7 @@ type (
 	ConsumeSubName = string
 )
 
+// TimeRange is a range of time periods
 type TimeRange struct {
 	timestampMin Timestamp
 	timestampMax Timestamp

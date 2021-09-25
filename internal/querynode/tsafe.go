@@ -16,6 +16,8 @@ import (
 	"math"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 )
 
@@ -51,6 +53,7 @@ type tSafer interface {
 	registerTSafeWatcher(t *tSafeWatcher)
 	start()
 	close()
+	removeRecord(partitionID UniqueID)
 }
 
 type tSafeMsg struct {
@@ -89,7 +92,9 @@ func (ts *tSafe) start() {
 		for {
 			select {
 			case <-ts.ctx.Done():
-				log.Debug("tSafe context done")
+				log.Debug("tSafe context done",
+					zap.Any("channel", ts.channel),
+				)
 				return
 			case m := <-ts.tSafeChan:
 				ts.tSafeMu.Lock()
@@ -114,6 +119,21 @@ func (ts *tSafe) start() {
 			}
 		}
 	}()
+}
+
+// removeRecord for deleting the old partition which has been released,
+// if we don't delete this, tSafe would always be the old partition's timestamp
+// (because we set tSafe to the minimum timestamp) from old partition
+// flow graph which has been closed and would not update tSafe any more.
+// removeRecord should be called when flow graph is been removed.
+func (ts *tSafe) removeRecord(partitionID UniqueID) {
+	ts.tSafeMu.Lock()
+	defer ts.tSafeMu.Unlock()
+
+	log.Debug("remove tSafeRecord",
+		zap.Any("partitionID", partitionID),
+	)
+	delete(ts.tSafeRecord, partitionID)
 }
 
 func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) {

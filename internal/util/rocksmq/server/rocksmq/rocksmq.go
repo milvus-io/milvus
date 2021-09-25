@@ -11,26 +11,32 @@
 
 package rocksmq
 
+// ProducerMessage that will be write to rocksdb
 type ProducerMessage struct {
 	Payload []byte
 }
 
+// Rocksmq consumer
 type Consumer struct {
 	Topic     string
 	GroupName string
 	MsgMutex  chan struct{}
 }
 
+// ConsumerMessage that consumed from rocksdb
 type ConsumerMessage struct {
 	MsgID   UniqueID
 	Payload []byte
 }
 
+// Rocksmq is an interface thatmay be implemented by the application
+// to do message queue operations based ion rocksdb
 type RocksMQ interface {
 	CreateTopic(topicName string) error
 	DestroyTopic(topicName string) error
 	CreateConsumerGroup(topicName string, groupName string) error
 	DestroyConsumerGroup(topicName string, groupName string) error
+	Close()
 
 	RegisterConsumer(consumer *Consumer)
 

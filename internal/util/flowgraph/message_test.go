@@ -71,7 +71,7 @@ func (bm *MockMsg) SetPosition(position *MsgPosition) {
 
 }
 
-func TestGenerateMsgStreamMsg(t *testing.T) {
+func Test_GenerateMsgStreamMsg(t *testing.T) {
 	messages := make([]msgstream.TsMsg, 1)
 	messages[0] = &MockMsg{
 		Ctx: context.TODO(),

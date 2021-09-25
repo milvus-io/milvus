@@ -13,10 +13,20 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"sort"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
+	"github.com/milvus-io/milvus/internal/types"
+
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -38,6 +48,77 @@ type channelsMgr interface {
 
 type getChannelsFuncType = func(collectionID UniqueID) (map[vChan]pChan, error)
 type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
+
+func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFuncType {
+	return func(collectionID UniqueID) (map[vChan]pChan, error) {
+		req := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     0, // todo
+				Timestamp: 0, // todo
+				SourceID:  0, // todo
+			},
+			DbName:         "", // todo
+			CollectionName: "", // todo
+			CollectionID:   collectionID,
+			TimeStamp:      0, // todo
+		}
+		resp, err := rc.DescribeCollection(ctx, req)
+		if err != nil {
+			log.Warn("DescribeCollection", zap.Error(err))
+			return nil, err
+		}
+		if resp.Status.ErrorCode != 0 {
+			log.Warn("DescribeCollection",
+				zap.Any("ErrorCode", resp.Status.ErrorCode),
+				zap.Any("Reason", resp.Status.Reason))
+			return nil, err
+		}
+		if len(resp.VirtualChannelNames) != len(resp.PhysicalChannelNames) {
+			err := fmt.Errorf(
+				"len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v",
+				len(resp.VirtualChannelNames),
+				len(resp.PhysicalChannelNames))
+			log.Warn("GetDmlChannels", zap.Error(err))
+			return nil, err
+		}
+
+		ret := make(map[vChan]pChan)
+		for idx, name := range resp.VirtualChannelNames {
+			if _, ok := ret[name]; ok {
+				err := fmt.Errorf(
+					"duplicated virtual channel found, vchan: %v, pchan: %v",
+					name,
+					resp.PhysicalChannelNames[idx])
+				return nil, err
+			}
+			ret[name] = resp.PhysicalChannelNames[idx]
+		}
+
+		return ret, nil
+	}
+}
+
+func getDqlChannelsFunc(ctx context.Context, proxyID int64, qc createQueryChannelInterface) getChannelsFuncType {
+	return func(collectionID UniqueID) (map[vChan]pChan, error) {
+		req := &querypb.CreateQueryChannelRequest{
+			CollectionID: collectionID,
+			ProxyID:      proxyID,
+		}
+		resp, err := qc.CreateQueryChannel(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return nil, errors.New(resp.Status.Reason)
+		}
+
+		m := make(map[vChan]pChan)
+		m[resp.RequestChannel] = resp.RequestChannel
+
+		return m, nil
+	}
+}
 
 type streamType int
 
@@ -278,7 +359,7 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 
 	mgr.updateChannels(channels)
 
-	id := getUniqueIntGeneratorIns().get()
+	id := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 
 	vchans, pchans := make([]string, 0, len(channels)), make([]string, 0, len(channels))
 	for k, v := range channels {

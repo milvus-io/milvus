@@ -45,7 +45,7 @@ class FieldIndexing {
 
     int64_t
     get_size_per_chunk() const {
-        return segcore_config_.get_size_per_chunk();
+        return segcore_config_.get_chunk_rows();
     }
 
     virtual knowhere::Index*

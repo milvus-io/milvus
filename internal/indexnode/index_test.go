@@ -320,3 +320,36 @@ func TestCIndex_Delete(t *testing.T) {
 		assert.Equal(t, err, nil)
 	}
 }
+
+func TestCIndex_Error(t *testing.T) {
+	indexPtr, err := NewCIndex(nil, nil)
+	assert.Nil(t, err)
+
+	t.Run("Serialize error", func(t *testing.T) {
+		blobs, err := indexPtr.Serialize()
+		assert.NotNil(t, err)
+		assert.Nil(t, blobs)
+	})
+
+	t.Run("Load error", func(t *testing.T) {
+		blobs := []*Blob{{
+			Key:   "test",
+			Value: []byte("value"),
+		},
+		}
+		err = indexPtr.Load(blobs)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("BuildFloatVecIndexWithoutIds error", func(t *testing.T) {
+		floatVectors := []float32{1.1, 2.2, 3.3}
+		err = indexPtr.BuildFloatVecIndexWithoutIds(floatVectors)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("BuildBinaryVecIndexWithoutIds error", func(t *testing.T) {
+		binaryVectors := []byte("binaryVectors")
+		err = indexPtr.BuildBinaryVecIndexWithoutIds(binaryVectors)
+		assert.NotNil(t, err)
+	})
+}

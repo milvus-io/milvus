@@ -85,6 +85,8 @@ func TestQueryNodeInfos_Codec(t *testing.T) {
 			RetrieveReceiveBufSize:       1024,
 			RetrievePulsarBufSize:        1024,
 			RetrieveResultReceiveBufSize: 1024,
+
+			SimdType: "avx2",
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
@@ -160,6 +162,8 @@ func TestIndexNodeInfos_Codec(t *testing.T) {
 		},
 		SystemConfigurations: IndexNodeConfiguration{
 			MinioBucketName: "a-bucket",
+
+			SimdType: "auto",
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)

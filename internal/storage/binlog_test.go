@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+/* #nosec G103 */
 func TestInsertBinlog(t *testing.T) {
 	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 
@@ -48,6 +49,8 @@ func TestInsertBinlog(t *testing.T) {
 	e2.SetEventTimestamp(300, 400)
 
 	w.SetEventTimeStamp(1000, 2000)
+
+	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -76,11 +79,6 @@ func TestInsertBinlog(t *testing.T) {
 	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
 	pos += int(unsafe.Sizeof(tc))
 
-	//descriptor header, server id
-	svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(svrID))
-
 	//descriptor header, event length
 	descEventLen := UnsafeReadInt32(buf, pos)
 	pos += int(unsafe.Sizeof(descEventLen))
@@ -89,26 +87,6 @@ func TestInsertBinlog(t *testing.T) {
 	descNxtPos := UnsafeReadInt32(buf, pos)
 	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
 	pos += int(unsafe.Sizeof(descNxtPos))
-
-	//descriptor data fix, binlog version
-	binLogVer := UnsafeReadInt16(buf, pos)
-	assert.Equal(t, binLogVer, int16(BinlogVersion))
-	pos += int(unsafe.Sizeof(binLogVer))
-
-	//descriptor data fix, server version
-	svrVer := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, svrVer, int64(ServerVersion))
-	pos += int(unsafe.Sizeof(svrVer))
-
-	//descriptor data fix, commit id
-	cmitID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, cmitID, int64(CommitID))
-	pos += int(unsafe.Sizeof(cmitID))
-
-	//descriptor data fix, header length
-	headLen := UnsafeReadInt8(buf, pos)
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	pos += int(unsafe.Sizeof(headLen))
 
 	//descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
@@ -152,6 +130,19 @@ func TestInsertBinlog(t *testing.T) {
 		pos++
 	}
 
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	assert.Equal(t, string(multiBytes), "{\"test\":\"testExtra\"}")
+
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
 
@@ -165,11 +156,6 @@ func TestInsertBinlog(t *testing.T) {
 	e1tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e1tc), InsertEventType)
 	pos += int(unsafe.Sizeof(e1tc))
-
-	//insert e1 header, Server id
-	e1svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e1svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e1svrID))
 
 	//insert e1 header, event length
 	e1EventLen := UnsafeReadInt32(buf, pos)
@@ -213,11 +199,6 @@ func TestInsertBinlog(t *testing.T) {
 	e2tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e2tc), InsertEventType)
 	pos += int(unsafe.Sizeof(e2tc))
-
-	//insert e2 header, Server id
-	e2svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e2svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e2svrID))
 
 	//insert e2 header, event length
 	e2EventLen := UnsafeReadInt32(buf, pos)
@@ -280,6 +261,7 @@ func TestInsertBinlog(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDeleteBinlog(t *testing.T) {
 	w := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50)
 
@@ -304,6 +286,8 @@ func TestDeleteBinlog(t *testing.T) {
 	e2.SetEventTimestamp(300, 400)
 
 	w.SetEventTimeStamp(1000, 2000)
+
+	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -332,11 +316,6 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
 	pos += int(unsafe.Sizeof(tc))
 
-	//descriptor header, server id
-	svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(svrID))
-
 	//descriptor header, event length
 	descEventLen := UnsafeReadInt32(buf, pos)
 	pos += int(unsafe.Sizeof(descEventLen))
@@ -345,26 +324,6 @@ func TestDeleteBinlog(t *testing.T) {
 	descNxtPos := UnsafeReadInt32(buf, pos)
 	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
 	pos += int(unsafe.Sizeof(descNxtPos))
-
-	//descriptor data fix, binlog version
-	binLogVer := UnsafeReadInt16(buf, pos)
-	assert.Equal(t, binLogVer, int16(BinlogVersion))
-	pos += int(unsafe.Sizeof(binLogVer))
-
-	//descriptor data fix, server version
-	svrVer := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, svrVer, int64(ServerVersion))
-	pos += int(unsafe.Sizeof(svrVer))
-
-	//descriptor data fix, commit id
-	cmitID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, cmitID, int64(CommitID))
-	pos += int(unsafe.Sizeof(cmitID))
-
-	//descriptor data fix, header length
-	headLen := UnsafeReadInt8(buf, pos)
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	pos += int(unsafe.Sizeof(headLen))
 
 	//descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
@@ -408,6 +367,19 @@ func TestDeleteBinlog(t *testing.T) {
 		pos++
 	}
 
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	assert.Equal(t, string(multiBytes), "{\"test\":\"testExtra\"}")
+
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
 
@@ -421,11 +393,6 @@ func TestDeleteBinlog(t *testing.T) {
 	e1tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e1tc), DeleteEventType)
 	pos += int(unsafe.Sizeof(e1tc))
-
-	//insert e1 header, Server id
-	e1svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e1svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e1svrID))
 
 	//insert e1 header, event length
 	e1EventLen := UnsafeReadInt32(buf, pos)
@@ -469,11 +436,6 @@ func TestDeleteBinlog(t *testing.T) {
 	e2tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e2tc), DeleteEventType)
 	pos += int(unsafe.Sizeof(e2tc))
-
-	//insert e2 header, Server id
-	e2svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e2svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e2svrID))
 
 	//insert e2 header, event length
 	e2EventLen := UnsafeReadInt32(buf, pos)
@@ -536,6 +498,7 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDDLBinlog1(t *testing.T) {
 	w := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 
@@ -560,6 +523,8 @@ func TestDDLBinlog1(t *testing.T) {
 	e2.SetEventTimestamp(300, 400)
 
 	w.SetEventTimeStamp(1000, 2000)
+
+	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -588,11 +553,6 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
 	pos += int(unsafe.Sizeof(tc))
 
-	//descriptor header, server id
-	svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(svrID))
-
 	//descriptor header, event length
 	descEventLen := UnsafeReadInt32(buf, pos)
 	pos += int(unsafe.Sizeof(descEventLen))
@@ -601,26 +561,6 @@ func TestDDLBinlog1(t *testing.T) {
 	descNxtPos := UnsafeReadInt32(buf, pos)
 	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
 	pos += int(unsafe.Sizeof(descNxtPos))
-
-	//descriptor data fix, binlog version
-	binLogVer := UnsafeReadInt16(buf, pos)
-	assert.Equal(t, binLogVer, int16(BinlogVersion))
-	pos += int(unsafe.Sizeof(binLogVer))
-
-	//descriptor data fix, server version
-	svrVer := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, svrVer, int64(ServerVersion))
-	pos += int(unsafe.Sizeof(svrVer))
-
-	//descriptor data fix, commit id
-	cmitID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, cmitID, int64(CommitID))
-	pos += int(unsafe.Sizeof(cmitID))
-
-	//descriptor data fix, header length
-	headLen := UnsafeReadInt8(buf, pos)
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	pos += int(unsafe.Sizeof(headLen))
 
 	//descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
@@ -664,6 +604,19 @@ func TestDDLBinlog1(t *testing.T) {
 		pos++
 	}
 
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	assert.Equal(t, string(multiBytes), "{\"test\":\"testExtra\"}")
+
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
 
@@ -677,11 +630,6 @@ func TestDDLBinlog1(t *testing.T) {
 	e1tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e1tc), CreateCollectionEventType)
 	pos += int(unsafe.Sizeof(e1tc))
-
-	//insert e1 header, Server id
-	e1svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e1svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e1svrID))
 
 	//insert e1 header, event length
 	e1EventLen := UnsafeReadInt32(buf, pos)
@@ -725,11 +673,6 @@ func TestDDLBinlog1(t *testing.T) {
 	e2tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e2tc), DropCollectionEventType)
 	pos += int(unsafe.Sizeof(e2tc))
-
-	//insert e2 header, Server id
-	e2svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e2svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e2svrID))
 
 	//insert e2 header, event length
 	e2EventLen := UnsafeReadInt32(buf, pos)
@@ -792,6 +735,7 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDDLBinlog2(t *testing.T) {
 	w := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 
@@ -816,6 +760,8 @@ func TestDDLBinlog2(t *testing.T) {
 	e2.SetEventTimestamp(300, 400)
 
 	w.SetEventTimeStamp(1000, 2000)
+
+	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -844,11 +790,6 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
 	pos += int(unsafe.Sizeof(tc))
 
-	//descriptor header, server id
-	svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(svrID))
-
 	//descriptor header, event length
 	descEventLen := UnsafeReadInt32(buf, pos)
 	pos += int(unsafe.Sizeof(descEventLen))
@@ -857,26 +798,6 @@ func TestDDLBinlog2(t *testing.T) {
 	descNxtPos := UnsafeReadInt32(buf, pos)
 	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
 	pos += int(unsafe.Sizeof(descNxtPos))
-
-	//descriptor data fix, binlog version
-	binLogVer := UnsafeReadInt16(buf, pos)
-	assert.Equal(t, binLogVer, int16(BinlogVersion))
-	pos += int(unsafe.Sizeof(binLogVer))
-
-	//descriptor data fix, server version
-	svrVer := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, svrVer, int64(ServerVersion))
-	pos += int(unsafe.Sizeof(svrVer))
-
-	//descriptor data fix, commit id
-	cmitID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, cmitID, int64(CommitID))
-	pos += int(unsafe.Sizeof(cmitID))
-
-	//descriptor data fix, header length
-	headLen := UnsafeReadInt8(buf, pos)
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	pos += int(unsafe.Sizeof(headLen))
 
 	//descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
@@ -920,6 +841,19 @@ func TestDDLBinlog2(t *testing.T) {
 		pos++
 	}
 
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	assert.Equal(t, string(multiBytes), "{\"test\":\"testExtra\"}")
+
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
 
@@ -933,11 +867,6 @@ func TestDDLBinlog2(t *testing.T) {
 	e1tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e1tc), CreatePartitionEventType)
 	pos += int(unsafe.Sizeof(e1tc))
-
-	//insert e1 header, Server id
-	e1svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e1svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e1svrID))
 
 	//insert e1 header, event length
 	e1EventLen := UnsafeReadInt32(buf, pos)
@@ -981,11 +910,6 @@ func TestDDLBinlog2(t *testing.T) {
 	e2tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e2tc), DropPartitionEventType)
 	pos += int(unsafe.Sizeof(e2tc))
-
-	//insert e2 header, Server id
-	e2svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e2svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e2svrID))
 
 	//insert e2 header, event length
 	e2EventLen := UnsafeReadInt32(buf, pos)

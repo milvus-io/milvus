@@ -14,6 +14,7 @@ package proxy
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	ant_ast "github.com/antonmedv/expr/ast"
 	ant_parser "github.com/antonmedv/expr/parser"
@@ -21,14 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
-
-func parseQueryExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
-	if exprStr == "" {
-		return nil, nil
-	}
-
-	return parseQueryExprAdvanced(schema, exprStr)
-}
 
 type ParserContext struct {
 	schema *typeutil.SchemaHelper
@@ -167,7 +160,10 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 	}
 }
 
-func parseQueryExprAdvanced(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
+func parseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
+	if exprStr == "" {
+		return nil, nil
+	}
 	ast, err := ant_parser.Parse(exprStr)
 	if err != nil {
 		return nil, err
@@ -180,7 +176,6 @@ func parseQueryExprAdvanced(schema *typeutil.SchemaHelper, exprStr string) (*pla
 	}
 
 	context := ParserContext{schema}
-
 	expr, err := context.handleExpr(&ast.Node)
 	if err != nil {
 		return nil, err
@@ -198,8 +193,8 @@ func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *pla
 }
 
 func isSameOrder(opStr1, opStr2 string) bool {
-	isLess1 := opStr1 == "<" || opStr1 == "<="
-	isLess2 := opStr2 == "<" || opStr2 == "<="
+	isLess1 := (opStr1 == "<") || (opStr1 == "<=")
+	isLess2 := (opStr2 == "<") || (opStr2 == "<=")
 	return isLess1 == isLess2
 }
 
@@ -256,7 +251,33 @@ func getLogicalOpType(opStr string) planpb.BinaryExpr_BinaryOp {
 	}
 }
 
+func parseBoolNode(nodeRaw *ant_ast.Node) *ant_ast.BoolNode {
+	switch node := (*nodeRaw).(type) {
+	case *ant_ast.IdentifierNode:
+		val := strings.ToLower(node.Value)
+		if val == "true" {
+			return &ant_ast.BoolNode{
+				Value: true,
+			}
+		} else if val == "false" {
+			return &ant_ast.BoolNode{
+				Value: false,
+			}
+		} else {
+			return nil
+		}
+	default:
+		return nil
+	}
+}
+
 func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string) (*planpb.Expr, error) {
+	if boolNode := parseBoolNode(&left); boolNode != nil {
+		left = boolNode
+	}
+	if boolNode := parseBoolNode(&right); boolNode != nil {
+		right = boolNode
+	}
 	idNodeLeft, leftIDNode := left.(*ant_ast.IdentifierNode)
 	idNodeRight, rightIDNode := right.(*ant_ast.IdentifierNode)
 
@@ -366,6 +387,8 @@ func (context *ParserContext) handleArrayExpr(node *ant_ast.Node, dataType schem
 	}
 	var arr []*planpb.GenericValue
 	for _, element := range arrayNode.Nodes {
+		// use value inside
+		// #nosec G601
 		val, err := context.handleLeafValue(&element, dataType)
 		if err != nil {
 			return nil, err
@@ -540,11 +563,20 @@ func (context *ParserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType sc
 					Int64Val: int64(node.Value),
 				},
 			}
+		} else if dataType == schemapb.DataType_Bool {
+			gv = &planpb.GenericValue{
+				Val: &planpb.GenericValue_BoolVal{},
+			}
+			if node.Value == 1 {
+				gv.Val.(*planpb.GenericValue_BoolVal).BoolVal = true
+			} else {
+				gv.Val.(*planpb.GenericValue_BoolVal).BoolVal = false
+			}
 		} else {
 			return nil, fmt.Errorf("type mismatch")
 		}
 	case *ant_ast.BoolNode:
-		if typeutil.IsFloatingType(dataType) {
+		if typeutil.IsBoolType(dataType) {
 			gv = &planpb.GenericValue{
 				Val: &planpb.GenericValue_BoolVal{
 					BoolVal: node.Value,
@@ -605,7 +637,7 @@ func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vector
 		return nil, err
 	}
 
-	expr, err := parseQueryExpr(schema, exprStr)
+	expr, err := parseExpr(schema, exprStr)
 	if err != nil {
 		return nil, err
 	}
@@ -634,13 +666,13 @@ func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vector
 	return planNode, nil
 }
 
-func CreateExprQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
+func CreateExprPlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	if err != nil {
 		return nil, err
 	}
 
-	expr, err := parseQueryExpr(schema, exprStr)
+	expr, err := parseExpr(schema, exprStr)
 	if err != nil {
 		return nil, err
 	}

@@ -15,28 +15,33 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// Params globle params
 var Params ParamTable
 var once sync.Once
 
+// ParamTable structure stores all params
 type ParamTable struct {
 	paramtable.BaseTable
 
 	Address string
 	Port    int
 
-	PulsarAddress     string
-	EtcdEndpoints     []string
-	MetaRootPath      string
-	KvRootPath        string
-	MsgChannelSubName string
-	TimeTickChannel   string
-	StatisticsChannel string
-	DmlChannelName    string
+	PulsarAddress string
+	EtcdEndpoints []string
+	MetaRootPath  string
+	KvRootPath    string
+
+	ClusterChannelPrefix string
+	MsgChannelSubName    string
+	TimeTickChannel      string
+	StatisticsChannel    string
+	DmlChannelName       string
 
 	DmlChannelNum               int64
 	MaxPartitionNum             int64
@@ -47,42 +52,53 @@ type ParamTable struct {
 	Timeout          int
 	TimeTickInterval int
 
+	CreatedTime time.Time
+	UpdatedTime time.Time
+
 	Log log.Config
 
 	RoleName string
 }
 
-func (p *ParamTable) Init() {
+// InitOnce initialize once
+func (p *ParamTable) InitOnce() {
 	once.Do(func() {
-		// load yaml
-		p.BaseTable.Init()
-		err := p.LoadYaml("advanced/root_coord.yaml")
-		if err != nil {
-			panic(err)
-		}
-
-		p.initPulsarAddress()
-		p.initEtcdEndpoints()
-		p.initMetaRootPath()
-		p.initKvRootPath()
-
-		p.initMsgChannelSubName()
-		p.initTimeTickChannel()
-		p.initStatisticsChannelName()
-		p.initDmlChannelName()
-
-		p.initDmlChannelNum()
-		p.initMaxPartitionNum()
-		p.initMinSegmentSizeToEnableIndex()
-		p.initDefaultPartitionName()
-		p.initDefaultIndexName()
-
-		p.initTimeout()
-		p.initTimeTickInterval()
-
-		p.initLogCfg()
-		p.initRoleName()
+		p.Init()
 	})
+}
+
+// Init initialize param table
+func (p *ParamTable) Init() {
+	// load yaml
+	p.BaseTable.Init()
+	err := p.LoadYaml("advanced/root_coord.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	p.initPulsarAddress()
+	p.initEtcdEndpoints()
+	p.initMetaRootPath()
+	p.initKvRootPath()
+
+	// Has to init global msgchannel prefix before other channel names
+	p.initClusterMsgChannelPrefix()
+	p.initMsgChannelSubName()
+	p.initTimeTickChannel()
+	p.initStatisticsChannelName()
+	p.initDmlChannelName()
+
+	p.initDmlChannelNum()
+	p.initMaxPartitionNum()
+	p.initMinSegmentSizeToEnableIndex()
+	p.initDefaultPartitionName()
+	p.initDefaultIndexName()
+
+	p.initTimeout()
+	p.initTimeTickInterval()
+
+	p.initLogCfg()
+	p.initRoleName()
 }
 
 func (p *ParamTable) initPulsarAddress() {
@@ -125,36 +141,48 @@ func (p *ParamTable) initKvRootPath() {
 	p.KvRootPath = rootPath + "/" + subPath
 }
 
-func (p *ParamTable) initMsgChannelSubName() {
-	name, err := p.Load("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
+func (p *ParamTable) initClusterMsgChannelPrefix() {
+	config, err := p.Load("msgChannel.chanNamePrefix.cluster")
 	if err != nil {
 		panic(err)
 	}
-	p.MsgChannelSubName = name
+	p.ClusterChannelPrefix = config
+}
+
+func (p *ParamTable) initMsgChannelSubName() {
+	config, err := p.Load("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.MsgChannelSubName = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initTimeTickChannel() {
-	channel, err := p.Load("msgChannel.chanNamePrefix.rootCoordTimeTick")
+	config, err := p.Load("msgChannel.chanNamePrefix.rootCoordTimeTick")
 	if err != nil {
 		panic(err)
 	}
-	p.TimeTickChannel = channel
+	s := []string{p.ClusterChannelPrefix, config}
+	p.TimeTickChannel = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initStatisticsChannelName() {
-	channel, err := p.Load("msgChannel.chanNamePrefix.rootCoordStatistics")
+	config, err := p.Load("msgChannel.chanNamePrefix.rootCoordStatistics")
 	if err != nil {
 		panic(err)
 	}
-	p.StatisticsChannel = channel
+	s := []string{p.ClusterChannelPrefix, config}
+	p.StatisticsChannel = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initDmlChannelName() {
-	channel, err := p.Load("msgChannel.chanNamePrefix.rootCoordDml")
+	config, err := p.Load("msgChannel.chanNamePrefix.rootCoordDml")
 	if err != nil {
 		panic(err)
 	}
-	p.DmlChannelName = channel
+	s := []string{p.ClusterChannelPrefix, config}
+	p.DmlChannelName = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initDmlChannelNum() {

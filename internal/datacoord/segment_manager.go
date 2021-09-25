@@ -29,6 +29,7 @@ import (
 )
 
 var (
+	// allocPool pool of Allocation, to reduce allocation of Allocation
 	allocPool = sync.Pool{
 		New: func() interface{} {
 			return &Allocation{}
@@ -59,6 +60,8 @@ func putAllocation(a *Allocation) {
 	allocPool.Put(a)
 }
 
+// segmentMaxLifetime default segment max lifetime value
+// TODO needs to be configurable
 const segmentMaxLifetime = 24 * time.Hour
 
 // Manager manage segment related operations.
@@ -75,7 +78,7 @@ type Manager interface {
 	ExpireAllocations(channel string, ts Timestamp) error
 }
 
-// allcation entry for segment Allocation record
+// Allocation records the allocation info
 type Allocation struct {
 	SegmentID  UniqueID
 	NumOfRows  int64
@@ -321,11 +324,12 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
 	collMeta := s.meta.GetCollection(collectionID)
 	if collMeta == nil {
-		return -1, fmt.Errorf("Failed to get collection %d", collectionID)
+		return -1, fmt.Errorf("failed to get collection %d", collectionID)
 	}
 	return s.estimatePolicy(collMeta.Schema)
 }
 
+// DropSegment puts back all the allocation of provided segment
 func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
@@ -347,6 +351,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	}
 }
 
+// SealAllSegments seals all segments of provided collectionID
 func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
@@ -374,6 +379,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	return ret, nil
 }
 
+// GetFlushableSegments get segment ids with Sealed State and flushable (meets flushPolicy)
 func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string,
 	t Timestamp) ([]UniqueID, error) {
 	s.mu.Lock()

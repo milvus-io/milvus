@@ -41,11 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-const (
-	rootCoordClientTimout = 20 * time.Second
-	connEtcdMaxRetryTime  = 100000
-	connEtcdRetryInterval = 200 * time.Millisecond
-)
+const connEtcdMaxRetryTime = 100000
 
 var (
 	// TODO: sunby put to config
@@ -56,13 +52,13 @@ var (
 )
 
 type (
-	UniqueID  = typeutil.UniqueID
+	// UniqueID shortcut for typeutil.UniqueID
+	UniqueID = typeutil.UniqueID
+	// Timestamp shortcurt for typeutil.Timestamp
 	Timestamp = typeutil.Timestamp
 )
 
-var errNilKvClient = errors.New("kv client not initialized")
-
-// ServerState type alias
+// ServerState type alias, presents datacoord Server State
 type ServerState = int64
 
 const (
@@ -74,8 +70,11 @@ const (
 	ServerStateHealthy ServerState = 2
 )
 
-type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
-type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
+// DataNodeCreatorFunc creator function for datanode
+type DataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+
+// RootCoordCreatorFunc creator function for rootcoord
+type RootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
 
 // Server implements `types.Datacoord`
 // handles Data Cooridinator related jobs
@@ -93,7 +92,6 @@ type Server struct {
 	allocator       allocator
 	cluster         *Cluster
 	rootCoordClient types.RootCoord
-	ddChannelName   string
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -104,8 +102,8 @@ type Server struct {
 	activeCh <-chan bool
 	eventCh  <-chan *sessionutil.SessionEvent
 
-	dataClientCreator      dataNodeCreatorFunc
-	rootCoordClientCreator rootCoordCreatorFunc
+	dataNodeCreator        DataNodeCreatorFunc
+	rootCoordClientCreator RootCoordCreatorFunc
 }
 
 // ServerHelper datacoord server injection helper
@@ -123,7 +121,7 @@ func defaultServerHelper() ServerHelper {
 type Option func(svr *Server)
 
 // SetRootCoordCreator returns an `Option` setting RootCoord creator with provided parameter
-func SetRootCoordCreator(creator rootCoordCreatorFunc) Option {
+func SetRootCoordCreator(creator RootCoordCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.rootCoordClientCreator = creator
 	}
@@ -143,6 +141,13 @@ func SetCluster(cluster *Cluster) Option {
 	}
 }
 
+// SetDataNodeCreator returns an `Option` setting DataNode create function
+func SetDataNodeCreator(creator DataNodeCreatorFunc) Option {
+	return func(svr *Server) {
+		svr.dataNodeCreator = creator
+	}
+}
+
 // CreateServer create `Server` instance
 func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
@@ -150,7 +155,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 		ctx:                    ctx,
 		msFactory:              factory,
 		flushCh:                make(chan UniqueID, 1024),
-		dataClientCreator:      defaultDataNodeCreatorFunc,
+		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		helper:                 defaultServerHelper(),
 
@@ -163,6 +168,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 	return s, nil
 }
 
+// defaultDataNodeCreatorFunc defines the default behavior to get a DataNode
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
 	return datanodeclient.NewClient(ctx, addr)
 }
@@ -174,6 +180,9 @@ func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdE
 // Register register data service at etcd
 func (s *Server) Register() error {
 	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if s.session == nil {
+		return errors.New("failed to initialize session")
+	}
 	s.activeCh = s.session.Init(typeutil.DataCoordRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	return nil
@@ -354,6 +363,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	if enableTtChecker {
 		checker = NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
 		checker.Start()
+		defer checker.Stop()
 	}
 	for {
 		select {

@@ -87,7 +87,8 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	Params.Init()
-	qc.Params.Init()
+
+	qc.Params.InitOnce()
 	qc.Params.Port = Params.Port
 
 	closer := trace.InitTracing("querycoord")

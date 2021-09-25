@@ -26,7 +26,7 @@ import (
 
 type filterDmNode struct {
 	baseNode
-	loadType     loadType
+	loadType     loadType // load collection or load partition
 	collectionID UniqueID
 	partitionID  UniqueID
 	replica      ReplicaInterface
@@ -185,6 +185,7 @@ func newFilteredDmNode(replica ReplicaInterface,
 	if loadType != loadTypeCollection && loadType != loadTypePartition {
 		err := errors.New("invalid flow graph type")
 		log.Warn(err.Error())
+		return nil
 	}
 
 	return &filterDmNode{

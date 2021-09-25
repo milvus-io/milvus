@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestStream_PmsFactory(t *testing.T) {
+func TestPmsFactory(t *testing.T) {
 	pmsFactory := NewPmsFactory()
 
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
@@ -41,15 +41,28 @@ func TestStream_PmsFactory(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestStream_RmsFactory(t *testing.T) {
+func TestPmsFactory_SetParams(t *testing.T) {
+	pmsFactory := (*PmsFactory)(nil)
+
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	m := map[string]interface{}{
+		"PulsarAddress":  pulsarAddress,
+		"receiveBufSize": 1024,
+		"pulsarBufSize":  1024,
+	}
+	err := pmsFactory.SetParams(m)
+	assert.NotNil(t, err)
+}
+
+func TestRmsFactory(t *testing.T) {
 	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
 	defer os.Unsetenv("ROCKSMQ_PATH")
 
 	rmsFactory := NewRmsFactory()
 
 	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarBufSize":  1024,
+		"ReceiveBufSize": 1024,
+		"RmqBufSize":     1024,
 	}
 	rmsFactory.SetParams(m)
 
@@ -62,4 +75,15 @@ func TestStream_RmsFactory(t *testing.T) {
 
 	_, err = rmsFactory.NewQueryMsgStream(ctx)
 	assert.Nil(t, err)
+}
+
+func TestRmsFactory_SetParams(t *testing.T) {
+	rmsFactory := (*RmsFactory)(nil)
+
+	m := map[string]interface{}{
+		"ReceiveBufSize": 1024,
+		"RmqBufSize":     1024,
+	}
+	err := rmsFactory.SetParams(m)
+	assert.NotNil(t, err)
 }

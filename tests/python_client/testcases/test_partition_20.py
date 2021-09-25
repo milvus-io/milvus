@@ -15,8 +15,6 @@ class TestPartitionParams(TestcaseBase):
     """ Test case of partition interface in parameters"""
 
     @pytest.mark.tags(CaseLabel.L0)
-    # @pytest.mark.parametrize("partition_name, description",
-                             # [(cf.gen_unique_str(prefix), cf.gen_unique_str("desc_"))])
     def test_partition_default(self):
         """
         target: verify create a partition
@@ -40,7 +38,6 @@ class TestPartitionParams(TestcaseBase):
         assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.xfail(reason="issue #5375")
     @pytest.mark.parametrize("partition_name", [""])
     def test_partition_empty_name(self, partition_name):
         """
@@ -57,7 +54,6 @@ class TestPartitionParams(TestcaseBase):
                                            check_items={ct.err_code: 1, ct.err_msg: "Partition name should not be empty"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name, description", [(cf.gen_unique_str(prefix), "")])
     def test_partition_empty_description(self):
         """
         target: verify create a partition with empty description
@@ -81,8 +77,6 @@ class TestPartitionParams(TestcaseBase):
         assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name, description",
-                             # [(cf.gen_str_by_length(255), cf.gen_str_by_length(2048))])
     def test_partition_max_description_length(self):
         """
         target: verify create a partition with 255 length name and 1024 length description
@@ -103,8 +97,6 @@ class TestPartitionParams(TestcaseBase):
                                  )
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("collection_name, partition_name, description",
-                             # [(cf.gen_unique_str(), cf.gen_unique_str(prefix), cf.gen_unique_str())])
     def test_partition_dup_name(self):
         """
         target: verify create partitions with duplicate name
@@ -128,7 +120,6 @@ class TestPartitionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("description", ct.get_invalid_strs)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_special_chars_description(self, description):
         """
         target: verify create a partition with special characters in description
@@ -170,10 +161,9 @@ class TestPartitionParams(TestcaseBase):
         assert collection.name == partition_w.name
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_str_by_length(256)])
-    def test_partition_maxlength_name(self):
+    def test_partition_max_length_name(self):
         """
-        target: verify create a partition with maxlength(256) name
+        target: verify create a partition with max length(256) name
         method: 1. create a partition with max length names
         expected: 1. raise exception
         """
@@ -206,7 +196,6 @@ class TestPartitionParams(TestcaseBase):
         # TODO: need an error code issue #5144 and assert independently
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_none_collection(self):
         """
         target: verify create a partition with none collection
@@ -221,7 +210,6 @@ class TestPartitionParams(TestcaseBase):
                                                         ct.err_msg: "must be pymilvus.Collection"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop(self):
         """
         target: verify drop a partition in one collection
@@ -246,7 +234,6 @@ class TestPartitionParams(TestcaseBase):
         assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("search_vectors", [cf.gen_vectors(1, ct.default_dim)])
     def test_partition_release(self):
         """
         target: verify release partition
@@ -298,7 +285,6 @@ class TestPartitionParams(TestcaseBase):
         assert len(res2) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
                                       cf.gen_default_list_data(10),
                                       cf.gen_default_tuple_data(10)])
@@ -339,7 +325,6 @@ class TestPartitionOperations(TestcaseBase):
     """ Test case of partition interface in operations """
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_dropped_collection(self):
         """
         target: verify create partition against a dropped collection
@@ -360,7 +345,6 @@ class TestPartitionOperations(TestcaseBase):
                                            check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_same_name_in_diff_collections(self):
         """
         target: verify create partitions with same name in diff collections
@@ -398,7 +382,7 @@ class TestPartitionOperations(TestcaseBase):
             assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="skip for memory issue check")
+    @pytest.mark.skip(reason="skip temporarily for debug")
     def test_partition_maximum_partitions(self):
         """
         target: verify create maximum partitions
@@ -450,7 +434,6 @@ class TestPartitionOperations(TestcaseBase):
                          check_items={ct.err_code: 1, ct.err_msg: "default partition cannot be deleted"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop_partition_twice(self):
         """
         target: verify drop the same partition twice
@@ -476,7 +459,6 @@ class TestPartitionOperations(TestcaseBase):
                          check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_create_and_drop_multi_times(self):
         """
         target: verify create and drop for times
@@ -500,14 +482,11 @@ class TestPartitionOperations(TestcaseBase):
             assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("flush", [True, False])
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop_non_empty_partition(self):
         """
         target: verify drop a partition which has data inserted
         method: 1.create a partition with default schema
                 2. insert some data
-                3. flush / not flush
                 3. drop the partition
         expected: drop successfully
         """
@@ -521,10 +500,6 @@ class TestPartitionOperations(TestcaseBase):
 
         # insert data to partition
         partition_w.insert(cf.gen_default_dataframe_data())
-
-        # # flush   remove flush for issue #5837
-        # if flush:
-        #      self._connect().flush([collection_w.name])
 
         # drop partition
         partition_w.drop()
@@ -589,7 +564,7 @@ class TestPartitionOperations(TestcaseBase):
         target: verify release an dropped partition
         method: 1.create a partition
                 2. drop the partition
-                2. release the partition
+                3. release the partition
         expected: raise exception
         """
         # create partition
@@ -603,13 +578,12 @@ class TestPartitionOperations(TestcaseBase):
                             check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_release_dropped_collection(self):
         """
         target: verify release an dropped collection
         method: 1.create a collection and partition
                 2. drop the collection
-                2. release the partition
+                3. release the partition
         expected: raise exception
         """
         # create collection
@@ -628,15 +602,13 @@ class TestPartitionOperations(TestcaseBase):
                             check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name, search_vectors",
-    #                          [(cf.gen_unique_str(prefix), cf.gen_vectors(1, ct.default_dim))])
     def test_partition_release_after_collection_released(self):
         """
         target: verify release a partition after the collection released
         method: 1.create a collection and partition
                 2. insert some data
-                2. release the collection
-                2. release the partition
+                3. release the collection
+                4. release the partition
         expected: partition released successfully
         """
         # create collection
@@ -678,7 +650,6 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.release()
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name, data", [(ct.default_partition_name, cf.gen_default_dataframe_data())])
     def test_partition_insert_default_partition(self):
         """
         target: verify insert data into _default partition
@@ -721,7 +692,6 @@ class TestPartitionOperations(TestcaseBase):
         # TODO: update the assert error
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_insert_dropped_collection(self):
         """
         target: verify insert data into dropped collection

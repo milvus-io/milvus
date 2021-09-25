@@ -1,6 +1,3 @@
-# pymilvus==0.2.14
-# pymilvus-distributed>=0.0.61
-
 # for local install
 # --extra-index-url https://test.pypi.org/simple/
 # pymilvus==2.0.0rc3.dev8

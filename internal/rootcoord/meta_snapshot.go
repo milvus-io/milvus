@@ -26,6 +26,7 @@ import (
 )
 
 const (
+	// RequestTimeout timeout for request
 	RequestTimeout = 10 * time.Second
 )
 

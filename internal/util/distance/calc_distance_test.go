@@ -83,7 +83,7 @@ func DistanceIP(left []float32, right []float32) float32 {
 	return sum
 }
 
-func TestCalcL2(t *testing.T) {
+func Test_CalcL2(t *testing.T) {
 	var dim int64 = 128
 	var leftNum int64 = 1
 	var rightNum int64 = 1
@@ -100,7 +100,7 @@ func TestCalcL2(t *testing.T) {
 	assert.Less(t, float64(distance), PRECISION)
 }
 
-func TestCalcIP(t *testing.T) {
+func Test_CalcIP(t *testing.T) {
 	var dim int64 = 128
 	var leftNum int64 = 1
 	var rightNum int64 = 1
@@ -114,7 +114,7 @@ func TestCalcIP(t *testing.T) {
 	assert.Less(t, math.Abs(float64(sum-distance)), PRECISION)
 }
 
-func TestCalcFloatDistance(t *testing.T) {
+func Test_CalcFloatDistance(t *testing.T) {
 	var dim int64 = 128
 	var leftNum int64 = 10
 	var rightNum int64 = 5
@@ -179,7 +179,7 @@ func CreateBinaryArray(n int64, dim int64) []byte {
 	return array
 }
 
-func TestSingleBitLen(t *testing.T) {
+func Test_SingleBitLen(t *testing.T) {
 	n := SingleBitLen(125)
 	assert.Equal(t, n, int64(128))
 
@@ -187,7 +187,7 @@ func TestSingleBitLen(t *testing.T) {
 	assert.Equal(t, n, int64(136))
 }
 
-func TestVectorCount(t *testing.T) {
+func Test_VectorCount(t *testing.T) {
 	n := VectorCount(15, 20)
 	assert.Equal(t, n, int64(10))
 
@@ -195,7 +195,7 @@ func TestVectorCount(t *testing.T) {
 	assert.Equal(t, n, int64(3))
 }
 
-func TestValidateBinaryArrayLength(t *testing.T) {
+func Test_ValidateBinaryArrayLength(t *testing.T) {
 	err := ValidateBinaryArrayLength(21, 12)
 	assert.Nil(t, err)
 
@@ -203,7 +203,7 @@ func TestValidateBinaryArrayLength(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestCountOne(t *testing.T) {
+func Test_CountOne(t *testing.T) {
 	n := CountOne(6)
 	assert.Equal(t, n, int32(2))
 
@@ -214,7 +214,7 @@ func TestCountOne(t *testing.T) {
 	assert.Equal(t, n, int32(8))
 }
 
-func TestCalcHamming(t *testing.T) {
+func Test_CalcHamming(t *testing.T) {
 	var dim int64 = 22
 	// v1 = 00000010 00000110 00001000
 	v1 := make([]uint8, 3)
@@ -230,7 +230,7 @@ func TestCalcHamming(t *testing.T) {
 	assert.Equal(t, n, int32(4))
 }
 
-func TestCalcHamminDistance(t *testing.T) {
+func Test_CalcHamminDistance(t *testing.T) {
 	var dim int64 = 125
 	var leftNum int64 = 2
 
@@ -262,7 +262,7 @@ func TestCalcHamminDistance(t *testing.T) {
 	assert.Error(t, e)
 }
 
-func TestCalcTanimotoCoefficient(t *testing.T) {
+func Test_CalcTanimotoCoefficient(t *testing.T) {
 	var dim int64 = 22
 	hamming := make([]int32, 2)
 	hamming[0] = 4

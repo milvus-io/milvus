@@ -18,18 +18,6 @@ const (
 	subSystemProxy     = "proxy"
 )
 
-/*
-var (
-	PanicCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "server",
-			Name:      "panic_total",
-			Help:      "Counter of panic.",
-		}, []string{"type"})
-)
-*/
-
 var (
 	// RootCoordProxyLister used to count the num of registered proxy nodes
 	RootCoordProxyLister = prometheus.NewGaugeVec(
@@ -607,7 +595,7 @@ var (
 
 //RegisterDataCoord register DataCoord metrics
 func RegisterDataCoord() {
-	prometheus.Register(DataCoordDataNodeList)
+	prometheus.MustRegister(DataCoordDataNodeList)
 }
 
 var (
@@ -632,8 +620,8 @@ var (
 
 //RegisterDataNode register DataNode metrics
 func RegisterDataNode() {
-	prometheus.Register(DataNodeFlushSegmentsCounter)
-	prometheus.Register(DataNodeWatchDmChannelsCounter)
+	prometheus.MustRegister(DataNodeFlushSegmentsCounter)
+	prometheus.MustRegister(DataNodeWatchDmChannelsCounter)
 }
 
 //RegisterIndexCoord register IndexCoord metrics

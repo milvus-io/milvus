@@ -12,6 +12,7 @@
 package rocksmq
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,7 +24,13 @@ func TestClient(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestCreateProducer(t *testing.T) {
+func TestClient_CreateProducer(t *testing.T) {
+	var client0 client
+	producer0, err := client0.CreateProducer(ProducerOptions{})
+	assert.Nil(t, producer0)
+	assert.Error(t, err)
+
+	/////////////////////////////////////////////////
 	client, err := NewClient(ClientOptions{
 		Server: newMockRocksMQ(),
 	})
@@ -35,12 +42,37 @@ func TestCreateProducer(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, producer)
 
-	client.Close()
+	/////////////////////////////////////////////////
+	rmqPath := "/tmp/milvus/test_client1"
+	rmq := newRocksMQ(rmqPath)
+	defer removePath(rmqPath)
+	client1, err := NewClient(ClientOptions{
+		Server: rmq,
+	})
+	assert.NoError(t, err)
+	defer client1.Close()
+	producer1, err := client1.CreateProducer(ProducerOptions{
+		Topic: newTopicName(),
+	})
+	assert.NotNil(t, producer1)
+	assert.NoError(t, err)
+	defer producer1.Close()
+
+	// /////////////////////////////////////////////////
+	// dummyTopic := strings.Repeat(newTopicName(), 100)
+	// producer2, err := client1.CreateProducer(ProducerOptions{
+	// 	Topic: dummyTopic,
+	// })
+	// assert.Nil(t, producer2)
+	// assert.Error(t, err)
 }
 
-func TestSubscribe(t *testing.T) {
+func TestClient_Subscribe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	client, err := NewClient(ClientOptions{
 		Server: newMockRocksMQ(),
+		Ctx:    ctx,
+		Cancel: cancel,
 	})
 	assert.NoError(t, err)
 
@@ -51,5 +83,65 @@ func TestSubscribe(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
-	client.Close()
+	/////////////////////////////////////////////////
+	rmqPath := "/tmp/milvus/test_client2"
+	rmq := newRocksMQ(rmqPath)
+	defer removePath(rmqPath)
+	client1, err := NewClient(ClientOptions{
+		Server: rmq,
+	})
+	assert.NoError(t, err)
+	defer client1.Close()
+	opt := ConsumerOptions{
+		Topic:            newTopicName(),
+		SubscriptionName: newConsumerName(),
+	}
+	consumer1, err := client1.Subscribe(opt)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer1)
+	consumer2, err := client1.Subscribe(opt)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer2)
+
+	producer1, err := client1.CreateProducer(ProducerOptions{
+		Topic: newTopicName(),
+	})
+	assert.NotNil(t, producer1)
+	assert.NoError(t, err)
+}
+
+func TestClient_consume(t *testing.T) {
+	rmqPath := "/tmp/milvus/test_client3"
+	rmq := newRocksMQ(rmqPath)
+	defer removePath(rmqPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	client, err := NewClient(ClientOptions{
+		Server: rmq,
+		Ctx:    ctx,
+		Cancel: cancel,
+	})
+	assert.NoError(t, err)
+	defer client.Close()
+	topicName := newTopicName()
+	producer, err := client.CreateProducer(ProducerOptions{
+		Topic: topicName,
+	})
+	assert.NotNil(t, producer)
+	assert.NoError(t, err)
+
+	opt := ConsumerOptions{
+		Topic:            topicName,
+		SubscriptionName: newConsumerName(),
+	}
+	consumer, err := client.Subscribe(opt)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer)
+
+	msg := &ProducerMessage{
+		Payload: make([]byte, 10),
+	}
+	producer.Send(msg)
+
+	<-consumer.Chan()
+
 }

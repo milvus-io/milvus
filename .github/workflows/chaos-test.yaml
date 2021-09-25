@@ -1,0 +1,66 @@
+name: Chaos Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  
+  test-network-partition-chaos:
+   
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pod: [datacoord, datanode, indexcoord, indexnode, proxy, pulsar, querycoord, querynode, rootcoord, etcd, minio]
+    
+    steps:
+
+      - name: Creating kind cluster
+        uses: helm/kind-action@v1.2.0
+      - name: Print cluster information
+        run: |
+          kubectl config view
+          kubectl cluster-info
+          kubectl get nodes
+          kubectl get pods -n kube-system
+          helm version
+          kubectl version
+      
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      
+      - name: Deploy Chaos Mesh
+        shell: bash
+        run: |
+          helm repo add chaos-mesh https://charts.chaos-mesh.org
+          helm search repo chaos-mesh
+          kubectl create ns chaos-testing
+          helm install chaos-mesh chaos-mesh/chaos-mesh -n=chaos-testing --version v2.0.1 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
+          sleep 60s
+          kubectl get po -n chaos-testing
+
+      - name: Deploy Milvus
+        shell: bash
+        run: |
+          helm repo add milvus https://milvus-io.github.io/milvus-helm
+          helm repo update
+          helm install chaos-testing milvus/milvus --set cluster.enabled=true -n=chaos-testing
+          kubectl get pods -n chaos-testing
+          sleep 60s
+          kubectl get pods -n chaos-testing
+          kubectl port-forward service/chaos-testing-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
+          sleep 20s
+          nc -vz 127.0.0.1 19530
+      - name: Chaos Test
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          pip install -r ../requirements.txt
+          pip install --upgrade protobuf
+          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_network_partition.yaml\'/g" constants.py
+          cat constants.py
+          pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO

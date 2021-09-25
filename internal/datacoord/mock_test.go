@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -54,6 +56,8 @@ func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	return val, nil
 }
 
+var _ allocator = (*FailsAllocator)(nil)
+
 // FailsAllocator allocator that fails
 type FailsAllocator struct{}
 
@@ -63,6 +67,22 @@ func (a *FailsAllocator) allocTimestamp(_ context.Context) (Timestamp, error) {
 
 func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
 	return 0, errors.New("always fail")
+}
+
+// a mock kv that always fail when do `Save`
+type saveFailKV struct{ kv.TxnKV }
+
+// Save override behavior
+func (kv *saveFailKV) Save(key, value string) error {
+	return errors.New("mocked fail")
+}
+
+// a mock kv that always fail when do `Remove`
+type removeFailKV struct{ kv.TxnKV }
+
+// Remove override behavior, inject error
+func (kv *removeFailKV) Remove(key string) error {
+	return errors.New("mocked fail")
 }
 
 func newMockAllocator() *MockAllocator {
@@ -93,6 +113,10 @@ func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, 
 		state: internalpb.StateCode_Initializing,
 		ch:    ch,
 	}, nil
+}
+
+var mockDataNodeCreator DataNodeCreatorFunc = func(_ context.Context, addr string) (types.DataNode, error) {
+	return newMockDataNodeClient(0, nil)
 }
 
 func (c *mockDataNodeClient) Init() error {
@@ -134,7 +158,7 @@ func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.Flush
 
 func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): change the id, though it's not important in ut
-	nodeID := UniqueID(20210819)
+	nodeID := UniqueID(c.id)
 
 	nodeInfos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
@@ -171,6 +195,18 @@ func (c *mockDataNodeClient) Stop() error {
 type mockRootCoordService struct {
 	state internalpb.StateCode
 	cnt   int64
+}
+
+func (m *mockRootCoordService) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
 }
 
 func newMockRootCoordService() *mockRootCoordService {

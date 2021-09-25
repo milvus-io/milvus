@@ -27,16 +27,15 @@ struct InsertRecord {
     explicit InsertRecord(const Schema& schema, int64_t size_per_chunk);
 
     // get field data without knowing the type
-    // return VectorBase type
-    auto
+    VectorBase*
     get_field_data_base(FieldOffset field_offset) const {
-        auto ptr = field_datas_[field_offset.get()].get();
+        auto ptr = fields_data_[field_offset.get()].get();
         return ptr;
     }
 
     // get field data in given type, const version
     template <typename Type>
-    auto
+    const ConcurrentVector<Type>*
     get_field_data(FieldOffset field_offset) const {
         auto base_ptr = get_field_data_base(field_offset);
         auto ptr = dynamic_cast<const ConcurrentVector<Type>*>(base_ptr);
@@ -44,9 +43,9 @@ struct InsertRecord {
         return ptr;
     }
 
-    // get field data in given type, nonconst version
+    // get field data in given type, non-const version
     template <typename Type>
-    auto
+    ConcurrentVector<Type>*
     get_field_data(FieldOffset field_offset) {
         auto base_ptr = get_field_data_base(field_offset);
         auto ptr = dynamic_cast<ConcurrentVector<Type>*>(base_ptr);
@@ -59,7 +58,7 @@ struct InsertRecord {
     void
     append_field_data(int64_t size_per_chunk) {
         static_assert(std::is_fundamental_v<Type>);
-        field_datas_.emplace_back(std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
+        fields_data_.emplace_back(std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
     }
 
     // append a column of vector type
@@ -67,10 +66,10 @@ struct InsertRecord {
     void
     append_field_data(int64_t dim, int64_t size_per_chunk) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        field_datas_.emplace_back(std::make_unique<ConcurrentVector<VectorType>>(dim, size_per_chunk));
+        fields_data_.emplace_back(std::make_unique<ConcurrentVector<VectorType>>(dim, size_per_chunk));
     }
 
  private:
-    std::vector<std::unique_ptr<VectorBase>> field_datas_;
+    std::vector<std::unique_ptr<VectorBase>> fields_data_;
 };
 }  // namespace milvus::segcore

@@ -14,7 +14,6 @@ package proxy
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -31,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -153,6 +151,8 @@ func (node *Proxy) Init() error {
 		}
 		log.Debug("Proxy CreateQueryChannel success")
 
+		// TODO SearchResultChannelNames and RetrieveResultChannelNames should not be part in the Param table
+		// we should maintain a separate map for search result
 		Params.SearchResultChannelNames = []string{resp.ResultChannel}
 		Params.RetrieveResultChannelNames = []string{resp.ResultChannel}
 		log.Debug("Proxy CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
@@ -187,73 +187,9 @@ func (node *Proxy) Init() error {
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
-	getDmlChannelsFunc := func(collectionID UniqueID) (map[vChan]pChan, error) {
-		req := &milvuspb.DescribeCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DescribeCollection,
-				MsgID:     0, // todo
-				Timestamp: 0, // todo
-				SourceID:  0, // todo
-			},
-			DbName:         "", // todo
-			CollectionName: "", // todo
-			CollectionID:   collectionID,
-			TimeStamp:      0, // todo
-		}
-		resp, err := node.rootCoord.DescribeCollection(node.ctx, req)
-		if err != nil {
-			log.Warn("DescribeCollection", zap.Error(err))
-			return nil, err
-		}
-		if resp.Status.ErrorCode != 0 {
-			log.Warn("DescribeCollection",
-				zap.Any("ErrorCode", resp.Status.ErrorCode),
-				zap.Any("Reason", resp.Status.Reason))
-			return nil, err
-		}
-		if len(resp.VirtualChannelNames) != len(resp.PhysicalChannelNames) {
-			err := fmt.Errorf(
-				"len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v",
-				len(resp.VirtualChannelNames),
-				len(resp.PhysicalChannelNames))
-			log.Warn("GetDmlChannels", zap.Error(err))
-			return nil, err
-		}
-
-		ret := make(map[vChan]pChan)
-		for idx, name := range resp.VirtualChannelNames {
-			if _, ok := ret[name]; ok {
-				err := fmt.Errorf(
-					"duplicated virtual channel found, vchan: %v, pchan: %v",
-					name,
-					resp.PhysicalChannelNames[idx])
-				return nil, err
-			}
-			ret[name] = resp.PhysicalChannelNames[idx]
-		}
-
-		return ret, nil
-	}
-	getDqlChannelsFunc := func(collectionID UniqueID) (map[vChan]pChan, error) {
-		req := &querypb.CreateQueryChannelRequest{
-			CollectionID: collectionID,
-			ProxyID:      node.session.ServerID,
-		}
-		resp, err := node.queryCoord.CreateQueryChannel(node.ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return nil, errors.New(resp.Status.Reason)
-		}
-
-		m := make(map[vChan]pChan)
-		m[resp.RequestChannel] = resp.RequestChannel
-
-		return m, nil
-	}
-
-	chMgr := newChannelsMgrImpl(getDmlChannelsFunc, defaultInsertRepackFunc, getDqlChannelsFunc, nil, node.msFactory)
+	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
+	dqlChannelsFunc := getDqlChannelsFunc(node.ctx, node.session.ServerID, node.queryCoord)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, dqlChannelsFunc, nil, node.msFactory)
 	node.chMgr = chMgr
 
 	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
@@ -348,16 +284,24 @@ func (node *Proxy) Start() error {
 	}
 	log.Debug("init global meta cache ...")
 
-	node.sched.Start()
+	if err := node.sched.Start(); err != nil {
+		return err
+	}
 	log.Debug("start scheduler ...")
 
-	node.idAllocator.Start()
+	if err := node.idAllocator.Start(); err != nil {
+		return err
+	}
 	log.Debug("start id allocator ...")
 
-	node.segAssigner.Start()
+	if err := node.segAssigner.Start(); err != nil {
+		return err
+	}
 	log.Debug("start seg assigner ...")
 
-	node.tick.Start()
+	if err := node.tick.Start(); err != nil {
+		return err
+	}
 	log.Debug("start time tick ...")
 
 	err = node.chTicker.start()

@@ -59,6 +59,13 @@ func (event *descriptorEvent) GetMemoryUsageInBytes() int32 {
 }
 
 func (event *descriptorEvent) Write(buffer io.Writer) error {
+	err := event.descriptorEventData.FinishExtra()
+	if err != nil {
+		return err
+	}
+	event.descriptorEventHeader.EventLength = event.descriptorEventHeader.GetMemoryUsageInBytes() + event.descriptorEventData.GetMemoryUsageInBytes()
+	event.descriptorEventHeader.NextPosition = int32(binary.Size(MagicNumber)) + event.descriptorEventHeader.EventLength
+
 	if err := event.descriptorEventHeader.Write(buffer); err != nil {
 		return err
 	}
@@ -195,9 +202,6 @@ type dropPartitionEventWriter struct {
 func newDescriptorEvent() *descriptorEvent {
 	header := newDescriptorEventHeader()
 	data := newDescriptorEventData()
-	header.EventLength = header.GetMemoryUsageInBytes() + data.GetMemoryUsageInBytes()
-	header.NextPosition = int32(binary.Size(MagicNumber)) + header.EventLength
-	data.HeaderLength = int8(binary.Size(eventHeader{}))
 	return &descriptorEvent{
 		descriptorEventHeader: *header,
 		descriptorEventData:   *data,

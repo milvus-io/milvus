@@ -13,6 +13,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -25,6 +26,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// dataSyncService controls a flowgraph for a specific collection
 type dataSyncService struct {
 	ctx          context.Context
 	cancelFn     context.CancelFunc
@@ -36,6 +38,10 @@ type dataSyncService struct {
 	collectionID UniqueID
 	dataCoord    types.DataCoord
 	clearSignal  chan<- UniqueID
+
+	flushingSegCache *Cache
+
+	saveBinlog func(fu *segmentFlushUnit) error
 }
 
 func newDataSyncService(ctx context.Context,
@@ -46,22 +52,28 @@ func newDataSyncService(ctx context.Context,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- UniqueID,
 	dataCoord types.DataCoord,
+	flushingSegCache *Cache,
 
 ) (*dataSyncService, error) {
+
+	if replica == nil {
+		return nil, errors.New("Nil input")
+	}
 
 	ctx1, cancel := context.WithCancel(ctx)
 
 	service := &dataSyncService{
-		ctx:          ctx1,
-		cancelFn:     cancel,
-		fg:           nil,
-		flushChan:    flushChan,
-		replica:      replica,
-		idAllocator:  alloc,
-		msFactory:    factory,
-		collectionID: vchan.GetCollectionID(),
-		dataCoord:    dataCoord,
-		clearSignal:  clearSignal,
+		ctx:              ctx1,
+		cancelFn:         cancel,
+		fg:               nil,
+		flushChan:        flushChan,
+		replica:          replica,
+		idAllocator:      alloc,
+		msFactory:        factory,
+		collectionID:     vchan.GetCollectionID(),
+		dataCoord:        dataCoord,
+		clearSignal:      clearSignal,
+		flushingSegCache: flushingSegCache,
 	}
 
 	if err := service.initNodes(vchan); err != nil {
@@ -70,6 +82,7 @@ func newDataSyncService(ctx context.Context,
 	return service, nil
 }
 
+// start starts the flowgraph in datasyncservice
 func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
 		log.Debug("Data Sync Service starting flowgraph")
@@ -88,6 +101,7 @@ func (dsService *dataSyncService) close() {
 	dsService.cancelFn()
 }
 
+// initNodes inits a TimetickedFlowGraph
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
 	// TODO: add delete pipeline support
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
@@ -147,13 +161,19 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return nil
 	}
 
-	var dmStreamNode Node = newDmInputNode(
+	dsService.saveBinlog = saveBinlog
+
+	var dmStreamNode Node
+	dmStreamNode, err = newDmInputNode(
 		dsService.ctx,
 		dsService.msFactory,
 		vchanInfo.CollectionID,
 		vchanInfo.GetChannelName(),
 		vchanInfo.GetSeekPosition(),
 	)
+	if err != nil {
+		return err
+	}
 	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
 	var insertBufferNode Node
 	insertBufferNode, err = newInsertBufferNode(
@@ -164,15 +184,15 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		dsService.flushChan,
 		saveBinlog,
 		vchanInfo.GetChannelName(),
+		dsService.flushingSegCache,
 	)
 	if err != nil {
 		return err
 	}
 
-	var deleteNode Node = newDeleteDNode(
-		dsService.ctx,
-		dsService.replica,
-	)
+	dn := newDeleteDNode(dsService.replica)
+
+	var deleteNode Node = dn
 
 	// recover segment checkpoints
 	for _, us := range vchanInfo.GetUnflushedSegments() {

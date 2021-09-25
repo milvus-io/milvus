@@ -4,6 +4,8 @@ import (
 	"sync"
 )
 
+// Cache stores flusing segments' ids to prevent flushing the same segment again and again.
+//  Once the segment is flushed, its id will be removed from the cache.
 type Cache struct {
 	cacheMu  sync.RWMutex
 	cacheMap map[UniqueID]bool
@@ -23,6 +25,7 @@ func (c *Cache) checkIfCached(key UniqueID) bool {
 	return ok
 }
 
+// Cache caches a specific segment ID into the cache
 func (c *Cache) Cache(segID UniqueID) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
@@ -30,6 +33,7 @@ func (c *Cache) Cache(segID UniqueID) {
 	c.cacheMap[segID] = true
 }
 
+// Remove removes a set of segment IDs from the cache
 func (c *Cache) Remove(segIDs ...UniqueID) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()

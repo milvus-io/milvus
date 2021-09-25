@@ -147,7 +147,7 @@ class SegmentSealedImpl : public SegmentSealed {
     std::vector<std::unique_ptr<knowhere::Index>> scalar_indexings_;
     std::unique_ptr<ScalarIndexBase> primary_key_index_;
 
-    std::vector<aligned_vector<char>> field_datas_;
+    std::vector<aligned_vector<char>> fields_data_;
 
     SealedIndexingRecord vecindexs_;
     aligned_vector<idx_t> row_ids_;

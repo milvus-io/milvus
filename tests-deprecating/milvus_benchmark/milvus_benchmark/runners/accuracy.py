@@ -25,6 +25,7 @@ class AccuracyRunner(BaseRunner):
         vector_type = utils.get_vector_type(data_type)
         index_field_name = utils.get_default_field_name(vector_type)
         base_query_vectors = utils.get_vectors_from_binary(utils.MAX_NQ, dimension, data_type)
+        # collection_info and index_info are used to report
         collection_info = {
             "dimension": dimension,
             "metric_type": metric_type,

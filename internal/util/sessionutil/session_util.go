@@ -20,7 +20,7 @@ const (
 	DefaultServiceRoot = "session/"
 	DefaultIDKey       = "id"
 	DefaultRetryTimes  = 30
-	DefaultTTL         = 10
+	DefaultTTL         = 60
 )
 
 type SessionEventType int
@@ -75,9 +75,11 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 	}
 	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(300))
 	if err != nil {
+		log.Warn("failed to initialize session",
+			zap.Error(err))
 		return nil
 	}
-	log.Debug("Sessiont connect to etcd success")
+	log.Debug("Session connect to etcd success")
 	return session
 }
 
@@ -146,7 +148,7 @@ func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error)
 		}
 
 		if !txnResp.Succeeded {
-			log.Debug("Session Txn unsuccess", zap.String("key", key))
+			log.Debug("Session Txn unsuccessful", zap.String("key", key))
 			continue
 		}
 		log.Debug("Session get serverID success")
@@ -332,4 +334,29 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 		}
 	}()
 	return eventCh
+}
+
+// LivenessCheck performs liveness check with provided context and channel
+// ctx controls the liveness check loop
+// ch is the liveness signal channel, ch is closed only when the session is expired
+// callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
+func (s *Session) LivenessCheck(ctx context.Context, ch <-chan bool, callback func()) {
+	for {
+		select {
+		case _, ok := <-ch:
+			// ok, still alive
+			if ok {
+				continue
+			}
+			// not ok, connection lost
+			log.Warn("connection lost detected, shuting down")
+			if callback != nil {
+				go callback()
+			}
+			return
+		case <-ctx.Done():
+			log.Debug("liveness exits due to context done")
+			return
+		}
+	}
 }

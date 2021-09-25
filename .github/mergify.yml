@@ -6,6 +6,7 @@ pull_request_rules:
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=continuous-integration/jenkins/pr-merge"
       - "status-success=codecov/patch"
+      - "status-success=codecov/project"
     actions:
       label:
         add:
@@ -21,15 +22,16 @@ pull_request_rules:
         add:
           - ci-passed
 
-#  - name: Test passed for tests20 changed
-#    conditions:
-#      - base=master
-#      - -files~=^(?!tests20\/python_client).+
-#      - "status-success=continuous-integration/jenkins/pr-merge"
-#    actions:
-#      label:
-#        add:
-#          - ci-passed
+  - name: Test passed for go unittest code changed
+    conditions:
+      - base=master
+      - "status-success=Code Checker AMD64 Ubuntu 18.04"
+      - "status-success=Build and test AMD64 Ubuntu 18.04"
+      - -files~=^(?!internal\/.*_test\.go).*$
+    actions:
+      label:
+        add:
+          - ci-passed
 
   - name: Test passed for document changed
     conditions:
@@ -54,7 +56,7 @@ pull_request_rules:
     conditions:
       - base=master
       - title~=\[skip ci\]
-      - -files~=^internal\/
+      - label=kind/improvement
     actions:
       label:
         add:
@@ -72,6 +74,7 @@ pull_request_rules:
   - name: Remove ci-passed when unittest failed
     conditions:
       - base=master
+      - -title~=\[skip ci\]
       - "check-failure=Build and test AMD64 Ubuntu 18.04"
     actions:
       label:
@@ -81,6 +84,7 @@ pull_request_rules:
   - name: Remove ci-passed when ci failed
     conditions:
       - base=master
+      - -title~=\[skip ci\]
       - "check-failure=continuous-integration/jenkins/pr-merge"
     actions:
       label:
@@ -90,16 +94,18 @@ pull_request_rules:
   - name: Remove ci-passed when ci pending
     conditions:
       - base=master
+      - -title~=\[skip ci\]
       - "check-pending=continuous-integration/jenkins/pr-merge"
     actions:
       label:
         remove:
           - ci-passed
 
-  - name: Blocking PR if missing a related issue
+  - name: Blocking PR if missing a related issue or PR doesn't have kind/improvement label
     conditions:
       - base=master
       - -body~=\#[0-9]{1,6}(\s+|$)
+      - -label=kind/improvement
       - -title~=\[automated\]
     actions:
       label:
@@ -112,8 +118,13 @@ pull_request_rules:
 
   - name: Dismiss block label if related issue be added into PR
     conditions:
-      - base=master
-      - body~=\#[0-9]{1,6}(\s+|$)
+      - or:
+        - and:
+          - base=master
+          - body~=\#[0-9]{1,6}(\s+|$)
+        - and:
+          - base=master
+          - label=kind/improvement
     actions:
       label:
         remove:

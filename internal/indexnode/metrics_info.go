@@ -50,6 +50,8 @@ func getSystemInfoMetrics(
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
 			MinioBucketName: Params.MinioBucketName,
+
+			SimdType: Params.SimdType,
 		},
 	}
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)

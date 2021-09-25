@@ -12,6 +12,7 @@
 package funcutil
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 )
@@ -30,4 +31,13 @@ func RandomString(n int) string {
 		b[i] = letterRunes[Rand.Intn(len(letterRunes))]
 	}
 	return string(b)
+}
+
+func GenRandomStr() string {
+	l := rand.Uint64()%10 + 1
+	b := make([]byte, l)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%X", b)
 }

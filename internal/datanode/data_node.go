@@ -49,6 +49,7 @@ import (
 )
 
 const (
+	// RPCConnectionTimeout used to set the timeout for rpc request
 	RPCConnectionTimeout = 30 * time.Second
 
 	// MetricRequestsTotal used to count the num of total requests
@@ -61,19 +62,20 @@ const (
 	ConnectEtcdMaxRetryTime = 1000
 )
 
+const illegalRequestErrStr = "Illegal request"
+
 // DataNode communicates with outside services and unioun all
 // services in datanode package.
 //
 // DataNode implements `types.Component`, `types.DataNode` interfaces.
-//  `rootCoord` is grpc client of root coordinator.
-//  `dataCoord` is grpc client of data service.
+//  `rootCoord` is a grpc client of root coordinator.
+//  `dataCoord` is a grpc client of data service.
 //  `NodeID` is unique to each datanode.
 //  `State` is current statement of this data node, indicating whether it's healthy.
 //
 //  `vchan2SyncService` is a map of vchannlName to dataSyncService, so that datanode
 //  has ability to scale flowgraph.
 //  `vchan2FlushCh` holds flush-signal channels for every flowgraph.
-
 //  `clearSignal` is a signal channel for releasing the flowgraph resources.
 //  `segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
@@ -147,7 +149,8 @@ func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	activeCh := node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	go node.etcdAliveCheck(node.ctx, activeCh)
 	Params.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
 	// Start node watch node
@@ -157,6 +160,7 @@ func (node *DataNode) Register() error {
 	log.Debug("DataNode Init",
 		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
 	)
+
 	return nil
 }
 
@@ -196,7 +200,27 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	}
 }
 
-// handleChannelEvt handels event from kv watch event
+// etcdAliveCheck performs alive check for etcd connection
+// will close datanode if check fails
+func (node *DataNode) etcdAliveCheck(ctx context.Context, ch <-chan bool) {
+	for {
+		select {
+		case _, ok := <-ch:
+			if ok { // ok means still alive do nothing
+				continue
+			}
+			// not ok, disconnect
+			go func() { node.Stop() }()
+			log.Warn("disconnected from etcd, shuting down datanode", zap.Int64("ServerID", node.NodeID))
+			return
+		case <-ctx.Done():
+			log.Warn("etcd alive check quit, due to ctx done")
+			return
+		}
+	}
+}
+
+// handleChannelEvt handles event from kv watch event
 func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 	switch evt.Type {
 	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
@@ -224,7 +248,7 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 		if err != nil {
 			log.Warn("fail to change WatchState to complete", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
 			node.ReleaseDataSyncService(string(evt.Kv.Key))
-			// maybe retry logic and exit logic
+			// TODO GOOSE: maybe retry logic and exit logic
 		}
 	case clientv3.EventTypeDelete:
 		// guaranteed there is no "/" in channel name
@@ -251,7 +275,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord)
+	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache)
 	if err != nil {
 		return err
 	}
@@ -301,6 +325,7 @@ func (node *DataNode) ReleaseDataSyncService(vchanName string) {
 	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
 
+// FilterThreshold is the start time ouf DataNode
 var FilterThreshold Timestamp
 
 // Start will update DataNode state to HEALTHY
@@ -340,6 +365,10 @@ func (node *DataNode) Start() error {
 	FilterThreshold = rep.GetTimestamp()
 
 	go node.BackGroundGC(node.clearSignal)
+
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
+
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
@@ -362,12 +391,12 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	}
 
 	switch {
-	case node.State.Load() != internalpb.StateCode_Healthy:
-		status.Reason = fmt.Sprintf("DataNode %d not healthy, please re-send message", node.NodeID)
+	case !node.isHealthy():
+		status.Reason = msgDataNodeIsUnhealthy(node.NodeID)
 		return status, nil
 
 	case len(in.GetVchannels()) == 0:
-		status.Reason = "Illegal request"
+		status.Reason = illegalRequestErrStr
 		return status, nil
 
 	default:
@@ -377,7 +406,12 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 				zap.Any("channal Info", chanInfo),
 			)
 			if err := node.NewDataSyncService(chanInfo); err != nil {
-				log.Warn("Failed to new data sync service", zap.Any("channel", chanInfo))
+				log.Warn("Failed to new data sync service",
+					zap.Any("channel", chanInfo),
+					zap.Error(err))
+				// return error even partial success
+				status.Reason = err.Error()
+				return status, nil
 			}
 		}
 
@@ -467,20 +501,17 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return status, nil
 	}
 
-	numOfFlushingSeg := len(req.SegmentIDs)
-	log.Debug("FlushSegments ...",
+	log.Debug("Receive FlushSegments req",
 		zap.Int("num", len(req.SegmentIDs)),
 		zap.Int64s("segments", req.SegmentIDs),
 	)
 
-	dmlFlushedCh := make(chan []*datapb.FieldBinlog, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelNamebySegmentID(id)
-		log.Debug("vchannel",
-			zap.String("name", chanName),
-			zap.Int64("SegmentID", id))
+		log.Debug("vchannel", zap.String("name", chanName), zap.Int64("SegmentID", id))
 
 		if len(chanName) == 0 {
+			log.Warn("DataNode not find segment", zap.Int64("ID", id))
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
 			return status, nil
 		}
@@ -488,7 +519,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		if node.segmentCache.checkIfCached(id) {
 			// Segment in flushing or flushed, ignore
 			log.Info("Segment in flushing, ignore it", zap.Int64("ID", id))
-			numOfFlushingSeg--
 			continue
 		}
 
@@ -498,7 +528,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		flushCh, ok := node.vchan2FlushCh[chanName]
 		node.chanMut.RUnlock()
 		if !ok {
-			// TODO restart DataNode or reshape vchan2FlushCh and vchan2SyncService
 			status.Reason = "DataNode abnormal, restarting"
 			return status, nil
 		}
@@ -508,29 +537,11 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			timestamp:    req.Base.Timestamp,
 			segmentID:    id,
 			collectionID: req.CollectionID,
-			dmlFlushedCh: dmlFlushedCh,
 		}
 		flushCh <- flushmsg
-
 	}
 
-	failedSegments := ""
-	for i := 0; i < numOfFlushingSeg; i++ {
-		msg := <-dmlFlushedCh
-		if len(msg) != 1 {
-			panic("flush size expect to 1")
-		}
-		if msg[0].Binlogs == nil {
-			failedSegments += fmt.Sprintf(" %d", msg[0].FieldID)
-		}
-	}
-	if len(failedSegments) != 0 {
-		status.Reason = fmt.Sprintf("flush failed segment list = %s", failedSegments)
-		return status, nil
-	}
-
-	node.segmentCache.Remove(req.SegmentIDs...)
-	log.Debug("FlushSegments Done",
+	log.Debug("FlushSegments tasks triggered",
 		zap.Int64s("segments", req.SegmentIDs))
 
 	status.ErrorCode = commonpb.ErrorCode_Success
@@ -538,6 +549,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	return status, nil
 }
 
+// Stop will release DataNode resources and shutdown datanode
 func (node *DataNode) Stop() error {
 	node.cancel()
 
@@ -556,6 +568,7 @@ func (node *DataNode) Stop() error {
 	return nil
 }
 
+// GetTimeTickChannel currently do nothing
 func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -566,6 +579,7 @@ func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
+// GetStatisticsChannel currently do nothing
 func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -576,6 +590,7 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
+// GetMetrics return datanode metrics
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("DataNode.GetMetrics",

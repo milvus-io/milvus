@@ -11,14 +11,17 @@
 
 package rocksmq
 
+// ProducerOptions is the options of a producer
 type ProducerOptions struct {
 	Topic string
 }
 
+// ProducerMessage is the message of a producer
 type ProducerMessage struct {
 	Payload []byte
 }
 
+// Producer provedes some operations for a producer
 type Producer interface {
 	// return the topic which producer is publishing to
 	Topic() string

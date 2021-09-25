@@ -24,6 +24,10 @@ using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::query;
 
+namespace {
+const int64_t ROW_COUNT = 100 * 1000;
+}
+
 TEST(Sealed, without_predicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -52,7 +56,7 @@ TEST(Sealed, without_predicate) {
         }
     })";
 
-    int64_t N = 1000 * 1000;
+    auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
@@ -133,8 +137,8 @@ TEST(Sealed, with_predicate) {
             {
                 "range": {
                     "counter": {
-                        "GE": 420000,
-                        "LT": 420005
+                        "GE": 42000,
+                        "LT": 42005
                     }
                 }
             },
@@ -154,11 +158,11 @@ TEST(Sealed, with_predicate) {
         }
     })";
 
-    int64_t N = 1000 * 1000;
+    auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
-    auto query_ptr = vec_col.data() + 420000 * dim;
+    auto query_ptr = vec_col.data() + 42000 * dim;
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
@@ -205,7 +209,7 @@ TEST(Sealed, with_predicate) {
     auto post_sr = sr;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
-        ASSERT_EQ(post_sr.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(post_sr.internal_seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(post_sr.result_distances_[offset], 0.0);
     }
 }
@@ -213,7 +217,7 @@ TEST(Sealed, with_predicate) {
 TEST(Sealed, LoadFieldData) {
     auto dim = 16;
     auto topK = 5;
-    int64_t N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto metric_type = MetricType::METRIC_L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
@@ -300,43 +304,13 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
     auto std_json = Json::parse(R"(
 [
- [
-  [
-   "982->0.000000",
-   "25315->4.741588",
-   "551029->5.078479",
-   "455002->5.134716",
-   "504754->5.329021"
-  ],
-  [
-   "287136->8.409121",
-   "528353->8.740297",
-   "935763->9.422906",
-   "794649->9.436665",
-   "192031->9.832053"
-  ],
-  [
-   "59251->2.542610",
-   "433044->3.424016",
-   "797884->3.663446",
-   "430441->3.692723",
-   "697705->3.944479"
-  ],
-  [
-   "611544->3.463480",
-   "642941->3.753775",
-   "967504->3.885163",
-   "232724->4.574215",
-   "507245->5.040902"
-  ],
-  [
-   "351788->4.453843",
-   "410227->4.699380",
-   "501497->4.805948",
-   "715061->5.166959",
-   "414882->5.179897"
-  ]
- ]
+	[
+		["982->0.000000", "25315->4.741588", "57893->4.758279", "48201->6.075444", "53853->6.223233"],
+		["41772->10.110812", "74859->11.789503", "79777->11.842009", "3785->11.982730", "35888->12.193403"],
+		["59251->2.542610", "65551->4.453535", "72204->5.331940", "96905->5.478549", "87833->5.765219"],
+		["59219->5.458013", "21995->6.077806", "97922->6.763784", "25710->7.158085", "14048->7.294020"],
+		["66353->5.695784", "30664->5.880683", "41087->5.916901", "10393->6.632869", "90215->7.201704"]
+	]
 ])");
     ASSERT_EQ(std_json.dump(-2), json.dump(-2));
 }

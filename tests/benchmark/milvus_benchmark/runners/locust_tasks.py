@@ -12,6 +12,7 @@ logger = logging.getLogger("milvus_benchmark.runners.locust_tasks")
 class Tasks(TaskSet):
     @task
     def query(self):
+        """ search interface """
         op = "query"
         # X = utils.generate_vectors(self.params[op]["nq"], self.op_info["dimension"])
         vector_query = {"vector": {self.op_info["vector_field_name"]: {
@@ -57,7 +58,7 @@ class Tasks(TaskSet):
         # ids = [random.randint(1000000, 10000000) for _ in range(self.params[op]["ni_per"])]
         # X = [[random.random() for _ in range(self.op_info["dimension"])] for _ in range(self.params[op]["ni_per"])]
         entities = utils.generate_entities(self.op_info["collection_info"], self.values["X"][:self.params[op]["ni_per"]], self.values["ids"][:self.params[op]["ni_per"]])
-        self.client.insert(entities, log=False)
+        self.client.insert(entities, log=False, timeout=300)
 
     @task
     def insert_flush(self):
@@ -74,6 +75,13 @@ class Tasks(TaskSet):
 
     @task
     def get(self):
+        """ query interface """
         op = "get"
         # ids = [random.randint(1, 10000000) for _ in range(self.params[op]["ids_length"])]
-        self.client.get(self.values["get_ids"][:self.params[op]["ids_length"]])
+        self.client.get(self.values["get_ids"][:self.params[op]["ids_length"]], timeout=300)
+
+    @task
+    def scene_test(self):
+        op = "scene_test"
+        collection_name = op + '_' + str(random.randint(1, 10000)) + '_' + str(random.randint(10001, 999999))
+        self.client.scene_test(collection_name, vectors=self.values["X"][:3000], ids=self.values["ids"][:3000])

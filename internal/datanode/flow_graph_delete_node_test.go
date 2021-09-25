@@ -12,7 +12,6 @@
 package datanode
 
 import (
-	"context"
 	"encoding/binary"
 	"testing"
 
@@ -20,25 +19,59 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFlowGraphDeleteNode_Operate_Nil(t *testing.T) {
-	ctx := context.Background()
-	var replica Replica
-	deleteNode := newDeleteDNode(ctx, replica)
-	result := deleteNode.Operate([]Msg{})
-	assert.Equal(t, len(result), 0)
+func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
+	tests := []struct {
+		replica Replica
+
+		description string
+	}{
+		{&SegmentReplica{}, "pointer of SegmentReplica"},
+	}
+
+	for _, test := range tests {
+		te.Run(test.description, func(t *testing.T) {
+			dn := newDeleteDNode(test.replica)
+
+			assert.NotNil(t, dn)
+			assert.Equal(t, "deleteNode", dn.Name())
+			dn.Close()
+		})
+	}
+
 }
 
-func TestFlowGraphDeleteNode_Operate_Invalid_Size(t *testing.T) {
-	ctx := context.Background()
-	var replica Replica
-	deleteNode := newDeleteDNode(ctx, replica)
-	var Msg1 Msg
-	var Msg2 Msg
-	result := deleteNode.Operate([]Msg{Msg1, Msg2})
-	assert.Equal(t, len(result), 0)
+func TestFlowGraphDeleteNode_Operate(te *testing.T) {
+	tests := []struct {
+		invalidIn []Msg
+		validIn   []Msg
+
+		description string
+	}{
+		{[]Msg{}, nil,
+			"Invalid input length == 0"},
+		{[]Msg{&insertMsg{}, &insertMsg{}, &insertMsg{}}, nil,
+			"Invalid input length == 3"},
+		{[]Msg{&insertMsg{}}, nil,
+			"Invalid input length == 1 but input message is not msgStreamMsg"},
+		{nil, []Msg{&MsgStreamMsg{}},
+			"valid input"},
+	}
+
+	for _, test := range tests {
+		te.Run(test.description, func(t *testing.T) {
+			dn := deleteNode{}
+			if test.invalidIn != nil {
+				rt := dn.Operate(test.invalidIn)
+				assert.Empty(t, rt)
+			} else {
+				rt := dn.Operate(test.validIn)
+				assert.Empty(t, rt)
+			}
+		})
+	}
 }
 
-func TestGetSegmentsByPKs(t *testing.T) {
+func Test_GetSegmentsByPKs(t *testing.T) {
 	buf := make([]byte, 8)
 	filter1 := bloom.NewWithEstimates(1000000, 0.01)
 	for i := 0; i < 3; i++ {

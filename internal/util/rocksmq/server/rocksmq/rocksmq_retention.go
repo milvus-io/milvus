@@ -13,7 +13,9 @@ package rocksmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -25,10 +27,16 @@ import (
 	"go.uber.org/zap"
 )
 
+// RocksmqRetentionTimeInMinutes is the time of retention
 var RocksmqRetentionTimeInMinutes int64
+
+// RocksmqRetentionSizeInMB is the size of retention
 var RocksmqRetentionSizeInMB int64
+
+// TickerTimeInMinutes is the time of expired check
 var TickerTimeInMinutes int64 = 1
 
+// Const value that used to convert unit
 const (
 	MB     = 2 << 20
 	MINUTE = 60
@@ -48,6 +56,7 @@ type topicAckedInfo struct {
 
 type retentionInfo struct {
 	ctx    context.Context
+	cancel context.CancelFunc
 	topics []string
 	// pageInfo  map[string]*topicPageInfo
 	pageInfo sync.Map
@@ -65,6 +74,9 @@ type retentionInfo struct {
 // which will cause crash when other goroutines operate the db instance. So here implement a
 // prefixLoad without reopen db instance.
 func prefixLoad(db *gorocksdb.DB, prefix string) ([]string, []string, error) {
+	if db == nil {
+		return nil, nil, errors.New("Rocksdb instance is nil when do prefixLoad")
+	}
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
 	readOpts.SetPrefixSameAsStart(true)
@@ -76,20 +88,19 @@ func prefixLoad(db *gorocksdb.DB, prefix string) ([]string, []string, error) {
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		value := iter.Value()
-		defer key.Free()
-		defer value.Free()
 		keys = append(keys, string(key.Data()))
+		key.Free()
 		values = append(values, string(value.Data()))
-	}
-	if err := iter.Err(); err != nil {
-		return nil, nil, err
+		value.Free()
 	}
 	return keys, values, nil
 }
 
 func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	ri := &retentionInfo{
-		ctx:               context.Background(),
+		ctx:               ctx,
+		cancel:            cancel,
 		topics:            make([]string, 0),
 		pageInfo:          sync.Map{},
 		ackedInfo:         sync.Map{},
@@ -110,19 +121,23 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	return ri, nil
 }
 
-func (ri *retentionInfo) startRetentionInfo() error {
+// Before do retention, load retention info from rocksdb to retention info structure in goroutines.
+// Because loadRetentionInfo may need some time, so do this asynchronously. Finally start retention goroutine.
+func (ri *retentionInfo) startRetentionInfo() {
 	var wg sync.WaitGroup
+	ri.kv.ResetPrefixLength(FixedChannelNameLen)
 	for _, topic := range ri.topics {
+		log.Debug("Start load retention info", zap.Any("topic", topic))
 		// Load all page infos
 		wg.Add(1)
 		go ri.loadRetentionInfo(topic, &wg)
 	}
 	wg.Wait()
+	log.Debug("Finish load retention info, start retention")
 	go ri.retention()
-
-	return nil
 }
 
+// Read retention infos from rocksdb so that retention check can be done based on memory data
 func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 	// TODO(yukun): If there needs to add lock
 	// ll, ok := topicMu.Load(topic)
@@ -216,10 +231,15 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 		log.Debug("Load failed", zap.Any("error", err))
 		return
 	}
-	ackedSize, err := strconv.ParseInt(ackedSizeVal, 10, 64)
-	if err != nil {
-		log.Debug("PrefixLoad failed", zap.Any("error", err))
-		return
+	var ackedSize int64
+	if ackedSizeVal == "" {
+		ackedSize = 0
+	} else {
+		ackedSize, err = strconv.ParseInt(ackedSizeVal, 10, 64)
+		if err != nil {
+			log.Debug("PrefixLoad failed", zap.Any("error", err))
+			return
+		}
 	}
 
 	ackedInfo := &topicAckedInfo{
@@ -235,10 +255,15 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 		log.Debug("Load failed", zap.Any("error", err))
 		return
 	}
-	lastRetentionTs, err := strconv.ParseInt(lastRetentionTsVal, 10, 64)
-	if err != nil {
-		log.Debug("ParseInt failed", zap.Any("error", err))
-		return
+	var lastRetentionTs int64
+	if lastRetentionTsVal == "" {
+		lastRetentionTs = math.MaxInt64
+	} else {
+		lastRetentionTs, err = strconv.ParseInt(lastRetentionTsVal, 10, 64)
+		if err != nil {
+			log.Debug("ParseInt failed", zap.Any("error", err))
+			return
+		}
 	}
 
 	ri.ackedInfo.Store(topic, ackedInfo)
@@ -248,6 +273,7 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 
 func (ri *retentionInfo) retention() error {
 	log.Debug("Rocksmq retention goroutine start!")
+	// Do retention check every 6s
 	ticker := time.NewTicker(time.Duration(TickerTimeInMinutes * int64(time.Minute) / 10))
 
 	for {
@@ -271,6 +297,11 @@ func (ri *retentionInfo) retention() error {
 	}
 }
 
+// 1. Obtain pageAckedInfo and do time expired check, get the expired page scope;
+// 2. Do iteration in the page after the last page in step 1 and get the last time expired message id;
+// 3. Do size expired check in next page, and get the last size expired message id;
+// 4. Do delete by range of [start_msg_id, end_msg_id) in rocksdb
+// 5. Delete corresponding data in retentionInfo
 func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	// log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	var ackedInfo *topicAckedInfo
@@ -452,6 +483,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	return DeleteMessages(ri.db, topic, startID, endID)
 }
 
+// Delte messages in rocksdb by range of [startID, endID)
 func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) error {
 	// Delete msg by range of startID and endID
 	startKey, err := combKey(topic, startID)

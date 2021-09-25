@@ -21,14 +21,15 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
 )
 
 type mqMsgStream struct {
@@ -48,6 +49,7 @@ type mqMsgStream struct {
 	consumerLock     *sync.Mutex
 }
 
+// NewMqMsgStream is used to generate a new mqMsgStream object
 func NewMqMsgStream(ctx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
@@ -215,8 +217,8 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 		switch msgType {
 		case commonpb.MsgType_Insert:
 			result, err = InsertRepackFunc(tsMsgs, reBucketValues)
-		case commonpb.MsgType_Delete:
-			result, err = DeleteRepackFunc(tsMsgs, reBucketValues)
+		//case commonpb.MsgType_Delete:
+		//	result, err = DeleteRepackFunc(tsMsgs, reBucketValues)
 		default:
 			result, err = DefaultRepackFunc(tsMsgs, reBucketValues)
 		}
@@ -412,12 +414,11 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 				log.Error("msMsgStream seek", zap.Error(err))
 			}
 		}
-
-		return nil
 	}
 	return nil
 }
 
+// MqTtMsgStream is a msgstream that contains timeticks
 type MqTtMsgStream struct {
 	mqMsgStream
 	chanMsgBuf         map[mqclient.Consumer][]TsMsg
@@ -431,6 +432,7 @@ type MqTtMsgStream struct {
 	syncConsumer       chan int
 }
 
+// NewMqTtMsgStream is used to generate a new MqTtMsgStream object
 func NewMqTtMsgStream(ctx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
@@ -510,6 +512,7 @@ func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 	}
 }
 
+// Start will start a goroutine which keep carrying msg from pulsar/rocksmq to golang chan
 func (ms *MqTtMsgStream) Start() {
 	if ms.consumers != nil {
 		ms.wait.Add(1)
@@ -517,6 +520,7 @@ func (ms *MqTtMsgStream) Start() {
 	}
 }
 
+// Close will stop goroutine and free internal producers and consumers
 func (ms *MqTtMsgStream) Close() {
 	ms.streamCancel()
 	close(ms.syncConsumer)
@@ -783,42 +787,3 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	}
 	return nil
 }
-
-//TODO test InMemMsgStream
-/*
-type InMemMsgStream struct {
-	buffer chan *MsgPack
-}
-
-func (ms *InMemMsgStream) Start() {}
-func (ms *InMemMsgStream) Close() {}
-
-func (ms *InMemMsgStream) ProduceOne(msg TsMsg) error {
-	msgPack := MsgPack{}
-	msgPack.BeginTs = msg.BeginTs()
-	msgPack.EndTs = msg.EndTs()
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	buffer <- &msgPack
-	return nil
-}
-
-func (ms *InMemMsgStream) Produce(msgPack *MsgPack) error {
-	buffer <- msgPack
-	return nil
-}
-
-func (ms *InMemMsgStream) Broadcast(msgPack *MsgPack) error {
-	return ms.Produce(msgPack)
-}
-
-func (ms *InMemMsgStream) Consume() *MsgPack {
-	select {
-	case msgPack := <-ms.buffer:
-		return msgPack
-	}
-}
-
-func (ms *InMemMsgStream) Chan() <- chan *MsgPack {
-	return buffer
-}
-*/

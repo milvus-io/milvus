@@ -18,10 +18,10 @@ namespace milvus::query {
 template <bool is_desc>
 void
 SubSearchResult::merge_impl(const SubSearchResult& right) {
-    Assert(num_queries_ == right.num_queries_);
-    Assert(topk_ == right.topk_);
-    Assert(metric_type_ == right.metric_type_);
-    Assert(is_desc == is_descending(metric_type_));
+    AssertInfo(num_queries_ == right.num_queries_, "[SubSearchResult]Nq check failed");
+    AssertInfo(topk_ == right.topk_, "[SubSearchResult]Topk check failed");
+    AssertInfo(metric_type_ == right.metric_type_, "[SubSearchResult]Metric type check failed");
+    AssertInfo(is_desc == is_descending(metric_type_), "[SubSearchResult]Metric type isn't desc");
 
     for (int64_t qn = 0; qn < num_queries_; ++qn) {
         auto offset = qn * topk_;
@@ -59,7 +59,7 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
 
 void
 SubSearchResult::merge(const SubSearchResult& sub_result) {
-    Assert(metric_type_ == sub_result.metric_type_);
+    AssertInfo(metric_type_ == sub_result.metric_type_, "[SubSearchResult]Metric type check failed when merge");
     if (is_descending(metric_type_)) {
         this->merge_impl<true>(sub_result);
     } else {

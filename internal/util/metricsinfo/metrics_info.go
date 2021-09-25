@@ -79,6 +79,8 @@ type QueryNodeConfiguration struct {
 	RetrieveReceiveBufSize       int64 `json:"retrieve_receive_buf_size"`
 	RetrievePulsarBufSize        int64 `json:"retrieve_pulsar_buf_size"`
 	RetrieveResultReceiveBufSize int64 `json:"retrieve_result_receive_buf_size"`
+
+	SimdType string `json:"simd_type"`
 }
 
 // QueryNodeInfos implements ComponentInfos
@@ -114,6 +116,8 @@ type ProxyInfos struct {
 // IndexNodeConfiguration records the configuration of index node.
 type IndexNodeConfiguration struct {
 	MinioBucketName string `json:"minio_bucket_name"`
+
+	SimdType string `json:"simd_type"`
 }
 
 // IndexNodeInfos implements ComponentInfos

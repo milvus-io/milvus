@@ -11,13 +11,27 @@
 
 package indexnode
 
+/*
+
+#cgo CFLAGS: -I${SRCDIR}/../core/output/include
+
+#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
+
+#include <stdlib.h>
+#include "indexbuilder/init_c.h"
+
+*/
+import "C"
 import (
 	"context"
+	"errors"
 	"io"
 	"math/rand"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
@@ -48,8 +62,11 @@ type IndexNode struct {
 
 	sched *TaskScheduler
 
+	once sync.Once
+
 	kv      kv.BaseKV
 	session *sessionutil.Session
+	liveCh  <-chan bool
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -59,6 +76,8 @@ type IndexNode struct {
 	finishedTasks map[UniqueID]commonpb.IndexState
 
 	closer io.Closer
+
+	initOnce sync.Once
 }
 
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
@@ -70,65 +89,99 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 		loopCancel: cancel,
 	}
 	b.UpdateStateCode(internalpb.StateCode_Abnormal)
-	var err error
-	b.sched, err = NewTaskScheduler(b.loopCtx, b.kv)
+	sc, err := NewTaskScheduler(b.loopCtx, b.kv)
 	if err != nil {
 		return nil, err
 	}
+
+	b.sched = sc
 	return b, nil
 }
 
 // Register register index node at etcd
 func (i *IndexNode) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	if i.session == nil {
+		return errors.New("failed to initialize session")
+	}
+	i.liveCh = i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = i.session.ServerID
 	return nil
 }
 
-func (i *IndexNode) Init() error {
-	i.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
-	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-		i.etcdKV = etcdKV
-		return err
-	}
-	err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
-	if err != nil {
-		log.Debug("IndexNode try connect etcd failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexNode try connect etcd success")
+func (i *IndexNode) initKnowhere() {
+	C.IndexBuilderInit()
 
-	option := &miniokv.Option{
-		Address:           Params.MinIOAddress,
-		AccessKeyID:       Params.MinIOAccessKeyID,
-		SecretAccessKeyID: Params.MinIOSecretAccessKey,
-		UseSSL:            Params.MinIOUseSSL,
-		BucketName:        Params.MinioBucketName,
-		CreateBucket:      true,
-	}
-	i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
-	if err != nil {
-		log.Debug("IndexNode NewMinIOKV failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexNode NewMinIOKV success")
-	i.closer = trace.InitTracing("index_node")
-	return nil
+	// override segcore SIMD type
+	cSimdType := C.CString(Params.SimdType)
+	C.IndexBuilderSetSimdType(cSimdType)
+	C.free(unsafe.Pointer(cSimdType))
+}
+
+func (i *IndexNode) Init() error {
+	var initErr error = nil
+	i.initOnce.Do(func() {
+		Params.Init()
+		i.UpdateStateCode(internalpb.StateCode_Initializing)
+		log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
+		connectEtcdFn := func() error {
+			etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+			i.etcdKV = etcdKV
+			return err
+		}
+		err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
+		if err != nil {
+			log.Debug("IndexNode try connect etcd failed", zap.Error(err))
+			initErr = err
+			return
+		}
+		log.Debug("IndexNode try connect etcd success")
+
+		option := &miniokv.Option{
+			Address:           Params.MinIOAddress,
+			AccessKeyID:       Params.MinIOAccessKeyID,
+			SecretAccessKeyID: Params.MinIOSecretAccessKey,
+			UseSSL:            Params.MinIOUseSSL,
+			BucketName:        Params.MinioBucketName,
+			CreateBucket:      true,
+		}
+		i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
+		if err != nil {
+			log.Debug("IndexNode NewMinIOKV failed", zap.Error(err))
+			initErr = err
+			return
+		}
+		log.Debug("IndexNode NewMinIOKV success")
+		i.closer = trace.InitTracing("index_node")
+
+		i.initKnowhere()
+	})
+
+	log.Debug("Init IndexNode finished", zap.Error(initErr))
+
+	return initErr
 }
 
 func (i *IndexNode) Start() error {
-	i.sched.Start()
+	var startErr error = nil
+	i.once.Do(func() {
+		startErr = i.sched.Start()
 
-	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
+		//start liveness check
+		go i.session.LivenessCheck(i.loopCtx, i.liveCh, func() {
+			i.Stop()
+		})
+
+		i.UpdateStateCode(internalpb.StateCode_Healthy)
+		log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
+	})
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	return nil
+
+	log.Debug("IndexNode start finished", zap.Error(startErr))
+	return startErr
 }
 
 // Stop Close closes the server.
@@ -153,6 +206,8 @@ func (i *IndexNode) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
+// CreateIndex receives request from IndexCoordinator to build an index.
+// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -170,8 +225,9 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
 	defer sp.Finish()
+	sp.SetTag("IndexBuildID", strconv.FormatInt(request.IndexBuildID, 10))
 
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
@@ -198,16 +254,6 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 
 	return ret, nil
 }
-
-// AddStartCallback adds a callback in the startServer phase.
-//func (i *IndexNode) AddStartCallback(callbacks ...func()) {
-//	i.startCallbacks = append(i.startCallbacks, callbacks...)
-//}
-
-// AddCloseCallback adds a callback in the Close phase.
-//func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
-//	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
-//}
 
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexNode components states ...")
