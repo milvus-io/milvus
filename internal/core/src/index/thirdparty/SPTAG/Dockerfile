@@ -13,9 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget build-esse
     openjdk-8-jdk python3-pip swig && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
-
 # cmake >= 3.12 is required
-RUN wget "https://github.com/Kitware/CMake/releases/download/v3.14.4/cmake-3.14.4-Linux-x86_64.tar.gz" -q -O - \
+RUN wget "https://github.com/Kitware/CMake/releases/download/v3.18.6/cmake-3.18.6-Linux-x86_64.tar.gz" -q -O - \
         | tar -xz --strip-components=1 -C /usr/local
 
 # specific version of boost
