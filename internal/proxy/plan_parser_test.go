@@ -50,15 +50,106 @@ func newTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
-func TestParseQueryExpr_Naive(t *testing.T) {
-	exprStr := "Int64Field > 3"
+func TestParseExpr_Naive(t *testing.T) {
 	schemaPb := newTestSchema()
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	assert.Nil(t, err)
-	exprProto, err := parseExpr(schema, exprStr)
-	assert.Nil(t, err)
-	str := proto.MarshalTextString(exprProto)
-	println(str)
+
+	t.Run("test UnaryNode", func(t *testing.T) {
+		exprStrs := []string{
+			"Int64Field > +1",
+			"Int64Field > -1",
+			"FloatField > +1.0",
+			"FloatField > -1.0",
+		}
+		for _, exprStr := range exprStrs {
+			exprProto, err := parseExpr(schema, exprStr)
+			assert.Nil(t, err)
+			str := proto.MarshalTextString(exprProto)
+			println(str)
+		}
+	})
+
+	t.Run("test UnaryNode invalid", func(t *testing.T) {
+		exprStrs := []string{
+			"Int64Field > +aa",
+			"FloatField > -aa",
+		}
+		for _, exprStr := range exprStrs {
+			exprProto, err := parseExpr(schema, exprStr)
+			assert.Error(t, err)
+			assert.Nil(t, exprProto)
+		}
+	})
+
+	t.Run("test BinaryNode", func(t *testing.T) {
+		exprStrs := []string{
+			// "+"
+			"FloatField > 1 + 2",
+			"FloatField > 1 + 2.0",
+			"FloatField > 1.0 + 2",
+			"FloatField > 1.0 + 2.0",
+			// "-"
+			"FloatField > 1 - 2",
+			"FloatField > 1 - 2.0",
+			"FloatField > 1.0 - 2",
+			"FloatField > 1.0 - 2.0",
+			// "*"
+			"FloatField > 1 * 2",
+			"FloatField > 1 * 2.0",
+			"FloatField > 1.0 * 2",
+			"FloatField > 1.0 * 2.0",
+			// "/"
+			"FloatField > 1 / 2",
+			"FloatField > 1 / 2.0",
+			"FloatField > 1.0 / 2",
+			"FloatField > 1.0 / 2.0",
+			// "%"
+			"FloatField > 1 % 2",
+			// "**"
+			"FloatField > 1 ** 2",
+			"FloatField > 1 ** 2.0",
+			"FloatField > 1.0 ** 2",
+			"FloatField > 1.0 ** 2.0",
+		}
+		for _, exprStr := range exprStrs {
+			exprProto, err := parseExpr(schema, exprStr)
+			assert.Nil(t, err)
+			str := proto.MarshalTextString(exprProto)
+			println(str)
+		}
+	})
+
+	t.Run("test BinaryNode invalid", func(t *testing.T) {
+		exprStrs := []string{
+			// "+"
+			"FloatField > 1 + aa",
+			"FloatField > aa + 2.0",
+			// "-"
+			"FloatField > 1 - aa",
+			"FloatField > aa - 2.0",
+			// "*"
+			"FloatField > 1 * aa",
+			"FloatField > aa * 2.0",
+			// "/"
+			"FloatField > 1 / 0",
+			"FloatField > 1 / 0.0",
+			"FloatField > 1.0 / 0",
+			"FloatField > 1.0 / 0.0",
+			"FloatField > 1 / aa",
+			"FloatField > aa / 2.0",
+			// "%"
+			"FloatField > 1 % aa",
+			// "**"
+			"FloatField > 1 ** aa",
+			"FloatField > aa ** 2.0",
+		}
+		for _, exprStr := range exprStrs {
+			exprProto, err := parseExpr(schema, exprStr)
+			assert.Error(t, err)
+			assert.Nil(t, exprProto)
+		}
+	})
 }
 
 func TestParsePlanNode_Naive(t *testing.T) {
