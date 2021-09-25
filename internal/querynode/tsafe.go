@@ -164,7 +164,4 @@ func (ts *tSafe) close() {
 	defer ts.tSafeMu.Unlock()
 
 	ts.cancel()
-	for _, watcher := range ts.watcherList {
-		close(watcher.notifyChan)
-	}
 }
