@@ -41,8 +41,8 @@ class TestPartitionParams(TestcaseBase):
     @pytest.mark.parametrize("partition_name", [""])
     def test_partition_empty_name(self, partition_name):
         """
-        target: verify create a partition with empyt name
-        method: 1. create a partition empty none name
+        target: verify create a partition with empty name
+        method: 1. create a partition with empty name
         expected: 1. raise exception
         """
         # create a collection
@@ -99,10 +99,10 @@ class TestPartitionParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_dup_name(self):
         """
-        target: verify create partitions with duplicate name
-        method: 1. create partitions with duplicate name
+        target: verify create partitions with duplicate names
+        method: 1. create partitions with duplicate names
         expected: 1. create successfully
-                  2. the same partition returned with diff object id
+                  2. the same partition returned with diff object ids
         """
         # create a collection
         collection_w = self.init_collection_wrap()
@@ -164,7 +164,7 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_max_length_name(self):
         """
         target: verify create a partition with max length(256) name
-        method: 1. create a partition with max length names
+        method: 1. create a partition with max length name
         expected: 1. raise exception
         """
         # create collection
