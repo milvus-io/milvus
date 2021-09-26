@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -113,10 +112,6 @@ func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, 
 		state: internalpb.StateCode_Initializing,
 		ch:    ch,
 	}, nil
-}
-
-var mockDataNodeCreator DataNodeCreatorFunc = func(_ context.Context, addr string) (types.DataNode, error) {
-	return newMockDataNodeClient(0, nil)
 }
 
 func (c *mockDataNodeClient) Init() error {
