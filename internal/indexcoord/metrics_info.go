@@ -50,8 +50,9 @@ func getSystemInfoMetrics(
 					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
 					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
 				},
-				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-				Type: typeutil.IndexCoordRole,
+				CreatedTime: Params.CreatedTime.String(),
+				UpdatedTime: Params.UpdatedTime.String(),
+				Type:        typeutil.IndexCoordRole,
 			},
 			SystemConfigurations: metricsinfo.IndexCoordConfiguration{
 				MinioBucketName: Params.MinioBucketName,
