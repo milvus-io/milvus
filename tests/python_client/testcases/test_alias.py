@@ -21,6 +21,8 @@ default_limit = ct.default_limit
 default_search_exp = "int64 >= 0"
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
+
+
 class TestAliasParams(TestcaseBase):
     """ Test cases of alias interface parameters"""
     pass
@@ -189,6 +191,34 @@ class TestAliasOperation(TestcaseBase):
 
         assert collection_w.num_entities == ct.default_nb
         assert collection_alias.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alias_create_index_default(self, nq=2, dim=8, auto_id=True):
+        """
+        target: test creating index by alias
+        """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alias_search_data_default(self):
+        """
+        target: test searching data by alias
+        """
+        pass
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alias_drop_collection_default(self):
+        """
+        target: test dropping collection by alias
+        """
+        pass
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alias_after_drop_collection(self):
+        """
+        target: test alias disappear after dropping collection
+        """
+        pass
+
 
 
 class TestAliasOperationInvalid(TestcaseBase):
