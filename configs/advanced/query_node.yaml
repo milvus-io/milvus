@@ -26,5 +26,6 @@ queryNode:
     searchResult:
       recvBufSize: 64 # msgPack channel buffer size
 
+  # Segcore will divide a segment into multiple chunks.
   segcore:
-    chunkRows: 32768
+    chunkRows: 32768 # The number of vectors in a chunk. 
