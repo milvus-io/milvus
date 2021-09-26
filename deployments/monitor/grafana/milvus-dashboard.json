@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632480056020,
+  "iteration": 1632654161669,
   "links": [],
   "panels": [
     {
@@ -2838,7 +2838,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Descirbe Segments Success",
+      "title": "Describe Segments Success",
       "type": "stat"
     },
     {
@@ -5686,8 +5686,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "test",
-          "value": "test"
+          "text": "default",
+          "value": "default"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -5812,5 +5812,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 111
+  "version": 112
 }
