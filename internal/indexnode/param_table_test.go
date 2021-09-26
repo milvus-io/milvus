@@ -13,6 +13,7 @@ package indexnode
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParamTable(t *testing.T) {
@@ -71,6 +72,16 @@ func TestParamTable(t *testing.T) {
 	})
 
 	// FIXME(dragondriver): how to cover panic case? we use `LoadWithDefault` to initialize `SimdType`
+
+	t.Run("CreatedTime", func(t *testing.T) {
+		Params.CreatedTime = time.Now()
+		t.Logf("CreatedTime: %v", Params.CreatedTime)
+	})
+
+	t.Run("UpdatedTime", func(t *testing.T) {
+		Params.UpdatedTime = time.Now()
+		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
+	})
 }
 
 //TODO: Params Load should be return error when key does not exist.
