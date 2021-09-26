@@ -160,7 +160,7 @@ func TestSearch_Search(t *testing.T) {
 	err = sendSearchRequest(node.queryNodeLoopCtx, DIM)
 	assert.NoError(t, err)
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	err = node.Stop()
 	assert.NoError(t, err)
@@ -206,7 +206,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	err = sendSearchRequest(node.queryNodeLoopCtx, DIM)
 	assert.NoError(t, err)
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	err = node.Stop()
 	assert.NoError(t, err)
