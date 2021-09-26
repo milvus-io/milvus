@@ -43,6 +43,7 @@ class CustomResourceOperations(object):
                 raise Exception(str(e))
 
     def list_all(self):
+        """list all the customer resources in k8s"""
         try:
             config.load_kube_config()
             api_instance = client.CustomObjectsApi()
@@ -54,6 +55,7 @@ class CustomResourceOperations(object):
         return data
 
     def delete_all(self):
+        """delete all the customer resources in k8s"""
         cus_objects = self.list_all()
         if len(cus_objects["items"]) > 0:
             for item in cus_objects["items"]:
