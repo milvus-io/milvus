@@ -58,8 +58,8 @@ type task interface {
 	PreExecute(ctx context.Context) error
 	Execute(ctx context.Context) error
 	PostExecute(ctx context.Context) error
-	WaitToFinish() error
-	Notify(err error)
+	waitToFinish() error
+	notify(err error)
 	TaskPriority() querypb.TriggerCondition
 	GetParentTask() task
 	GetChildTask() []task
@@ -72,7 +72,7 @@ type task interface {
 }
 
 type BaseTask struct {
-	Condition
+	condition
 	ctx    context.Context
 	cancel context.CancelFunc
 	result *commonpb.Status
@@ -342,7 +342,7 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 			releaseCollectionTask := &ReleaseCollectionTask{
 				BaseTask: BaseTask{
 					ctx:              ctx,
-					Condition:        NewTaskCondition(ctx),
+					condition:        NewTaskCondition(ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 				ReleaseCollectionRequest: req,
@@ -438,7 +438,7 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) error {
 			releaseCollectionTask := &ReleaseCollectionTask{
 				BaseTask: BaseTask{
 					ctx:              ctx,
-					Condition:        NewTaskCondition(ctx),
+					condition:        NewTaskCondition(ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 				ReleaseCollectionRequest: req,
@@ -626,7 +626,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 				releaseCollectionTask := &ReleaseCollectionTask{
 					BaseTask: BaseTask{
 						ctx:              ctx,
-						Condition:        NewTaskCondition(ctx),
+						condition:        NewTaskCondition(ctx),
 						triggerCondition: querypb.TriggerCondition_grpcRequest,
 					},
 					ReleaseCollectionRequest: req,
@@ -657,7 +657,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 				releasePartitionTask := &ReleasePartitionTask{
 					BaseTask: BaseTask{
 						ctx:              ctx,
-						Condition:        NewTaskCondition(ctx),
+						condition:        NewTaskCondition(ctx),
 						triggerCondition: querypb.TriggerCondition_grpcRequest,
 					},
 
@@ -728,7 +728,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 			releasePartitionTask := &ReleasePartitionTask{
 				BaseTask: BaseTask{
 					ctx:              ctx,
-					Condition:        NewTaskCondition(ctx),
+					condition:        NewTaskCondition(ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
@@ -860,7 +860,7 @@ func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 		loadSegmentTask := &LoadSegmentTask{
 			BaseTask: BaseTask{
 				ctx:              lst.ctx,
-				Condition:        NewTaskCondition(lst.ctx),
+				condition:        NewTaskCondition(lst.ctx),
 				triggerCondition: lst.LoadCondition,
 			},
 			LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
@@ -892,7 +892,7 @@ func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 			watchQueryChannelTask := &WatchQueryChannelTask{
 				BaseTask: BaseTask{
 					ctx:              lst.ctx,
-					Condition:        NewTaskCondition(lst.ctx),
+					condition:        NewTaskCondition(lst.ctx),
 					triggerCondition: lst.LoadCondition,
 				},
 
@@ -1069,7 +1069,7 @@ func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 		loadSegmentTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
 				ctx:              wdt.ctx,
-				Condition:        NewTaskCondition(wdt.ctx),
+				condition:        NewTaskCondition(wdt.ctx),
 				triggerCondition: wdt.triggerCondition,
 			},
 			WatchDmChannelsRequest: &querypb.WatchDmChannelsRequest{
@@ -1103,7 +1103,7 @@ func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 			watchQueryChannelTask := &WatchQueryChannelTask{
 				BaseTask: BaseTask{
 					ctx:              wdt.ctx,
-					Condition:        NewTaskCondition(wdt.ctx),
+					condition:        NewTaskCondition(wdt.ctx),
 					triggerCondition: wdt.triggerCondition,
 				},
 
@@ -1574,7 +1574,7 @@ func assignInternalTask(ctx context.Context,
 		loadSegmentTask := &LoadSegmentTask{
 			BaseTask: BaseTask{
 				ctx:              ctx,
-				Condition:        NewTaskCondition(ctx),
+				condition:        NewTaskCondition(ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 
@@ -1593,7 +1593,7 @@ func assignInternalTask(ctx context.Context,
 		watchDmChannelTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
 				ctx:              ctx,
-				Condition:        NewTaskCondition(ctx),
+				condition:        NewTaskCondition(ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			WatchDmChannelsRequest: watchDmChannelReq,
@@ -1621,7 +1621,7 @@ func assignInternalTask(ctx context.Context,
 			watchQueryChannelTask := &WatchQueryChannelTask{
 				BaseTask: BaseTask{
 					ctx:              ctx,
-					Condition:        NewTaskCondition(ctx),
+					condition:        NewTaskCondition(ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 

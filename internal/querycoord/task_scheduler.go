@@ -263,7 +263,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		loadCollectionTask := &LoadCollectionTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadCollectionRequest: &loadReq,
@@ -282,7 +282,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		loadPartitionTask := &LoadPartitionTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadPartitionsRequest: &loadReq,
@@ -300,7 +300,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		releaseCollectionTask := &ReleaseCollectionTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleaseCollectionRequest: &loadReq,
@@ -318,7 +318,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		releasePartitionTask := &ReleasePartitionTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleasePartitionsRequest: &loadReq,
@@ -334,7 +334,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		loadSegmentTask := &LoadSegmentTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadSegmentsRequest: &loadReq,
@@ -351,7 +351,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		releaseSegmentTask := &ReleaseSegmentTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleaseSegmentsRequest: &loadReq,
@@ -367,7 +367,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		watchDmChannelTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			WatchDmChannelsRequest: &loadReq,
@@ -384,7 +384,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		watchQueryChannelTask := &WatchQueryChannelTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			AddQueryChannelRequest: &loadReq,
@@ -400,7 +400,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		loadBalanceTask := &LoadBalanceTask{
 			BaseTask: BaseTask{
 				ctx:              scheduler.ctx,
-				Condition:        NewTaskCondition(scheduler.ctx),
+				condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: loadReq.BalanceReason,
 			},
 			LoadBalanceRequest: &loadReq,
@@ -534,11 +534,11 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				err = scheduler.processTask(t)
 				if err != nil {
 					log.Error("scheduleLoop: process task error", zap.Any("error", err.Error()))
-					t.Notify(err)
+					t.notify(err)
 					t.PostExecute(scheduler.ctx)
 				}
 				if t.Type() == commonpb.MsgType_LoadCollection || t.Type() == commonpb.MsgType_LoadPartitions {
-					t.Notify(err)
+					t.notify(err)
 				}
 			}
 			log.Debug("scheduleLoop: num of child task", zap.Int("num child task", len(t.GetChildTask())))
@@ -563,18 +563,18 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			err = scheduler.client.MultiRemove(keys)
 			if err != nil {
 				log.Error("scheduleLoop: error when remove trigger task to etcd", zap.Int64("taskID", t.ID()))
-				t.Notify(err)
+				t.notify(err)
 				continue
 			}
 			log.Debug("scheduleLoop: trigger task done and delete from etcd", zap.Int64("taskID", t.ID()))
-			t.Notify(err)
+			t.notify(err)
 		}
 	}
 }
 
 func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task) {
 	defer wg.Done()
-	err := t.WaitToFinish()
+	err := t.waitToFinish()
 	if err != nil {
 		log.Debug("waitActivateTaskDone: activate task return err", zap.Any("error", err.Error()), zap.Int64("taskID", t.ID()))
 		redoFunc1 := func() {
@@ -701,13 +701,13 @@ func (scheduler *TaskScheduler) processActivateTaskLoop() {
 			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
 			err := scheduler.client.Save(stateKey, strconv.Itoa(int(taskDoing)))
 			if err != nil {
-				t.Notify(err)
+				t.notify(err)
 				continue
 			}
 			log.Debug("processActivateTaskLoop: pop a active task from activateChan", zap.Int64("taskID", t.ID()))
 			go func() {
 				err := scheduler.processTask(t)
-				t.Notify(err)
+				t.notify(err)
 			}()
 		}
 	}

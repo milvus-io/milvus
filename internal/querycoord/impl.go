@@ -141,7 +141,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
 			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(qc.loopCtx),
+			condition:        NewTaskCondition(qc.loopCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		LoadCollectionRequest: req,
@@ -152,7 +152,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	}
 	qc.scheduler.Enqueue([]task{loadCollectionTask})
 
-	err := loadCollectionTask.WaitToFinish()
+	err := loadCollectionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -187,7 +187,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	releaseCollectionTask := &ReleaseCollectionTask{
 		BaseTask: BaseTask{
 			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(qc.loopCtx),
+			condition:        NewTaskCondition(qc.loopCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		ReleaseCollectionRequest: req,
@@ -197,7 +197,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	}
 	qc.scheduler.Enqueue([]task{releaseCollectionTask})
 
-	err := releaseCollectionTask.WaitToFinish()
+	err := releaseCollectionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -326,7 +326,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	loadPartitionTask := &LoadPartitionTask{
 		BaseTask: BaseTask{
 			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(qc.loopCtx),
+			condition:        NewTaskCondition(qc.loopCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		LoadPartitionsRequest: req,
@@ -336,7 +336,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	}
 	qc.scheduler.Enqueue([]task{loadPartitionTask})
 
-	err := loadPartitionTask.WaitToFinish()
+	err := loadPartitionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -394,7 +394,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	releasePartitionTask := &ReleasePartitionTask{
 		BaseTask: BaseTask{
 			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(qc.loopCtx),
+			condition:        NewTaskCondition(qc.loopCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		ReleasePartitionsRequest: req,
@@ -402,7 +402,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	}
 	qc.scheduler.Enqueue([]task{releasePartitionTask})
 
-	err := releasePartitionTask.WaitToFinish()
+	err := releasePartitionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()

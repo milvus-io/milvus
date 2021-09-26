@@ -62,7 +62,7 @@ func (tt *testTask) Execute(ctx context.Context) error {
 		childTask := &LoadSegmentTask{
 			BaseTask: BaseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        NewTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
@@ -79,7 +79,7 @@ func (tt *testTask) Execute(ctx context.Context) error {
 		childTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        NewTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			WatchDmChannelsRequest: &querypb.WatchDmChannelsRequest{
@@ -96,7 +96,7 @@ func (tt *testTask) Execute(ctx context.Context) error {
 		childTask := &WatchQueryChannelTask{
 			BaseTask: BaseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        NewTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			AddQueryChannelRequest: &querypb.AddQueryChannelRequest{
@@ -139,7 +139,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	testTask := &testTask{
 		BaseTask: BaseTask{
 			ctx:              baseCtx,
-			Condition:        NewTaskCondition(baseCtx),
+			condition:        NewTaskCondition(baseCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		baseMsg: &commonpb.MsgBase{
@@ -151,7 +151,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	}
 	queryCoord.scheduler.Enqueue([]task{testTask})
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(time.Second)
 	queryCoord.cluster.stopNode(nodeID)
 	for {
 		newActiveTaskIDKeys, _, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)

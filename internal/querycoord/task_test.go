@@ -40,7 +40,7 @@ func TestTriggerTask(t *testing.T) {
 		loadCollectionTask := &LoadCollectionTask{
 			BaseTask: BaseTask{
 				ctx:              ctx,
-				Condition:        NewTaskCondition(ctx),
+				condition:        NewTaskCondition(ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadCollectionRequest: req,
@@ -64,7 +64,7 @@ func TestTriggerTask(t *testing.T) {
 		loadCollectionTask := &ReleaseCollectionTask{
 			BaseTask: BaseTask{
 				ctx:              ctx,
-				Condition:        NewTaskCondition(ctx),
+				condition:        NewTaskCondition(ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleaseCollectionRequest: req,
@@ -88,7 +88,7 @@ func TestTriggerTask(t *testing.T) {
 		loadCollectionTask := &LoadPartitionTask{
 			BaseTask: BaseTask{
 				ctx:              ctx,
-				Condition:        NewTaskCondition(ctx),
+				condition:        NewTaskCondition(ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadPartitionsRequest: req,
@@ -112,7 +112,7 @@ func TestTriggerTask(t *testing.T) {
 		loadCollectionTask := &ReleasePartitionTask{
 			BaseTask: BaseTask{
 				ctx:              ctx,
-				Condition:        NewTaskCondition(ctx),
+				condition:        NewTaskCondition(ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleasePartitionsRequest: req,

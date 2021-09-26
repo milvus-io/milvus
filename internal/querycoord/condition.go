@@ -16,21 +16,21 @@ import (
 	"errors"
 )
 
-type Condition interface {
-	WaitToFinish() error
-	Notify(err error)
-	Ctx() context.Context
+type condition interface {
+	waitToFinish() error
+	notify(err error)
+	ctx() context.Context
 }
 
 type TaskCondition struct {
-	done chan error
-	ctx  context.Context
+	done    chan error
+	context context.Context
 }
 
-func (tc *TaskCondition) WaitToFinish() error {
+func (tc *TaskCondition) waitToFinish() error {
 	for {
 		select {
-		case <-tc.ctx.Done():
+		case <-tc.context.Done():
 			return errors.New("timeout")
 		case err := <-tc.done:
 			return err
@@ -38,17 +38,17 @@ func (tc *TaskCondition) WaitToFinish() error {
 	}
 }
 
-func (tc *TaskCondition) Notify(err error) {
+func (tc *TaskCondition) notify(err error) {
 	tc.done <- err
 }
 
-func (tc *TaskCondition) Ctx() context.Context {
-	return tc.ctx
+func (tc *TaskCondition) ctx() context.Context {
+	return tc.context
 }
 
 func NewTaskCondition(ctx context.Context) *TaskCondition {
 	return &TaskCondition{
-		done: make(chan error, 1),
-		ctx:  ctx,
+		done:    make(chan error, 1),
+		context: ctx,
 	}
 }
