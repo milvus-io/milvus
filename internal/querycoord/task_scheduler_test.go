@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -151,8 +150,9 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	}
 	queryCoord.scheduler.Enqueue([]task{testTask})
 
-	time.Sleep(100 * time.Millisecond)
-	queryCoord.cluster.stopNode(nodeID)
+	queryNode.stop()
+	err = removeNodeSession(queryNode.queryNodeID)
+	assert.Nil(t, err)
 	for {
 		newActiveTaskIDKeys, _, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
 		assert.Nil(t, err)
@@ -161,7 +161,8 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 		}
 	}
 	queryCoord.Stop()
-	queryNode.stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
 }
 
 func TestUnMarshalTask(t *testing.T) {

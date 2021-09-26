@@ -123,13 +123,8 @@ func TestTriggerTask(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	//nodes, err := queryCoord.cluster.getOnServiceNodes()
-	//assert.Nil(t, err)
-
 	err = node.stop()
-	//assert.Nil(t, err)
-
-	//allNodeOffline := waitAllQueryNodeOffline(queryCoord.cluster, nodes)
-	//assert.Equal(t, allNodeOffline, true)
 	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
 }
