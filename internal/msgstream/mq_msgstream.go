@@ -236,7 +236,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 				return err
 			}
 
-			m, err := ConvertToByteArray(mb)
+			m, err := convertToByteArray(mb)
 			if err != nil {
 				return err
 			}
@@ -275,7 +275,7 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 			return err
 		}
 
-		m, err := ConvertToByteArray(mb)
+		m, err := convertToByteArray(mb)
 		if err != nil {
 			return err
 		}

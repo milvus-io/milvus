@@ -70,7 +70,7 @@ func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 		headerMsg := commonpb.MsgHeader{}
 		payload, err := v.Marshal(v)
 		assert.Nil(t, err)
-		p, err := ConvertToByteArray(payload)
+		p, err := convertToByteArray(payload)
 		assert.Nil(t, err)
 		err = proto.Unmarshal(p, &headerMsg)
 		assert.Nil(t, err)
