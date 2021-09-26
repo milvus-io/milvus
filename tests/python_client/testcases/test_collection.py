@@ -2097,6 +2097,11 @@ class TestCreateCollectionInvalid(object):
     # TODO: assert exception
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_limit_fields(self, connect):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: raise exception
+        """
         collection_name = gen_unique_str(uid_create)
         limit_num = 64
         fields = copy.deepcopy(cons.default_fields)
