@@ -121,19 +121,19 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		indexMeta := indexpb.IndexMeta{}
 		_, values, versions, err := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
 		if err != nil {
-			log.Debug("IndexNode checkIndexMeta", zap.Any("load meta error with path", it.req.MetaPath),
+			log.Error("IndexNode checkIndexMeta", zap.Any("load meta error with path", it.req.MetaPath),
 				zap.Error(err), zap.Any("pre", pre))
 			return err
 		}
 		log.Debug("IndexNode checkIndexMeta load meta success", zap.Any("path", it.req.MetaPath), zap.Any("pre", pre))
 		err = proto.UnmarshalText(values[0], &indexMeta)
 		if err != nil {
-			log.Debug("IndexNode checkIndexMeta Unmarshal", zap.Error(err))
+			log.Error("IndexNode checkIndexMeta Unmarshal", zap.Error(err))
 			return err
 		}
 		log.Debug("IndexNode checkIndexMeta Unmarshal success", zap.Any("IndexMeta", indexMeta))
 		if indexMeta.Version > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
-			log.Debug("IndexNode checkIndexMeta Notify build index this version is not the latest version", zap.Any("version", it.req.Version))
+			log.Warn("IndexNode checkIndexMeta Notify build index this version is not the latest version", zap.Any("version", it.req.Version))
 			return nil
 		}
 		if indexMeta.MarkDeleted {
@@ -153,7 +153,7 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		indexMeta.IndexFilePaths = it.savePaths
 		indexMeta.State = commonpb.IndexState_Finished
 		if it.err != nil {
-			log.Debug("IndexNode CreateIndex Failed", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", err))
+			log.Error("IndexNode CreateIndex Failed", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", err))
 			indexMeta.State = commonpb.IndexState_Failed
 			indexMeta.FailReason = it.err.Error()
 		}
@@ -362,18 +362,18 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 			saveIndexFileFn := func() error {
 				v, err := it.etcdKV.Load(it.req.MetaPath)
 				if err != nil {
-					log.Debug("IndexNode load meta failed", zap.Any("path", it.req.MetaPath), zap.Error(err))
+					log.Error("IndexNode load meta failed", zap.Any("path", it.req.MetaPath), zap.Error(err))
 					return err
 				}
 				indexMeta := indexpb.IndexMeta{}
 				err = proto.UnmarshalText(v, &indexMeta)
 				if err != nil {
-					log.Debug("IndexNode Unmarshal indexMeta error ", zap.Error(err))
+					log.Error("IndexNode Unmarshal indexMeta error ", zap.Error(err))
 					return err
 				}
 				//log.Debug("IndexNode Unmarshal indexMeta success ", zap.Any("meta", indexMeta))
 				if indexMeta.Version > it.req.Version {
-					log.Debug("IndexNode try saveIndexFile failed req.Version is low", zap.Any("req.Version", it.req.Version),
+					log.Warn("IndexNode try saveIndexFile failed req.Version is low", zap.Any("req.Version", it.req.Version),
 						zap.Any("indexMeta.Version", indexMeta.Version))
 					return errors.New("This task has been reassigned ")
 				}

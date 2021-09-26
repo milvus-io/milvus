@@ -131,7 +131,7 @@ func (i *IndexNode) Init() error {
 		}
 		err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
-			log.Debug("IndexNode try connect etcd failed", zap.Error(err))
+			log.Error("IndexNode try connect etcd failed", zap.Error(err))
 			initErr = err
 			return
 		}
@@ -147,7 +147,7 @@ func (i *IndexNode) Init() error {
 		}
 		i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
 		if err != nil {
-			log.Debug("IndexNode NewMinIOKV failed", zap.Error(err))
+			log.Error("IndexNode NewMinIOKV failed", zap.Error(err))
 			initErr = err
 			return
 		}
