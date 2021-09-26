@@ -19,6 +19,28 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type mockReplica struct {
+	Replica
+
+	newSegments     map[UniqueID]*Segment
+	normalSegments  map[UniqueID]*Segment
+	flushedSegments map[UniqueID]*Segment
+}
+
+func (replica *mockReplica) getSegments(channelName string) []*Segment {
+	results := make([]*Segment, 0)
+	for _, value := range replica.newSegments {
+		results = append(results, value)
+	}
+	for _, value := range replica.normalSegments {
+		results = append(results, value)
+	}
+	for _, value := range replica.flushedSegments {
+		results = append(results, value)
+	}
+	return results
+}
+
 func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 	tests := []struct {
 		replica Replica
@@ -30,7 +52,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			dn := newDeleteDNode(test.replica)
+			dn := newDeleteNode(test.replica, "")
 
 			assert.NotNil(t, dn)
 			assert.Equal(t, "deleteNode", dn.Name())
@@ -84,39 +106,57 @@ func Test_GetSegmentsByPKs(t *testing.T) {
 		filter2.Add(buf)
 	}
 	segment1 := &Segment{
-		segmentID: 1,
-		pkFilter:  filter1,
+		segmentID:   1,
+		channelName: "test",
+		pkFilter:    filter1,
 	}
 	segment2 := &Segment{
-		segmentID: 2,
-		pkFilter:  filter1,
+		segmentID:   2,
+		channelName: "test",
+		pkFilter:    filter1,
 	}
 	segment3 := &Segment{
-		segmentID: 3,
-		pkFilter:  filter1,
+		segmentID:   3,
+		channelName: "test",
+		pkFilter:    filter1,
 	}
 	segment4 := &Segment{
-		segmentID: 4,
-		pkFilter:  filter2,
+		segmentID:   4,
+		channelName: "test",
+		pkFilter:    filter2,
 	}
 	segment5 := &Segment{
-		segmentID: 5,
-		pkFilter:  filter2,
+		segmentID:   5,
+		channelName: "test",
+		pkFilter:    filter2,
 	}
-	segments := []*Segment{segment1, segment2, segment3, segment4, segment5}
-	results, err := getSegmentsByPKs([]int64{0, 1, 2, 3, 4}, segments)
+	segment6 := &Segment{
+		segmentID:   5,
+		channelName: "test_error",
+		pkFilter:    filter2,
+	}
+	mockReplica := &mockReplica{}
+	mockReplica.newSegments = make(map[int64]*Segment)
+	mockReplica.normalSegments = make(map[int64]*Segment)
+	mockReplica.flushedSegments = make(map[int64]*Segment)
+	mockReplica.newSegments[segment1.segmentID] = segment1
+	mockReplica.newSegments[segment2.segmentID] = segment2
+	mockReplica.normalSegments[segment3.segmentID] = segment3
+	mockReplica.normalSegments[segment4.segmentID] = segment4
+	mockReplica.flushedSegments[segment5.segmentID] = segment5
+	mockReplica.flushedSegments[segment6.segmentID] = segment6
+	dn := newDeleteNode(mockReplica, "test")
+	results, err := dn.filterSegmentByPK([]int64{0, 1, 2, 3, 4})
 	assert.Nil(t, err)
 	expected := map[int64][]int64{
-		1: {0, 1, 2},
-		2: {0, 1, 2},
-		3: {0, 1, 2},
-		4: {3, 4},
-		5: {3, 4},
+		0: {1, 2, 3},
+		1: {1, 2, 3},
+		2: {1, 2, 3},
+		3: {4, 5},
+		4: {4, 5},
 	}
-	assert.Equal(t, expected, results)
+	for key, value := range expected {
+		assert.EqualValues(t, value, results[key])
+	}
 
-	_, err = getSegmentsByPKs(nil, segments)
-	assert.NotNil(t, err)
-	_, err = getSegmentsByPKs([]int64{0, 1, 2, 3, 4}, nil)
-	assert.NotNil(t, err)
 }
