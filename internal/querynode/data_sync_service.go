@@ -44,6 +44,7 @@ type dataSyncService struct {
 }
 
 // collection flow graph
+// addCollectionFlowGraph add a collection flowGraph to collectionFlowGraphs
 func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
