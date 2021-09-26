@@ -49,9 +49,9 @@ func TestFlowGraphDeleteNode_Operate(te *testing.T) {
 	}{
 		{[]Msg{}, nil,
 			"Invalid input length == 0"},
-		{[]Msg{&insertMsg{}, &insertMsg{}, &insertMsg{}}, nil,
+		{[]Msg{&flowGraphMsg{}, &flowGraphMsg{}, &flowGraphMsg{}}, nil,
 			"Invalid input length == 3"},
-		{[]Msg{&insertMsg{}}, nil,
+		{[]Msg{&flowGraphMsg{}}, nil,
 			"Invalid input length == 1 but input message is not msgStreamMsg"},
 		{nil, []Msg{&MsgStreamMsg{}},
 			"valid input"},
