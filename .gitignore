@@ -77,11 +77,9 @@ gtags.conf
 **/__debug_bin
 
 # codecov-go generated files
-coverage.txt
+go_coverage.txt
 profile.out
-profile.txt
 go_coverage.html
-cover.out
 
 # codecov-cpp generated files
 lcov_*.info
