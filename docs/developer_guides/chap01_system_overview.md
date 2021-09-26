@@ -36,7 +36,7 @@ The WAL forms a hash ring. Requests (i.e. inserts and deletes) from clients will
 
 The query/write nodes are linked to the hash ring, with each node covers some portion of the buckets. Once the hash function and bucket coverage are settled, the chain 'proxy -> WAL -> query/write node' will act as a producer-consumer pipeline. Logs in each bucket is a determined operation stream. Via performing the operation stream in order, the query nodes keep themselves up to date.
 
-The query nodes hold all the indexes in memory. Since building index is time-consuming, the query nodes will dump their index to disk (store engine) for fast failure recovery and cross node index copy.
+The query nodes hold all the indexes in memory. Since building an index is time-consuming, the query nodes will dump their index to disk (store engine) for fast failure recovery and cross node index copy.
 
 The write nodes are stateless. They simply transform the newly arrived WALs to binlog format, then append the binlog to store engine.
 
