@@ -126,6 +126,12 @@ def get_deploy_mode(deploy_params):
 
 
 def get_server_tag(deploy_params):
+    """
+    Get service deployment configuration
+    e.g.:
+        server:
+          server_tag: "8c16m"
+    """
     server_tag = ""
     if deploy_params and "server" in deploy_params:
         server = deploy_params["server"]
