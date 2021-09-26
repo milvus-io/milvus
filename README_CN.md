@@ -75,14 +75,14 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 ### 源码编译 Milvus
 
 ```bash
-# Clone github repository.
+# 克隆项目
 $ git clone https://github.com/milvus-io/milvus.git
 
-# Install third-party dependencies.
+# 安装第三方依赖
 $ cd milvus/
 $ ./scripts/install_deps.sh
 
-# Compile Milvus standalone.
+# 编译 Milvus 单机版
 $ make milvus
 ```
 
