@@ -634,7 +634,8 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 
 	opts := gorocksdb.NewDefaultReadOptions()
 	defer opts.Destroy()
-	_, err = rmq.store.Get(opts, []byte(storeKey))
+	val, err := rmq.store.Get(opts, []byte(storeKey))
+	defer val.Free()
 	if err != nil {
 		log.Debug("RocksMQ: get " + storeKey + " failed")
 		return err
