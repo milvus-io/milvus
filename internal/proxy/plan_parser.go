@@ -47,7 +47,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if i, ok := node.Node.(*ant_ast.FloatNode); ok {
 				patch(&ant_ast.FloatNode{Value: -i.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only make a number negative")
+				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "+":
@@ -56,7 +56,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if i, ok := node.Node.(*ant_ast.FloatNode); ok {
 				patch(&ant_ast.FloatNode{Value: i.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only make a number positive")
+				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		}
@@ -78,7 +78,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value + integerNodeRight.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only add two number")
+				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "-":
@@ -91,7 +91,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value - integerNodeRight.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only subtract two number")
+				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "*":
@@ -104,43 +104,47 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value * integerNodeRight.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only multiply two number")
+				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "/":
 			if leftFloat && rightFloat {
 				if floatNodeRight.Value == 0 {
-					optimizer.err = fmt.Errorf("number divide by zero")
+					optimizer.err = fmt.Errorf("divide by zero")
 					return
 				}
 				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value / floatNodeRight.Value})
 			} else if leftFloat && rightInteger {
 				if integerNodeRight.Value == 0 {
-					optimizer.err = fmt.Errorf("number divide by zero")
+					optimizer.err = fmt.Errorf("divide by zero")
 					return
 				}
 				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value / float64(integerNodeRight.Value)})
 			} else if leftInteger && rightFloat {
 				if floatNodeRight.Value == 0 {
-					optimizer.err = fmt.Errorf("number divide by zero")
+					optimizer.err = fmt.Errorf("divide by zero")
 					return
 				}
 				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) / floatNodeRight.Value})
 			} else if leftInteger && rightInteger {
 				if integerNodeRight.Value == 0 {
-					optimizer.err = fmt.Errorf("number divide by zero")
+					optimizer.err = fmt.Errorf("divide by zero")
 					return
 				}
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value / integerNodeRight.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only divide two number")
+				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "%":
 			if leftInteger && rightInteger {
+				if integerNodeRight.Value == 0 {
+					optimizer.err = fmt.Errorf("modulo by zero")
+					return
+				}
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value % integerNodeRight.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only modulus two integer")
+				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "**":
@@ -153,7 +157,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: int(math.Pow(float64(integerNodeLeft.Value), float64(integerNodeRight.Value)))})
 			} else {
-				optimizer.err = fmt.Errorf("can only pow two number")
+				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		}
