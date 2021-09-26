@@ -69,7 +69,7 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 		Payload:    []byte{},
 		Properties: nil,
 	}
-	err = rmqProducer.Send(context.TODO(), msg)
+	_, err = rmqProducer.Send(context.TODO(), msg)
 	assert.Nil(t, err)
 
 	invalidOpts := ProducerOptions{Topic: ""}
@@ -114,7 +114,7 @@ func TestRmqClient_Subscribe(t *testing.T) {
 		Payload:    []byte{1},
 		Properties: nil,
 	}
-	err = producer.Send(context.TODO(), msg)
+	_, err = producer.Send(context.TODO(), msg)
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)

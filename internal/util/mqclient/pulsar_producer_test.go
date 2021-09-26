@@ -38,7 +38,7 @@ func TestPulsarProducer(t *testing.T) {
 		Payload:    []byte{},
 		Properties: map[string]string{},
 	}
-	err = producer.Send(context.TODO(), msg)
+	_, err = producer.Send(context.TODO(), msg)
 	assert.Nil(t, err)
 
 	pulsarProd.Close()
