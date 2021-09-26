@@ -6,7 +6,7 @@ Your Milvus installation may fail when images are not properly loaded from publi
 
 ### Step 1: Save Milvus manifest and Docker images
 
-#### If you install your Milvus with the **docker-compose.yml** file, use these command:
+#### If you install Milvus with the **docker-compose.yml** file, use these command:
 
 1. Download Milvus standalone docker-compose.yml
    ```shell
@@ -25,7 +25,7 @@ Your Milvus installation may fail when images are not properly loaded from publi
    python3 save_image.py --manifest docker-compose.yml
    ```
 
-#### If you install your Milvus with **Helm**, use these command:
+#### If you install Milvus with **Helm**, use these command:
 1. Update Helm repo
    ```shell
    helm repo add milvus https://milvus-io.github.io/milvus-helm/
