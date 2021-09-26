@@ -96,7 +96,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					continue
 				}
 			}
-			iMsg.insertMessages = append(iMsg.insertMessages, msg.(*msgstream.InsertMsg))
+			iMsg.insertMessages = append(iMsg.insertMessages, imsg)
 		}
 	}
 
