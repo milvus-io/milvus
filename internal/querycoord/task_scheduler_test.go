@@ -151,7 +151,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	}
 	queryCoord.scheduler.Enqueue([]task{testTask})
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 	queryCoord.cluster.stopNode(nodeID)
 	for {
 		newActiveTaskIDKeys, _, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
