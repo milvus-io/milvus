@@ -120,7 +120,7 @@ func TestContextCancel(t *testing.T) {
 	}
 
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 		cancel()
 	}()
 
