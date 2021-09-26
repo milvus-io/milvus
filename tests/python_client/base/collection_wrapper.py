@@ -7,9 +7,10 @@ from utils.api_request import api_request
 from utils.util_log import test_log as log
 
 TIMEOUT = 20
-#keep small timeout for stability tests
-#TIMEOUT = 5
 
+
+# keep small timeout for stability tests
+# TIMEOUT = 5
 
 
 class ApiCollectionWrapper:
@@ -147,7 +148,8 @@ class ApiCollectionWrapper:
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop_partition, partition_name], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, partition_name=partition_name, **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, partition_name=partition_name,
+                                       **kwargs).run()
         return res, check_result
 
     def create_partition(self, partition_name, check_task=None, check_items=None, description=""):
@@ -216,5 +218,12 @@ class ApiCollectionWrapper:
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.alter_alias, alias_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def delete(self, expr, partition_name=None, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.delete, expr, partition_name, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
