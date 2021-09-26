@@ -56,8 +56,8 @@
 	</tr>
 	<tr>
 		<th>SDKs</th>
-		<td><li>Python</li><li>Java</li><li>Go</li><li>RESTful</li><li>C++</li></td>
-		<td><li>Python</li><li>Node</li><li>Go (under development)</li><li>Java (under development)</li><li>RESTful (in planning)</li><li>C++ (in planning)</li></td>
+		<td><li><a href="https://github.com/milvus-io/pymilvus/tree/1.x">Python<a></li><li><a href="https://github.com/milvus-io/milvus-sdk-java">Java</a></li><li><a href="https://github.com/milvus-io/milvus-sdk-go/tree/1.x">Go</a></li><li><a href="https://github.com/milvus-io/milvus/tree/1.1/core/src/server/web_impl">RESTful</a></li><li><a href="https://github.com/milvus-io/milvus/tree/1.1/sdk">C++</a></li></td>
+		<td><li><a href="https://github.com/milvus-io/pymilvus">Python<a></li><li><a href="https://github.com/milvus-io/milvus-sdk-node">Node</a></li><li><a href="https://github.com/milvus-io/milvus-sdk-go">Go (under development)</a></li><li><a href="https://github.com/milvus-io/milvus-sdk-java/tree/master">Java (under development)</a></li><li>RESTful (in planning)</li><li>C++ (in planning)</li></td>
 	</tr>
 	<tr>
 		<th>Release status</th>
