@@ -68,7 +68,7 @@ func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 	log.Debug("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
 	if nm.pq.CheckExist(nodeID) {
-		log.Debug("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
+		log.Warn("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
 		return nil
 	}
 
