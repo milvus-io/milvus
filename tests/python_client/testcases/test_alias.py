@@ -28,7 +28,24 @@ class TestAliasParams(TestcaseBase):
 
 class TestAliasParamsInvalid(TestcaseBase):
     """ Negative test cases of alias interface parameters"""
-    pass
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("alias_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
+    def test_alias_create_alias_with_invalid_name(self, alias_name):
+        """
+        target: test alias inserting data
+        method: create a collection with invalid alias name
+        expected: create alias failed
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        error = {ct.err_code: 1, ct.err_msg: f"Invalid collection alias: {alias_name}. The first character of a collection alias must be an underscore or letter"}
+        collection_w.create_alias(alias_name,
+                                  check_task=CheckTasks.err_res,
+                                  check_items=error)
 
 
 class TestAliasOperation(TestcaseBase):
