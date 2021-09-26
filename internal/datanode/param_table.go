@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// ParamTable in DataNode contains all configs for DataNode
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -71,19 +72,23 @@ type ParamTable struct {
 	UpdatedTime time.Time
 }
 
+// Params is global var in DataNode
 var Params ParamTable
 var once sync.Once
 
+// InitAlias init this DataNode alias
 func (p *ParamTable) InitAlias(alias string) {
 	p.Alias = alias
 }
 
+// InitOnce call params Init only once
 func (p *ParamTable) InitOnce() {
 	once.Do(func() {
 		p.Init()
 	})
 }
 
+// Init initializes DataNode configs
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 	err := p.LoadYaml("advanced/data_node.yaml")
