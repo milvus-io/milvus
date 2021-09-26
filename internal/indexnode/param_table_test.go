@@ -70,7 +70,6 @@ func TestParamTable(t *testing.T) {
 	t.Run("SimdType", func(t *testing.T) {
 		t.Logf("SimdType: %v", Params.SimdType)
 	})
-
 	// FIXME(dragondriver): how to cover panic case? we use `LoadWithDefault` to initialize `SimdType`
 
 	t.Run("CreatedTime", func(t *testing.T) {
@@ -81,6 +80,10 @@ func TestParamTable(t *testing.T) {
 	t.Run("UpdatedTime", func(t *testing.T) {
 		Params.UpdatedTime = time.Now()
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
+	})
+
+	t.Run("IndexRootPath", func(t *testing.T) {
+		t.Logf("IndexRootPath: %v", Params.IndexRootPath)
 	})
 }
 
