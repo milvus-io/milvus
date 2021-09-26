@@ -2,7 +2,7 @@
 
 ## Manually downloading Docker images
 
-Your Milvus installation may fail when images are not properly loaded from public Docker registries. To pull all images and save them into a directory that can be moved to the target host and loaded manually, perform the following procedures:
+Milvus installation may fail when images are not properly loaded from public Docker registries. To pull all images and save them into a directory that can be moved to the target host and loaded manually, perform the following procedures:
 
 ### Step 1: Save Milvus manifest and Docker images
 
@@ -61,13 +61,13 @@ for image in $(find . -type f -name "*.tar.gz") ; do gunzip -c $image | docker l
 
 ## Install Milvus
 
-- Install Milvus with Docker Compose
+- Install with Docker Compose
 
 ```shell
 docker-compose -f docker-compose.yml up -d
 ```
 
-- Install Milvus on Kubernetes
+- Install on Kubernetes
 
 ```shell
 kubectl apply -f milvus_manifest.yaml
@@ -75,13 +75,13 @@ kubectl apply -f milvus_manifest.yaml
 
 ## Uninstall Milvus
 
-- Uninstall Milvus with Docker Compose
+- Uninstall with Docker Compose
 
 ```shell
 docker-compose -f docker-compose.yml down
 ```
 
-- Uninstall Milvus on Kubernetes
+- Uninstall on Kubernetes
 
 ```shell
 kubectl delete -f milvus_manifest.yaml
