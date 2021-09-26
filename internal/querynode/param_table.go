@@ -12,8 +12,6 @@
 package querynode
 
 import (
-	"fmt"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,8 +72,6 @@ type ParamTable struct {
 	// segcore
 	ChunkRows int64
 	SimdType  string
-
-	Log log.Config
 }
 
 var Params ParamTable
@@ -130,8 +126,6 @@ func (p *ParamTable) Init() {
 
 	p.initSegcoreChunkRows()
 	p.initKnowhereSimdType()
-
-	p.initLogCfg()
 }
 
 // ---------------------------------------------------------- minio
@@ -298,27 +292,5 @@ func (p *ParamTable) initKnowhereSimdType() {
 }
 
 func (p *ParamTable) initLogCfg() {
-	p.Log = log.Config{}
-	format, err := p.Load("log.format")
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Format = format
-	level, err := p.Load("log.level")
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Level = level
-	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
-	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
-	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
-	rootPath, err := p.Load("log.file.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("querynode-%s.log", p.Alias))
-	} else {
-		p.Log.File.Filename = ""
-	}
+	p.InitLogCfg("querynode", p.QueryNodeID)
 }

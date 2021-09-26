@@ -12,12 +12,10 @@
 package rootcoord
 
 import (
-	"path"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -54,8 +52,6 @@ type ParamTable struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
-
-	Log log.Config
 
 	RoleName string
 }
@@ -222,29 +218,7 @@ func (p *ParamTable) initTimeTickInterval() {
 }
 
 func (p *ParamTable) initLogCfg() {
-	p.Log = log.Config{}
-	format, err := p.Load("log.format")
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Format = format
-	level, err := p.Load("log.level")
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Level = level
-	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
-	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
-	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
-	rootPath, err := p.Load("log.file.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, "rootcoord.log")
-	} else {
-		p.Log.File.Filename = ""
-	}
+	p.InitLogCfg("rootcoord", 0)
 }
 
 func (p *ParamTable) initRoleName() {
