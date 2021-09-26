@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 
@@ -58,6 +59,9 @@ type ParamTable struct {
 	TimeTickChannelName       string
 	SegmentInfoChannelName    string
 	DataCoordSubscriptionName string
+
+	CreatedTime time.Time
+	UpdatedTime time.Time
 
 	Log log.Config
 }
