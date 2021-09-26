@@ -250,6 +250,9 @@ func (i *IndexCoord) Start() error {
 		cb()
 	}
 
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
+
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("IndexCoord start successfully", zap.Any("State", i.stateCode.Load()))
 

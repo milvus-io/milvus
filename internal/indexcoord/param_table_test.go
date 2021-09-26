@@ -13,6 +13,7 @@ package indexcoord
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParamTable(t *testing.T) {
@@ -56,6 +57,16 @@ func TestParamTable(t *testing.T) {
 
 	t.Run("MinioBucketName", func(t *testing.T) {
 		t.Logf("MinioBucketName: %v", Params.MinioBucketName)
+	})
+
+	t.Run("CreatedTime", func(t *testing.T) {
+		Params.CreatedTime = time.Now()
+		t.Logf("CreatedTime: %v", Params.CreatedTime)
+	})
+
+	t.Run("UpdatedTime", func(t *testing.T) {
+		Params.UpdatedTime = time.Now()
+		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
 	})
 }
 

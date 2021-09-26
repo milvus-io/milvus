@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -36,6 +37,9 @@ type ParamTable struct {
 	MinIOSecretAccessKey string
 	MinIOUseSSL          bool
 	MinioBucketName      string
+
+	CreatedTime time.Time
+	UpdatedTime time.Time
 
 	Log log.Config
 }
