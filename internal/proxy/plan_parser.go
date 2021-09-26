@@ -179,8 +179,8 @@ func parseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 		return nil, optimizer.err
 	}
 
-	context := ParserContext{schema}
-	expr, err := context.handleExpr(&ast.Node)
+	pc := ParserContext{schema}
+	expr, err := pc.handleExpr(&ast.Node)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func parseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 	return expr, nil
 }
 
-func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *planpb.ColumnInfo {
+func createColumnInfo(field *schemapb.FieldSchema) *planpb.ColumnInfo {
 	return &planpb.ColumnInfo{
 		FieldId:      field.FieldID,
 		DataType:     field.DataType,
@@ -301,8 +301,8 @@ func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator s
 		expr := &planpb.Expr{
 			Expr: &planpb.Expr_CompareExpr{
 				CompareExpr: &planpb.CompareExpr{
-					LeftColumnInfo:  context.createColumnInfo(leftField),
-					RightColumnInfo: context.createColumnInfo(rightField),
+					LeftColumnInfo:  createColumnInfo(leftField),
+					RightColumnInfo: createColumnInfo(rightField),
 					Op:              op,
 				},
 			},
@@ -343,7 +343,7 @@ func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator s
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
 			UnaryRangeExpr: &planpb.UnaryRangeExpr{
-				ColumnInfo: context.createColumnInfo(field),
+				ColumnInfo: createColumnInfo(field),
 				Op:         op,
 				Value:      val,
 			},
@@ -422,7 +422,7 @@ func (context *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Ex
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_TermExpr{
 			TermExpr: &planpb.TermExpr{
-				ColumnInfo: context.createColumnInfo(field),
+				ColumnInfo: createColumnInfo(field),
 				Values:     arrayData,
 			},
 		},
