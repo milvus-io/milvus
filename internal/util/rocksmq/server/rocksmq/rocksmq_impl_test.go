@@ -99,7 +99,7 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	pMsgs[0] = pMsgA
 
 	_ = idAllocator.UpdateID()
-	err = rmq.Produce(topicName, pMsgs)
+	_, err = rmq.Produce(topicName, pMsgs)
 	assert.Error(t, err)
 
 	rmq.Notify(topicName, groupName)
@@ -152,7 +152,7 @@ func TestRocksmq(t *testing.T) {
 	pMsgs[0] = pMsgA
 
 	_ = idAllocator.UpdateID()
-	err = rmq.Produce(channelName, pMsgs)
+	_, err = rmq.Produce(channelName, pMsgs)
 	assert.Nil(t, err)
 
 	pMsgB := ProducerMessage{Payload: []byte("b_message")}
@@ -161,7 +161,7 @@ func TestRocksmq(t *testing.T) {
 	pMsgs[0] = pMsgB
 	pMsgs = append(pMsgs, pMsgC)
 	_ = idAllocator.UpdateID()
-	err = rmq.Produce(channelName, pMsgs)
+	_, err = rmq.Produce(channelName, pMsgs)
 	assert.Nil(t, err)
 
 	groupName := "test_group"
@@ -212,10 +212,10 @@ func TestRocksmq_Dummy(t *testing.T) {
 	err = rmq.DestroyConsumerGroup(channelName, channelName1)
 	assert.NoError(t, err)
 
-	err = rmq.Produce(channelName, nil)
+	_, err = rmq.Produce(channelName, nil)
 	assert.Error(t, err)
 
-	err = rmq.Produce(channelName1, nil)
+	_, err = rmq.Produce(channelName1, nil)
 	assert.Error(t, err)
 
 	groupName1 := "group_dummy"
@@ -226,7 +226,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	channelName2 := strings.Repeat(channelName1, 100)
 	err = rmq.CreateTopic(string(channelName2))
 	assert.NoError(t, err)
-	err = rmq.Produce(string(channelName2), nil)
+	_, err = rmq.Produce(string(channelName2), nil)
 	assert.Error(t, err)
 
 	msgA := "a_message"
@@ -238,7 +238,8 @@ func TestRocksmq_Dummy(t *testing.T) {
 	_, err = rmq.Consume(channelName, groupName1, 1)
 	assert.Error(t, err)
 	topicMu.Store(channelName, channelName)
-	assert.Error(t, rmq.Produce(channelName, nil))
+	_, err = rmq.Produce(channelName, nil)
+	assert.Error(t, err)
 
 	_, err = rmq.Consume(channelName, groupName1, 1)
 	assert.Error(t, err)
@@ -275,7 +276,7 @@ func TestRocksmq_Loop(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs := make([]ProducerMessage, 1)
 		pMsgs[0] = pMsg
-		err := rmq.Produce(channelName, pMsgs)
+		_, err := rmq.Produce(channelName, pMsgs)
 		assert.Nil(t, err)
 	}
 
@@ -286,7 +287,7 @@ func TestRocksmq_Loop(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	err = rmq.Produce(channelName, pMsgs)
+	_, err = rmq.Produce(channelName, pMsgs)
 	assert.Nil(t, err)
 
 	// Consume loopNum message once
@@ -350,8 +351,9 @@ func TestRocksmq_Goroutines(t *testing.T) {
 			pMsgs[0] = pMsg0
 			pMsgs[1] = pMsg1
 
-			err := mq.Produce(channelName, pMsgs)
+			ids, err := mq.Produce(channelName, pMsgs)
 			assert.Nil(t, err)
+			assert.Equal(t, len(pMsgs), len(ids))
 			msgChan <- msg0
 			msgChan <- msg1
 		}(i, rmq)
@@ -413,8 +415,9 @@ func TestRocksmq_Throughout(t *testing.T) {
 		msg := "message_" + strconv.Itoa(i)
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		assert.Nil(t, idAllocator.UpdateID())
-		err := rmq.Produce(channelName, []ProducerMessage{pMsg})
+		ids, err := rmq.Produce(channelName, []ProducerMessage{pMsg})
 		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
 	}
 	pt1 := time.Now().UnixNano() / int64(time.Millisecond)
 	pDuration := pt1 - pt0
@@ -471,9 +474,9 @@ func TestRocksmq_MultiChan(t *testing.T) {
 		msg1 := "for_chann1_" + strconv.Itoa(i)
 		pMsg0 := ProducerMessage{Payload: []byte(msg0)}
 		pMsg1 := ProducerMessage{Payload: []byte(msg1)}
-		err = rmq.Produce(channelName0, []ProducerMessage{pMsg0})
+		_, err = rmq.Produce(channelName0, []ProducerMessage{pMsg0})
 		assert.Nil(t, err)
-		err = rmq.Produce(channelName1, []ProducerMessage{pMsg1})
+		_, err = rmq.Produce(channelName1, []ProducerMessage{pMsg1})
 		assert.Nil(t, err)
 	}
 
@@ -516,20 +519,20 @@ func TestRocksmq_CopyData(t *testing.T) {
 
 	msg0 := "abcde"
 	pMsg0 := ProducerMessage{Payload: []byte(msg0)}
-	err = rmq.Produce(channelName0, []ProducerMessage{pMsg0})
+	_, err = rmq.Produce(channelName0, []ProducerMessage{pMsg0})
 	assert.Nil(t, err)
 
 	pMsg1 := ProducerMessage{Payload: nil}
-	err = rmq.Produce(channelName1, []ProducerMessage{pMsg1})
+	_, err = rmq.Produce(channelName1, []ProducerMessage{pMsg1})
 	assert.Nil(t, err)
 
 	pMsg2 := ProducerMessage{Payload: []byte{}}
-	err = rmq.Produce(channelName1, []ProducerMessage{pMsg2})
+	_, err = rmq.Produce(channelName1, []ProducerMessage{pMsg2})
 	assert.Nil(t, err)
 
 	var emptyTargetData []byte
 	pMsg3 := ProducerMessage{Payload: emptyTargetData}
-	err = rmq.Produce(channelName1, []ProducerMessage{pMsg3})
+	_, err = rmq.Produce(channelName1, []ProducerMessage{pMsg3})
 	assert.Nil(t, err)
 
 	groupName := "test_group"

@@ -27,7 +27,7 @@ type Producer interface {
 	Topic() string
 
 	// publish a message
-	Send(message *ProducerMessage) error
+	Send(message *ProducerMessage) (UniqueID, error)
 
 	// Close a producer
 	Close()

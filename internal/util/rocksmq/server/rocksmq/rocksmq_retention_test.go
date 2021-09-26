@@ -73,8 +73,9 @@ func TestRmqRetention(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	err = rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(topicName, pMsgs)
 	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs), len(ids))
 
 	groupName := "test_group"
 	_ = rmq.DestroyConsumerGroup(topicName, groupName)
@@ -159,8 +160,9 @@ func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	err = rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(topicName, pMsgs)
 	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs), len(ids))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -321,8 +323,9 @@ func TestRmqRetention_Complex(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	err = rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(topicName, pMsgs)
 	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs), len(ids))
 
 	groupName := "test_group"
 	_ = rmq.DestroyConsumerGroup(topicName, groupName)
@@ -385,8 +388,9 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
-	err = rmq.Produce(topicName, pMsgs)
+	ids, err := rmq.Produce(topicName, pMsgs)
 	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs), len(ids))
 
 	groupName := "test_group"
 	_ = rmq.DestroyConsumerGroup(topicName, groupName)

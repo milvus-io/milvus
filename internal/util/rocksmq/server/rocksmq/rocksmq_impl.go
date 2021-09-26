@@ -382,14 +382,14 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	return nil
 }
 
-func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error {
+func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
-		return fmt.Errorf("topic name = %s not exist", topicName)
+		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
+		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -399,11 +399,11 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 
 	if err != nil {
 		log.Debug("RocksMQ: alloc id failed.")
-		return err
+		return []UniqueID{}, err
 	}
 
 	if UniqueID(msgLen) != idEnd-idStart {
-		return errors.New("Obtained id length is not equal that of message")
+		return []UniqueID{}, errors.New("Obtained id length is not equal that of message")
 	}
 
 	/* Step I: Insert data to store system */
@@ -415,7 +415,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 		msgID := idStart + UniqueID(i)
 		key, err := combKey(topicName, msgID)
 		if err != nil {
-			return err
+			return []UniqueID{}, err
 		}
 
 		batch.Put([]byte(key), messages[i].Payload)
@@ -428,7 +428,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 	err = rmq.store.Write(opts, batch)
 	if err != nil {
 		log.Debug("RocksMQ: write batch failed")
-		return err
+		return []UniqueID{}, err
 	}
 
 	/* Step II: Update meta data to kv system */
@@ -436,7 +436,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 	beginIDValue, err := rmq.kv.Load(kvChannelBeginID)
 	if err != nil {
 		log.Debug("RocksMQ: load " + kvChannelBeginID + " failed")
-		return err
+		return []UniqueID{}, err
 	}
 
 	kvValues := make(map[string]string)
@@ -452,7 +452,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 	err = rmq.kv.MultiSave(kvValues)
 	if err != nil {
 		log.Debug("RocksMQ: multisave failed")
-		return err
+		return []UniqueID{}, err
 	}
 
 	if vals, ok := rmq.consumers.Load(topicName); ok {
@@ -470,9 +470,9 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 	// TODO(yukun): Should this be in a go routine
 	err = rmq.UpdatePageInfo(topicName, msgIDs, msgSizes)
 	if err != nil {
-		return err
+		return []UniqueID{}, err
 	}
-	return nil
+	return msgIDs, nil
 }
 
 func (rmq *rocksmq) UpdatePageInfo(topicName string, msgIDs []UniqueID, msgSizes map[UniqueID]int64) error {
