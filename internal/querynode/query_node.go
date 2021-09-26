@@ -45,6 +45,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// QueryNode communicates with outside services and union all
+// services in querynode package.
+//
+// QueryNode implements `types.Component`, `types.QueryNode` interfaces.
+//  `rootCoord` is a grpc client of root coordinator.
+//  `indexCoord` is a grpc client of index coordinator.
+//  `stateCode` is current statement of this query node, indicating whether it's healthy.
 type QueryNode struct {
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
