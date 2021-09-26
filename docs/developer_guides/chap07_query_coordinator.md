@@ -1,14 +1,14 @@
 
 
-## 8. Query Coordinator
+## 7. Query Coordinator
 
-#### 8.1 Overview
+#### 7.1 Overview
 
 <img src="./figs/query_coord.png" width=500>
 
 
 
-#### 8.2 Query Coordinator Interface
+#### 7.2 Query Coordinator Interface
 
 ```go
 type QueryCoord interface {
@@ -185,7 +185,7 @@ type GetSegmentInfoResponse struct {
 }
 ```
 
-#### 8.3 Query Channel
+#### 7.3 Query Channel
 
 * *SearchMsg*
 
@@ -231,7 +231,7 @@ type RetriveMsg struct {
 }
 ```
 
-#### 8.4 Query Node Interface
+#### 7.4 Query Node Interface
 
 ```go
 type QueryNode interface {
@@ -354,7 +354,7 @@ type GetSegmentInfoResponse struct {
 
 
 //TODO
-#### 8.2 Collection Replica
+#### 7.5 Collection Replica
 
 $collectionReplica$ contains a in-memory local copy of persistent collections. In common cases, the system has multiple query nodes. Data of a collection will be distributed across all the available query nodes, and each query node's $collectionReplica$ will maintain its own share (only part of the collection).
 Every replica tracks a value called tSafe which is the maximum timestamp that the replica is up-to-date.
