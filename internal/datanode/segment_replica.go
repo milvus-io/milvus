@@ -35,6 +35,7 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
+// Replica is DataNode unique replication
 type Replica interface {
 	getCollectionID() UniqueID
 	getCollectionSchema(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error)
