@@ -42,6 +42,8 @@ type Base interface {
 type BaseTable struct {
 	params    *memkv.MemoryKV
 	configDir string
+
+	Log log.Config
 }
 
 func (gp *BaseTable) Init() {
@@ -376,4 +378,30 @@ func ConvertRangeToIntSlice(rangeStr, sep string) []int {
 		ret = append(ret, i)
 	}
 	return ret
+}
+
+func (gp *BaseTable) InitLogCfg(role string, id UniqueID) {
+	gp.Log = log.Config{}
+	format, err := gp.Load("log.format")
+	if err != nil {
+		panic(err)
+	}
+	gp.Log.Format = format
+	level, err := gp.Load("log.level")
+	if err != nil {
+		panic(err)
+	}
+	gp.Log.Level = level
+	gp.Log.File.MaxSize = gp.ParseInt("log.file.maxSize")
+	gp.Log.File.MaxBackups = gp.ParseInt("log.file.maxBackups")
+	gp.Log.File.MaxDays = gp.ParseInt("log.file.maxAge")
+	rootPath, err := gp.Load("log.file.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	if len(rootPath) != 0 {
+		gp.Log.File.Filename = path.Join(rootPath, role+"-"+strconv.FormatInt(id, 10)+".log")
+	} else {
+		gp.Log.File.Filename = ""
+	}
 }
