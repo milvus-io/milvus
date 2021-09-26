@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"go.uber.org/zap"
@@ -200,6 +202,49 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 						zap.Any("pchan", pchan),
 						zap.Any("minTs", ts))
 				}
+			}
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	b <- struct{}{}
+	wg.Wait()
+
+	defer func() {
+		err := ticker.close()
+		assert.Equal(t, nil, err)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestChannelsTimeTickerImpl_getMinTick(t *testing.T) {
+	interval := time.Millisecond * 10
+	pchanNum := rand.Uint64()%10 + 1
+	pchans := make([]pChan, 0, pchanNum)
+	for i := 0; uint64(i) < pchanNum; i++ {
+		pchans = append(pchans, funcutil.GenRandomStr())
+	}
+	tso := newMockTsoAllocator()
+	ctx := context.Background()
+
+	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
+	err := ticker.start()
+	assert.Equal(t, nil, err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	b := make(chan struct{}, 1)
+	ts := typeutil.ZeroTimestamp
+	go func() {
+		defer wg.Done()
+		timer := time.NewTicker(interval * 40)
+		for {
+			select {
+			case <-b:
+				return
+			case <-timer.C:
+				minTs := ticker.getMinTick()
+				assert.GreaterOrEqual(t, minTs, ts)
 			}
 		}
 	}()
