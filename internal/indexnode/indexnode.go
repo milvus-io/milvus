@@ -167,6 +167,9 @@ func (i *IndexNode) Start() error {
 	i.once.Do(func() {
 		startErr = i.sched.Start()
 
+		Params.CreatedTime = time.Now()
+		Params.UpdatedTime = time.Now()
+
 		//start liveness check
 		go i.session.LivenessCheck(i.loopCtx, i.liveCh, func() {
 			i.Stop()
