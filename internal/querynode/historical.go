@@ -36,6 +36,7 @@ const (
 	segmentMetaPrefix = "queryCoord-segmentMeta"
 )
 
+// historical is in charge of historical data in query node
 type historical struct {
 	ctx context.Context
 
