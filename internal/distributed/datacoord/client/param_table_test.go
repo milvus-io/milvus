@@ -26,11 +26,13 @@ func TestParamTable(t *testing.T) {
 	log.Info("TestParamTable", zap.Int("ClientMaxSendSize", Params.ClientMaxSendSize))
 	log.Info("TestParamTable", zap.Int("ClientMaxRecvSize", Params.ClientMaxRecvSize))
 
-	Params.Remove("dataCoord.grpc.clientMaxSendSize")
+	err := Params.Remove("dataCoord.grpc.clientMaxSendSize")
+	assert.Nil(t, err)
 	Params.initClientMaxSendSize()
 	assert.Equal(t, Params.ClientMaxSendSize, grpcconfigs.DefaultClientMaxSendSize)
 
-	Params.Remove("dataCoord.grpc.clientMaxRecvSize")
+	err = Params.Remove("dataCoord.grpc.clientMaxRecvSize")
+	assert.Nil(t, err)
 	Params.initClientMaxRecvSize()
 	assert.Equal(t, Params.ClientMaxRecvSize, grpcconfigs.DefaultClientMaxRecvSize)
 }
