@@ -86,7 +86,7 @@ func TestSegmentAllocator1(t *testing.T) {
 	ctx := context.Background()
 	dataCoord := &mockDataCoord{}
 	dataCoord.expireTime = Timestamp(1000)
-	segAllocator, err := NewSegIDAssigner(ctx, dataCoord, getLastTick1)
+	segAllocator, err := newSegIDAssigner(ctx, dataCoord, getLastTick1)
 	assert.Nil(t, err)
 	wg := &sync.WaitGroup{}
 	segAllocator.Start()
@@ -107,9 +107,9 @@ func TestSegmentAllocator1(t *testing.T) {
 	}
 	assert.Equal(t, uint32(10), total)
 
-	ret, err := segAllocator.GetSegmentID(1, 1, "abc", SegCountPerRPC-10, 999)
+	ret, err := segAllocator.GetSegmentID(1, 1, "abc", segCountPerRPC-10, 999)
 	assert.Nil(t, err)
-	assert.Equal(t, uint32(SegCountPerRPC-10), ret[1])
+	assert.Equal(t, uint32(segCountPerRPC-10), ret[1])
 
 	_, err = segAllocator.GetSegmentID(1, 1, "abc", 10, 1001)
 	assert.NotNil(t, err)
@@ -131,7 +131,7 @@ func TestSegmentAllocator2(t *testing.T) {
 	ctx := context.Background()
 	dataCoord := &mockDataCoord{}
 	dataCoord.expireTime = Timestamp(500)
-	segAllocator, err := NewSegIDAssigner(ctx, dataCoord, getLastTick2)
+	segAllocator, err := newSegIDAssigner(ctx, dataCoord, getLastTick2)
 	assert.Nil(t, err)
 	wg := &sync.WaitGroup{}
 	segAllocator.Start()
@@ -150,7 +150,7 @@ func TestSegmentAllocator2(t *testing.T) {
 	}
 	assert.Equal(t, uint32(10), total)
 	time.Sleep(50 * time.Millisecond)
-	_, err = segAllocator.GetSegmentID(1, 1, "abc", SegCountPerRPC-10, getLastTick2())
+	_, err = segAllocator.GetSegmentID(1, 1, "abc", segCountPerRPC-10, getLastTick2())
 	assert.NotNil(t, err)
 	wg.Wait()
 
@@ -160,7 +160,7 @@ func TestSegmentAllocator3(t *testing.T) {
 	ctx := context.Background()
 	dataCoord := &mockDataCoord2{}
 	dataCoord.expireTime = Timestamp(500)
-	segAllocator, err := NewSegIDAssigner(ctx, dataCoord, getLastTick2)
+	segAllocator, err := newSegIDAssigner(ctx, dataCoord, getLastTick2)
 	assert.Nil(t, err)
 	wg := &sync.WaitGroup{}
 	segAllocator.Start()
@@ -218,7 +218,7 @@ func TestSegmentAllocator4(t *testing.T) {
 	ctx := context.Background()
 	dataCoord := &mockDataCoord3{}
 	dataCoord.expireTime = Timestamp(500)
-	segAllocator, err := NewSegIDAssigner(ctx, dataCoord, getLastTick2)
+	segAllocator, err := newSegIDAssigner(ctx, dataCoord, getLastTick2)
 	assert.Nil(t, err)
 	wg := &sync.WaitGroup{}
 	segAllocator.Start()
@@ -253,7 +253,7 @@ func TestSegmentAllocator5(t *testing.T) {
 	ctx := context.Background()
 	dataCoord := &mockDataCoord5{}
 	dataCoord.expireTime = Timestamp(500)
-	segAllocator, err := NewSegIDAssigner(ctx, dataCoord, getLastTick2)
+	segAllocator, err := newSegIDAssigner(ctx, dataCoord, getLastTick2)
 	assert.Nil(t, err)
 	wg := &sync.WaitGroup{}
 	segAllocator.Start()
@@ -274,7 +274,7 @@ func TestSegmentAllocator6(t *testing.T) {
 	ctx := context.Background()
 	dataCoord := &mockDataCoord{}
 	dataCoord.expireTime = Timestamp(500)
-	segAllocator, err := NewSegIDAssigner(ctx, dataCoord, getLastTick2)
+	segAllocator, err := newSegIDAssigner(ctx, dataCoord, getLastTick2)
 	assert.Nil(t, err)
 	wg := &sync.WaitGroup{}
 	segAllocator.Start()

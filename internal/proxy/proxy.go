@@ -67,7 +67,7 @@ type Proxy struct {
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *TimestampAllocator
-	segAssigner  *SegIDAssigner
+	segAssigner  *segIDAssinger
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -181,7 +181,7 @@ func (node *Proxy) Init() error {
 	}
 	node.tsoAllocator = tsoAllocator
 
-	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
+	segAssigner, err := newSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
 	if err != nil {
 		panic(err)
 	}

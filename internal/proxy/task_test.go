@@ -3053,7 +3053,7 @@ func TestInsertTask_all(t *testing.T) {
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
 
-	segAllocator, err := NewSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
+	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
 	assert.NoError(t, err)
 	segAllocator.Init()
 	_ = segAllocator.Start()
