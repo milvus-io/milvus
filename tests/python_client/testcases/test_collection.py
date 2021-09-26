@@ -2288,6 +2288,11 @@ class TestDescribeCollectionInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test describe collection which name invalid
+        method: call describe_collection with invalid names
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)
@@ -2295,6 +2300,11 @@ class TestDescribeCollectionInvalid(object):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("collection_name", ('', None))
     def test_describe_collection_with_empty_or_None_collection_name(self, connect, collection_name):
+        """
+        target: test describe collection which name is empty or None
+        method: call describe_collection with '' or None name
+        expected: raise exception
+        """
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)
 
