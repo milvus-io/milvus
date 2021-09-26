@@ -60,7 +60,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
-	var iMsg = insertMsg{
+	var fgMsg = flowGraphMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: msMsg.TimestampMin(),
@@ -96,14 +96,14 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					continue
 				}
 			}
-			iMsg.insertMessages = append(iMsg.insertMessages, imsg)
+			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
 		}
 	}
 
-	iMsg.startPositions = append(iMsg.startPositions, msMsg.StartPositions()...)
-	iMsg.endPositions = append(iMsg.endPositions, msMsg.EndPositions()...)
+	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
+	fgMsg.endPositions = append(fgMsg.endPositions, msMsg.EndPositions()...)
 
-	var res Msg = &iMsg
+	var res Msg = &fgMsg
 
 	for _, sp := range spans {
 		sp.Finish()

@@ -25,11 +25,15 @@ type (
 	MsgStreamMsg = flowgraph.MsgStreamMsg
 )
 
-type insertMsg struct {
+type flowGraphMsg struct {
 	insertMessages []*msgstream.InsertMsg
 	timeRange      TimeRange
 	startPositions []*internalpb.MsgPosition
 	endPositions   []*internalpb.MsgPosition
+}
+
+func (fgMsg *flowGraphMsg) TimeTick() Timestamp {
+	return fgMsg.timeRange.timestampMax
 }
 
 type flushMsg struct {
@@ -37,8 +41,4 @@ type flushMsg struct {
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
-}
-
-func (iMsg *insertMsg) TimeTick() Timestamp {
-	return iMsg.timeRange.timestampMax
 }
