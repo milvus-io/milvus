@@ -164,6 +164,8 @@ func TestWatchNodeLoop(t *testing.T) {
 		}
 
 		queryCoord.Stop()
+		err = removeAllSession()
+		assert.Nil(t, err)
 	})
 
 	t.Run("Test RegisterNewNode", func(t *testing.T) {
@@ -184,6 +186,8 @@ func TestWatchNodeLoop(t *testing.T) {
 
 		queryCoord.Stop()
 		queryNode1.stop()
+		err = removeAllSession()
+		assert.Nil(t, err)
 	})
 
 	t.Run("Test RemoveNode", func(t *testing.T) {
@@ -196,6 +200,8 @@ func TestWatchNodeLoop(t *testing.T) {
 
 		nodeID := queryNode1.queryNodeID
 		queryNode1.stop()
+		err = removeNodeSession(nodeID)
+		assert.Nil(t, err)
 		for {
 			_, err = queryCoord.cluster.getNodeByID(nodeID)
 			if err != nil {
@@ -203,5 +209,7 @@ func TestWatchNodeLoop(t *testing.T) {
 			}
 		}
 		queryCoord.Stop()
+		err = removeAllSession()
+		assert.Nil(t, err)
 	})
 }

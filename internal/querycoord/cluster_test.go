@@ -60,6 +60,8 @@ func TestReloadClusterFromKV(t *testing.T) {
 			}
 		}
 		queryNode.stop()
+		err = removeNodeSession(queryNode.queryNodeID)
+		assert.Nil(t, err)
 	})
 
 	t.Run("Test LoadOfflineNodes", func(t *testing.T) {
@@ -100,6 +102,9 @@ func TestReloadClusterFromKV(t *testing.T) {
 		assert.Equal(t, 1, len(cluster.nodes))
 		collection := cluster.getCollectionInfosByID(context.Background(), 100)
 		assert.Equal(t, defaultCollectionID, collection[0].CollectionID)
+
+		err = removeAllSession()
+		assert.Nil(t, err)
 	})
 }
 
@@ -127,14 +132,7 @@ func TestGrpcRequest(t *testing.T) {
 	nodeSession := node.session
 	nodeID := node.queryNodeID
 	cluster.registerNode(baseCtx, nodeSession, nodeID, disConnect)
-
-	for {
-		online, err := cluster.isOnline(nodeID)
-		assert.Nil(t, err)
-		if online {
-			break
-		}
-	}
+	waitQueryNodeOnline(cluster, nodeID)
 
 	t.Run("Test GetComponentInfos", func(t *testing.T) {
 		_, err := cluster.getComponentInfos(baseCtx)
@@ -191,4 +189,6 @@ func TestGrpcRequest(t *testing.T) {
 	})
 
 	node.stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
 }
