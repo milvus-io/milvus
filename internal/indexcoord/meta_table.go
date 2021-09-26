@@ -158,7 +158,7 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		log.Debug("IndexCoord metaTable BuildIndex index not exists", zap.Any("indexBuildID", indexBuildID))
+		log.Error("IndexCoord metaTable BuildIndex index not exists", zap.Any("indexBuildID", indexBuildID))
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
@@ -194,7 +194,7 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	log.Debug("IndexCoord metaTable update UpdateVersion", zap.Any("IndexBuildId", indexBuildID))
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		log.Debug("IndexCoord metaTable update UpdateVersion indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
+		log.Warn("IndexCoord metaTable update UpdateVersion indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
@@ -236,7 +236,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 			// marshal inside
 			/* #nosec G601 */
 			if err := mt.saveIndexMeta(&meta); err != nil {
-				log.Debug("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
+				log.Error("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
 				fn := func() error {
 					m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
 					if m == nil {
@@ -338,7 +338,7 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 		err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
 		if err2 != nil {
 			meta.indexMeta.Recycled = false
-			log.Debug("IndexCoord metaTable UpdateRecycleState failed", zap.Error(err2))
+			log.Error("IndexCoord metaTable UpdateRecycleState failed", zap.Error(err2))
 			return err2
 		}
 	}
@@ -471,13 +471,13 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 			return false
 		}
 	} else {
-		log.Debug("Index not exist", zap.Int64("IndexBuildID", indexBuildID))
+		log.Error("Index not exist", zap.Int64("IndexBuildID", indexBuildID))
 		return false
 	}
 
 	m, err := mt.reloadMeta(indexBuildID)
 	if m == nil {
-		log.Debug("IndexCoord metaTable reloadMeta failed", zap.Error(err))
+		log.Error("IndexCoord metaTable reloadMeta failed", zap.Error(err))
 		return false
 	}
 
