@@ -112,6 +112,7 @@ type rocksmq struct {
 	retentionInfo *retentionInfo
 }
 
+// NewRocksMQ step:
 // 1. New rocksmq instance based on rocksdb with name and rocksdbkv with kvname
 // 2. Init retention info, load retention info to memory
 // 3. Start retention goroutine
