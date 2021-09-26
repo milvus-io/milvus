@@ -308,7 +308,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return resp, nil
 }
 
-// todo deprecated rpc
+// GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	resp := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{

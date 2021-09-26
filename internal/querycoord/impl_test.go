@@ -344,7 +344,7 @@ func TestLoadBalanceTask(t *testing.T) {
 	queryNode2, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 	res, err := queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
@@ -355,7 +355,7 @@ func TestLoadBalanceTask(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, res.ErrorCode)
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 	for {
 		collectionInfo := queryCoord.meta.showCollections()
 		if collectionInfo[0].InMemoryPercentage == 100 {

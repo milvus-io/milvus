@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632393084403,
+  "iteration": 1632480056020,
   "links": [],
   "panels": [
     {
@@ -4375,7 +4375,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "",
+      "description": "process cpu usage",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -5686,8 +5686,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "default",
-          "value": "default"
+          "text": "test",
+          "value": "test"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -5716,7 +5716,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
+          "selected": false,
           "text": "All",
           "value": "$__all"
         },
@@ -5812,5 +5812,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 108
+  "version": 111
 }

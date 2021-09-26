@@ -26,8 +26,8 @@ proxy:
     timeTick:
       bufSize: 512
 
-  maxNameLength: 255
-  maxFieldNum: 64
+  maxNameLength: 255  # max name length of collection or alias
+  maxFieldNum: 64     # max field number of a collection
   maxDimension: 32768 # Maximum dimension of vector
   maxShardNum: 256 # Maximum number of shards in a collection
 

@@ -187,6 +187,7 @@ fi
 cat docker-compose.yml|grep milvusdb
 docker-compose up -d
 check_healthy
+# sleep 60s # Todo use `curl http://localhost:9091/healthz` to check health
 docker-compose ps
 popd
 

@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcindexcoord
+package grpcindexnode
 
 import (
 	"strconv"
@@ -19,61 +19,87 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
 
-	ServiceAddress string
-	ServicePort    int
+	IndexCoordAddress string
+
+	IP      string
+	Port    int
+	Address string
 
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
 }
 
+// Params is an alias for ParamTable.
 var Params ParamTable
 var once sync.Once
 
+// Init is used to initialize configuration items.
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initParams()
+
+		pt.initServerMaxSendSize()
+		pt.initServerMaxRecvSize()
+
+		if !funcutil.CheckPortAvailable(pt.Port) {
+			pt.Port = funcutil.GetAvailablePort()
+			log.Warn("IndexNode init", zap.Any("Port", pt.Port))
+		}
+		pt.LoadFromEnv()
+		pt.LoadFromArgs()
 	})
 }
 
+// LoadFromArgs is used to initialize configuration items from args.
+func (pt *ParamTable) LoadFromArgs() {
+
+}
+
+// LoadFromEnv is used to initialize configuration items from env.
+func (pt *ParamTable) LoadFromEnv() {
+	Params.IP = funcutil.GetLocalIP()
+}
+
 func (pt *ParamTable) initParams() {
-	pt.initServicePort()
-	pt.initServiceAddress()
-
-	pt.initServerMaxSendSize()
-	pt.initServerMaxRecvSize()
+	pt.initPort()
+	pt.initIndexCoordAddress()
 }
 
-func (pt *ParamTable) initServicePort() {
-	pt.ServicePort = pt.ParseInt("indexCoord.port")
-}
-
-func (pt *ParamTable) initServiceAddress() {
+// todo remove and use load from env
+func (pt *ParamTable) initIndexCoordAddress() {
 	ret, err := pt.Load("_IndexCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.ServiceAddress = ret
+	pt.IndexCoordAddress = ret
+}
+
+func (pt *ParamTable) initPort() {
+	port := pt.ParseInt("indexNode.port")
+	pt.Port = port
 }
 
 func (pt *ParamTable) initServerMaxSendSize() {
 	var err error
 
-	valueStr, err := pt.Load("indexCoord.grpc.serverMaxSendSize")
+	valueStr, err := pt.Load("indexNode.grpc.serverMaxSendSize")
 	if err != nil { // not set
 		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
 	}
 
 	value, err := strconv.Atoi(valueStr)
 	if err != nil { // not in valid format
-		log.Warn("Failed to parse indexCoord.grpc.serverMaxSendSize, set to default",
-			zap.String("indexCoord.grpc.serverMaxSendSize", valueStr),
+		log.Warn("Failed to parse indexNode.grpc.serverMaxSendSize, set to default",
+			zap.String("indexNode.grpc.serverMaxSendSize", valueStr),
 			zap.Error(err))
 
 		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
@@ -82,21 +108,21 @@ func (pt *ParamTable) initServerMaxSendSize() {
 	}
 
 	log.Debug("initServerMaxSendSize",
-		zap.Int("indexCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
+		zap.Int("indexNode.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
 }
 
 func (pt *ParamTable) initServerMaxRecvSize() {
 	var err error
 
-	valueStr, err := pt.Load("indexCoord.grpc.serverMaxRecvSize")
+	valueStr, err := pt.Load("indexNode.grpc.serverMaxRecvSize")
 	if err != nil { // not set
 		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
 	}
 
 	value, err := strconv.Atoi(valueStr)
 	if err != nil { // not in valid format
-		log.Warn("Failed to parse indexCoord.grpc.serverMaxRecvSize, set to default",
-			zap.String("indexCoord.grpc.serverMaxRecvSize", valueStr),
+		log.Warn("Failed to parse indexNode.grpc.serverMaxRecvSize, set to default",
+			zap.String("indexNode.grpc.serverMaxRecvSize", valueStr),
 			zap.Error(err))
 
 		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
@@ -105,5 +131,5 @@ func (pt *ParamTable) initServerMaxRecvSize() {
 	}
 
 	log.Debug("initServerMaxRecvSize",
-		zap.Int("indexCoord.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
+		zap.Int("indexNode.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

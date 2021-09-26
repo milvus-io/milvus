@@ -10,9 +10,9 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 rootcoord:
-  dmlChannelNum: 256
-  maxPartitionNum: 4096
-  minSegmentSizeToEnableIndex: 1024
+  dmlChannelNum: 256 # The number of dml channels created at system startup
+  maxPartitionNum: 4096 # Maximum number of partitions in a collection
+  minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
   timeout: 3600 # time out, 5 seconds
-  timeTickInterval: 200 # ms
+  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
 

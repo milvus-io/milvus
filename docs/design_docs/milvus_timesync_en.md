@@ -1,6 +1,6 @@
 # Timesync -- All The things you should know
 
-`Time Synchronization` is the kernel part of Milvus 2.0, it affects all components of the system. This document describes the detailed desgin of `Time Synchronization`.
+`Time Synchronization` is the kernel part of Milvus 2.0; it affects all components of the system. This document describes the detailed design of `Time Synchronization`.
 
 There are 2 kinds of events in Milvus 2.0:
 - DDL events
@@ -12,10 +12,10 @@ There are 2 kinds of events in Milvus 2.0:
   - insert
   - search
   - etc
-    
+
 All events have a `Timestamp` to indicate when this event occurs.
 
-Suppose there are two users, `u1` and `u2`. They connect to Milvus, and do following operations at respective timestamps.
+Suppose there are two users, `u1` and `u2`. They connect to Milvus and do the following operations at the respective timestamps.
 
 | ts        | u1                   | u2           |
 |-----------|----------------------|--------------|
@@ -26,22 +26,22 @@ Suppose there are two users, `u1` and `u2`. They connect to Milvus, and do follo
 | t10       | insert A2            | -            |
 | t12       | -                    | search on C0 |
 | t15       | delete A1 from C0    | -            |
-| t17       | -                    | search on C0 | 
+| t17       | -                    | search on C0 |
 
-Ideally, `u2` expects `C0` is empty at `t2`, and could only sees `A1` at `t7`; while `u2` could see both `A1` and `A2` at `t12`, but only see `A2` at `t17`.
+Ideally, `u2` expects `C0` to be empty at `t2`, and could only see `A1` at `t7`; while `u2` could see both `A1` and `A2` at `t12`, but only see `A2` at `t17`.
 
-It's easy to achieve this in a `single-node` database. But for a `Distributed System`, such like `Milvus`, it's a little difficult, following problems needs to be solved.
+It's easy to achieve this in a `single-node` database. But for a `Distributed System`, such like `Milvus`, it's a little difficult; the following problems need to be solved.
 
 1. If `u1` and `u2` are on different nodes, and their time clock is not synchronized. To give an extreme example, suppose that the time of `u2` is 24 hours later than `u1`, then all the operations of `u1` can't been seen by `u2` until next day.
-2. Network latency. If `u2` starts the `Search on C0` at `t17`, then how to guarantee that all the `events` before `t17` have been processed. If the events of `delete A1 from C0` has been delayed due to the network latency, then it would lead to incorrect state: `u2` would see both `A1` and `A2` at `t17`.
+2. Network latency. If `u2` starts the `Search on C0` at `t17`, then how can it be guaranteed that all the `events` before `t17` have been processed? If the events of `delete A1 from C0` has been delayed due to the network latency, then it would lead to incorrect state: `u2` would see both `A1` and `A2` at `t17`.
 
 `Time synchronization system` is used to solve the above problems.
 
 ## Timestamp Oracle(TSO)
 
-Like [TiKV](https://github.com/tikv/tikv), Milvus 2.0 provides `TSO` service, all the events must alloc timestamp from `TSO`，not use local timestamp, so the first problem can be solved.
+Like [TiKV](https://github.com/tikv/tikv), Milvus 2.0 provides `TSO` service. All the events must alloc timestamp from `TSO`，not use local timestamp, so the first problem can be solved.
 
-`TSO` is provided by `RootCoord` component, clients could alloc one or more timestamp in a single request, the `proto` is defined as following.
+`TSO` is provided by the `RootCoord` component. Clients could alloc one or more timestamp in a single request; the `proto` is defined as following.
 
 ```proto
 service RootCoord {
@@ -61,7 +61,7 @@ message AllocTimestampResponse {
     uint32 count = 3;
 }
 ```
-`Timestamp` is with type `uint64`, containing physical and logical parts. 
+`Timestamp` is of type `uint64`, containing physical and logical parts.
 
 This is the format of `Timestamp`
 
@@ -81,25 +81,25 @@ Taking `Insert Operation` as an example.
 
 ![proxy insert](./graphs/timesync_proxy_insert_msg.png)
 
-Based on above information, we can know that the `MsgStream` have the following characteristics:
+Based on the above information, we know that the `MsgStream` has the following characteristics:
 - In `MsgStream`, `InsertMsg` from the same `Proxy` must be incremented in timestamp
 - In `MsgStream`, `InsertMsg` from different `Proxy` have no relationship in timestamp
 
-The following figure shows an example of `InsertMsg` in `MsgStream`, the snippet contains 5 `InsertMsg`, 3 of them from `Proxy1` and others from `Proxy2`.
+The following figure shows an example of `InsertMsg` in `MsgStream`. The snippet contains 5 `InsertMsg`, 3 of them from `Proxy1` and others from `Proxy2`.
 
 The 3 `InsertMsg` from `Proxy1` are incremented in timestamp, and the 2 `InsertMsg` from `Proxy2` are also incremented in timestamps, but there is no relationship between `Proxy1` and `Proxy2`.
 
 ![msgstream](./graphs/timesync_msgstream.png)
 
-So the second problem has turned into this: after reading a message from `MsgStream`, how to make sure that all the messages with smaller timestamp have been consumed ?
+So the second problem has turned into this: after reading a message from `MsgStream`, how to make sure that all the messages with smaller timestamp have been consumed?
 
-For example, when read a message with timestamp `110` produced by `Proxy2`, but the message with timestamp `80` produced by `Proxy1`, is still in the `MsgStream`, how to handle this situation ?
+For example, when reading a message with timestamp `110` produced by `Proxy2`, but the message with timestamp `80` produced by `Proxy1`, is still in the `MsgStream`. How can this situation be handled?
 
-The following graph shows the core logic of `Time Synchronization System` in `Milvus 2.0`, it should solve the second problem.
-- Each `Proxy` will periodically reports its latest timestamp of every `MsgStream` to `RootCoord`, the default interval is `200ms`
+The following graph shows the core logic of `Time Synchronization System` in `Milvus 2.0`; it should solve the second problem.
+- Each `Proxy` will periodically reports its latest timestamp of every `MsgStream` to `RootCoord`; the default interval is `200ms`
 - For each `Msgstream`, `Rootcoord` finds the minimum timestamp of all `Proxy` on this `Msgstream`, and inserts this minimum timestamp into the `Msgstream`
 - When the consumer reads the timestamp inserted by the `RootCoord` on the `MsgStream`, it indicates that all messages with smaller timestamp have been consumed, so all actions that depend on this timestamp can be executed safely
-- The message inserted by `RootCoord` into `MsgStream` is type of `TimeTick`
+- The message inserted by `RootCoord` into `MsgStream` is of type `TimeTick`
 
 ![upload time tick](./graphs/timesync_proxy_upload_time_tick.png)
 

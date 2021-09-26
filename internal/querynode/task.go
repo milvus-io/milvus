@@ -112,6 +112,7 @@ func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
 func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	collectionID := w.req.CollectionID
 	partitionID := w.req.PartitionID
+	// if no partitionID is specified, load type is load collection
 	loadPartition := partitionID != 0
 
 	// get all vChannels

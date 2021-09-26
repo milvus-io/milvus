@@ -1,6 +1,6 @@
-# Install Milvus standalone through binary file
+# Install Milvus standalone through binary files
 
-In order to quickly install and experience Milvus without docker or kubernetes, this document provides a tutorial for installing Milvus and Milvus dependencies, etcd and Minio, through binary files.
+In order to quickly install and experience Milvus without docker or kubernetes, this document provides a tutorial for installing Milvus and dependencies, etcd and Minio, through binary files.
 
 Before installing etcd and MinIO, you can refer to [docker-compose.yml](https://github.com/milvus-io/milvus/blob/master/deployments/docker/standalone/docker-compose.yml) to check the versions required by etcd and MinIO.
 
