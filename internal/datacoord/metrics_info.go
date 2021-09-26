@@ -99,8 +99,9 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
 				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
 			},
-			// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-			Type: typeutil.DataCoordRole,
+			CreatedTime: Params.CreatedTime.String(),
+			UpdatedTime: Params.UpdatedTime.String(),
+			Type:        typeutil.DataCoordRole,
 		},
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
 			SegmentMaxSize: Params.SegmentMaxSize,

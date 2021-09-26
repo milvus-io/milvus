@@ -236,8 +236,13 @@ func (s *Server) Start() error {
 	if err := helper.Execute(); err != nil {
 		return err
 	}
+
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
+
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
 	log.Debug("dataCoordinator startup success")
+
 	return nil
 }
 
