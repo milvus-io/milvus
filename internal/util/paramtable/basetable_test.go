@@ -225,3 +225,17 @@ func Test_ConvertRangeToIntSlice(t *testing.T) {
 		assert.Panics(t, func() { ConvertRangeToIntSlice("9,0", ",") })
 	})
 }
+
+func Test_InitLogCfg(t *testing.T) {
+	t.Run("TestInitLogCfg", func(t *testing.T) {
+		baseParams.InitLogCfg("rootcoord", 0)
+		assert.Equal(t, baseParams.Log.File.Filename, "")
+
+		baseParams.Save("log.file.rootPath", "/")
+		baseParams.InitLogCfg("rootcoord", 0)
+		assert.Equal(t, baseParams.Log.File.Filename, "/rootcoord-0.log")
+
+		baseParams.InitLogCfg("datanode", 8)
+		assert.Equal(t, baseParams.Log.File.Filename, "/datanode-8.log")
+	})
+}

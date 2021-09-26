@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -37,7 +36,6 @@ type ParamTable struct {
 
 	NetworkAddress string
 
-	// TODO(dragondriver): maybe using the Proxy + ProxyID as the alias is more reasonable
 	Alias string
 
 	EtcdEndpoints    []string
@@ -69,7 +67,6 @@ type ParamTable struct {
 	MaxTaskNum int64
 
 	PulsarMaxMessageSize int
-	Log                  log.Config
 	RoleName             string
 }
 
@@ -89,7 +86,6 @@ func (pt *ParamTable) Init() {
 		panic(err)
 	}
 
-	pt.initLogCfg()
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
 	pt.initPulsarAddress()
@@ -277,29 +273,7 @@ func (pt *ParamTable) initPulsarMaxMessageSize() {
 }
 
 func (pt *ParamTable) initLogCfg() {
-	pt.Log = log.Config{}
-	format, err := pt.Load("log.format")
-	if err != nil {
-		panic(err)
-	}
-	pt.Log.Format = format
-	level, err := pt.Load("log.level")
-	if err != nil {
-		panic(err)
-	}
-	pt.Log.Level = level
-	pt.Log.File.MaxSize = pt.ParseInt("log.file.maxSize")
-	pt.Log.File.MaxBackups = pt.ParseInt("log.file.maxBackups")
-	pt.Log.File.MaxDays = pt.ParseInt("log.file.maxAge")
-	rootPath, err := pt.Load("log.file.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	if len(rootPath) != 0 {
-		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("proxy-%s.log", pt.Alias))
-	} else {
-		pt.Log.File.Filename = ""
-	}
+	pt.InitLogCfg("proxy", pt.ProxyID)
 }
 
 func (pt *ParamTable) initRoleName() {

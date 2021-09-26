@@ -12,7 +12,6 @@
 package indexnode
 
 import (
-	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -53,8 +52,6 @@ type ParamTable struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
-
-	Log log.Config
 }
 
 var Params ParamTable
@@ -76,7 +73,6 @@ func (pt *ParamTable) Init() {
 		panic(err)
 	}*/
 
-	pt.initLogCfg()
 	pt.initParams()
 	pt.initKnowhereSimdType()
 }
@@ -170,29 +166,7 @@ func (pt *ParamTable) initMinioBucketName() {
 }
 
 func (pt *ParamTable) initLogCfg() {
-	pt.Log = log.Config{}
-	format, err := pt.Load("log.format")
-	if err != nil {
-		panic(err)
-	}
-	pt.Log.Format = format
-	level, err := pt.Load("log.level")
-	if err != nil {
-		panic(err)
-	}
-	pt.Log.Level = level
-	pt.Log.File.MaxSize = pt.ParseInt("log.file.maxSize")
-	pt.Log.File.MaxBackups = pt.ParseInt("log.file.maxBackups")
-	pt.Log.File.MaxDays = pt.ParseInt("log.file.maxAge")
-	rootPath, err := pt.Load("log.file.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	if len(rootPath) != 0 {
-		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("indexnode-%s.log", pt.Alias))
-	} else {
-		pt.Log.File.Filename = ""
-	}
+	pt.InitLogCfg("indexnode", pt.NodeID)
 }
 
 func (pt *ParamTable) initKnowhereSimdType() {
