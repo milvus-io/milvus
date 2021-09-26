@@ -246,7 +246,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
 			ms.producerLock.Lock()
-			if err := ms.producers[channel].Send(
+			if _, err := ms.producers[channel].Send(
 				spanCtx,
 				msg,
 			); err != nil {
@@ -286,7 +286,7 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 
 		ms.producerLock.Lock()
 		for _, producer := range ms.producers {
-			if err := producer.Send(
+			if _, err := producer.Send(
 				spanCtx,
 				msg,
 			); err != nil {

@@ -28,7 +28,7 @@ type Producer interface {
 	//Topic() string
 
 	// publish a message
-	Send(ctx context.Context, message *ProducerMessage) error
+	Send(ctx context.Context, message *ProducerMessage) (MessageID, error)
 
 	Close()
 }

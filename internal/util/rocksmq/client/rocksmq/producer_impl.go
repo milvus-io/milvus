@@ -17,6 +17,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// assertion make sure implementation
+var _ Producer = (*producer)(nil)
+
 type producer struct {
 	// client which the producer belong to
 	c     *client
@@ -42,12 +45,16 @@ func (p *producer) Topic() string {
 	return p.topic
 }
 
-func (p *producer) Send(message *ProducerMessage) error {
-	return p.c.server.Produce(p.topic, []server.ProducerMessage{
+func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
+	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{
 		{
 			Payload: message.Payload,
 		},
 	})
+	if err != nil {
+		return 0, err
+	}
+	return ids[0], nil
 }
 
 func (p *producer) Close() {

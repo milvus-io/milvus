@@ -17,6 +17,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 )
 
+var _ Producer = (*rmqProducer)(nil)
+
 type rmqProducer struct {
 	p rocksmq.Producer
 }
@@ -25,9 +27,10 @@ func (rp *rmqProducer) Topic() string {
 	return rp.p.Topic()
 }
 
-func (rp *rmqProducer) Send(ctx context.Context, message *ProducerMessage) error {
+func (rp *rmqProducer) Send(ctx context.Context, message *ProducerMessage) (MessageID, error) {
 	pm := &rocksmq.ProducerMessage{Payload: message.Payload}
-	return rp.p.Send(pm)
+	id, err := rp.p.Send(pm)
+	return &rmqID{messageID: id}, err
 }
 
 func (rp *rmqProducer) Close() {

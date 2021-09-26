@@ -53,7 +53,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 			Payload:    IntToBytes(v),
 			Properties: map[string]string{},
 		}
-		err = producer.Send(ctx, msg)
+		_, err = producer.Send(ctx, msg)
 		assert.Nil(t, err)
 		log.Info("Pub", zap.Any("SND", v))
 	}
