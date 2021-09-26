@@ -1,3 +1,4 @@
+from typing import Collection
 import pytest
 
 from base.client_base import TestcaseBase
@@ -11,8 +12,15 @@ prefix = "alias"
 exp_name = "name"
 exp_schema = "schema"
 default_schema = cf.gen_default_collection_schema()
-
-
+default_binary_schema = cf.gen_default_binary_collection_schema()
+default_nb = ct.default_nb
+default_nb_medium = ct.default_nb_medium
+default_nq = ct.default_nq
+default_dim = ct.default_dim
+default_limit = ct.default_limit
+default_search_exp = "int64 >= 0"
+default_search_field = ct.default_float_vec_field_name
+default_search_params = ct.default_search_params
 class TestAliasParams(TestcaseBase):
     """ Test cases of alias interface parameters"""
     pass
@@ -29,7 +37,7 @@ class TestAliasOperation(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_create_operation_default(self):
         """
-        target: test collection create alias
+        target: test collection creating alias
         method: 
                 1.create a collection and create 10 partitions for it
                 2.collection create a alias, then init a collection with this alias name but not create partitions 
@@ -48,15 +56,15 @@ class TestAliasOperation(TestcaseBase):
 
         alias_name = cf.gen_unique_str(prefix)
         collection_w.create_alias(alias_name)
-        collection_alias = self.init_collection_wrap(name=alias_name,
-                                                     check_task=CheckTasks.check_collection_property,
-                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                   check_task=CheckTasks.check_collection_property,
+                                                                   check_items={exp_name: alias_name, exp_schema: default_schema})
         # assert collection is equal to alias
         assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
 
     def test_alias_alter_operation_default(self):
         """
-        target: test collection alter alias
+        target: test collection altering alias
         method: 
                 1. create collection_1 with 10 partitions and its alias alias_a
                 2. create collection_2 with 5 partitions and its alias alias_b
@@ -81,9 +89,9 @@ class TestAliasOperation(TestcaseBase):
         
         alias_a_name = cf.gen_unique_str(prefix)
         collection_1.create_alias(alias_a_name)
-        collection_alias_a = self.init_collection_wrap(name=alias_a_name,
-                                                       check_task=CheckTasks.check_collection_property,
-                                                       check_items={exp_name: alias_a_name, exp_schema: default_schema})
+        collection_alias_a, _ = self.collection_wrap.init_collection(name=alias_a_name,
+                                                                     check_task=CheckTasks.check_collection_property,
+                                                                     check_items={exp_name: alias_a_name, exp_schema: default_schema})
 
         assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_a.partitions]        
         
@@ -102,9 +110,9 @@ class TestAliasOperation(TestcaseBase):
 
         alias_b_name = cf.gen_unique_str(prefix)
         collection_2.create_alias(alias_b_name)
-        collection_alias_b = self.init_collection_wrap(name=alias_b_name,
-                                                       check_task=CheckTasks.check_collection_property,
-                                                       check_items={exp_name: alias_b_name, exp_schema: default_schema})
+        collection_alias_b, _ = self.collection_wrap.init_collection(name=alias_b_name,
+                                                                     check_task=CheckTasks.check_collection_property,
+                                                                     check_items={exp_name: alias_b_name, exp_schema: default_schema})
 
         assert [p.name for p in collection_2.partitions] == [p.name for p in collection_alias_b.partitions]
         
@@ -122,14 +130,14 @@ class TestAliasOperation(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_operation_default(self):
         """
-        target: test collection drop alias
+        target: test collection dropping alias
         method: 
                 1.create a collection with 10 partitons
                 2.collection create a alias
                 3.collection drop the alias
         expected: 
                 in step 2, collection is equal to alias
-                in step 3, collection is not equal to alias any more
+                in step 3, collection with alias name is exist
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
@@ -144,19 +152,43 @@ class TestAliasOperation(TestcaseBase):
 
         alias_name = cf.gen_unique_str(prefix)
         collection_w.create_alias(alias_name)
-        collection_alias = self.init_collection_wrap(name=alias_name,
-                                                     check_task=CheckTasks.check_collection_property,
-                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                   check_task=CheckTasks.check_collection_property,
+                                                                   check_items={exp_name: alias_name, exp_schema: default_schema})
 
         assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
 
         collection_w.drop_alias(alias_name)
+        error = {ct.err_code: 0, ct.err_msg: f"Collection '{alias_name}' not exist, or you can pass in schema to create one"}
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                   check_task=CheckTasks.err_res,
+                                                                   check_items=error)
 
-        collection_alias = self.init_collection_wrap(name=alias_name,
-                                                     check_task=CheckTasks.check_collection_property,
-                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alias_insert_data_default(self):
+        """
+        target: test alias inserting data
+        method: 
+                1.create a collection with alias
+                2.collection insert data by alias
+        expected: inserting data by alias can work and the result is same as inserting data directly
 
-        assert [p.name for p in collection_w.partitions] != [p.name for p in collection_alias.partitions]
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        alias_name = cf.gen_unique_str(prefix)
+        collection_w.create_alias(alias_name)
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                   check_task=CheckTasks.check_collection_property,
+                                                                   check_items={exp_name: alias_name, exp_schema: default_schema})
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        collection_alias.insert(data=df)
+
+        assert collection_w.num_entities == ct.default_nb
+        assert collection_alias.num_entities == ct.default_nb
 
 
 class TestAliasOperationInvalid(TestcaseBase):
@@ -165,7 +197,7 @@ class TestAliasOperationInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_create_dupcation_alias(self):
         """
-        target: test two collections create alias with same name
+        target: test two collections creating alias with same name
         method: 
                 1.create a collection_1 with alias name alias_a
                 2.create a collection_2 also with alias name alias_a
@@ -193,7 +225,7 @@ class TestAliasOperationInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_alter_not_exist_alias(self):
         """
-        target: test collection alter to alias which is not exist
+        target: test collection altering to alias which is not exist
         method: 
                 1.create a collection with alias
                 2.collection alters to a alias name which is not exist
@@ -218,7 +250,7 @@ class TestAliasOperationInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_not_exist_alias(self):
         """
-        target: test collection drop alias which is not exist
+        target: test collection dropping alias which is not exist
         method: 
                 1.create a collection with alias
                 2.collection drop alias which is not exist
@@ -242,7 +274,7 @@ class TestAliasOperationInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_same_alias_twice(self):
         """
-        target: test collection drop same alias twice
+        target: test collection dropping same alias twice
         method: 
                 1.create a collection with alias
                 2.collection drop alias
@@ -263,3 +295,25 @@ class TestAliasOperationInvalid(TestcaseBase):
         collection_w.drop_alias(alias_name,
                                 check_task=CheckTasks.err_res,
                                 check_items=error)
+
+    def test_alias_cerate_dup_name_collection(self):
+        """
+        target: test creating a collection with a same name as alias, but a different schema
+        method:
+                1.create a collection with alias
+                2.create a collection with same name as alias, but a different schema
+        expected: in step 2, create collection failed
+        """
+
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        alias_name = cf.gen_unique_str(prefix)
+        collection_w.create_alias(alias_name)
+
+        error = {ct.err_code: 0, ct.err_msg: "The collection already exist, but the schema is not the same as the schema passed in"} 
+        self.init_collection_wrap(alias_name, schema=default_binary_schema,
+                                  check_task=CheckTasks.err_res,
+                                  check_items=error)
