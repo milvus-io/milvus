@@ -33,6 +33,7 @@ const (
 	queryChannelMetaPrefix = "queryCoord-queryChannel"
 )
 
+// Meta contains information about all loaded collections and partitions, including segment information and vchannel information
 type Meta interface {
 	reloadFromKV() error
 
