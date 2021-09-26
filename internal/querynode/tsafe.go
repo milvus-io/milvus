@@ -164,12 +164,13 @@ func (ts *tSafe) set(id UniqueID, t Timestamp) {
 }
 
 func (ts *tSafe) close() {
-	ts.tSafeMu.Lock()
-	defer ts.tSafeMu.Unlock()
-
 	ts.cancel()
 	// wait for all job done
 	ts.closeWg.Wait()
+
+	ts.tSafeMu.Lock()
+	defer ts.tSafeMu.Unlock()
+
 	for _, watcher := range ts.watcherList {
 		close(watcher.notifyChan)
 	}
