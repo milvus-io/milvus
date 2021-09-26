@@ -1,4 +1,4 @@
-## 6. Proxy
+## 5. Proxy
 
 
 
@@ -6,7 +6,7 @@
 
 
 
-#### 6.0 Proxy Service Interface
+#### 5.0 Proxy Service Interface
 
 ```go
 type ProxyService interface {
@@ -67,7 +67,7 @@ type InvalidateCollMetaCacheRequest struct {
 
 
 
-#### 6.1 Proxy Node Interface
+#### 5.1 Proxy Node Interface
 
 ```go
 type Proxy interface {
@@ -87,7 +87,7 @@ type InvalidateCollMetaCacheRequest struct {
 }
 ```
 
-#### 6.2 Milvus Service Interface
+#### 5.2 Milvus Service Interface
 
 Proxy also implements Milvus Service interface to receive client grpc call.
 
@@ -334,7 +334,7 @@ type PersistentSegmentInfoResponse  struct{
 
 ```
 
-#### 6.1 Proxy Instance
+#### 5.3 Proxy Instance
 
 ```go
 type Proxy struct {
@@ -424,7 +424,7 @@ var Params ParamTable
 ```
 
 
-#### 6.2 Task
+#### 5.4 Task
 
 ``` go
 type task interface {
@@ -445,7 +445,7 @@ type task interface {
 }
 ```
 
-#### 6.2 Task Scheduler
+#### 5.5 Task Scheduler
 
 * Base Task Queue
 
@@ -599,7 +599,7 @@ message taskSchedulerHeartbeat {
 
 
 // TODO
-#### 6.3 Time Tick
+#### 5.6 Time Tick
 
 * Time Tick
 
