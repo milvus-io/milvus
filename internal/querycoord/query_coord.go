@@ -68,7 +68,6 @@ type QueryCoord struct {
 	eventChan <-chan *sessionutil.SessionEvent
 
 	stateCode  atomic.Value
-	isInit     atomic.Value
 	enableGrpc bool
 
 	msFactory msgstream.Factory
