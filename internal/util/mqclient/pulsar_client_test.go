@@ -195,7 +195,7 @@ func TestPulsarClient_Consume1(t *testing.T) {
 
 	// launch produce
 	Produce(ctx, t, pc, topic, arr)
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	// launch consume1
 	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
@@ -346,7 +346,7 @@ func TestPulsarClient_Consume2(t *testing.T) {
 
 	// launch produce
 	Produce(ctx, t, pc, topic, arr)
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	// launch consume1
 	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
