@@ -74,7 +74,7 @@ func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOpti
 	return StartSpanFromContextWithSkip(ctx, 2, opts...)
 }
 
-// StartSpanFromContext starts a opentracing span with call skip. The operation
+// StartSpanFromContextWithSkip starts a opentracing span with call skip. The operation
 // name is upper @skip call stacks of the function
 func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
@@ -105,13 +105,13 @@ func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentra
 	return span, opentracing.ContextWithSpan(ctx, span)
 }
 
-// StartSpanFromContext starts a opentracing span with specific operation name.
+// StartSpanFromContextWithOperationName starts a opentracing span with specific operation name.
 // And will log print the current call line number and file name.
 func StartSpanFromContextWithOperationName(ctx context.Context, operationName string, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	return StartSpanFromContextWithOperationNameWithSkip(ctx, operationName, 2, opts...)
 }
 
-// StartSpanFromContext starts a opentracing span with specific operation name.
+// StartSpanFromContextWithOperationNameWithSkip starts a opentracing span with specific operation name.
 // And will log print the current call line number and file name.
 func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operationName string, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
@@ -187,15 +187,19 @@ func InjectContextToPulsarMsgProperties(sc opentracing.SpanContext, properties m
 	tracer.Inject(sc, opentracing.TextMap, PropertiesReaderWriter{properties})
 }
 
+// PropertiesReaderWriter is for saving trce in pulsar msg properties.
+// Implement Set and ForeachKey methods.
 type PropertiesReaderWriter struct {
 	PpMap map[string]string
 }
 
+// Set sets key, value to PpMap.
 func (ppRW PropertiesReaderWriter) Set(key, val string) {
 	key = strings.ToLower(key)
 	ppRW.PpMap[key] = val
 }
 
+// ForeachKey iters each key value of PpMap.
 func (ppRW PropertiesReaderWriter) ForeachKey(handler func(key, val string) error) error {
 	for k, val := range ppRW.PpMap {
 		if err := handler(k, val); err != nil {
@@ -205,6 +209,7 @@ func (ppRW PropertiesReaderWriter) ForeachKey(handler func(key, val string) erro
 	return nil
 }
 
+// NoopSpan is a minimal span to reduce overhead.
 func NoopSpan() opentracing.Span {
 	return opentracing.NoopTracer{}.StartSpan("Default-span")
 }
