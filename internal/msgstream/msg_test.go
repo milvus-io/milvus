@@ -49,17 +49,17 @@ func TestBaseMsg(t *testing.T) {
 	assert.Equal(t, position, baseMsg.Position())
 }
 
-func Test_ConvertToByteArray(t *testing.T) {
+func Test_convertToByteArray(t *testing.T) {
 	{
 		bytes := []byte{1, 2, 3}
-		byteArray, err := ConvertToByteArray(bytes)
+		byteArray, err := convertToByteArray(bytes)
 		assert.Equal(t, bytes, byteArray)
 		assert.Nil(t, err)
 	}
 
 	{
 		bytes := 4
-		byteArray, err := ConvertToByteArray(bytes)
+		byteArray, err := convertToByteArray(bytes)
 		assert.Equal(t, ([]byte)(nil), byteArray)
 		assert.NotNil(t, err)
 	}
