@@ -85,7 +85,7 @@ func (inm *Mock) buildIndexTask() {
 				}
 				err := retry.Do(context.Background(), saveIndexMeta, retry.Attempts(3))
 				if err != nil {
-					log.Debug("IndexNode Mock saveIndexMeta error", zap.Error(err))
+					log.Error("IndexNode Mock saveIndexMeta error", zap.Error(err))
 				}
 			} else {
 				saveIndexMeta := func() error {
@@ -127,7 +127,7 @@ func (inm *Mock) buildIndexTask() {
 				}
 				err := retry.Do(context.Background(), saveIndexMeta, retry.Attempts(3))
 				if err != nil {
-					log.Debug("IndexNode Mock saveIndexMeta error", zap.Error(err))
+					log.Error("IndexNode Mock saveIndexMeta error", zap.Error(err))
 				}
 			}
 		}
