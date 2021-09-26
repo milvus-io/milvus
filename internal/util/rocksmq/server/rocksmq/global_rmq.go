@@ -24,7 +24,7 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 )
 
-// Global rocksmq instance that will be initialized only once
+// Rmq is global rocksmq instance that will be initialized only once
 var Rmq *rocksmq
 
 // once is used to init global rocksmq

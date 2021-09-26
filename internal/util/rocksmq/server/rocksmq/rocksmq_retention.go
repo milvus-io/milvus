@@ -279,6 +279,7 @@ func (ri *retentionInfo) retention() error {
 	for {
 		select {
 		case <-ri.ctx.Done():
+			log.Debug("aaaaaaaaaaaaa")
 			return nil
 		case t := <-ticker.C:
 			timeNow := t.Unix()
@@ -483,7 +484,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	return DeleteMessages(ri.db, topic, startID, endID)
 }
 
-// Delte messages in rocksdb by range of [startID, endID)
+// DeleteMessages in rocksdb by range of [startID, endID)
 func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) error {
 	// Delete msg by range of startID and endID
 	startKey, err := combKey(topic, startID)
