@@ -56,7 +56,7 @@ type queryCollection struct {
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []queryMsg
 
-	tSafeWatchersMu sync.Mutex // guards tSafeWatchers
+	tSafeWatchersMu sync.RWMutex // guards tSafeWatchers
 	tSafeWatchers   map[Channel]*tSafeWatcher
 	tSafeUpdate     bool
 	watcherCond     *sync.Cond
@@ -217,7 +217,8 @@ func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
 		q.watcherCond.Wait()
 	}
 	q.watcherCond.L.Unlock()
-	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
+	q.tSafeWatchersMu.RLock()
+	defer q.tSafeWatchersMu.RUnlock()
 	t := Timestamp(math.MaxInt64)
 	for channel := range q.tSafeWatchers {
 		ts, err := q.streaming.tSafeReplica.getTSafe(channel)
