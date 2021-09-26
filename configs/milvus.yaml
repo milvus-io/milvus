@@ -132,3 +132,34 @@ log:
     maxAge: 10 # day
     maxBackups: 20
   format: text # text/json
+
+msgChannel:
+  # channel name generation rule: ${namePrefix}-${ChannelIdx}
+  chanNamePrefix:
+    cluster:           "by-dev"
+    rootCoordTimeTick: "rootcoord-timetick"
+    rootCoordStatistics: "rootcoord-statistics"
+    rootCoordDml: "rootcoord-dml"
+    search: "search"
+    searchResult: "searchResult"
+    proxyTimeTick: "proxyTimeTick"
+    queryTimeTick: "queryTimeTick"
+    queryNodeStats: "query-node-stats"
+    # cmd for loadIndex, flush, etc...
+    cmd: "cmd"
+    dataCoordInsertChannel: "insert-channel-"
+    dataCoordStatistic: "datacoord-statistics-channel"
+    dataCoordTimeTick: "datacoord-timetick-channel"
+    dataCoordSegmentInfo: "segment-info-channel"
+
+  # sub name generation rule: ${subNamePrefix}-${NodeID}
+  subNamePrefix:
+    rootCoordSubNamePrefix: "rootCoord"
+    proxySubNamePrefix: "proxy"
+    queryNodeSubNamePrefix: "queryNode"
+    dataNodeSubNamePrefix: "dataNode"
+    dataCoordSubNamePrefix: "dataCoord"
+
+common:
+  defaultPartitionName: "_default"  # default partition name for a collection
+  defaultIndexName: "_default_idx"  # default index name

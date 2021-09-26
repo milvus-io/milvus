@@ -15,6 +15,8 @@ import (
 	"os"
 	"testing"
 
+	"path/filepath"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/stretchr/testify/assert"
 )
@@ -124,14 +126,43 @@ func TestBaseTable_Remove(t *testing.T) {
 func TestBaseTable_LoadYaml(t *testing.T) {
 	err := baseParams.LoadYaml("milvus.yaml")
 	assert.Nil(t, err)
-	err = baseParams.LoadYaml("advanced/channel.yaml")
-	assert.Nil(t, err)
 	assert.Panics(t, func() { baseParams.LoadYaml("advanced/not_exist.yaml") })
 
 	_, err = baseParams.Load("etcd.address")
 	assert.Nil(t, err)
 	_, err = baseParams.Load("pulsar.port")
 	assert.Nil(t, err)
+}
+
+func TestBaseTable_ConfDir(t *testing.T) {
+	rightConfig := baseParams.configDir
+	// fake dir
+	baseParams.configDir = "./"
+
+	assert.Panics(t, func() { baseParams.loadFromMilvusYaml() })
+	assert.False(t, baseParams.loadFromCommonYaml())
+	assert.False(t, baseParams.loadFromChannelYaml())
+
+	baseParams.configDir = rightConfig
+	assert.True(t, baseParams.loadFromCommonYaml())
+	assert.True(t, baseParams.loadFromChannelYaml())
+}
+
+func TestBateTable_ConfPath(t *testing.T) {
+	os.Setenv("MILVUSCONF", "test")
+	config := baseParams.initConfPath()
+	assert.Equal(t, config, "test")
+
+	os.Unsetenv("MILVUSCONF")
+	dir, _ := os.Getwd()
+	config = baseParams.initConfPath()
+	assert.Equal(t, filepath.Clean(config), filepath.Clean(dir+"/../../../configs/"))
+
+	// test use get dir
+	os.Chdir(dir + "/../../../")
+	defer os.Chdir(dir)
+	config = baseParams.initConfPath()
+	assert.Equal(t, filepath.Clean(config), filepath.Clean(dir+"/../../../configs/"))
 }
 
 func TestBaseTable_Parse(t *testing.T) {

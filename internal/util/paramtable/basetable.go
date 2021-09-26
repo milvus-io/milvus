@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"go.uber.org/zap"
 
@@ -47,28 +48,15 @@ type BaseTable struct {
 func (gp *BaseTable) Init() {
 	gp.params = memkv.NewMemoryKV()
 
-	_, fpath, _, _ := runtime.Caller(0)
-	configDir := path.Dir(fpath) + "/../../../configs/"
-	if _, err := os.Stat(configDir); err != nil {
-		log.Warn("cannot access config directory", zap.String("configDir", configDir), zap.Error(err))
-		if runPath, err1 := os.Getwd(); err1 != nil {
-			panic(err1.Error())
-		} else {
-			configDir = runPath + "/configs/"
-		}
-	}
-	gp.configDir = configDir
+	gp.configDir = gp.initConfPath()
 	log.Debug("config directory", zap.String("configDir", gp.configDir))
 
-	if err := gp.LoadYaml("milvus.yaml"); err != nil {
-		panic(err)
-	}
-	if err := gp.LoadYaml("advanced/common.yaml"); err != nil {
-		panic(err)
-	}
-	if err := gp.LoadYaml("advanced/channel.yaml"); err != nil {
-		panic(err)
-	}
+	gp.loadFromMilvusYaml()
+
+	// TODO remove once we change helm deployment
+	gp.loadFromCommonYaml()
+	gp.loadFromChannelYaml()
+
 	gp.tryloadFromEnv()
 }
 
@@ -84,6 +72,54 @@ func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error {
 		}
 	}
 	return nil
+}
+
+func (gp *BaseTable) initConfPath() string {
+	// check if user set conf dir through env
+	configDir, find := syscall.Getenv("MILVUSCONF")
+	if !find {
+		runPath, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+		configDir = runPath + "/configs/"
+		if _, err := os.Stat(configDir); err != nil {
+			_, fpath, _, _ := runtime.Caller(0)
+			// TODO, this is a hack, need to find better solution for relative path
+			configDir = path.Dir(fpath) + "/../../../configs/"
+		}
+	}
+	return configDir
+}
+
+func (gp *BaseTable) loadFromMilvusYaml() {
+	if err := gp.LoadYaml("milvus.yaml"); err != nil {
+		panic(err)
+	}
+}
+
+func (gp *BaseTable) loadFromCommonYaml() bool {
+	configFile := gp.configDir + "advanced/common.yaml"
+	if _, err := os.Stat(configFile); err == nil {
+		if err := gp.LoadYaml("advanced/common.yaml"); err != nil {
+			panic(err)
+		}
+		return true
+	}
+	log.Debug("failed to find common.yaml in config, skip..")
+	return false
+}
+
+func (gp *BaseTable) loadFromChannelYaml() bool {
+	configFile := gp.configDir + "advanced/channel.yaml"
+	if _, err := os.Stat(configFile); err == nil {
+		if err := gp.LoadYaml("advanced/channel.yaml"); err != nil {
+			panic(err)
+		}
+		return true
+	}
+	log.Debug("failed to find channel.yaml in config, skip..")
+	return false
 }
 
 func (gp *BaseTable) tryloadFromEnv() {
