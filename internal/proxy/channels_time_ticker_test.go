@@ -68,7 +68,7 @@ func TestChannelsTimeTickerImpl_start(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChannelsTimeTickerImpl_close(t *testing.T) {
@@ -90,7 +90,7 @@ func TestChannelsTimeTickerImpl_close(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChannelsTimeTickerImpl_addPChan(t *testing.T) {
@@ -118,7 +118,7 @@ func TestChannelsTimeTickerImpl_addPChan(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
@@ -156,7 +156,7 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 	b <- struct{}{}
 	wg.Wait()
 
@@ -165,7 +165,7 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
@@ -203,7 +203,7 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 	b <- struct{}{}
 	wg.Wait()
 
@@ -212,5 +212,5 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }

@@ -495,7 +495,7 @@ func TestElapse(t *testing.T) {
 	isElapse := etcdkv.CheckElapseAndWarn(start, "err message")
 	assert.Equal(t, isElapse, false)
 
-	time.Sleep(time.Duration(3) * time.Second)
+	time.Sleep(2001 * time.Millisecond)
 	isElapse = etcdkv.CheckElapseAndWarn(start, "err message")
 	assert.Equal(t, isElapse, true)
 }
