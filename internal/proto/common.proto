@@ -63,6 +63,11 @@ message KeyValuePair {
     string value = 2;
 }
 
+message KeyDataPair {
+    string key = 1;
+    bytes data = 2;
+}
+
 message Blob {
     bytes value = 1;
 }
