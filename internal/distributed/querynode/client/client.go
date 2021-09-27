@@ -42,9 +42,15 @@ type Client struct {
 	grpcClientMtx sync.RWMutex
 
 	addr string
+
+	getGrpcClient func() (querypb.QueryNodeClient, error)
 }
 
-func (c *Client) getGrpcClient() (querypb.QueryNodeClient, error) {
+func (c *Client) setGetGrpcClientFunc() {
+	c.getGrpcClient = c.getGrpcClientFunc
+}
+
+func (c *Client) getGrpcClientFunc() (querypb.QueryNodeClient, error) {
 	c.grpcClientMtx.RLock()
 	if c.grpcClient != nil {
 		defer c.grpcClientMtx.RUnlock()
@@ -83,16 +89,19 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 
-	return &Client{
+	client := &Client{
 		ctx:    ctx,
 		cancel: cancel,
 		addr:   addr,
-	}, nil
+	}
+
+	client.setGetGrpcClientFunc()
+	return client, nil
 }
 
 func (c *Client) Init() error {
 	Params.Init()
-	return c.connect(retry.Attempts(20))
+	return nil
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
