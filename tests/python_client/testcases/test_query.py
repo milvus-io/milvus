@@ -25,7 +25,7 @@ default_int_field_name = "int64"
 default_float_field_name = "float"
 
 
-class TestQueryBase(TestcaseBase):
+class TestQueryParams(TestcaseBase):
     """
     test Query interface
     query(collection_name, expr, output_fields=None, partition_names=None, timeout=None)
@@ -203,7 +203,7 @@ class TestQueryBase(TestcaseBase):
                                        check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #7521 #7522")
+    # @pytest.mark.xfail(reason="issue #7521 #7522")
     def test_query_expr_by_bool_field(self):
         """
         target: test query by bool field and output binary field
@@ -777,8 +777,6 @@ class TestQueryOperation(TestcaseBase):
                            check_items={ct.err_code: 0, ct.err_msg: cem.ConnectFirst})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.parametrize("collection_name, data",
-    # [(cf.gen_unique_str(prefix), cf.gen_default_list_data(ct.default_nb))])
     def test_query_without_loading(self):
         """
         target: test query without loading
