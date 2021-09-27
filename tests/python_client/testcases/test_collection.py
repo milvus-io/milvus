@@ -2718,6 +2718,11 @@ class TestLoadCollection:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_repeatedly(self, connect, collection):
+        """
+        target: test load collection repeatedly
+        method: load collection twice
+        expected: No exception
+        """
         result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
@@ -3002,6 +3007,11 @@ class TestLoadCollectionInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_release_collection_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test release invalid collection
+        method: release collection with invalid name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.release_collection(collection_name)
