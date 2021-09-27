@@ -13,7 +13,7 @@
 1. `RC` needs to load meta from etcd when it starts, this part is already done
 
 ### 2.2 `dd requests` from grpc
-1. The `dd requests`, such as create_collection, create_partition, etc., from grpc are marked as done only if the related meata have been writen into etcd.
+1. The `dd requests`, such as create_collection, create_partition, etc., from grpc are marked as done only if the related meta have been writen into etcd.
 2. The `dd requests` should be send to `dd msgstream` when the operation is done. 
 3. There may be a fault here, that is, the `dd request` has been written to etcd, but it has not been sent to `dd msgstream` yet, then the `RC` has crashed.
 4. For the scenarios mentioned in item 3, `RC` needs to check if all `dd requests` are sent to `dd msgstream` when it starts up.
