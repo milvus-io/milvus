@@ -45,9 +45,15 @@ type Client struct {
 	addr string
 
 	retryOptions []retry.Option
+
+	getGrpcClient func() (datapb.DataNodeClient, error)
 }
 
-func (c *Client) getGrpcClient() (datapb.DataNodeClient, error) {
+func (c *Client) setGetGrpcClientFunc() {
+	c.getGrpcClient = c.getGrpcClientFunc
+}
+
+func (c *Client) getGrpcClientFunc() (datapb.DataNodeClient, error) {
 	c.grpcMtx.RLock()
 	if c.grpc != nil {
 		defer c.grpcMtx.RUnlock()
@@ -89,17 +95,20 @@ func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	return &Client{
+	client := &Client{
 		ctx:          ctx,
 		cancel:       cancel,
 		addr:         addr,
 		retryOptions: retryOptions,
-	}, nil
+	}
+
+	client.setGetGrpcClientFunc()
+	return client, nil
 }
 
 func (c *Client) Init() error {
 	Params.Init()
-	return c.connect(retry.Attempts(20))
+	return nil
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
