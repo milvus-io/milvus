@@ -45,9 +45,15 @@ type Client struct {
 
 	sess *sessionutil.Session
 	addr string
+
+	getGrpcClient func() (querypb.QueryCoordClient, error)
 }
 
-func (c *Client) getGrpcClient() (querypb.QueryCoordClient, error) {
+func (c *Client) setGetGrpcClientFunc() {
+	c.getGrpcClient = c.getGrpcClientFunc
+}
+
+func (c *Client) getGrpcClientFunc() (querypb.QueryCoordClient, error) {
 	c.grpcClientMtx.RLock()
 	if c.grpcClient != nil {
 		defer c.grpcClientMtx.RUnlock()
@@ -107,16 +113,19 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	return &Client{
+	client := &Client{
 		ctx:    ctx,
 		cancel: cancel,
 		sess:   sess,
-	}, nil
+	}
+
+	client.setGetGrpcClientFunc()
+	return client, nil
 }
 
 func (c *Client) Init() error {
 	Params.Init()
-	return c.connect(retry.Attempts(20))
+	return nil
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
