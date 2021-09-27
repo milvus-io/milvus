@@ -83,6 +83,7 @@ type QueryNode struct {
 	etcdKV  *etcdkv.EtcdKV
 }
 
+// NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
