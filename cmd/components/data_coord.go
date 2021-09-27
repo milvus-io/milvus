@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+// DataCoord implements grpc server of DataCoord server
 type DataCoord struct {
 	ctx context.Context
 	svr *grpcdatacoordclient.Server
@@ -54,6 +55,7 @@ func (s *DataCoord) Stop() error {
 	return nil
 }
 
+// GetComponentStates returns DataCoord's states
 func (s *DataCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.svr.GetComponentStates(ctx, request)
 }
