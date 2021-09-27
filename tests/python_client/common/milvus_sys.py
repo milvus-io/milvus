@@ -70,4 +70,5 @@ class MilvusSys:
 
     @property
     def nodes(self):
+        """get all the nodes in Milvus deployment"""
         return json.loads(self.sys_info.response).get('nodes_info')
