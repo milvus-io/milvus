@@ -18,6 +18,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"github.com/milvus-io/milvus/internal/util/trace"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -1773,7 +1775,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 }
 
 func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
-	param, _ := GetAttrByKeyFromRepeatedKV("metric", request.GetParams())
+	param, _ := funcutil.GetAttrByKeyFromRepeatedKV("metric", request.GetParams())
 	metric, err := distance.ValidateMetricType(param)
 	if err != nil {
 		return &milvuspb.CalcDistanceResults{
