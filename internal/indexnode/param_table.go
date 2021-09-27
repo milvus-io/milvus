@@ -92,6 +92,7 @@ func (pt *ParamTable) initParams() {
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
 	pt.initIndexRootPath()
+	pt.initLogCfg()
 }
 
 func (pt *ParamTable) initMinIOAddress() {

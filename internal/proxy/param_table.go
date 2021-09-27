@@ -107,6 +107,8 @@ func (pt *ParamTable) Init() {
 	pt.initRoleName()
 
 	pt.initMaxTaskNum()
+
+	Params.initLogCfg()
 }
 
 func (pt *ParamTable) InitAlias(alias string) {

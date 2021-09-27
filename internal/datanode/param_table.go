@@ -126,6 +126,8 @@ func (p *ParamTable) Init() {
 	p.initMinioSecretAccessKey()
 	p.initMinioUseSSL()
 	p.initMinioBucketName()
+
+	p.initLogCfg()
 }
 
 // ==== DataNode internal components configs ====

@@ -80,7 +80,7 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
-	p.BaseTable.InitLogCfg("queryCoord", 0)
+	p.initLogCfg()
 
 	p.initQueryCoordAddress()
 	p.initRoleName()
@@ -236,4 +236,8 @@ func (p *ParamTable) initMinioBucketName() {
 		panic(err)
 	}
 	p.MinioBucketName = bucketName
+}
+
+func (p *ParamTable) initLogCfg() {
+	p.InitLogCfg("querycoord", 0)
 }

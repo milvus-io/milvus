@@ -100,7 +100,8 @@ func (node *Proxy) Register() error {
 	node.session.Init(typeutil.ProxyRole, Params.NetworkAddress, false)
 	Params.ProxyID = node.session.ServerID
 	Params.initProxySubName()
-	Params.initLogCfg()
+	// TODO Reset the logger
+	//Params.initLogCfg()
 	return nil
 }
 
