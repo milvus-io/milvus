@@ -99,3 +99,4 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run rootcoord
 | log.file.maxSize | 日志文件的大小限制 | 300MB |
 | log.file.maxAge | 日志最大保留的天数。默认不清理旧的日志文件。如果设置该参数值，则会清理 `maxAge` 天前的日志文件。 | 0 |
 | log.file.maxBackups | 保留日志文件的最大数量。默认保留所有旧的日志文件。如果设置该参数值为 `7`，则最多会保留 `7` 个旧的日志文件。 | 0 |
+| msgChannel.chanNamePrefix.cluster | 指定pulsar 中topic 前缀| "by-dev" |
