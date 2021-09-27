@@ -52,6 +52,8 @@ func genRandonName() string {
 func TestRmqRetention(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
+	atomic.StoreInt64(&TickerTimeInSeconds, 2)
+	defer atomic.StoreInt64(&TickerTimeInSeconds, 6)
 	kvPath := retentionPath + kvPathSuffix
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
@@ -100,7 +102,7 @@ func TestRmqRetention(t *testing.T) {
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
 
-	checkTimeInterval := 6
+	checkTimeInterval := 2
 	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
 	// Seek to a previous consumed message, the message should be clean up
 	err = rmq.Seek(topicName, groupName, cMsgs[msgNum/2].MsgID)
@@ -108,6 +110,15 @@ func TestRmqRetention(t *testing.T) {
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, len(newRes), 0)
+
+	//////////////////////////////////////////////////
+	lastRetTsKey := LastRetTsTitle + topicName
+	rmq.kv.Save(lastRetTsKey, "")
+	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
+
+	//////////////////////////////////////////////////
+	rmq.kv.Save(lastRetTsKey, "dummy")
+	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
 }
 
 func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
@@ -293,35 +304,40 @@ func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 	//////////////////////////////////////////////////
 	fixedPageSizeKey1, _ := constructKey(PageMsgSizeTitle, topicName)
 	pageMsgSizeKey1 := fixedPageSizeKey1 + "/" + "dummy"
-	err = rmq.retentionInfo.kv.Save(pageMsgSizeKey1, "dummy")
-	assert.Nil(t, err)
+	rmq.retentionInfo.kv.Save(pageMsgSizeKey1, "dummy")
 	wg.Add(1)
 	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(pageMsgSizeKey1)
-	assert.Nil(t, err)
+	rmq.retentionInfo.kv.Remove(pageMsgSizeKey1)
 
 	//////////////////////////////////////////////////
-	topicMu.Delete(topicName)
-	topicMu.Store(topicName, &sync.Mutex{})
-	err = rmq.retentionInfo.expiredCleanUp(topicName)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	topicMu.Delete(topicName)
-	err = rmq.retentionInfo.expiredCleanUp(topicName)
-	// TopicName has been deleted in line 310
-	assert.NotNil(t, err)
-
-	//////////////////////////////////////////////////
-	rmq.retentionInfo.ackedInfo.Delete(topicName)
-	err = rmq.retentionInfo.expiredCleanUp(topicName)
-	assert.Nil(t, err)
+	pageMsgPrefix, _ := constructKey(PageMsgSizeTitle, topicName)
+	pageMsgKey := pageMsgPrefix + "/dummy"
+	rmq.kv.Save(pageMsgKey, "0")
+	rmq.retentionInfo.newExpiredCleanUp(topicName)
 
 	//////////////////////////////////////////////////
 	rmq.retentionInfo.kv.DB = nil
 	wg.Add(1)
 	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
+	rmq.retentionInfo.kv.Remove(pageMsgSizeKey1)
 
+	//////////////////////////////////////////////////
+	longTopic := strings.Repeat("dummy", 100)
+	wg.Add(1)
+	rmq.retentionInfo.loadRetentionInfo(longTopic, &wg)
+
+	//////////////////////////////////////////////////
+	topicMu.Delete(topicName)
+	topicMu.Store(topicName, topicName)
+	rmq.retentionInfo.newExpiredCleanUp(topicName)
+
+	//////////////////////////////////////////////////
+	topicMu.Delete(topicName)
+	rmq.retentionInfo.newExpiredCleanUp(topicName)
+
+	//////////////////////////////////////////////////
+	rmq.retentionInfo.ackedInfo.Delete(topicName)
+	rmq.retentionInfo.newExpiredCleanUp(topicName)
 }
 
 func TestRmqRetention_Complex(t *testing.T) {
@@ -394,13 +410,13 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	kvPath := retentionPath + "kv_com1"
-	defer os.RemoveAll(kvPath)
+	os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
 	rocksdbPath := retentionPath + "db_com1"
-	defer os.RemoveAll(rocksdbPath)
+	os.RemoveAll(rocksdbPath)
 	metaPath := retentionPath + "meta_kv_com1"
-	defer os.RemoveAll(metaPath)
+	os.RemoveAll(metaPath)
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
