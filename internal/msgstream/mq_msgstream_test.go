@@ -13,6 +13,7 @@ package msgstream
 
 import (
 	"context"
+	"errors"
 	"log"
 	"math/rand"
 	"os"
@@ -949,6 +950,105 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 
 	receiveMsg(outputStream, len(msgPack1.Msgs))
 	Close(rocksdbName, inputStream, outputStream, etcdKV)
+}
+
+func TestStream_BroadcastMark(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c1 := funcutil.RandomString(8)
+	c2 := funcutil.RandomString(8)
+	producerChannels := []string{c1, c2}
+
+	factory := ProtoUDFactory{}
+	pulsarClient, err := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+	outputStream, err := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	assert.Nil(t, err)
+
+	// add producer channels
+	outputStream.AsProducer(producerChannels)
+	outputStream.Start()
+
+	msgPack0 := MsgPack{}
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
+
+	ids, err := outputStream.BroadcastMark(&msgPack0)
+	assert.Nil(t, err)
+	assert.NotNil(t, ids)
+	assert.Equal(t, len(producerChannels), len(ids))
+	for _, c := range producerChannels {
+		ids, ok := ids[c]
+		assert.True(t, ok)
+		assert.Equal(t, len(msgPack0.Msgs), len(ids))
+	}
+
+	msgPack1 := MsgPack{}
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
+
+	ids, err = outputStream.BroadcastMark(&msgPack1)
+	assert.Nil(t, err)
+	assert.NotNil(t, ids)
+	assert.Equal(t, len(producerChannels), len(ids))
+	for _, c := range producerChannels {
+		ids, ok := ids[c]
+		assert.True(t, ok)
+		assert.Equal(t, len(msgPack1.Msgs), len(ids))
+	}
+
+	// edge cases
+	_, err = outputStream.BroadcastMark(nil)
+	assert.NotNil(t, err)
+
+	msgPack2 := MsgPack{}
+	msgPack2.Msgs = append(msgPack2.Msgs, &MarshalFailTsMsg{})
+	_, err = outputStream.BroadcastMark(&msgPack2)
+	assert.NotNil(t, err)
+
+	// mock send fail
+	for k, p := range outputStream.producers {
+		outputStream.producers[k] = &mockSendFailProducer{Producer: p}
+	}
+	_, err = outputStream.BroadcastMark(&msgPack1)
+	assert.NotNil(t, err)
+
+	outputStream.Close()
+
+}
+
+var _ TsMsg = (*MarshalFailTsMsg)(nil)
+
+type MarshalFailTsMsg struct {
+	BaseMsg
+}
+
+func (t *MarshalFailTsMsg) ID() UniqueID {
+	return 0
+}
+
+func (t *MarshalFailTsMsg) Type() MsgType {
+	return commonpb.MsgType_Undefined
+}
+
+func (t *MarshalFailTsMsg) SourceID() int64 {
+	return -1
+}
+
+func (t *MarshalFailTsMsg) Marshal(_ TsMsg) (MarshalType, error) {
+	return nil, errors.New("mocked error")
+}
+
+func (t *MarshalFailTsMsg) Unmarshal(_ MarshalType) (TsMsg, error) {
+	return nil, errors.New("mocked error")
+}
+
+var _ mqclient.Producer = (*mockSendFailProducer)(nil)
+
+type mockSendFailProducer struct {
+	mqclient.Producer
+}
+
+func (p *mockSendFailProducer) Send(_ context.Context, _ *mqclient.ProducerMessage) (MessageID, error) {
+	return nil, errors.New("mocked error")
 }
 
 /* ========================== Utility functions ========================== */
