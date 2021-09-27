@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
+// queryNodeFlowGraph is a TimeTickedFlowGraph in query node
 type queryNodeFlowGraph struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
