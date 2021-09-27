@@ -102,7 +102,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				SourceID:  deleteRequest.Base.SourceID,
 			},
 			CollectionName: deleteRequest.CollectionName,
-			ChannelID:      deleteRequest.ChannelID,
+			ShardName:      deleteRequest.ShardName,
 			Timestamp:      deleteRequest.Timestamp,
 			ExprPlan:       deleteRequest.ExprPlan,
 		}
