@@ -38,7 +38,7 @@ The query/write nodes are linked to the hash ring, with each node covers some po
 
 The query nodes hold all the indexes in memory. Since building an index is time-consuming, the query nodes will dump their index to disk (store engine) for fast failure recovery and cross node index copy.
 
-The write nodes are stateless. They simply transform the newly arrived WALs to binlog format, then append the binlog to store engine.
+The write nodes are stateless. They simply transform the newly arrived WALs to binlog format, then append the binlog to the store engine.
 
 Note that not all the components are necessarily replicated. The system provides failure tolerance by maintaining multiple copies of WAL and binlog. When there is no in-memory index replica and there occurs a query node failure, other query nodes will take over its indexes by loading the dumped index files, or rebuilding them from binlog and WALs. The links from query nodes to the hash ring will also be adjusted such that the failure node's input WAL stream can be properly handled by its neighbors.
 
