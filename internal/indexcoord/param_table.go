@@ -12,6 +12,7 @@
 package indexcoord
 
 import (
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ type ParamTable struct {
 	EtcdEndpoints []string
 	KvRootPath    string
 	MetaRootPath  string
+	IndexRootPath string
 
 	MinIOAddress         string
 	MinIOAccessKeyID     string
@@ -60,6 +62,7 @@ func (pt *ParamTable) Init() {
 	pt.initMinIOSecretAccessKey()
 	pt.initMinIOUseSSL()
 	pt.initMinioBucketName()
+	pt.initIndexRootPath()
 }
 
 func (pt *ParamTable) InitOnce() {
@@ -141,6 +144,14 @@ func (pt *ParamTable) initMinioBucketName() {
 		panic(err)
 	}
 	pt.MinioBucketName = bucketName
+}
+
+func (pt *ParamTable) initIndexRootPath() {
+	rootPath, err := pt.Load("minio.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	pt.IndexRootPath = path.Join(rootPath, "index_files")
 }
 
 func (pt *ParamTable) initLogCfg() {
