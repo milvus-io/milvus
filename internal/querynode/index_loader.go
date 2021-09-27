@@ -34,6 +34,7 @@ import (
 
 type indexParam = map[string]string
 
+// indexLoader is in charge of loading index in query node
 type indexLoader struct {
 	replica ReplicaInterface
 
