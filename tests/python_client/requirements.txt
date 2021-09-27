@@ -5,6 +5,7 @@ numpy==1.19.5
 pytest-cov==2.8.1
 sklearn==0.0
 pytest==6.2.2
+pytest-assume==2.4.3
 pytest-timeout==1.3.3
 pytest-repeat==0.8.0
 allure-pytest==2.7.0
