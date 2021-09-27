@@ -157,7 +157,8 @@ func (node *DataNode) Register() error {
 	go node.StartWatchChannels(node.ctx)
 
 	Params.initMsgChannelSubName()
-	Params.initLogCfg()
+	//TODO reset
+	//Params.initLogCfg()
 	log.Debug("DataNode Init",
 		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
 	)
