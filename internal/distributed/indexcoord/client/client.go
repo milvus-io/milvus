@@ -116,7 +116,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 
 func (c *Client) Init() error {
 	Params.Init()
-	return c.connect(retry.Attempts(20))
+	return nil
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
