@@ -15,6 +15,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -22,6 +23,7 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 type IntPrimaryKey = typeutil.IntPrimaryKey
 type MsgPosition = internalpb.MsgPosition
+type MessageID = mqclient.MessageID
 
 // MsgPack represents a batch of msg in msgstream
 type MsgPack struct {
@@ -46,6 +48,7 @@ type MsgStream interface {
 	GetProduceChannels() []string
 	Produce(*MsgPack) error
 	Broadcast(*MsgPack) error
+	BroadcastMark(*MsgPack) (map[string][]MessageID, error)
 	Consume() *MsgPack
 	Seek(offset []*MsgPosition) error
 }
