@@ -4,7 +4,7 @@
 
 Milvus installation may fail when images are not properly loaded from public Docker registries. To pull all images and save them into a directory that can be moved to the target host and loaded manually, perform the following procedures:
 
-### Step 1: Save Milvus manifest and Docker images
+### Step 1: Save Milvus manifests and Docker images
 
 #### If you install Milvus with the **docker-compose.yml** file, use these command:
 
@@ -32,12 +32,12 @@ Milvus installation may fail when images are not properly loaded from public Doc
    helm repo update
    ```
 
-2. Get Kubernetes manifest of Milvus standalone
+2. Get Kubernetes manifests of Milvus standalone
    ```shell
    helm template my-release milvus/milvus > milvus_manifest.yaml
    ```
 
-   &nbsp;&nbsp;&nbsp;or get Kubernetes manifest of Milvus cluster
+   &nbsp;&nbsp;&nbsp;or get Kubernetes manifests of Milvus cluster
 
    ```shell
    helm template --set cluster.enabled=true my-release milvus/milvus > milvus_manifest.yaml
@@ -61,13 +61,13 @@ for image in $(find . -type f -name "*.tar.gz") ; do gunzip -c $image | docker l
 
 ## Install Milvus
 
-- Install with Docker Compose
+With Docker Compose
 
 ```shell
 docker-compose -f docker-compose.yml up -d
 ```
 
-- Install on Kubernetes
+On Kubernetes
 
 ```shell
 kubectl apply -f milvus_manifest.yaml
@@ -75,13 +75,13 @@ kubectl apply -f milvus_manifest.yaml
 
 ## Uninstall Milvus
 
-- Uninstall with Docker Compose
+With Docker Compose
 
 ```shell
 docker-compose -f docker-compose.yml down
 ```
 
-- Uninstall on Kubernetes
+On Kubernetes
 
 ```shell
 kubectl delete -f milvus_manifest.yaml
