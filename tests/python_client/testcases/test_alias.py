@@ -1,7 +1,8 @@
-from typing import Collection
 import pytest
+import random
 
 from base.client_base import TestcaseBase
+from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -155,8 +156,8 @@ class TestAliasOperation(TestcaseBase):
                 2.collection create a alias
                 3.collection drop the alias
         expected: 
-                in step 2, collection is equal to alias
-                in step 3, collection with alias name is exist
+                after step 2, collection is equal to alias
+                after step 3, collection with alias name is not exist
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
@@ -184,15 +185,27 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_insert_data_default(self):
+    @pytest.mark.xfail(reason="issue #8614: can't use alias to create index")
+    def test_alias_exec_operations_as_collection(self):
         """
-        target: test alias inserting data
-        method: 
-                1.create a collection with alias
-                2.collection insert data by alias
-        expected: inserting data by alias can work and the result is same as inserting data directly
+        target: test alias 
+                1.creating partition, 
+                2.inserting data, 
+                3.creating index, 
+                4.loading collection,  
+                5.searching, 
+                6.releasing collection,
+        method: follow the steps in target
+        expected: all steps operated by alias can work
 
         """
+        create_partition_flag = True
+        insert_data_flag = True
+        create_index_flag = True
+        load_collection_flag = True
+        search_flag = True
+        release_collection_flag = True
+
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
@@ -203,11 +216,89 @@ class TestAliasOperation(TestcaseBase):
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name, exp_schema: default_schema})
+        
+        # create partition by alias
+        partition_name = cf.gen_unique_str("partition")
+        try:
+            collection_alias.create_partition(partition_name)
+        except Exception as e:
+            log.info(f"alias create partition failed with exception {e}")
+            create_partition_flag = False
+            collection_w.create_partition(partition_name)
+        
+        # assert partition
+        pytest.assume(create_partition_flag == True and
+                      [p.name for p in collection_alias.partitions] == [p.name for p in collection_w.partitions])
+        
+        # insert data by alias
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        collection_alias.insert(data=df)
+        try:
+            collection_alias.insert(data=df)
+        except Exception as e:
+            log.info(f"alias insert data failed with exception {e}")
+            insert_data_flag = False
+            collection_w.insert(data=df)
+        
+        # assert insert data
+        pytest.assume(insert_data_flag == True and
+                      collection_alias.num_entities == ct.default_nb and
+                      collection_w.num_entities == ct.default_nb)            
 
-        assert collection_w.num_entities == ct.default_nb
-        assert collection_alias.num_entities == ct.default_nb
+        # create index by alias
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        try:
+            collection_alias.create_index(field_name="float_vector", index_params=default_index)
+        except Exception as e:
+            log.info(f"alias create index failed with exception {e}")
+            create_index_flag = False
+            collection_w.create_index(field_name="float_vector", index_params=default_index)
+        
+        # assert create index
+        pytest.assume(create_index_flag == True and
+                      collection_alias.has_index == True and
+                      collection_w.has_index()[0] == True)
+        
+        # load by alias
+        try:
+            collection_alias.load()
+        except Exception as e:
+            log.info(f"alias load collection failed with exception {e}")
+            load_collection_flag = False
+            collection_w.load()
+        # assert load
+        pytest.assume(load_collection_flag == True)
+
+        # search by alias
+        topK = 5
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+             
+        query = [[random.random() for _ in range(ct.default_dim)] for _ in range(1)]
+        
+        try:
+            alias_res = collection_alias.search(
+                query, "float_vector", search_params, topK,
+                "int64 >= 0", output_fields=["int64"]
+            )
+        except Exception as e:
+            log.info(f"alias search failed with exception {e}")
+            search_flag = False
+          
+        collection_res, _ = collection_w.search(
+            query, "float_vector", search_params, topK,
+            "int64 >= 0", output_fields=["int64"]
+        )
+        # assert search
+        pytest.assume(search_flag == True and alias_res[0].ids == collection_res[0].ids)
+
+        # release by alias
+        try:
+            collection_alias.release()
+        except Exception as e:
+            log.info(f"alias release failed with exception {e}")
+            release_collection_flag = False
+            collection_w.release()
+        # assert release
+        pytest.assume(release_collection_flag == True)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_create_index_default(self, nq=2, dim=8, auto_id=True):
@@ -364,3 +455,26 @@ class TestAliasOperationInvalid(TestcaseBase):
         self.init_collection_wrap(alias_name, schema=default_binary_schema,
                                   check_task=CheckTasks.err_res,
                                   check_items=error)
+
+    def test_alias_drop_collection_by_alias(self):
+        """
+        target: test dropping a collection by alias
+        method:
+                1.create a collection with alias
+                2.drop a collection by alias
+        expected: in step 2, drop collection by alias failed by design
+        """
+
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        alias_name = cf.gen_unique_str(prefix)
+        collection_w.create_alias(alias_name)
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                   check_task=CheckTasks.check_collection_property,
+                                                                   check_items={exp_name: alias_name, exp_schema: default_schema})
+        
+        with pytest.raises(Exception):
+            collection_alias.drop()
