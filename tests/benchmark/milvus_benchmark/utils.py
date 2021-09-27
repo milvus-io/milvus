@@ -13,6 +13,7 @@ logger = logging.getLogger("milvus_benchmark.utils")
 
 
 def timestr_to_int(time_str):
+    """ Parse the test time set in the yaml configuration file and convert it to int type """
     time_int = 0
     if isinstance(time_str, int) or time_str.isdigit():
         time_int = int(time_str)
