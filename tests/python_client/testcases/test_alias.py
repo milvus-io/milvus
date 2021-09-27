@@ -300,32 +300,6 @@ class TestAliasOperation(TestcaseBase):
         # assert release
         pytest.assume(release_collection_flag == True)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_create_index_default(self, nq=2, dim=8, auto_id=True):
-        """
-        target: test creating index by alias
-        """
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_search_data_default(self):
-        """
-        target: test searching data by alias
-        """
-        pass
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_drop_collection_default(self):
-        """
-        target: test dropping collection by alias
-        """
-        pass
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_after_drop_collection(self):
-        """
-        target: test alias disappear after dropping collection
-        """
-        pass
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_called_by_utility_has_collection(self):
@@ -511,7 +485,8 @@ class TestAliasOperationInvalid(TestcaseBase):
         collection_w.drop_alias(alias_name,
                                 check_task=CheckTasks.err_res,
                                 check_items=error)
-
+    
+    @pytest.mark.tags(CaseLabel.L1)
     def test_alias_cerate_dup_name_collection(self):
         """
         target: test creating a collection with a same name as alias, but a different schema
