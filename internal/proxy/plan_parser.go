@@ -258,6 +258,7 @@ func getLogicalOpType(opStr string) planpb.BinaryExpr_BinaryOp {
 func parseBoolNode(nodeRaw *ant_ast.Node) *ant_ast.BoolNode {
 	switch node := (*nodeRaw).(type) {
 	case *ant_ast.IdentifierNode:
+		// bool node only accept value 'true' or 'false'
 		val := strings.ToLower(node.Value)
 		if val == "true" {
 			return &ant_ast.BoolNode{
