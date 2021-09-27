@@ -94,7 +94,7 @@ func TestInsertMsg(t *testing.T) {
 			CollectionID:   5,
 			PartitionID:    6,
 			SegmentID:      7,
-			ChannelID:      "test-channel",
+			ShardName:      "test-channel",
 			Timestamps:     []uint64{2, 1, 3},
 			RowData:        []*commonpb.Blob{},
 		},
@@ -142,7 +142,7 @@ func TestDeleteMsg(t *testing.T) {
 			},
 
 			CollectionName: "test_collection",
-			ChannelID:      "test-channel",
+			ShardName:      "test-channel",
 			Timestamp:      uint64(1),
 		},
 	}

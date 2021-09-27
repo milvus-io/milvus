@@ -923,7 +923,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		size += int(unsafe.Sizeof(msg.CollectionID))
 		size += int(unsafe.Sizeof(msg.PartitionID))
 		size += int(unsafe.Sizeof(msg.SegmentID))
-		size += int(unsafe.Sizeof(msg.ChannelID))
+		size += int(unsafe.Sizeof(msg.ShardName))
 		size += int(unsafe.Sizeof(msg.Timestamps))
 		size += int(unsafe.Sizeof(msg.RowIDs))
 		return size
@@ -962,8 +962,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
 					SegmentID:      segmentID,
-					// todo rename to ChannelName
-					ChannelID: channelNames[key],
+					ShardName:      channelNames[key],
 				}
 				insertMsg := &msgstream.InsertMsg{
 					BaseMsg: msgstream.BaseMsg{

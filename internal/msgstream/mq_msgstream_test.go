@@ -267,7 +267,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 		CollectionName: "Collection",
 		PartitionName:  "Partition",
 		SegmentID:      1,
-		ChannelID:      "1",
+		ShardName:      "1",
 		Timestamps:     []Timestamp{1, 1},
 		RowIDs:         []int64{1, 3},
 		RowData:        []*commonpb.Blob{{}, {}},
@@ -988,7 +988,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 			CollectionName: "Collection",
 			PartitionName:  "Partition",
 			SegmentID:      1,
-			ChannelID:      "0",
+			ShardName:      "0",
 			Timestamps:     []Timestamp{time},
 			RowIDs:         []int64{1},
 			RowData:        []*commonpb.Blob{{}},
@@ -1007,7 +1007,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 				SourceID:  reqID,
 			},
 			CollectionName: "Collection",
-			ChannelID:      "1",
+			ShardName:      "1",
 			Timestamp:      Timestamp(1),
 		}
 		deleteMsg := &DeleteMsg{

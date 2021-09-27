@@ -56,7 +56,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				CollectionName: insertRequest.CollectionName,
 				PartitionName:  insertRequest.PartitionName,
 				SegmentID:      insertRequest.SegmentID,
-				ChannelID:      insertRequest.ChannelID,
+				ShardName:      insertRequest.ShardName,
 				Timestamps:     []uint64{insertRequest.Timestamps[index]},
 				RowIDs:         []int64{insertRequest.RowIDs[index]},
 				RowData:        []*commonpb.Blob{insertRequest.RowData[index]},
