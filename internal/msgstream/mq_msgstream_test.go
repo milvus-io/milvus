@@ -326,7 +326,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 		CollectionName: "Collection",
 		ShardName:      "chan-1",
 		Timestamp:      Timestamp(1),
-		ExprPlan:       []byte{},
+		PrimaryKeys:    []int64{},
 	}
 	deleteMsg := &DeleteMsg{
 		BaseMsg:       baseMsg,

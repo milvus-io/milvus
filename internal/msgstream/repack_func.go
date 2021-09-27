@@ -104,7 +104,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 			CollectionName: deleteRequest.CollectionName,
 			ShardName:      deleteRequest.ShardName,
 			Timestamp:      deleteRequest.Timestamp,
-			ExprPlan:       deleteRequest.ExprPlan,
+			PrimaryKeys:    deleteRequest.PrimaryKeys,
 		}
 
 		deleteMsg := &DeleteMsg{
