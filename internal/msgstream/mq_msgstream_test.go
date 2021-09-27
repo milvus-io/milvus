@@ -323,7 +323,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 			SourceID:  1,
 		},
 		CollectionName: "Collection",
-		ChannelID:      "1",
+		ShardName:      "chan-1",
 		Timestamp:      Timestamp(1),
 		ExprPlan:       []byte{},
 	}
