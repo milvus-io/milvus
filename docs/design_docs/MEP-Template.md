@@ -38,7 +38,7 @@ Describe in few sentences how the MEP will be tested. We are mostly interested i
 
 ## Rejected Alternatives(optional)
 
-If there are alternative ways of accomplishing the same thing, what were they? The purpose of this section is to motivate why the design is the way it is and not some other way.
+If there are alternative ways of accomplishing the same thing, what were they? The purpose of this section is to motivate why the design is the way it is and not some other ways.
 
 ## References(optional)
 
