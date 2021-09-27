@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632712794591,
+  "iteration": 1632712794593,
   "links": [],
   "panels": [
     {
@@ -1228,7 +1228,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of has_partition as measured over the last 5 minutes",
+      "description": "per-second rate of drop_partition as measured over the last 5 minutes",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1269,6 +1269,7 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(rate(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
           "interval": "",
           "legendFormat": "total",
@@ -5812,5 +5813,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 114
+  "version": 115
 }
