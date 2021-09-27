@@ -885,9 +885,9 @@ message IndexDescription {
 }
 ```
 
-**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is an enum type to distinguish the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is an enum type to distinguish the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describe error detail.
 
-**index_descriptions** is a list of index descriptions. If index_name is specific in request, the list length will be 0. Otherwise, if index_name is empty, the response will return all index in the field of a collection.
+**index_descriptions** is a list of index descriptions. If index_name is specific in request, the list length will be 0. Otherwise, if index_name is empty, the response will return all indexes in the field of a collection.
 
 **params**：For fast search, you build index for field. You specify detailed index information for a field. Detailed information about index can be seen in chapter 2.2.3
 
