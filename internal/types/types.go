@@ -51,6 +51,21 @@ type DataCoord interface {
 	Component
 	TimeTickProvider
 
+	// Flush notifies DataCoord to flush all current growing segments of specified Collection
+	// ctx is the context to control request deadline and cancelation
+	// req contains the request params, which are database name(not used for now) and collection id
+	//
+	// response struct `FlushResponse` contains related db & collection meta
+	// and the affected segment ids
+	// error is returned only when some communication issue occurs
+	// if some error occurs in the process of `Flush`, it will be recorded and returned in `Status` field of response
+	//
+	// `Flush` returns when all growing segments of specified collection is "sealed"
+	// the flush procedure will wait corresponding data node(s) proceeds to the safe timestamp
+	// and the `Flush` operation will be truly invoked
+	// If the Datacoord or Datanode crashes in the flush procedure, recovery process will replay the ts check until all requirement is met
+	//
+	// Flushed segments can be check via `GetFlushedSegments` API
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
 
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
