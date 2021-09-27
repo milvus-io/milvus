@@ -212,7 +212,7 @@ func (kv *MinIOKV) RemoveWithPrefix(prefix string) error {
 	go func() {
 		defer close(objectsCh)
 
-		for object := range kv.minioClient.ListObjects(kv.ctx, kv.bucketName, minio.ListObjectsOptions{Prefix: prefix}) {
+		for object := range kv.minioClient.ListObjects(kv.ctx, kv.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
 			objectsCh <- object
 		}
 	}()
