@@ -99,7 +99,8 @@ type Core struct {
 	SendTimeTick func(t typeutil.Timestamp, reason string) error
 
 	//setMsgStreams, send create collection into dd channel
-	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error
+	//returns corresponding message id for each channel
+	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) (map[string][]byte, error)
 
 	//setMsgStreams, send drop collection into dd channel, and notify the proxy to delete this collection
 	SendDdDropCollectionReq func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error
@@ -503,7 +504,7 @@ func (c *Core) setMsgStreams() error {
 		return c.chanTimeTick.UpdateTimeTick(&ttMsg, reason)
 	}
 
-	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error {
+	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) (map[string][]byte, error) {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -516,7 +517,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastMark(channelNames, &msgPack)
 	}
 
 	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
@@ -1010,6 +1011,8 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	var dbName, collName string
 
 	switch ddOp.Type {
+	// TODO remove create collection resend
+	// since create collection needs a start position to succeed
 	case CreateCollectionDDType:
 		var ddReq = internalpb.CreateCollectionRequest{}
 		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
@@ -1019,7 +1022,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		if err != nil {
 			return err
 		}
-		if err = c.SendDdCreateCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
+		if _, err = c.SendDdCreateCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
 		invalidateCache = false

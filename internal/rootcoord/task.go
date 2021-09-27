@@ -197,17 +197,24 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 
-		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
-		if err != nil {
-			return fmt.Errorf("meta table add collection failed,error = %w", err)
-		}
-
 		// add dml channel before send dd msg
 		t.core.dmlChannels.AddProducerChannels(chanNames...)
 
-		err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
+		ids, err := t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 		if err != nil {
 			return fmt.Errorf("send dd create collection req failed, error = %w", err)
+		}
+		for _, pchan := range collInfo.PhysicalChannelNames {
+			collInfo.StartPositions = append(collInfo.StartPositions, &commonpb.KeyDataPair{
+				Key:  pchan,
+				Data: ids[pchan],
+			})
+		}
+		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
+		if err != nil {
+			t.core.dmlChannels.RemoveProducerChannels(chanNames...)
+			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
+			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
 
 		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
@@ -397,6 +404,7 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)
 	t.Rsp.CreatedUtcTimestamp = createdPhysicalTime
 	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID)
+	t.Rsp.StartPositions = collInfo.GetStartPositions()
 	return nil
 }
 
