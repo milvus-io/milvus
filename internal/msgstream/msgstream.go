@@ -19,10 +19,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is an alias for short
 type UniqueID = typeutil.UniqueID
+
+// Timestamp is an alias for short
 type Timestamp = typeutil.Timestamp
+
+// IntPrimaryKey is an alias for short
 type IntPrimaryKey = typeutil.IntPrimaryKey
+
+// MsgPosition is an alias for short
 type MsgPosition = internalpb.MsgPosition
+
+// MessageID is an alias for short
 type MessageID = mqclient.MessageID
 
 // MsgPack represents a batch of msg in msgstream
@@ -34,6 +43,7 @@ type MsgPack struct {
 	EndPositions   []*MsgPosition
 }
 
+// RepackFunc is a function type which used to repack message after hash by primary key
 type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
 
 // MsgStream is an interface that can be used to produce and consume message on message queue
