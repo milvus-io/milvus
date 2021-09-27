@@ -23,7 +23,6 @@ import (
 )
 
 const (
-	PulsarMaxMessageSizeKey        = "maxMessageSize"
 	SuggestPulsarMaxMessageSizeKey = 5 * 1024 * 1024
 )
 
