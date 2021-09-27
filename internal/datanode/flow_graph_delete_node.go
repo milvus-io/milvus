@@ -24,7 +24,8 @@ import (
 type deleteNode struct {
 	BaseNode
 
-	replica Replica
+	channelName string
+	replica     Replica
 }
 
 func (dn *deleteNode) Name() string {
@@ -52,36 +53,36 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	return []Msg{}
 }
 
-// getSegmentsByPKs returns the bloom filter check result.
+// filterSegmentByPK returns the bloom filter check result.
 // If the key may exists in the segment, returns it in map.
 // If the key not exists in the segment, the segment is filter out.
-func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, error) {
+func (dn *deleteNode) filterSegmentByPK(pks []int64) (map[int64][]int64, error) {
 	if pks == nil {
 		return nil, errors.New("pks is nil")
 	}
-	if segments == nil {
-		return nil, errors.New("segments is nil")
-	}
 	results := make(map[int64][]int64)
 	buf := make([]byte, 8)
+	segments := dn.replica.getSegments(dn.channelName)
 	for _, segment := range segments {
 		for _, pk := range pks {
 			binary.BigEndian.PutUint64(buf, uint64(pk))
 			exist := segment.pkFilter.Test(buf)
 			if exist {
-				results[segment.segmentID] = append(results[segment.segmentID], pk)
+				results[pk] = append(results[pk], segment.segmentID)
 			}
 		}
 	}
 	return results, nil
 }
 
-func newDeleteDNode(replica Replica) *deleteNode {
+func newDeleteNode(replica Replica, channelName string) *deleteNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
 
 	return &deleteNode{
 		BaseNode: baseNode,
-		replica:  replica,
+
+		channelName: channelName,
+		replica:     replica,
 	}
 }
