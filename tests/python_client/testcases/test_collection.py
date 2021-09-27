@@ -2675,6 +2675,11 @@ class TestLoadCollection:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_release_collection_not_existed(self, connect, collection):
+        """
+        target: test release a not existed collection
+        method: release with a not existed collection anme
+        expected: raise exception
+        """
         collection_name = gen_unique_str(uid_load)
         try:
             connect.release_collection(collection_name)
@@ -2698,6 +2703,12 @@ class TestLoadCollection:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_collection_after_load_release(self, connect, collection):
+        """
+        target: test load collection after load and release
+        method: 1.load and release collection after entities flushed
+                2.re-load collection
+        expected: No exception
+        """
         result = connect.insert(collection, cons.default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
