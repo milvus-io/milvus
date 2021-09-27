@@ -11,16 +11,18 @@
 
 package mqclient
 
+// SubscriptionInitialPosition is the type of a subscription initial position
 type SubscriptionInitialPosition int
 
 const (
-	// Latest position which means the start consuming position will be the last message
+	// SubscriptionPositionLatest is latest position which means the start consuming position will be the last message
 	SubscriptionPositionLatest SubscriptionInitialPosition = iota
 
-	// Earliest position which means the start consuming position will be the first message
+	// SubscriptionPositionEarliest is earliest position which means the start consuming position will be the first message
 	SubscriptionPositionEarliest
 )
 
+// SubscriptionType is the type of subsription position
 type SubscriptionType int
 
 const (
@@ -42,8 +44,10 @@ const (
 	KeyShared
 )
 
+// UniqueID is the type of message id
 type UniqueID = int64
 
+// ConsumerOptions contains the options of a consumer
 type ConsumerOptions struct {
 	// The topic that this consumer will subscribe on
 	Topic string
@@ -67,6 +71,7 @@ type ConsumerOptions struct {
 	Type SubscriptionType
 }
 
+// Consumer is the interface that provides operations of a consumer
 type Consumer interface {
 	// returns the subscription for the consumer
 	Subscription() string
