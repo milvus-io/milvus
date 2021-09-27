@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632654161669,
+  "iteration": 1632712794591,
   "links": [],
   "panels": [
     {
@@ -92,7 +92,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total success Has collection operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5812,5 +5812,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 112
+  "version": 114
 }
