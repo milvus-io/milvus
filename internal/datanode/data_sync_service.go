@@ -190,7 +190,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	dn := newDeleteDNode(dsService.replica)
+	dn := newDeleteNode(dsService.replica, vchanInfo.GetChannelName())
 
 	var deleteNode Node = dn
 

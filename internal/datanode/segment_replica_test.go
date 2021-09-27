@@ -555,6 +555,12 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 		assert.Equal(t, int64(10), replica.normalSegments[UniqueID(0)].checkPoint.numRows)
 		replica.updateSegmentCheckPoint(1)
 		assert.Equal(t, int64(20), replica.normalSegments[UniqueID(1)].checkPoint.numRows)
+
+		err = replica.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
+		assert.Nil(t, err)
+
+		totalSegments := replica.getSegments("insert-01")
+		assert.Equal(t, len(totalSegments), 3)
 	})
 }
 
