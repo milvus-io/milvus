@@ -2980,6 +2980,11 @@ class TestLoadCollectionInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test load invalid collection
+        method: load collection with invalid name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.load_collection(collection_name)
