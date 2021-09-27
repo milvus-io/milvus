@@ -281,9 +281,9 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_add_after_connect(self, host, port):
         """
-        target: add_connect passes different params after normal connect
-        method: normal connection then add_connect passes different params
-        expected: add_connect failed
+        target: add_connection with different params after normal connect
+        method: then add_connection with different params
+        expected: add_connection failed
         """
 
         # create connection that param of alias is not exist
