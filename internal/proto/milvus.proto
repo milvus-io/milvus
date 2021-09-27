@@ -162,6 +162,8 @@ message DescribeCollectionResponse {
   int32 shards_num = 8;
   // The aliases of this collection
   repeated string aliases = 9;
+  // The message ID/posititon when collection is created
+  repeated common.KeyDataPair start_positions = 10;
 }
 
 /**

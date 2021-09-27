@@ -40,6 +40,7 @@ message CollectionInfo {
   repeated string physical_channel_names = 8;
   repeated uint64 partition_created_timestamps = 9;
   int32 shards_num = 10;
+  repeated common.KeyDataPair start_positions = 11;
 }
 
 message SegmentIndexInfo {

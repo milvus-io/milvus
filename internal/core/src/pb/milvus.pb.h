@@ -1945,6 +1945,7 @@ class DescribeCollectionResponse :
     kVirtualChannelNamesFieldNumber = 4,
     kPhysicalChannelNamesFieldNumber = 5,
     kAliasesFieldNumber = 9,
+    kStartPositionsFieldNumber = 10,
     kStatusFieldNumber = 1,
     kSchemaFieldNumber = 2,
     kCollectionIDFieldNumber = 3,
@@ -2003,6 +2004,17 @@ class DescribeCollectionResponse :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& aliases() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_aliases();
 
+  // repeated .milvus.proto.common.KeyDataPair start_positions = 10;
+  int start_positions_size() const;
+  void clear_start_positions();
+  ::milvus::proto::common::KeyDataPair* mutable_start_positions(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >*
+      mutable_start_positions();
+  const ::milvus::proto::common::KeyDataPair& start_positions(int index) const;
+  ::milvus::proto::common::KeyDataPair* add_start_positions();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >&
+      start_positions() const;
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -2047,6 +2059,7 @@ class DescribeCollectionResponse :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> virtual_channel_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> physical_channel_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> aliases_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair > start_positions_;
   ::milvus::proto::common::Status* status_;
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
@@ -13130,6 +13143,33 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 DescribeCollectionResponse::mutable_aliases() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.DescribeCollectionResponse.aliases)
   return &aliases_;
+}
+
+// repeated .milvus.proto.common.KeyDataPair start_positions = 10;
+inline int DescribeCollectionResponse::start_positions_size() const {
+  return start_positions_.size();
+}
+inline ::milvus::proto::common::KeyDataPair* DescribeCollectionResponse::mutable_start_positions(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.DescribeCollectionResponse.start_positions)
+  return start_positions_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >*
+DescribeCollectionResponse::mutable_start_positions() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.DescribeCollectionResponse.start_positions)
+  return &start_positions_;
+}
+inline const ::milvus::proto::common::KeyDataPair& DescribeCollectionResponse::start_positions(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionResponse.start_positions)
+  return start_positions_.Get(index);
+}
+inline ::milvus::proto::common::KeyDataPair* DescribeCollectionResponse::add_start_positions() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.DescribeCollectionResponse.start_positions)
+  return start_positions_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >&
+DescribeCollectionResponse::start_positions() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.DescribeCollectionResponse.start_positions)
+  return start_positions_;
 }
 
 // -------------------------------------------------------------------
