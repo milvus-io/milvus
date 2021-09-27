@@ -1505,12 +1505,12 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	st.query.OutputFields = outputFields
 
 	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
-		annsField, err := GetAttrByKeyFromRepeatedKV(AnnsFieldKey, st.query.SearchParams)
+		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, st.query.SearchParams)
 		if err != nil {
 			return errors.New(AnnsFieldKey + " not found in search_params")
 		}
 
-		topKStr, err := GetAttrByKeyFromRepeatedKV(TopKKey, st.query.SearchParams)
+		topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, st.query.SearchParams)
 		if err != nil {
 			return errors.New(TopKKey + " not found in search_params")
 		}
@@ -1519,12 +1519,12 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			return errors.New(TopKKey + " " + topKStr + " is not invalid")
 		}
 
-		metricType, err := GetAttrByKeyFromRepeatedKV(MetricTypeKey, st.query.SearchParams)
+		metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, st.query.SearchParams)
 		if err != nil {
 			return errors.New(MetricTypeKey + " not found in search_params")
 		}
 
-		searchParams, err := GetAttrByKeyFromRepeatedKV(SearchParamsKey, st.query.SearchParams)
+		searchParams, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, st.query.SearchParams)
 		if err != nil {
 			return errors.New(SearchParamsKey + " not found in search_params")
 		}
