@@ -19,6 +19,7 @@ import (
 	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 )
 
+// IndexCoord implements IndexCoord grpc server
 type IndexCoord struct {
 	svr *grpcindexcoord.Server
 }
@@ -52,6 +53,7 @@ func (s *IndexCoord) Stop() error {
 	return nil
 }
 
+// GetComponentStates returns indexnode's states
 func (s *IndexCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.svr.GetComponentStates(ctx, request)
 }
