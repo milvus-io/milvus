@@ -17,23 +17,25 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
+// UnmarshalFunc is an interface that has been implemented by each Msg
 type UnmarshalFunc func(interface{}) (TsMsg, error)
 
+// UnmarshalDispatcher is an interface contains method Unmarshal
 type UnmarshalDispatcher interface {
 	Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error)
-	AddMsgTemplate(msgType commonpb.MsgType, unmarshalFunc UnmarshalFunc)
 }
 
+// UnmarshalDispatcherFactory is a factory to generate an object which implement interface UnmarshalDispatcher
 type UnmarshalDispatcherFactory interface {
 	NewUnmarshalDispatcher() *UnmarshalDispatcher
 }
 
-// ProtoUnmarshalDispatcher ant its factory
-
+// ProtoUnmarshalDispatcher is Unmarshal Dispatcher which used for data of proto type
 type ProtoUnmarshalDispatcher struct {
 	TempMap map[commonpb.MsgType]UnmarshalFunc
 }
 
+// Unmarshal will forward unmarshal request to msg type specified unmarshal function
 func (p *ProtoUnmarshalDispatcher) Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error) {
 	unmarshalFunc, ok := p.TempMap[msgType]
 	if !ok {
@@ -42,12 +44,10 @@ func (p *ProtoUnmarshalDispatcher) Unmarshal(input interface{}, msgType commonpb
 	return unmarshalFunc(input)
 }
 
-func (p *ProtoUnmarshalDispatcher) AddMsgTemplate(msgType commonpb.MsgType, unmarshalFunc UnmarshalFunc) {
-	p.TempMap[msgType] = unmarshalFunc
-}
-
+// ProtoUDFactory is a factory to generate ProtoUnmarshalDispatcher object
 type ProtoUDFactory struct{}
 
+// NewUnmarshalDispatcher returns an new UnmarshalDispatcher
 func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	insertMsg := InsertMsg{}
 	deleteMsg := DeleteMsg{}

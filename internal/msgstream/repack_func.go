@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
+// InsertRepackFunc is used to repack messages after hash by primary key
 func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
@@ -74,6 +75,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 	return result, nil
 }
 
+// DeleteRepackFunc is used to repack messages after hash by primary key
 func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
@@ -118,6 +120,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 	return result, nil
 }
 
+// DefaultRepackFunc is used to repack messages after hash by primary key
 func DefaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
