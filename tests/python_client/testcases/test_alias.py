@@ -236,6 +236,84 @@ class TestAliasOperation(TestcaseBase):
         """
         pass
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alias_called_by_utility_has_collection(self):
+        """
+        target: test utility has collection by alias
+        method: 
+               1.create collection with alias
+               2.call has_collection function with alias as param
+        expected: result is True
+        """
+
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        
+        alias_name = cf.gen_unique_str(prefix)     
+        collection_w.create_alias(alias_name)
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                     check_task=CheckTasks.check_collection_property,
+                                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+        res, _ = self.utility_wrap.has_collection(alias_name)
+
+        assert res == True
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alias_called_by_utility_drop_collection(self):
+        """
+        target: test utility drop collection by alias
+        method: 
+               1.create collection with alias
+               2.call drop_collection function with alias as param
+        expected: collection is dropped
+        """
+
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        
+        alias_name = cf.gen_unique_str(prefix)     
+        collection_w.create_alias(alias_name)
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                     check_task=CheckTasks.check_collection_property,
+                                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+        assert self.utility_wrap.has_collection(c_name)[0]
+        self.utility_wrap.drop_collection(alias_name)
+        assert not self.utility_wrap.has_collection(c_name)[0]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alias_called_by_utility_has_partition(self):
+        """
+        target: test utility has partition by alias
+        method: 
+               1.create collection with partition and alias
+               2.call has_partition function with alias as param
+        expected: result is True
+        """
+
+        self._connect()
+        c_name = cf.gen_unique_str("collection")
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        partition_name = cf.gen_unique_str("partition")
+        self.init_partition_wrap(collection_w, partition_name)
+        
+        alias_name = cf.gen_unique_str(prefix)     
+        collection_w.create_alias(alias_name)
+        collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
+                                                                     check_task=CheckTasks.check_collection_property,
+                                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+        res, _ = self.utility_wrap.has_partition(alias_name, partition_name)
+
+        assert res == True
+
+
 
 
 class TestAliasOperationInvalid(TestcaseBase):
