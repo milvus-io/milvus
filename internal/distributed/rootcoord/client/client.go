@@ -47,6 +47,8 @@ type GrpcClient struct {
 
 	sess *sessionutil.Session
 	addr string
+
+	getGrpcClient func() (rootcoordpb.RootCoordClient, error)
 }
 
 func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
@@ -79,11 +81,14 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*G
 	}
 	ctx, cancel := context.WithCancel(ctx)
 
-	return &GrpcClient{
+	client := &GrpcClient{
 		ctx:    ctx,
 		cancel: cancel,
 		sess:   sess,
-	}, nil
+	}
+
+	client.setGetGrpcClientFunc()
+	return client, nil
 }
 
 // Init initialize grpc parameters
@@ -147,7 +152,11 @@ func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 	return nil
 }
 
-func (c *GrpcClient) getGrpcClient() (rootcoordpb.RootCoordClient, error) {
+func (c *GrpcClient) setGetGrpcClientFunc() {
+	c.getGrpcClient = c.getGrpcClientFunc
+}
+
+func (c *GrpcClient) getGrpcClientFunc() (rootcoordpb.RootCoordClient, error) {
 	c.grpcClientMtx.RLock()
 	if c.grpcClient != nil {
 		defer c.grpcClientMtx.RUnlock()
@@ -437,6 +446,9 @@ func (c *GrpcClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexReques
 
 		return client.DropIndex(ctx, in)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
