@@ -111,6 +111,10 @@ def print_table(headers, columns, data):
 
 
 def get_deploy_mode(deploy_params):
+    """
+    Get the server deployment mode set in the yaml configuration file
+    single, cluster, cluster_3rd
+    """
     deploy_mode = None
     if deploy_params:
         milvus_params = None
