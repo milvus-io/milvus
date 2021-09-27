@@ -329,6 +329,10 @@ func (ms *simpleMockMsgStream) Broadcast(pack *msgstream.MsgPack) error {
 	return nil
 }
 
+func (ms *simpleMockMsgStream) BroadcastMark(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+	return map[string][]msgstream.MessageID{}, nil
+}
+
 func (ms *simpleMockMsgStream) GetProduceChannels() []string {
 	return nil
 }
