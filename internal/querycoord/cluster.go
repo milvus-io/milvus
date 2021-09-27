@@ -37,6 +37,7 @@ const (
 	queryNodeInfoPrefix = "queryCoord-queryNodeInfo"
 )
 
+// Cluster manages all query node connections and grpc requests
 type Cluster interface {
 	reloadFromKV() error
 	getComponentInfos(ctx context.Context) ([]*internalpb.ComponentInfo, error)
