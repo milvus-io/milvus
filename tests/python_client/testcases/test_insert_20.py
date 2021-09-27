@@ -147,7 +147,7 @@ class TestInsertParams(TestcaseBase):
         """
         target: test insert None
         method: data is None
-        expected: raise exception
+        expected: return successfully with zero results
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
