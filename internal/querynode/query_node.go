@@ -109,7 +109,8 @@ func (node *QueryNode) Register() error {
 
 	// This param needs valid QueryNodeID
 	Params.initMsgChannelSubName()
-	Params.initLogCfg()
+	//TODO Reset the logger
+	//Params.initLogCfg()
 	return nil
 }
 

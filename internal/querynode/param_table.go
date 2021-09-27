@@ -126,6 +126,8 @@ func (p *ParamTable) Init() {
 
 	p.initSegcoreChunkRows()
 	p.initKnowhereSimdType()
+
+	p.initLogCfg()
 }
 
 // ---------------------------------------------------------- minio
