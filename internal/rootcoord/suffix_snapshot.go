@@ -288,7 +288,6 @@ func (ss *suffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error
 	after, err := ss.checkKeyTS(key, ts)
 	ss.Unlock()
 
-	log.Warn("", zap.Bool("after", after), zap.Error(err))
 	ss.RLock()
 	defer ss.RUnlock()
 	// ts after latest ts, load key as acceleration

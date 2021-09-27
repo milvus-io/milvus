@@ -129,11 +129,8 @@ func TestGrpcService(t *testing.T) {
 		timeTickArray = append(timeTickArray, ts)
 		return nil
 	}
-	createCollectionArray := make([]*internalpb.CreateCollectionRequest, 0, 16)
-	core.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error {
-		t.Logf("Create Colllection %s", req.CollectionName)
-		createCollectionArray = append(createCollectionArray, req)
-		return nil
+	core.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) (map[string][]byte, error) {
+		return map[string][]byte{}, nil
 	}
 
 	dropCollectionArray := make([]*internalpb.DropCollectionRequest, 0, 16)
@@ -328,11 +325,14 @@ func TestGrpcService(t *testing.T) {
 
 		status, err := cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
+		colls, err := core.MetaTable.ListCollections(0)
+		assert.Nil(t, err)
 
-		assert.Equal(t, 1, len(createCollectionArray))
+		assert.Equal(t, 1, len(colls))
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-		assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionArray[0].Base.MsgType)
-		assert.Equal(t, collName, createCollectionArray[0].CollectionName)
+		//assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionArray[0].Base.MsgType)
+		_, has := colls[collName]
+		assert.True(t, has)
 
 		req.Base.MsgID = 101
 		req.Base.Timestamp = 101
@@ -359,10 +359,11 @@ func TestGrpcService(t *testing.T) {
 		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-		assert.Equal(t, 2, len(createCollectionArray))
-		assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionArray[1].Base.MsgType)
-		assert.Equal(t, collName2, createCollectionArray[1].CollectionName)
-
+		colls, err = core.MetaTable.ListCollections(0)
+		assert.Nil(t, err)
+		assert.Equal(t, 2, len(colls))
+		_, has = colls[collName2]
+		assert.True(t, has)
 		//time stamp go back, master response to add the timestamp, so the time tick will never go back
 		//schema.Name = "testColl-goback"
 		//sbf, err = proto.Marshal(&schema)
