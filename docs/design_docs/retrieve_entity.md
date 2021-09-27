@@ -1,4 +1,4 @@
-# Support to retrieves the specified entity from a collection
+# Support to retrieve the specified entity from a collection
 
 
 
@@ -6,7 +6,7 @@
 
 Milvus supports one entity containing multiple vector fields and multiple scalar fields.
 
-When creating a collection, you can specify to using the primary key generated automatically or the primary key user provided. If the user sets to use the primary key user provided, each entity inserted must contain the primary key field, otherwise the insertion will fail. The primary keys will be returned after the insertion request is successful.
+When creating a collection, you can specify using the primary key generated automatically or the primary key user provided. If the user sets to use the primary key user provided, each entity inserted must contain the primary key field, otherwise the insertion will fail. The primary keys will be returned after the insertion request is successful.
 
 Milvus currently only supports primary keys of int64 type.
 
@@ -24,7 +24,7 @@ QueryNode subscribes to insert channel, and will determine whether to use the da
 
 ## Non-Goals
 
-- How to deal with when primary key is not unique
+- How to deal with duplicate primary keys
 - How to retrieve entity by non-primary key
 
 
@@ -33,13 +33,13 @@ QueryNode subscribes to insert channel, and will determine whether to use the da
 
 When the DataNode processes each inserted entity, it updates the bloomfilter of the Segment to which the entity belongs. If it does not exist, it creates a bloomfilter in memory and updates it.
 
-Once DataNode receives a Flush command from DataCoord, sorts the data in the segment in ascending order of primary key, records the maximum and minimum values of primary key, and writes the segment, statistics and bloomfilter to storage system.
+Once DataNode receives a Flush command from DataCoord, it sorts the data in the segment in ascending order of primary key, records the maximum and minimum values of primary key, and writes the segment, statistics and bloomfilter to storage system.
 
 - Key of binlog file: `${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/_${log_idx}`
-- Key of staticstics file: `${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/stats_${log_idx}`
+- Key of statistics file: `${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/stats_${log_idx}`
 - Key of bloom filter file: `${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/bf_${log_idx}`
 
-QueryNode maintains mapping from primary key to entities each segment. This mapping updates every time an insert request is processed.
+QueryNode maintains mapping from primary key to entities in each segment. This mapping updates every time an insert request is processed.
 
 After receiving the Get request from the client, the Proxy writes the request to the `search` channel and waits for the result returned from the `searchResult` channel.
 
@@ -50,22 +50,22 @@ The processing flow after QueryNode reads the Get request from `search` channel:
 3. Load statistics and bloomfilter of all `Sealed` segments;
 4. Convert the statistics into an inverted index from Range to SegmentID for each `Sealed` segment;
 5. Check whether the requested primary key exists in any inverted index of `Sealed` segment, return empty if not found;
-6. [optional]Use the bloomfilter to filter out segments where the primary key does not exist;
-7. Use binary search to find specify entity in each segment where the primary key may exist;
+6. [optional] Use the bloomfilter to filter out segments where the primary key does not exist;
+7. Use binary search to find specified entity in each segment where the primary key may exist;
 
 ### APIs
 
 ```go
 // pseudo-code
-func get(collection_name string, 
-         ids list[string], 
-         output_fields list[string], 
-         partition_names list[string]) (list[entity], error) 
-// Example 
+func get(collection_name string,
+         ids list[string],
+         output_fields list[string],
+         partition_names list[string]) (list[entity], error)
+// Example
 // entities = get("collection1", ["103"], ["_id", "age"], nil)
 ```
 
-When the primary key not exist in specify collection( and partitions), Milvus will return an empty result, which is not considered an error.
+When the primary key does not exist in specified collection( and partitions), Milvus will return an empty result, which is not considered as an error.
 
 ### Storage
 
@@ -113,4 +113,3 @@ In the newly created collection, insert the records with the primary keys of 105
 ### Testcase 4
 
 In the newly created collection, insert a record with a primary key of 107, call the Flush interface, and check whether there are stats and bloomfilter files on minIO.
-
