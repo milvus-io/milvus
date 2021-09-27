@@ -715,7 +715,6 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, pt.in.Timestamps[0], pt.in.DefaultTimestamp)
 		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[0]], pt.in.DefaultTimestamp)
 		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[1]], pt.in.DefaultTimestamp)
-		assert.LessOrEqual(t, createMsg.BeginTimestamp, pt.in.Timestamps[0])
 		core.chanTimeTick.lock.Unlock()
 
 		// check DD operation info
@@ -2342,8 +2341,8 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.SendDdCreateCollectionReq = func(context.Context, *internalpb.CreateCollectionRequest, []string) error {
-		return nil
+	c.SendDdCreateCollectionReq = func(context.Context, *internalpb.CreateCollectionRequest, []string) (map[string][]byte, error) {
+		return map[string][]byte{}, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)

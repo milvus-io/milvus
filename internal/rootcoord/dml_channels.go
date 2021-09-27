@@ -95,6 +95,30 @@ func (d *dmlChannels) Broadcast(chanNames []string, pack *msgstream.MsgPack) err
 	return nil
 }
 
+// BroadcastMark broadcasts msg pack into specified channel and returns related message id
+func (d *dmlChannels) BroadcastMark(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
+	result := make(map[string][]byte)
+	for _, chanName := range chanNames {
+		// only in-use chanName exist in refcnt
+		if _, ok := d.refcnt.Load(chanName); ok {
+			v, _ := d.pool.Load(chanName)
+			ids, err := (*(v.(*msgstream.MsgStream))).BroadcastMark(pack)
+			if err != nil {
+				return result, err
+			}
+			for chanName, idList := range ids {
+				// idList should have length 1, just flat by iteration
+				for _, id := range idList {
+					result[chanName] = id.Serialize()
+				}
+			}
+		} else {
+			return result, fmt.Errorf("channel %s not exist", chanName)
+		}
+	}
+	return result, nil
+}
+
 // AddProducerChannels add named channels as producer
 func (d *dmlChannels) AddProducerChannels(names ...string) {
 	for _, name := range names {
