@@ -57,7 +57,6 @@ func (gp *BaseTable) Init() {
 
 	// TODO remove once we change helm deployment
 	gp.loadFromCommonYaml()
-	gp.loadFromChannelYaml()
 
 	gp.tryloadFromEnv()
 }
@@ -109,18 +108,6 @@ func (gp *BaseTable) loadFromCommonYaml() bool {
 		return true
 	}
 	log.Debug("failed to find common.yaml in config, skip..")
-	return false
-}
-
-func (gp *BaseTable) loadFromChannelYaml() bool {
-	configFile := gp.configDir + "advanced/channel.yaml"
-	if _, err := os.Stat(configFile); err == nil {
-		if err := gp.LoadYaml("advanced/channel.yaml"); err != nil {
-			panic(err)
-		}
-		return true
-	}
-	log.Debug("failed to find channel.yaml in config, skip..")
 	return false
 }
 
