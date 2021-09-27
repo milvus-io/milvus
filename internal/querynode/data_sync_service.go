@@ -34,7 +34,7 @@ const (
 type dataSyncService struct {
 	ctx context.Context
 
-	mu                   sync.Mutex                                   // guards FlowGraphs
+	flowGraphsMu         sync.Mutex                                   // guards collectionFlowGraphs and partitionFlowGraphs
 	collectionFlowGraphs map[UniqueID]map[Channel]*queryNodeFlowGraph // map[collectionID]flowGraphs
 	partitionFlowGraphs  map[UniqueID]map[Channel]*queryNodeFlowGraph // map[partitionID]flowGraphs
 
@@ -46,8 +46,8 @@ type dataSyncService struct {
 // collection flow graph
 // addCollectionFlowGraph add a collection flowGraph to collectionFlowGraphs
 func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) {
-	dsService.mu.Lock()
-	defer dsService.mu.Unlock()
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
 
 	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
 		dsService.collectionFlowGraphs[collectionID] = make(map[Channel]*queryNodeFlowGraph)
@@ -71,8 +71,8 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 }
 
 func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
-	dsService.mu.Lock()
-	defer dsService.mu.Unlock()
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
 
 	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
 		return nil, errors.New("collection flow graph doesn't existed, collectionID = " + fmt.Sprintln(collectionID))
@@ -88,9 +88,16 @@ func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID,
 	return tmpFGs, nil
 }
 
+func (dsService *dataSyncService) hasCollectionFlowGraph(collectionID UniqueID) bool {
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
+
+	return len(dsService.collectionFlowGraphs[collectionID]) > 0
+}
+
 func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
-	dsService.mu.Lock()
-	defer dsService.mu.Unlock()
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
 
 	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
 		return errors.New("collection flow graph doesn't existed, collectionID = " + fmt.Sprintln(collectionID))
@@ -106,8 +113,8 @@ func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID
 }
 
 func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueID) {
-	dsService.mu.Lock()
-	defer dsService.mu.Unlock()
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
 
 	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
 		for _, nodeFG := range dsService.collectionFlowGraphs[collectionID] {
@@ -121,8 +128,8 @@ func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueI
 
 // partition flow graph
 func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) {
-	dsService.mu.Lock()
-	defer dsService.mu.Unlock()
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
 
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
 		dsService.partitionFlowGraphs[partitionID] = make(map[Channel]*queryNodeFlowGraph)
@@ -141,8 +148,8 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 }
 
 func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
-	dsService.mu.Lock()
-	defer dsService.mu.Unlock()
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
 
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
 		return nil, errors.New("partition flow graph doesn't existed, partitionID = " + fmt.Sprintln(partitionID))
@@ -158,9 +165,16 @@ func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, v
 	return tmpFGs, nil
 }
 
+func (dsService *dataSyncService) hasPartitionFlowGraph(partitionID UniqueID) bool {
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
+
+	return len(dsService.partitionFlowGraphs[partitionID]) > 0
+}
+
 func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID, vChannels []string) error {
-	dsService.mu.Lock()
-	defer dsService.mu.Unlock()
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
 
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
 		return errors.New("partition flow graph doesn't existed, partitionID = " + fmt.Sprintln(partitionID))
@@ -176,8 +190,8 @@ func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID, 
 }
 
 func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID) {
-	dsService.mu.Lock()
-	defer dsService.mu.Unlock()
+	dsService.flowGraphsMu.Lock()
+	defer dsService.flowGraphsMu.Unlock()
 
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
 		for channel, nodeFG := range dsService.partitionFlowGraphs[partitionID] {

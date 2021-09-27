@@ -55,6 +55,7 @@ type ReplicaInterface interface {
 	getCollectionNum() int
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
 	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error)
+	getSegmentNumByCollectionID(collectionID UniqueID) (int, error)
 
 	// partition
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
@@ -229,6 +230,25 @@ func (colReplica *collectionReplica) getFieldsByCollectionIDPrivate(collectionID
 	}
 
 	return collection.Schema().Fields, nil
+}
+
+func (colReplica *collectionReplica) getSegmentNumByCollectionID(collectionID UniqueID) (int, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+	if err != nil {
+		return -1, err
+	}
+	segmentNums := 0
+	for _, partitionID := range collection.partitionIDs {
+		partition, err := colReplica.getPartitionByID(partitionID)
+		if err != nil {
+			return -1, err
+		}
+		segmentNums += len(partition.segmentIDs)
+	}
+	return segmentNums, nil
 }
 
 //----------------------------------------------------------------------------------------------------- partition

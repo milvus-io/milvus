@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 )
 
+const gracefulReleaseTimeInSecond = 1
+
 type task interface {
 	ID() UniqueID       // return ReqID
 	SetID(uid UniqueID) // set ReqID
@@ -67,6 +69,12 @@ type releaseCollectionTask struct {
 type releasePartitionsTask struct {
 	baseTask
 	req  *queryPb.ReleasePartitionsRequest
+	node *QueryNode
+}
+
+type releaseSegmentsTask struct {
+	baseTask
+	req  *queryPb.ReleaseSegmentsRequest
 	node *QueryNode
 }
 
@@ -455,8 +463,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	collection.setReleaseTime(r.req.Base.Timestamp)
 
 	// sleep to wait for query tasks done
-	const gracefulReleaseTime = 1
-	time.Sleep(gracefulReleaseTime * time.Second)
+	time.Sleep(gracefulReleaseTimeInSecond * time.Second)
 	log.Debug("starting release collection...",
 		zap.Any("collectionID", r.req.CollectionID),
 	)
@@ -490,8 +497,8 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	// remove excludedSegments record
 	r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
 
-	// remove query collection
-	r.node.queryService.stopQueryCollection(r.req.CollectionID)
+	// remove query collection, if no collection query collection, don't return error
+	_ = r.node.queryService.stopQueryCollection(r.req.CollectionID)
 
 	// remove collection metas in streaming and historical
 	hasCollectionInHistorical := r.node.historical.replica.hasCollection(r.req.CollectionID)
@@ -551,8 +558,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	errMsg := "release partitions failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
 
 	// sleep to wait for query tasks done
-	const gracefulReleaseTime = 1
-	time.Sleep(gracefulReleaseTime * time.Second)
+	time.Sleep(gracefulReleaseTimeInSecond * time.Second)
 
 	// get collection from streaming and historical
 	hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
@@ -619,5 +625,99 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 }
 
 func (r *releasePartitionsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+// releaseSegmentsTask
+func (r *releaseSegmentsTask) Timestamp() Timestamp {
+	if r.req.Base == nil {
+		log.Warn("nil base req in releaseSegmentsTask", zap.Any("collectionID", r.req.CollectionID))
+		return 0
+	}
+	return r.req.Base.Timestamp
+}
+
+func (r *releaseSegmentsTask) OnEnqueue() error {
+	if r.req == nil || r.req.Base == nil {
+		// internal request id, use random request id for debugging
+		r.SetID(rand.Int63n(100000000000))
+	} else {
+		r.SetID(r.req.Base.MsgID)
+	}
+	return nil
+}
+
+func (r *releaseSegmentsTask) PreExecute(ctx context.Context) error {
+	return nil
+}
+
+func (r *releaseSegmentsTask) Execute(ctx context.Context) error {
+	log.Debug("receive release segments task",
+		zap.Any("collectionID", r.req.CollectionID),
+		zap.Any("partitionIDs", r.req.PartitionIDs),
+		zap.Any("segmentIDs", r.req.SegmentIDs),
+	)
+	errMsg := "release segments failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
+
+	// remove segments from replica
+	for _, segmentID := range r.req.SegmentIDs {
+		err := r.node.historical.replica.removeSegment(segmentID)
+		if err != nil {
+			// don't return, try to release all the segments
+			log.Warn(errMsg + err.Error())
+		}
+		err = r.node.streaming.replica.removeSegment(segmentID)
+		if err != nil {
+			// don't return, try to release all the segments
+			log.Warn(errMsg + err.Error())
+		}
+	}
+
+	// release global segment info
+	r.node.historical.removeGlobalSegmentIDsBySegmentIDs(r.req.SegmentIDs)
+
+	defer log.Debug("release segments task done",
+		zap.Any("collectionID", r.req.CollectionID),
+		zap.Any("partitionIDs", r.req.PartitionIDs),
+		zap.Any("segmentIDs", r.req.SegmentIDs),
+	)
+
+	// remove query collection if no segment and flowGraph exist
+	for _, partitionID := range r.req.PartitionIDs {
+		if r.node.streaming.dataSyncService.hasPartitionFlowGraph(partitionID) {
+			// has partition flow graph, return
+			return nil
+		}
+	}
+	if r.node.streaming.dataSyncService.hasCollectionFlowGraph(r.req.CollectionID) {
+		// has collection flow graph, return
+		return nil
+	}
+	segmentNumsInStreaming, err := r.node.streaming.replica.getSegmentNumByCollectionID(r.req.CollectionID)
+	if err == nil && segmentNumsInStreaming > 0 {
+		// still have some segments in the collection of streaming, return
+		return nil
+	}
+	segmentNumsInHistorical, err := r.node.historical.replica.getSegmentNumByCollectionID(r.req.CollectionID)
+	if err == nil && segmentNumsInHistorical > 0 {
+		// still have some segments in the collection of historical, return
+		return nil
+	}
+
+	// sleep to wait for query tasks done
+	time.Sleep(gracefulReleaseTimeInSecond * time.Second)
+	// no collection flow graph and no partition flow graph,
+	// no segment left in streaming or historical,
+	// remove query collection
+	log.Debug("stop query collection when release segments",
+		zap.Any("collectionID", r.req.CollectionID),
+	)
+	// no collection query collection, don't return error
+	_ = r.node.queryService.stopQueryCollection(r.req.CollectionID)
+
+	return nil
+}
+
+func (r *releaseSegmentsTask) PostExecute(ctx context.Context) error {
 	return nil
 }

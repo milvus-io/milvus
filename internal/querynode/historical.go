@@ -20,10 +20,10 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -44,8 +44,8 @@ type historical struct {
 	loader       *segmentLoader
 	statsService *statsService
 
-	mu                   sync.Mutex // guards globalSealedSegments
-	globalSealedSegments map[UniqueID]*querypb.SegmentInfo
+	globalSealedSegmentMu sync.Mutex // guards globalSealedSegments
+	globalSealedSegments  map[UniqueID]*querypb.SegmentInfo
 
 	etcdKV *etcdkv.EtcdKV
 }
@@ -121,20 +121,20 @@ func (h *historical) watchGlobalSegmentMeta() {
 }
 
 func (h *historical) addGlobalSegmentInfo(segmentID UniqueID, segmentInfo *querypb.SegmentInfo) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.globalSealedSegmentMu.Lock()
+	defer h.globalSealedSegmentMu.Unlock()
 	h.globalSealedSegments[segmentID] = segmentInfo
 }
 
 func (h *historical) removeGlobalSegmentInfo(segmentID UniqueID) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.globalSealedSegmentMu.Lock()
+	defer h.globalSealedSegmentMu.Unlock()
 	delete(h.globalSealedSegments, segmentID)
 }
 
 func (h *historical) getGlobalSegmentIDsByCollectionID(collectionID UniqueID) []UniqueID {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.globalSealedSegmentMu.Lock()
+	defer h.globalSealedSegmentMu.Unlock()
 	resIDs := make([]UniqueID, 0)
 	for _, v := range h.globalSealedSegments {
 		if v.CollectionID == collectionID {
@@ -145,8 +145,8 @@ func (h *historical) getGlobalSegmentIDsByCollectionID(collectionID UniqueID) []
 }
 
 func (h *historical) getGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) []UniqueID {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.globalSealedSegmentMu.Lock()
+	defer h.globalSealedSegmentMu.Unlock()
 	resIDs := make([]UniqueID, 0)
 	for _, v := range h.globalSealedSegments {
 		for _, partitionID := range partitionIDs {
@@ -159,8 +159,8 @@ func (h *historical) getGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) 
 }
 
 func (h *historical) removeGlobalSegmentIDsByCollectionID(collectionID UniqueID) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.globalSealedSegmentMu.Lock()
+	defer h.globalSealedSegmentMu.Unlock()
 	for _, v := range h.globalSealedSegments {
 		if v.CollectionID == collectionID {
 			delete(h.globalSealedSegments, v.SegmentID)
@@ -169,12 +169,29 @@ func (h *historical) removeGlobalSegmentIDsByCollectionID(collectionID UniqueID)
 }
 
 func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.globalSealedSegmentMu.Lock()
+	defer h.globalSealedSegmentMu.Unlock()
 	for _, v := range h.globalSealedSegments {
 		for _, partitionID := range partitionIDs {
 			if v.PartitionID == partitionID {
 				delete(h.globalSealedSegments, v.SegmentID)
+			}
+		}
+	}
+}
+
+func (h *historical) removeGlobalSegmentIDsBySegmentIDs(segmentIDs []UniqueID) {
+	h.globalSealedSegmentMu.Lock()
+	defer h.globalSealedSegmentMu.Unlock()
+OuterLoop:
+	for _, segmentID := range segmentIDs {
+		for _, v := range h.globalSealedSegments {
+			if v.SegmentID == segmentID {
+				delete(h.globalSealedSegments, v.SegmentID)
+				log.Debug("remove segment global segments by segmentIDs",
+					zap.Any("segmentID", segmentID),
+				)
+				continue OuterLoop
 			}
 		}
 	}

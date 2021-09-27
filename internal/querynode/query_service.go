@@ -94,14 +94,18 @@ func newQueryService(ctx context.Context,
 }
 
 func (q *queryService) close() {
-	log.Debug("search service closed")
-	for collectionID := range q.queryCollections {
-		q.stopQueryCollection(collectionID)
-	}
 	q.queryCollectionMu.Lock()
+	defer q.queryCollectionMu.Unlock()
+	for collectionID, queryCollection := range q.queryCollections {
+		queryCollection.close()
+		queryCollection.cancel()
+		log.Debug("stop query collection when stopAllQueryCollections",
+			zap.Any("collectionID", collectionID),
+		)
+	}
 	q.queryCollections = make(map[UniqueID]*queryCollection)
-	q.queryCollectionMu.Unlock()
 	q.cancel()
+	log.Debug("query service closed")
 }
 
 func (q *queryService) addQueryCollection(collectionID UniqueID) error {
@@ -147,15 +151,17 @@ func (q *queryService) getQueryCollection(collectionID UniqueID) (*queryCollecti
 	return nil, errors.New(fmt.Sprintln("queryCollection not exists, collectionID = ", collectionID))
 }
 
-func (q *queryService) stopQueryCollection(collectionID UniqueID) {
+func (q *queryService) stopQueryCollection(collectionID UniqueID) error {
 	q.queryCollectionMu.Lock()
 	defer q.queryCollectionMu.Unlock()
 	sc, ok := q.queryCollections[collectionID]
 	if !ok {
-		log.Warn("stopQueryCollection failed, collection doesn't exist", zap.Int64("collectionID", collectionID))
-		return
+		err := errors.New(fmt.Sprintln("stopQueryCollection failed, collection doesn't exist, collectionID = ", collectionID))
+		log.Warn(err.Error())
+		return err
 	}
 	sc.close()
 	sc.cancel()
 	delete(q.queryCollections, collectionID)
+	return nil
 }

@@ -399,24 +399,42 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 		}
 		return status, err
 	}
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+	dct := &releaseSegmentsTask{
+		baseTask: baseTask{
+			ctx:  ctx,
+			done: make(chan error),
+		},
+		req:  in,
+		node: node,
 	}
-	for _, id := range in.SegmentIDs {
-		err := node.historical.replica.removeSegment(id)
-		if err != nil {
-			// not return, try to release all segments
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
+
+	err := node.scheduler.queue.Enqueue(dct)
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
 		}
-		err = node.streaming.replica.removeSegment(id)
-		if err != nil {
-			// not return, try to release all segments
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
-		}
+		return status, err
 	}
-	return status, nil
+	log.Debug("releaseSegmentsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+
+	waitFunc := func() (*commonpb.Status, error) {
+		err = dct.WaitToFinish()
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn(err.Error())
+			return status, err
+		}
+		log.Debug("releaseSegmentsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
+
+	return waitFunc()
 }
 
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmentInfoRequest) (*queryPb.GetSegmentInfoResponse, error) {

@@ -432,3 +432,122 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestTask_releaseSegmentTask(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	genReleaseSegmentsTask := func() *releaseSegmentsTask {
+		req := &querypb.ReleaseSegmentsRequest{
+			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+		}
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		return &releaseSegmentsTask{
+			req:  req,
+			node: node,
+		}
+	}
+
+	t.Run("test timestamp", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		timestamp := Timestamp(1000)
+		task.req.Base.Timestamp = timestamp
+		resT := task.Timestamp()
+		assert.Equal(t, timestamp, resT)
+		task.req.Base = nil
+		resT = task.Timestamp()
+		assert.Equal(t, Timestamp(0), resT)
+	})
+
+	t.Run("test OnEnqueue", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.OnEnqueue()
+		assert.NoError(t, err)
+		task.req.Base = nil
+		err = task.OnEnqueue()
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute no collection in historical", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.node.historical.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute no collection in streaming", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.node.streaming.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute, don't stop queryCollection because partition flowGraph exists", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		task.node.streaming.dataSyncService.addPartitionFlowGraph(defaultCollectionID, defaultPartitionID, []Channel{defaultVChannel})
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		hasQueryCollection := task.node.queryService.hasQueryCollection(defaultCollectionID)
+		assert.True(t, hasQueryCollection)
+	})
+
+	t.Run("test execute, don't stop queryCollection because collection flowGraph exists", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		task.node.streaming.dataSyncService.addCollectionFlowGraph(defaultCollectionID, []Channel{defaultVChannel})
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		hasQueryCollection := task.node.queryService.hasQueryCollection(defaultCollectionID)
+		assert.True(t, hasQueryCollection)
+	})
+
+	t.Run("test execute, don't stop queryCollection because segment exists in streaming", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		err = task.node.streaming.replica.addSegment(defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultVChannel, segmentTypeGrowing, true)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		hasQueryCollection := task.node.queryService.hasQueryCollection(defaultCollectionID)
+		assert.True(t, hasQueryCollection)
+	})
+
+	t.Run("test execute, don't stop queryCollection because segment exists in historical", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		err = task.node.historical.replica.addSegment(defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultVChannel, segmentTypeGrowing, true)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		hasQueryCollection := task.node.queryService.hasQueryCollection(defaultCollectionID)
+		assert.True(t, hasQueryCollection)
+	})
+
+	t.Run("test execute, stop queryCollection", func(t *testing.T) {
+		task := genReleaseSegmentsTask()
+		err := task.node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		hasQueryCollection := task.node.queryService.hasQueryCollection(defaultCollectionID)
+		assert.False(t, hasQueryCollection)
+	})
+}

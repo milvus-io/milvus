@@ -385,6 +385,6 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 
 		status, err := node.ReleaseSegments(ctx, req)
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 }

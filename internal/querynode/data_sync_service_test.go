@@ -143,6 +143,11 @@ func TestDataSyncService_collectionFlowGraphs(t *testing.T) {
 
 	dataSyncService.addCollectionFlowGraph(defaultCollectionID, []Channel{defaultVChannel})
 
+	hasCollectionFlowGraph := dataSyncService.hasCollectionFlowGraph(defaultCollectionID)
+	assert.True(t, hasCollectionFlowGraph)
+	hasCollectionFlowGraph = dataSyncService.hasCollectionFlowGraph(UniqueID(1000))
+	assert.False(t, hasCollectionFlowGraph)
+
 	fg, err := dataSyncService.getCollectionFlowGraphs(defaultCollectionID, []Channel{defaultVChannel})
 	assert.NotNil(t, fg)
 	assert.NoError(t, err)
@@ -185,6 +190,11 @@ func TestDataSyncService_partitionFlowGraphs(t *testing.T) {
 	assert.NotNil(t, dataSyncService)
 
 	dataSyncService.addPartitionFlowGraph(defaultPartitionID, defaultPartitionID, []Channel{defaultVChannel})
+
+	hasPartitionFlowGraph := dataSyncService.hasPartitionFlowGraph(defaultPartitionID)
+	assert.True(t, hasPartitionFlowGraph)
+	hasPartitionFlowGraph = dataSyncService.hasPartitionFlowGraph(UniqueID(1000))
+	assert.False(t, hasPartitionFlowGraph)
 
 	fg, err := dataSyncService.getPartitionFlowGraphs(defaultPartitionID, []Channel{defaultVChannel})
 	assert.NotNil(t, fg)

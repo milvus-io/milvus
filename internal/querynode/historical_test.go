@@ -65,6 +65,18 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 	n.historical.removeGlobalSegmentIDsByPartitionIds([]UniqueID{partitionID})
 	emptySegmentCheck()
 
+	n.historical.addGlobalSegmentInfo(0, &querypb.SegmentInfo{SegmentID: 0})
+	n.historical.addGlobalSegmentInfo(1, &querypb.SegmentInfo{SegmentID: 1})
+	n.historical.addGlobalSegmentInfo(2, &querypb.SegmentInfo{SegmentID: 2})
+	n.historical.addGlobalSegmentInfo(3, &querypb.SegmentInfo{SegmentID: 3})
+	n.historical.addGlobalSegmentInfo(4, &querypb.SegmentInfo{SegmentID: 4})
+	n.historical.removeGlobalSegmentIDsBySegmentIDs([]UniqueID{0, 2, 4})
+	assert.Equal(t, 2, len(n.historical.globalSealedSegments))
+	assert.Equal(t, n.historical.globalSealedSegments[1].SegmentID, UniqueID(1))
+	assert.Equal(t, n.historical.globalSealedSegments[3].SegmentID, UniqueID(3))
+	n.historical.removeGlobalSegmentIDsBySegmentIDs([]UniqueID{1, 3})
+	emptySegmentCheck()
+
 	// watch test
 	go n.historical.watchGlobalSegmentMeta()
 	time.Sleep(100 * time.Millisecond) // for etcd latency
