@@ -156,7 +156,7 @@ func Test_GetSegmentsByPKs(t *testing.T) {
 		4: {4, 5},
 	}
 	for key, value := range expected {
-		assert.EqualValues(t, value, results[key])
+		assert.ElementsMatch(t, value, results[key])
 	}
 
 }
