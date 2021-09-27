@@ -368,8 +368,7 @@ func (m *meta) MoveSegmentBinlogs(segmentID UniqueID, oldPathPrefix string, fiel
 		k := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 		kv[k] = proto.MarshalTextString(segment.SegmentInfo)
 	}
-	m.client.MultiSaveAndRemoveWithPrefix(kv, removals)
-	return nil
+	return m.client.MultiSaveAndRemoveWithPrefix(kv, removals)
 }
 
 // saveSegmentInfo utility function saving segment info into kv store
