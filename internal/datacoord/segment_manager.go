@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -290,6 +291,15 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		return nil, err
 	}
 
+	startPosition := []byte{} // default start position
+	coll := s.meta.GetCollection(collectionID)
+	for _, pair := range coll.GetStartPositions() {
+		if pair.Key == rootcoord.ToPhysicalChannel(channelName) { // pchan or vchan
+			startPosition = pair.Data
+			break
+		}
+	}
+
 	segmentInfo := &datapb.SegmentInfo{
 		ID:             id,
 		CollectionID:   collectionID,
@@ -301,7 +311,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		LastExpireTime: 0,
 		StartPosition: &internalpb.MsgPosition{
 			ChannelName: channelName,
-			MsgID:       []byte{},
+			MsgID:       startPosition,
 			MsgGroup:    "",
 			Timestamp:   0,
 		},
