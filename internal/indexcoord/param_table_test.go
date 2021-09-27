@@ -68,6 +68,10 @@ func TestParamTable(t *testing.T) {
 		Params.UpdatedTime = time.Now()
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
 	})
+
+	t.Run("initIndexRootPath", func(t *testing.T) {
+		t.Logf("IndexRootPath: %v", Params.IndexRootPath)
+	})
 }
 
 //TODO: Params Load should be return error when key does not exist.
