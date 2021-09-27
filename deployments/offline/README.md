@@ -6,7 +6,7 @@ Milvus installation may fail when images are not properly loaded from public Doc
 
 ### Step 1: Save Milvus manifests and Docker images
 
-#### If you install Milvus with the **docker-compose.yml** file, use these command:
+#### If you install Milvus with the **docker-compose.yml** file, use these commands:
 
 1. Download Milvus standalone docker-compose.yml
    ```shell
