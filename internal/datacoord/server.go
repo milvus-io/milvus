@@ -631,9 +631,10 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		return err
 	}
 	collInfo := &datapb.CollectionInfo{
-		ID:         resp.CollectionID,
-		Schema:     resp.Schema,
-		Partitions: presp.PartitionIDs,
+		ID:             resp.CollectionID,
+		Schema:         resp.Schema,
+		Partitions:     presp.PartitionIDs,
+		StartPositions: resp.GetStartPositions(),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil

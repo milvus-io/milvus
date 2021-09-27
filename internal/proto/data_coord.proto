@@ -187,7 +187,9 @@ message CollectionInfo {
   int64 ID = 1;
   schema.CollectionSchema schema = 2;
   repeated int64 partitions = 3;
+  repeated common.KeyDataPair start_positions = 4;
 }
+
 message SegmentInfo {
   int64 ID = 1;
   int64 collectionID = 2;
@@ -201,7 +203,6 @@ message SegmentInfo {
   internal.MsgPosition dml_position = 10;
   repeated FieldBinlog binlogs = 11;
 }
-
 
 message SegmentStartPosition {
   internal.MsgPosition start_position = 1;
