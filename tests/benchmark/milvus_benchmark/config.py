@@ -27,6 +27,8 @@ LOG_PATH = "/test/milvus/benchmark/logs/{}/".format(BRANCH)
 DEFAULT_DEPLOY_MODE = "single"
 SINGLE_DEPLOY_MODE = "single"
 CLUSTER_DEPLOY_MODE = "cluster"
+CLUSTER_3RD_DEPLOY_MODE = "cluster_3rd"
+
 
 NAMESPACE = "milvus"
 CHAOS_NAMESPACE = "chaos-testing"
