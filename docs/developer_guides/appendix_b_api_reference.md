@@ -4,30 +4,30 @@
 
 In this section, we introduce the RPCs of milvus service. A brief description of the RPCs is listed as follows.
 
-| RPC                | description                                                  |
-| :----------------- | ------------------------------------------------------------ |
-| CreateCollection        | create a collection base on schema statement                 |
-| DropCollection          | drop a collection                                            |
-| HasCollection           | whether a collection exists                                  |
-| LoadCollection          | load collection to memory for future search                  |
-| ReleaseCollection       | release the memory the collection memory                     |
-| DescribeCollection      | show a collection's schema and its descriptive statistics    |
-| GetCollectionStatistics | show a collection's statistics                               |
-| ShowCollections         | list all collections                                         |
-| CreatePartition         | create a partition                                           |
-| DropPartition           | drop a partition                                             |
-| HasPartition            | whether a partition exists                                   |
-| LoadPartition           | load collection to memory for future search                  |
-| ReleasePartitions       | release the memory the collection memory                     |
-| GetPartitionStatistics  | show a partition's statistics                                |
-| ShowPartitions          | list a collection's all partitions                           |
-| CreateIndex             | create index for a field in the collection                       |
-| DescribeIndex           | get index details for a field in the collection                |
-| GetIndexStates          | get build index state                                        |
-| DropIndex               | drop a specific index for a field in the collection            |
-| Insert                  | insert a batch of rows into a collection or a partition      |
+| RPC                     | description                                                                                   |
+| :---------------------- | --------------------------------------------------------------------------------------------- |
+| CreateCollection        | create a collection base on schema statement                                                  |
+| DropCollection          | drop a collection                                                                             |
+| HasCollection           | whether a collection exists                                                                   |
+| LoadCollection          | load collection to memory for future search                                                   |
+| ReleaseCollection       | release the memory the collection memory                                                      |
+| DescribeCollection      | show a collection's schema and its descriptive statistics                                     |
+| GetCollectionStatistics | show a collection's statistics                                                                |
+| ShowCollections         | list all collections                                                                          |
+| CreatePartition         | create a partition                                                                            |
+| DropPartition           | drop a partition                                                                              |
+| HasPartition            | whether a partition exists                                                                    |
+| LoadPartition           | load collection to memory for future search                                                   |
+| ReleasePartitions       | release the memory the collection memory                                                      |
+| GetPartitionStatistics  | show a partition's statistics                                                                 |
+| ShowPartitions          | list a collection's all partitions                                                            |
+| CreateIndex             | create index for a field in the collection                                                    |
+| DescribeIndex           | get index details for a field in the collection                                               |
+| GetIndexStates          | get build index state                                                                         |
+| DropIndex               | drop a specific index for a field in the collection                                           |
+| Insert                  | insert a batch of rows into a collection or a partition                                       |
 | Search                  | query the columns of a collection or a partition with ANNS statements and boolean expressions |
-| Flush                   | Perform persistent storage of data in memory                 |
+| Flush                   | Perform persistent storage of data in memory                                                  |
 
 **MsgBase** is a base struct in each request.
 
