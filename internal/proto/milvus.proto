@@ -270,32 +270,62 @@ message CreatePartitionRequest {
   string partition_name = 4;
 }
 
+/*
+* Drop partition in created collection.
+*/
 message DropPartitionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  string partition_name = 4; // must
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition name you want to drop
+  string partition_name = 4; 
 }
 
+/*
+* Check if partition exist in collection or not.
+*/
 message HasPartitionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  string partition_name = 4; // must
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition name you want to check
+  string partition_name = 4;
 }
 
+/*
+* Load specific partitions data of one collection into query nodes
+* Then you can get these data as result when you do vector search on this collection.
+*/
 message LoadPartitionsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  repeated string partition_names = 4; // must
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition names you want to load
+  repeated string partition_names = 4;
 }
 
+/*
+* Release specific partitions data of one collection from query nodes.
+* Then you can not get these data as result when you do vector search on this collection.
+*/
 message ReleasePartitionsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  repeated string partition_names = 4; // must
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition names you want to release
+  repeated string partition_names = 4;
 }
 
 message GetPartitionStatisticsRequest {
