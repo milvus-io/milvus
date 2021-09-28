@@ -316,7 +316,8 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 				},
 			},
 		}
-		svr.meta.AddSegment(NewSegmentInfo(info))
+		err := svr.meta.AddSegment(NewSegmentInfo(info))
+		assert.Nil(t, err)
 		req := &datapb.GetInsertBinlogPathsRequest{
 			SegmentID: 0,
 		}
