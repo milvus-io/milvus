@@ -135,6 +135,7 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 			return []string{}, err
 		}
 		values = append(values, string(value.Data()))
+		value.Free()
 	}
 	return values, nil
 }
@@ -154,7 +155,7 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 		return errors.New("Rocksdb instance is nil when do MultiSave")
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
-	defer writeBatch.Clear()
+	defer writeBatch.Destroy()
 	for k, v := range kvs {
 		writeBatch.Put([]byte(k), []byte(v))
 	}
@@ -207,7 +208,7 @@ func (kv *RocksdbKV) MultiRemove(keys []string) error {
 		return errors.New("Rocksdb instance is nil when do MultiRemove")
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
-	defer writeBatch.Clear()
+	defer writeBatch.Destroy()
 	for _, key := range keys {
 		writeBatch.Delete([]byte(key))
 	}
@@ -221,7 +222,7 @@ func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []stri
 		return errors.New("Rocksdb instance is nil when do MultiSaveAndRemove")
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
-	defer writeBatch.Clear()
+	defer writeBatch.Destroy()
 	for k, v := range saves {
 		writeBatch.Put([]byte(k), []byte(v))
 	}
@@ -238,7 +239,7 @@ func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
 		return errors.New("Rocksdb instance is nil when do DeleteRange")
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
-	defer writeBatch.Clear()
+	defer writeBatch.Destroy()
 	if len(startKey) == 0 {
 		iter := kv.DB.NewIterator(kv.ReadOptions)
 		defer iter.Close()
