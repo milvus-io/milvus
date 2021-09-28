@@ -18,6 +18,7 @@ import (
 	"github.com/tecbot/gorocksdb"
 )
 
+// RocksdbKV is KV implemented by rocksdb
 type RocksdbKV struct {
 	Opts         *gorocksdb.Options
 	DB           *gorocksdb.DB
@@ -26,6 +27,7 @@ type RocksdbKV struct {
 	name         string
 }
 
+// NewRocksdbKV returns a rockskv object
 func NewRocksdbKV(name string) (*RocksdbKV, error) {
 	if name == "" {
 		return nil, errors.New("rocksdb name is nil")
@@ -53,16 +55,19 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 	}, nil
 }
 
+// Close free resource of rocksdb
 func (kv *RocksdbKV) Close() {
 	if kv.DB != nil {
 		kv.DB.Close()
 	}
 }
 
+// GetName returns the name of this object
 func (kv *RocksdbKV) GetName() string {
 	return kv.name
 }
 
+// Load returns the value of specified key
 func (kv *RocksdbKV) Load(key string) (string, error) {
 	if kv.DB == nil {
 		return "", fmt.Errorf("Rocksdb instance is nil when load %s", key)
@@ -73,6 +78,7 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 	return string(value.Data()), err
 }
 
+// LoadWithPrefix returns a batch values of keys with a prefix
 func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	if key == "" {
 		return nil, nil, errors.New("Key is nil in LoadWithPrefix")
@@ -108,6 +114,7 @@ func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+// ResetPrefixLength will close rocksdb object and open a new rocksdb with new prefix length
 func (kv *RocksdbKV) ResetPrefixLength(len int) error {
 	kv.DB.Close()
 	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len))
@@ -116,6 +123,7 @@ func (kv *RocksdbKV) ResetPrefixLength(len int) error {
 	return err
 }
 
+// MultiLoad load a batch of values by keys
 func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	if kv.DB == nil {
 		return nil, errors.New("Rocksdb instance is nil when do MultiLoad")
@@ -131,6 +139,7 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	return values, nil
 }
 
+// Save a pair of key-value
 func (kv *RocksdbKV) Save(key, value string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do save")
@@ -139,6 +148,7 @@ func (kv *RocksdbKV) Save(key, value string) error {
 	return err
 }
 
+// MultiSave a batch of key-values
 func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do MultiSave")
@@ -152,6 +162,7 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 	return err
 }
 
+// RemoveWithPrefix removes a batch of key-values with specified prefix
 func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do RemoveWithPrefix")
@@ -181,6 +192,7 @@ func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 	return nil
 }
 
+// Remove is used to remove a pair of key-value
 func (kv *RocksdbKV) Remove(key string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do Remove")
@@ -189,6 +201,7 @@ func (kv *RocksdbKV) Remove(key string) error {
 	return err
 }
 
+// MultiRemove is used to remove a batch of key-values
 func (kv *RocksdbKV) MultiRemove(keys []string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do MultiRemove")
@@ -202,6 +215,7 @@ func (kv *RocksdbKV) MultiRemove(keys []string) error {
 	return err
 }
 
+// MultiSaveAndRemove provides a transaction to execute a batch of operators
 func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do MultiSaveAndRemove")
@@ -218,6 +232,7 @@ func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []stri
 	return err
 }
 
+// DeleteRange remove a batch of key-values from startKey to endKey
 func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do DeleteRange")
@@ -236,10 +251,12 @@ func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
 	return err
 }
 
+// MultiRemoveWithPrefix is used to remove a batch of key-values with the same prefix
 func (kv *RocksdbKV) MultiRemoveWithPrefix(keys []string) error {
 	panic("not implement")
 }
 
+// MultiSaveAndRemoveWithPrefix is used to execute a batch operators with the same prefix
 func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	panic("not implement")
 }
