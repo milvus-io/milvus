@@ -12,6 +12,8 @@
 package mqclient
 
 import (
+	"sync"
+
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 )
 
@@ -19,6 +21,7 @@ type RmqConsumer struct {
 	c          rocksmq.Consumer
 	msgChannel chan ConsumerMessage
 	closeCh    chan struct{}
+	once       sync.Once
 }
 
 func (rc *RmqConsumer) Subscription() string {
@@ -27,22 +30,24 @@ func (rc *RmqConsumer) Subscription() string {
 
 func (rc *RmqConsumer) Chan() <-chan ConsumerMessage {
 	if rc.msgChannel == nil {
-		rc.msgChannel = make(chan ConsumerMessage)
-		go func() {
-			for { //nolint:gosimple
-				select {
-				case msg, ok := <-rc.c.Chan():
-					if !ok {
+		rc.once.Do(func() {
+			rc.msgChannel = make(chan ConsumerMessage)
+			go func() {
+				for { //nolint:gosimple
+					select {
+					case msg, ok := <-rc.c.Chan():
+						if !ok {
+							close(rc.msgChannel)
+							return
+						}
+						rc.msgChannel <- &rmqMessage{msg: msg}
+					case <-rc.closeCh:
 						close(rc.msgChannel)
 						return
 					}
-					rc.msgChannel <- &rmqMessage{msg: msg}
-				case <-rc.closeCh:
-					close(rc.msgChannel)
-					return
 				}
-			}
-		}()
+			}()
+		})
 	}
 	return rc.msgChannel
 }
