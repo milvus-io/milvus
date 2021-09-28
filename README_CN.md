@@ -341,7 +341,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 
 ## 社区
 
-欢迎加入 [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) 频道分享你的建议与问题。你也可以通过 [FAQ](https://milvus.io/cn/docs/v1.0.0/performance_faq.md) 页面，查看常见问题及解答。
+欢迎加入 [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) 频道分享你的建议与问题。你也可以通过 [FAQ](https://milvus.io/cn/docs/performance_faq.md) 页面，查看常见问题及解答。
 
 订阅 Milvus 邮件：
 
