@@ -608,7 +608,7 @@ var (
 			Help:      "Counter of flush segments",
 		}, []string{"type"})
 
-	// DataNodeWatchDmChannelCounter used to count the num of calls of WatchDmChannels
+	// DataNodeWatchDmChannelsCounter used to count the num of calls of WatchDmChannels
 	DataNodeWatchDmChannelsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
