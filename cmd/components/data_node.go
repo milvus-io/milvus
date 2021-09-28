@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+// DataNode implements DataNode grpc server
 type DataNode struct {
 	ctx context.Context
 	svr *grpcdatanode.Server
@@ -56,6 +57,7 @@ func (d *DataNode) Stop() error {
 	return nil
 }
 
+// GetComponentStates returns DataNode's states
 func (d *DataNode) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return d.svr.GetComponentStates(ctx, request)
 }
