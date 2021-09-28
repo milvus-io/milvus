@@ -18,6 +18,9 @@ services:
         - ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-${OS_NAME}-${LATEST_DATE_VERSION}
     # user: {{ CURRENT_ID }}
     shm_size: 2G
+    # expose 19530 port so we can directly access milvus inside build container
+    # ports:
+    #  - "19530:19530"
     environment:
       <<: *ccache
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
