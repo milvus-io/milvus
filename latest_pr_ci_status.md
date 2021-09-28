@@ -1,9 +1,9 @@
-<h2><a name="pr-8770" class="anchor" href="#pr-8770" rel="nofollow" aria-hidden="true"><span class="octicon octicon-link"></span></a>PR-8770</h2>
+<h2><a name="pr-8782" class="anchor" href="#pr-8782" rel="nofollow" aria-hidden="true"><span class="octicon octicon-link"></span></a>PR-8782</h2>
 
-<p>Build at: 2021-09-28 17:16:48 +0800 CST</p>
+<p>Build at: 2021-09-28 18:32:09 +0800 CST</p>
 
-<p>Build result: <strong>SUCCESS</strong></p>
+<p>Build result: <strong>FAILURE</strong></p>
 
-<p>Build url: <a href="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/PR-8770/1/" rel="nofollow">https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/PR-8770/1/</a></p>
+<p>Build url: <a href="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/PR-8782/1/" rel="nofollow">https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/PR-8782/1/</a></p>
 
-<p>Checked at: 2021-09-28 18:00:11 +0800 CST</p>
+<p>Checked at: 2021-09-28 19:00:08 +0800 CST</p>
