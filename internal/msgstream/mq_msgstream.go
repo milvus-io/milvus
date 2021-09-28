@@ -113,6 +113,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 	}
 }
 
+// Create consumer to receive message from channels
 func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
