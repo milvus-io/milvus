@@ -5,7 +5,7 @@
 ```
     OS: Ubuntu 18.04
     go：1.15
-    cmake: >=3.16
+    cmake: >=3.18
     gcc： 7.5
 ```
 
