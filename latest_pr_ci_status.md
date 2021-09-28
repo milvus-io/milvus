@@ -6,4 +6,4 @@
 
 <p>Build url: <a href="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/PR-8799/1/" rel="nofollow">https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/PR-8799/1/</a></p>
 
-<p>Checked at: 2021-09-28 22:00:03 +0800 CST</p>
+<p>Checked at: 2021-09-28 23:00:10 +0800 CST</p>
