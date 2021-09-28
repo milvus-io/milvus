@@ -23,6 +23,7 @@ func (pm *pulsarMessage) Topic() string {
 	return pm.msg.Topic()
 }
 
+//Get properties about the message
 func (pm *pulsarMessage) Properties() map[string]string {
 	return pm.msg.Properties()
 }
