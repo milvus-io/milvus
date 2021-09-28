@@ -75,11 +75,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_collection_not_existed(self, connect):
-        '''
-        target: test create partition, its owner collection name not existed in db, check status returned
-        method: call function: create_partition
-        expected: status not ok
-        '''
+        """
+        target: verify the response when creating a partition with a non_existing collection
+        method: create a partition with a non_existing collection
+        expected: raise an exception
+        """
         collection_name = gen_unique_str()
         try:
             connect.create_partition(collection_name, default_tag)
