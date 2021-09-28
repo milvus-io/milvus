@@ -1,6 +1,6 @@
 # Development
 
-This document will help to setup your development environment and running tests. If you encounter a problem, please file an issue.
+This document will help to setup your development environment and run tests. If you encounter a problem, please file an issue.
 
 Table of contents
 =================
@@ -9,7 +9,7 @@ Table of contents
   - [Building Milvus with Docker](#building-milvus-with-docker)
   - [Building Milvus on a local OS/shell environment](#building-milvus-on-a-local-osshell-environment)
     - [Hardware Requirements](#hardware-requirements)
-    - [Installing Required Software](#installing-required-software)
+    - [Software Requirements](#software-requirements)
       - [Dependencies](#dependencies)
       - [CMake](#cmake)
       - [Go](#go)
@@ -40,9 +40,9 @@ Milvus is written in Go and C++, compiling it can use a lot of resources. We rec
 - 50GB of free disk space
 ```
 
-### Installing Required Software
+### Software Requirements
 
-In fact, all Linux distributions is available to develop Milvus. The following only contains commands on Ubuntu, because we mainly use it. If you develop Milvus on other distributions, you are welcome to improve this document.
+In fact, all Linux distributions are available to develop Milvus. The following only contains commands on Ubuntu and CentOS, because we mainly use them. If you develop Milvus on other distributions, you are welcome to improve this document.
 
 #### Dependencies
 - Debian/Ubuntu
@@ -192,7 +192,7 @@ $ cd ../../../
 # Running Milvus standalone
 $ ./scripts/start_standalone.sh
 
-# or running running a Milvus cluster
+# or running a Milvus cluster
 $ ./scripts/start_cluster.sh
 ```
 
