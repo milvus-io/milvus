@@ -430,6 +430,7 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 	return ms.receiveBuf
 }
 
+// Seek reset the subscription associated with this consumer to a specific position
 func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	for _, mp := range msgPositions {
 		consumer, ok := ms.consumers[mp.ChannelName]
