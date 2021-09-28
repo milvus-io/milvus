@@ -216,7 +216,7 @@ class TestInsertParams(TestcaseBase):
         assert collection_w.num_entities == 1
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_insert_dim_not_match(self):
         """
         target: test insert with not match dim
@@ -232,7 +232,7 @@ class TestInsertParams(TestcaseBase):
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_insert_binary_dim_not_match(self):
         """
         target: test insert binary with dim not match
@@ -299,7 +299,7 @@ class TestInsertParams(TestcaseBase):
         """
         target: test insert vector value less than other
         method: vec field value less than int field
-        expected: todo
+        expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
@@ -316,7 +316,7 @@ class TestInsertParams(TestcaseBase):
         """
         target: test insert with fields more
         method: field more than schema fields
-        expected: todo
+        expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
