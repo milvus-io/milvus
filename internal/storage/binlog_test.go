@@ -263,7 +263,7 @@ func TestInsertBinlog(t *testing.T) {
 
 /* #nosec G103 */
 func TestDeleteBinlog(t *testing.T) {
-	w := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50)
+	w := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50, 1, 1)
 
 	e1, err := w.NextDeleteEventWriter()
 	assert.Nil(t, err)
@@ -332,12 +332,12 @@ func TestDeleteBinlog(t *testing.T) {
 
 	//descriptor data fix, partition id
 	partID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, partID, int64(-1))
+	assert.Equal(t, partID, int64(1))
 	pos += int(unsafe.Sizeof(partID))
 
 	//descriptor data fix, segment id
 	segID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, segID, int64(-1))
+	assert.Equal(t, segID, int64(1))
 	pos += int(unsafe.Sizeof(segID))
 
 	//descriptor data fix, field id
@@ -1075,7 +1075,7 @@ func TestInsertBinlogWriterCloseError(t *testing.T) {
 }
 
 func TestDeleteBinlogWriteCloseError(t *testing.T) {
-	deleteWriter := NewDeleteBinlogWriter(schemapb.DataType_Int64, 10)
+	deleteWriter := NewDeleteBinlogWriter(schemapb.DataType_Int64, 10, 1, 1)
 	e1, err := deleteWriter.NextDeleteEventWriter()
 	assert.Nil(t, err)
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
