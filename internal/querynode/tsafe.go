@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 
@@ -37,11 +38,6 @@ func (watcher *tSafeWatcher) notify() {
 	}
 }
 
-// deprecated
-func (watcher *tSafeWatcher) hasUpdate() {
-	<-watcher.notifyChan
-}
-
 func (watcher *tSafeWatcher) watcherChan() <-chan bool {
 	return watcher.notifyChan
 }
@@ -49,7 +45,7 @@ func (watcher *tSafeWatcher) watcherChan() <-chan bool {
 type tSafer interface {
 	get() Timestamp
 	set(id UniqueID, t Timestamp)
-	registerTSafeWatcher(t *tSafeWatcher)
+	registerTSafeWatcher(t *tSafeWatcher) error
 	start()
 	close()
 	removeRecord(partitionID UniqueID)
@@ -100,6 +96,7 @@ func (ts *tSafe) start() {
 				for _, watcher := range ts.watcherList {
 					close(watcher.notifyChan)
 				}
+				ts.watcherList = nil
 				close(ts.tSafeChan)
 				ts.tSafeMu.Unlock()
 				return
@@ -140,17 +137,37 @@ func (ts *tSafe) start() {
 func (ts *tSafe) removeRecord(partitionID UniqueID) {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
-
+	if ts.isClose {
+		// should not happen if tsafe_replica guard correctly
+		log.Warn("Try to remove record with tsafe close ",
+			zap.Any("channel", ts.channel),
+			zap.Any("id", partitionID))
+		return
+	}
 	log.Debug("remove tSafeRecord",
 		zap.Any("partitionID", partitionID),
 	)
 	delete(ts.tSafeRecord, partitionID)
+	var tmpT Timestamp = math.MaxUint64
+	for _, t := range ts.tSafeRecord {
+		if t <= tmpT {
+			tmpT = t
+		}
+	}
+	ts.tSafe = tmpT
+	for _, watcher := range ts.watcherList {
+		watcher.notify()
+	}
 }
 
-func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) {
+func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) error {
 	ts.tSafeMu.Lock()
+	if ts.isClose {
+		return errors.New("Failed to register tsafe watcher because tsafe is closed " + ts.channel)
+	}
 	defer ts.tSafeMu.Unlock()
 	ts.watcherList = append(ts.watcherList, t)
+	return nil
 }
 
 func (ts *tSafe) get() Timestamp {
@@ -164,9 +181,9 @@ func (ts *tSafe) set(id UniqueID, t Timestamp) {
 	defer ts.tSafeMu.Unlock()
 	if ts.isClose {
 		// should not happen if tsafe_replica guard correctly
-		log.Warn("Try to set id with ts close ",
+		log.Warn("Try to set id with tsafe close ",
 			zap.Any("channel", ts.channel),
-			zap.Any("it", id))
+			zap.Any("id", id))
 		return
 	}
 	msg := tSafeMsg{
