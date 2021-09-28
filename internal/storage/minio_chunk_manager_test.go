@@ -39,7 +39,8 @@ func TestMinioChunkManager_ReadAt(t *testing.T) {
 	key := "1"
 	bin := []byte{1, 2, 3}
 	content := make([]byte, 8)
-	minioMgr.minio.Remove(key)
+	err = minioMgr.minio.Remove(key)
+	assert.Nil(t, err)
 
 	n, err := minioMgr.ReadAt(key, content, 0)
 	assert.Equal(t, n, -1)

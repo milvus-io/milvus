@@ -147,8 +147,9 @@ func buildVectorChunkManager(t *testing.T, localPath string, localCacheEnable bo
 	assert.NotNil(t, vcm)
 
 	var allCancel context.CancelFunc = func() {
+		err := minIOKV.RemoveWithPrefix("")
+		assert.Nil(t, err)
 		cancel()
-		minIOKV.RemoveWithPrefix("")
 	}
 	return vcm, allCancel
 }
@@ -159,7 +160,10 @@ var localPath string = "/tmp/milvus/test_data"
 func TestMain(m *testing.M) {
 	Params.Init()
 	exitCode := m.Run()
-	os.RemoveAll(localPath)
+	err := os.RemoveAll(localPath)
+	if err != nil {
+		return
+	}
 	os.Exit(exitCode)
 }
 
@@ -177,7 +181,8 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 	assert.Equal(t, pathGet, pathJoin)
 
 	vcm.localCacheEnable = false
-	vcm.remoteChunkManager.Write(key, []byte{1})
+	err = vcm.remoteChunkManager.Write(key, []byte{1})
+	assert.Nil(t, err)
 	pathGet, err = vcm.GetPath(key)
 	assert.Nil(t, err)
 	assert.Equal(t, pathGet, key)
@@ -219,7 +224,8 @@ func TestVectorChunkManager_Read(t *testing.T) {
 	binlogs := initBinlogFile(meta)
 	assert.NotNil(t, binlogs)
 	for _, binlog := range binlogs {
-		vcm.remoteChunkManager.Write(binlog.Key, binlog.Value)
+		err := vcm.remoteChunkManager.Write(binlog.Key, binlog.Value)
+		assert.Nil(t, err)
 	}
 
 	content, err = vcm.Read("108")
