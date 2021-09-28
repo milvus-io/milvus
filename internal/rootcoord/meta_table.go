@@ -811,7 +811,10 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string, ts typeuti
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return 0, false, fmt.Errorf("collection name = %s not exist", collName)
+		collID, ok = mt.collAlias2ID[collName]
+		if !ok {
+			return 0, false, fmt.Errorf("collection name = %s not exist", collName)
+		}
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -933,7 +936,10 @@ func (mt *MetaTable) GetFieldSchema(collName string, fieldName string) (schemapb
 func (mt *MetaTable) unlockGetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error) {
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
+		collID, ok = mt.collAlias2ID[collName]
+		if !ok {
+			return schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
+		}
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -987,7 +993,10 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	}
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
+		collID, ok = mt.collAlias2ID[collName]
+		if !ok {
+			return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
+		}
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -1091,7 +1100,10 @@ func (mt *MetaTable) GetIndexByName(collName, indexName string) (pb.CollectionIn
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return pb.CollectionInfo{}, nil, fmt.Errorf("collection %s not found", collName)
+		collID, ok = mt.collAlias2ID[collName]
+		if !ok {
+			return pb.CollectionInfo{}, nil, fmt.Errorf("collection %s not found", collName)
+		}
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
