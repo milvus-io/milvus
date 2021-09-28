@@ -202,44 +202,38 @@ func isSameOrder(opStr1, opStr2 string) bool {
 	return isLess1 == isLess2
 }
 
-func getCompareOpType(opStr string, reverse bool) planpb.OpType {
-	type OpType = planpb.OpType
-	var op planpb.OpType
-
-	if !reverse {
-		switch opStr {
-		case "<":
+func getCompareOpType(opStr string, reverse bool) (op planpb.OpType) {
+	switch opStr {
+	case ">":
+		if reverse {
 			op = planpb.OpType_LessThan
-		case ">":
+		} else {
 			op = planpb.OpType_GreaterThan
-		case "<=":
-			op = planpb.OpType_LessEqual
-		case ">=":
-			op = planpb.OpType_GreaterEqual
-		case "==":
-			op = planpb.OpType_Equal
-		case "!=":
-			op = planpb.OpType_NotEqual
-		default:
-			op = planpb.OpType_Invalid
 		}
-	} else {
-		switch opStr {
-		case ">":
+	case "<":
+		if reverse {
+			op = planpb.OpType_GreaterThan
+		} else {
 			op = planpb.OpType_LessThan
-		case "<":
-			op = planpb.OpType_GreaterThan
-		case ">=":
-			op = planpb.OpType_LessEqual
-		case "<=":
-			op = planpb.OpType_GreaterEqual
-		case "==":
-			op = planpb.OpType_Equal
-		case "!=":
-			op = planpb.OpType_NotEqual
-		default:
-			op = planpb.OpType_Invalid
 		}
+	case ">=":
+		if reverse {
+			op = planpb.OpType_LessEqual
+		} else {
+			op = planpb.OpType_GreaterEqual
+		}
+	case "<=":
+		if reverse {
+			op = planpb.OpType_GreaterEqual
+		} else {
+			op = planpb.OpType_LessEqual
+		}
+	case "==":
+		op = planpb.OpType_Equal
+	case "!=":
+		op = planpb.OpType_NotEqual
+	default:
+		op = planpb.OpType_Invalid
 	}
 	return op
 }
@@ -283,10 +277,10 @@ func (pc *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string
 	if boolNode := parseBoolNode(&right); boolNode != nil {
 		right = boolNode
 	}
-	idNodeLeft, leftIDNode := left.(*ant_ast.IdentifierNode)
-	idNodeRight, rightIDNode := right.(*ant_ast.IdentifierNode)
+	idNodeLeft, okLeft := left.(*ant_ast.IdentifierNode)
+	idNodeRight, okRight := right.(*ant_ast.IdentifierNode)
 
-	if leftIDNode && rightIDNode {
+	if okLeft && okRight {
 		leftField, err := pc.handleIdentifier(idNodeLeft)
 		if err != nil {
 			return nil, err
@@ -312,15 +306,15 @@ func (pc *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string
 	}
 
 	var idNode *ant_ast.IdentifierNode
-	var isReversed bool
+	var reverse bool
 	var valueNode *ant_ast.Node
-	if leftIDNode {
+	if okLeft {
 		idNode = idNodeLeft
-		isReversed = false
+		reverse = false
 		valueNode = &right
-	} else if rightIDNode {
+	} else if okRight {
 		idNode = idNodeRight
-		isReversed = true
+		reverse = true
 		valueNode = &left
 	} else {
 		return nil, fmt.Errorf("compare expr has no identifier")
@@ -336,7 +330,7 @@ func (pc *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string
 		return nil, err
 	}
 
-	op := getCompareOpType(operator, isReversed)
+	op := getCompareOpType(operator, reverse)
 	if op == planpb.OpType_Invalid {
 		return nil, fmt.Errorf("invalid binary operator(%s)", operator)
 	}
