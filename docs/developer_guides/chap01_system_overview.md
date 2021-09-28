@@ -40,7 +40,7 @@ The query nodes hold all the indexes in memory. Since building an index is time-
 
 The write nodes are stateless. They simply transform the newly arrived WALs to binlog format, then append the binlog to the store engine.
 
-Note that not all the components are necessarily replicated. The system provides failure tolerance by maintaining multiple copies of WAL and binlog. When there is no in-memory index replica and there occurs a query node failure, other query nodes will take over its indexes by loading the dumped index files, or rebuilding them from binlog and WALs. The links from query nodes to the hash ring will also be adjusted such that the failure node's input WAL stream can be properly handled by its neighbors.
+Note that not all the components are necessarily replicated. The system provides failure tolerance by maintaining multiple copies of WAL and binlog. When there is no in-memory index replica and there occurs a query node failure, other query nodes will take over its indexes by loading the dumped index files, or rebuilding them from binlog and WALs. The links from query nodes to the hash ring will also be adjusted such that the failed node's input WAL stream can be properly handled by its neighbors.
 
 #### 1.4 State Synchronization
 
