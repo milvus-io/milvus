@@ -15,6 +15,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 )
 
+// Check rmqMessage implements ConsumerMessage
+var _ ConsumerMessage = (*rmqMessage)(nil)
+
 type rmqMessage struct {
 	msg rocksmq.ConsumerMessage
 }
