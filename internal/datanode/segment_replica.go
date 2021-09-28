@@ -43,7 +43,7 @@ type Replica interface {
 
 	addNewSegment(segID, collID, partitionID UniqueID, channelName string, startPos, endPos *internalpb.MsgPosition) error
 	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error
-	getSegments(channelName string) []*Segment
+	filterSegments(channelName string, partitionID UniqueID) []*Segment
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
@@ -223,24 +223,28 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	return nil
 }
 
-// getSegments return segments with same channelName
-func (replica *SegmentReplica) getSegments(channelName string) []*Segment {
+// filterSegments return segments with same channelName and partition ID
+func (replica *SegmentReplica) filterSegments(channelName string, partitionID UniqueID) []*Segment {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 	results := make([]*Segment, 0)
-	for _, value := range replica.newSegments {
-		if value.channelName == channelName {
-			results = append(results, value)
+
+	isMatched := func(segment *Segment, chanName string, partID UniqueID) bool {
+		return segment.channelName == chanName && (partID == 0 || segment.partitionID == partID)
+	}
+	for _, seg := range replica.newSegments {
+		if isMatched(seg, channelName, partitionID) {
+			results = append(results, seg)
 		}
 	}
-	for _, value := range replica.normalSegments {
-		if value.channelName == channelName {
-			results = append(results, value)
+	for _, seg := range replica.normalSegments {
+		if isMatched(seg, channelName, partitionID) {
+			results = append(results, seg)
 		}
 	}
-	for _, value := range replica.flushedSegments {
-		if value.channelName == channelName {
-			results = append(results, value)
+	for _, seg := range replica.flushedSegments {
+		if isMatched(seg, channelName, partitionID) {
+			results = append(results, seg)
 		}
 	}
 	return results
