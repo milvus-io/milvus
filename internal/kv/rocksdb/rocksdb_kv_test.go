@@ -174,4 +174,8 @@ func TestRocksdbKV_Dummy(t *testing.T) {
 	assert.Error(t, err)
 	err = rocksdbkv.DeleteRange("", "")
 	assert.Error(t, err)
+
+	rocksdbkv.ReadOptions = nil
+	_, err = rocksdbkv.Load("dummy")
+	assert.Error(t, err)
 }
