@@ -297,6 +297,25 @@ func TestInsertCodec(t *testing.T) {
 	_, _, _, err = insertCodec.Deserialize(blobs)
 	assert.NotNil(t, err)
 }
+
+func TestDeleteCodec(t *testing.T) {
+	schema := &etcdpb.CollectionMeta{
+		ID: CollectionID,
+	}
+	deleteCodec := NewDeleteCodec(schema)
+	deleteData := &DeleteData{
+		Data: map[string]int64{"1": 43757345, "2": 23578294723},
+	}
+	blob, err := deleteCodec.Serialize(1, 1, deleteData)
+	assert.Nil(t, err)
+
+	pid, sid, data, err := deleteCodec.Deserialize(blob)
+	assert.Nil(t, err)
+	assert.Equal(t, pid, int64(1))
+	assert.Equal(t, sid, int64(1))
+	assert.Equal(t, data, deleteData)
+}
+
 func TestDDCodec(t *testing.T) {
 	dataDefinitionCodec := NewDataDefinitionCodec(int64(1))
 	ts := []Timestamp{1, 2, 3, 4}

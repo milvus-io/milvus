@@ -239,10 +239,12 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 }
 
 // NewDeleteBinlogWriter creates DeleteBinlogWriter to write binlog file.
-func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *DeleteBinlogWriter {
+func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID int64) *DeleteBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
+	descriptorEvent.PartitionID = partitionID
+	descriptorEvent.SegmentID = segmentID
 	return &DeleteBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
