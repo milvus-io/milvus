@@ -2048,6 +2048,9 @@ func TestProxy(t *testing.T) {
 		}
 		resp, err = proxy.CreateAlias(ctx, aliasReq)
 		assert.NoError(t, err)
+		log.Debug("create alias response",
+			zap.String("code", resp.ErrorCode.String()),
+			zap.String("reason", resp.Reason))
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 		sameAliasReq := &milvuspb.CreateAliasRequest{
 			Base:           nil,
@@ -2057,6 +2060,9 @@ func TestProxy(t *testing.T) {
 
 		resp, err = proxy.CreateAlias(ctx, sameAliasReq)
 		assert.NoError(t, err)
+		log.Debug("create alias response",
+			zap.String("code", resp.ErrorCode.String()),
+			zap.String("reason", resp.Reason))
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 	})
 
