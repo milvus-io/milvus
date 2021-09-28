@@ -52,7 +52,7 @@ type DataCoord interface {
 	TimeTickProvider
 
 	// Flush notifies DataCoord to flush all current growing segments of specified Collection
-	// ctx is the context to control request deadline and cancelation
+	// ctx is the context to control request deadline and cancellation
 	// req contains the request params, which are database name(not used for now) and collection id
 	//
 	// response struct `FlushResponse` contains related db & collection meta
@@ -118,11 +118,62 @@ type RootCoord interface {
 	Component
 	TimeTickProvider
 
-	//DDL request
+	// CreateCollection notifies RootCoord to create a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name, collection schema and
+	//     physical channel num for inserting data
+	//
+	// The `ErrorCode` of `Status` is `Success` if create collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+
+	// DropCollection notifies RootCoord to drop a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used) and collection name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+
+	// HasCollection notifies RootCoord to check a collection's existence at specified timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name and timestamp
+	//
+	// The `Status` in response struct `BoolResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Value` in `BoolResponse` is `true` if the collection exists at the specified timestamp, `false` otherwise.
+	// Timestamp is ignored if set to 0.
+	// error is always nil
 	HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+
+	// DescribeCollection notifies RootCoord to get all information about this collection at specified timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name or collection id, and timestamp
+	//
+	// The `Status` in response struct `DescribeCollectionResponse` indicates if this operation is processed successfully or fail cause;
+	// other fields in `DescribeCollectionResponse` are filled with this collection's schema, collection id,
+	// physical channel names, virtual channel names, created time, alias names, and so on.
+	//
+	// If timestamp is set a non-zero value and collection does not exist at this timestamp,
+	// the `ErrorCode` of `Status` in `DescribeCollectionResponse` will be set to `Error`.
+	// Timestamp is ignored if set to 0.
+	// error is always nil
 	DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+
+	// ShowCollections notifies RootCoord to list all collection names in database at specified timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name and timestamp
+	//
+	// The `Status` in response struct `ShowCollectionsResponse` indicates if this operation is processed successfully or fail cause;
+	// other fields in `ShowCollectionsResponse` are filled with each collections' names, collection ids,
+	// created times, created UTC times, and so on.
+	// error is always nil
 	ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)
 	CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
 	DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
