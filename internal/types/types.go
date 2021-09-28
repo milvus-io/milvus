@@ -25,10 +25,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
+// TimeTickProvider is the interface all services implement
 type TimeTickProvider interface {
 	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 
+// Component is the interface all services implement
 type Component interface {
 	Init() error
 	Start() error
@@ -38,6 +40,7 @@ type Component interface {
 	Register() error
 }
 
+// DataNode is the interface `datanode` package implements
 type DataNode interface {
 	Component
 
@@ -47,6 +50,7 @@ type DataNode interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
+// DataCoord is the interface `datacoord` package implements
 type DataCoord interface {
 	Component
 	TimeTickProvider
@@ -82,6 +86,7 @@ type DataCoord interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
+// IndexNode is the interface `indexnode` package implements
 type IndexNode interface {
 	Component
 	TimeTickProvider
@@ -93,6 +98,7 @@ type IndexNode interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
+// IndexCoord is the interface `indexcoord` package implements
 type IndexCoord interface {
 	Component
 	TimeTickProvider
@@ -114,6 +120,7 @@ type IndexCoord interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
+// RootCoord is the interface `rootcoord` package implements
 type RootCoord interface {
 	Component
 	TimeTickProvider
@@ -217,6 +224,7 @@ type RootCoordComponent interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
+// Proxy is the interface `proxy` package implements
 type Proxy interface {
 	Component
 
@@ -248,6 +256,7 @@ type Proxy interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
+// QueryNode is the interface `querynode` package implements
 type QueryNode interface {
 	Component
 	TimeTickProvider
@@ -264,6 +273,7 @@ type QueryNode interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
+// QueryCoord is the interface `querycoord` package implements
 type QueryCoord interface {
 	Component
 	TimeTickProvider
