@@ -105,14 +105,14 @@ func TestDataNode(t *testing.T) {
 			assert.NoError(t, err)
 			if testcase.expect {
 				assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-				assert.NotNil(t, node1.vchan2FlushCh)
+				assert.NotNil(t, node1.vchan2FlushChs)
 				assert.NotNil(t, node1.vchan2SyncService)
 				sync, ok := node1.vchan2SyncService[testcase.channels[0]]
 				assert.True(t, ok)
 				assert.NotNil(t, sync)
 				assert.Equal(t, UniqueID(1), sync.collectionID)
 				assert.Equal(t, len(testcase.channels), len(node1.vchan2SyncService))
-				assert.Equal(t, len(node1.vchan2FlushCh), len(node1.vchan2SyncService))
+				assert.Equal(t, len(node1.vchan2FlushChs), len(node1.vchan2SyncService))
 			} else {
 				assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 				assert.Equal(t, testcase.failReason, resp.Reason)
@@ -174,17 +174,17 @@ func TestDataNode(t *testing.T) {
 			UnflushedSegments: []*datapb.SegmentInfo{},
 		}
 
-		require.Equal(t, 0, len(node2.vchan2FlushCh))
+		require.Equal(t, 0, len(node2.vchan2FlushChs))
 		require.Equal(t, 0, len(node2.vchan2SyncService))
 
 		err := node2.NewDataSyncService(vchan)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(node2.vchan2FlushCh))
+		assert.Equal(t, 1, len(node2.vchan2FlushChs))
 		assert.Equal(t, 1, len(node2.vchan2SyncService))
 
 		err = node2.NewDataSyncService(vchan)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(node2.vchan2FlushCh))
+		assert.Equal(t, 1, len(node2.vchan2FlushChs))
 		assert.Equal(t, 1, len(node2.vchan2SyncService))
 
 		cancel()
@@ -367,7 +367,7 @@ func TestDataNode(t *testing.T) {
 		assert.Eventually(t, func() bool {
 			node.chanMut.Lock()
 			defer node.chanMut.Unlock()
-			return len(node.vchan2FlushCh) == 0
+			return len(node.vchan2FlushChs) == 0
 		}, time.Second, time.Millisecond)
 
 		cancel()
@@ -384,12 +384,12 @@ func TestDataNode(t *testing.T) {
 
 		err := node.NewDataSyncService(vchan)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(node.vchan2FlushCh))
+		require.Equal(t, 1, len(node.vchan2FlushChs))
 		require.Equal(t, 1, len(node.vchan2SyncService))
 		time.Sleep(100 * time.Millisecond)
 
 		node.ReleaseDataSyncService(dmChannelName)
-		assert.Equal(t, 0, len(node.vchan2FlushCh))
+		assert.Equal(t, 0, len(node.vchan2FlushChs))
 		assert.Equal(t, 0, len(node.vchan2SyncService))
 
 		s, ok := node.vchan2SyncService[dmChannelName]
