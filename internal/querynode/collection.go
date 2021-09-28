@@ -51,6 +51,7 @@ type Collection struct {
 	releaseTime        Timestamp
 }
 
+// ID returns collection id
 func (c *Collection) ID() UniqueID {
 	return c.id
 }
