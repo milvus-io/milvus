@@ -80,6 +80,7 @@ type ReplicaInterface interface {
 	addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) error
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
 
+	getSegmentsMemSize() int64
 	freeAll()
 	printReplica()
 }
@@ -95,6 +96,17 @@ type collectionReplica struct {
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
 	etcdKV *etcdkv.EtcdKV
+}
+
+func (colReplica *collectionReplica) getSegmentsMemSize() int64 {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	memSize := int64(0)
+	for _, segment := range colReplica.segments {
+		memSize += segment.getMemSize()
+	}
+	return memSize
 }
 
 func (colReplica *collectionReplica) printReplica() {
