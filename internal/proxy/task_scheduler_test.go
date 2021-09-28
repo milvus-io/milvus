@@ -16,7 +16,6 @@ import (
 	"math/rand"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -27,7 +26,6 @@ func TestBaseTaskQueue(t *testing.T) {
 	var err error
 	var unissuedTask task
 	var activeTask task
-	var done bool
 
 	tsoAllocatorIns := newMockTsoAllocator()
 	idAllocatorIns := newMockIDAllocatorInterface()
@@ -39,7 +37,6 @@ func TestBaseTaskQueue(t *testing.T) {
 
 	st := newDefaultMockTask()
 	stID := st.ID()
-	stTs := st.BeginTs()
 
 	// no task in queue
 
@@ -51,9 +48,6 @@ func TestBaseTaskQueue(t *testing.T) {
 
 	unissuedTask = queue.PopUnissuedTask()
 	assert.Nil(t, unissuedTask)
-
-	done = queue.TaskDoneTest(stTs)
-	assert.True(t, done)
 
 	// task enqueue, only one task in queue
 
@@ -71,24 +65,15 @@ func TestBaseTaskQueue(t *testing.T) {
 	unissuedTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.NotNil(t, unissuedTask)
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.False(t, done)
-
 	unissuedTask = queue.PopUnissuedTask()
 	assert.NotNil(t, unissuedTask)
 	assert.True(t, queue.utEmpty())
 	assert.False(t, queue.utFull())
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
-
 	// test active list, no task in queue
 
 	activeTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.Nil(t, activeTask)
-
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
 
 	activeTask = queue.PopActiveTask(unissuedTask.ID())
 	assert.Nil(t, activeTask)
@@ -100,14 +85,8 @@ func TestBaseTaskQueue(t *testing.T) {
 	activeTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.NotNil(t, activeTask)
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.False(t, done)
-
 	activeTask = queue.PopActiveTask(unissuedTask.ID())
 	assert.NotNil(t, activeTask)
-
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
 
 	// test utFull
 	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
@@ -126,7 +105,6 @@ func TestDdTaskQueue(t *testing.T) {
 	var err error
 	var unissuedTask task
 	var activeTask task
-	var done bool
 
 	tsoAllocatorIns := newMockTsoAllocator()
 	idAllocatorIns := newMockIDAllocatorInterface()
@@ -138,7 +116,6 @@ func TestDdTaskQueue(t *testing.T) {
 
 	st := newDefaultMockDdlTask()
 	stID := st.ID()
-	stTs := st.BeginTs()
 
 	// no task in queue
 
@@ -150,9 +127,6 @@ func TestDdTaskQueue(t *testing.T) {
 
 	unissuedTask = queue.PopUnissuedTask()
 	assert.Nil(t, unissuedTask)
-
-	done = queue.TaskDoneTest(stTs)
-	assert.True(t, done)
 
 	// task enqueue, only one task in queue
 
@@ -170,24 +144,15 @@ func TestDdTaskQueue(t *testing.T) {
 	unissuedTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.NotNil(t, unissuedTask)
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.False(t, done)
-
 	unissuedTask = queue.PopUnissuedTask()
 	assert.NotNil(t, unissuedTask)
 	assert.True(t, queue.utEmpty())
 	assert.False(t, queue.utFull())
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
-
 	// test active list, no task in queue
 
 	activeTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.Nil(t, activeTask)
-
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
 
 	activeTask = queue.PopActiveTask(unissuedTask.ID())
 	assert.Nil(t, activeTask)
@@ -199,14 +164,8 @@ func TestDdTaskQueue(t *testing.T) {
 	activeTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.NotNil(t, activeTask)
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.False(t, done)
-
 	activeTask = queue.PopActiveTask(unissuedTask.ID())
 	assert.NotNil(t, activeTask)
-
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
 
 	// test utFull
 	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
@@ -226,7 +185,6 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 	var err error
 	var unissuedTask task
 	var activeTask task
-	var done bool
 
 	tsoAllocatorIns := newMockTsoAllocator()
 	idAllocatorIns := newMockIDAllocatorInterface()
@@ -238,7 +196,6 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 
 	st := newDefaultMockDmlTask()
 	stID := st.ID()
-	stTs := st.BeginTs()
 
 	// no task in queue
 
@@ -250,9 +207,6 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 
 	unissuedTask = queue.PopUnissuedTask()
 	assert.Nil(t, unissuedTask)
-
-	done = queue.TaskDoneTest(stTs)
-	assert.True(t, done)
 
 	// task enqueue, only one task in queue
 
@@ -270,24 +224,15 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 	unissuedTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.NotNil(t, unissuedTask)
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.False(t, done)
-
 	unissuedTask = queue.PopUnissuedTask()
 	assert.NotNil(t, unissuedTask)
 	assert.True(t, queue.utEmpty())
 	assert.False(t, queue.utFull())
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
-
 	// test active list, no task in queue
 
 	activeTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.Nil(t, activeTask)
-
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
 
 	activeTask = queue.PopActiveTask(unissuedTask.ID())
 	assert.Nil(t, activeTask)
@@ -299,14 +244,8 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 	activeTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.NotNil(t, activeTask)
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.False(t, done)
-
 	activeTask = queue.PopActiveTask(unissuedTask.ID())
 	assert.NotNil(t, activeTask)
-
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
 
 	// test utFull
 	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
@@ -366,7 +305,6 @@ func TestDqTaskQueue(t *testing.T) {
 	var err error
 	var unissuedTask task
 	var activeTask task
-	var done bool
 
 	tsoAllocatorIns := newMockTsoAllocator()
 	idAllocatorIns := newMockIDAllocatorInterface()
@@ -378,7 +316,6 @@ func TestDqTaskQueue(t *testing.T) {
 
 	st := newDefaultMockDqlTask()
 	stID := st.ID()
-	stTs := st.BeginTs()
 
 	// no task in queue
 
@@ -390,9 +327,6 @@ func TestDqTaskQueue(t *testing.T) {
 
 	unissuedTask = queue.PopUnissuedTask()
 	assert.Nil(t, unissuedTask)
-
-	done = queue.TaskDoneTest(stTs)
-	assert.True(t, done)
 
 	// task enqueue, only one task in queue
 
@@ -410,24 +344,15 @@ func TestDqTaskQueue(t *testing.T) {
 	unissuedTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.NotNil(t, unissuedTask)
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.False(t, done)
-
 	unissuedTask = queue.PopUnissuedTask()
 	assert.NotNil(t, unissuedTask)
 	assert.True(t, queue.utEmpty())
 	assert.False(t, queue.utFull())
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
-
 	// test active list, no task in queue
 
 	activeTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.Nil(t, activeTask)
-
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
 
 	activeTask = queue.PopActiveTask(unissuedTask.ID())
 	assert.Nil(t, activeTask)
@@ -439,14 +364,8 @@ func TestDqTaskQueue(t *testing.T) {
 	activeTask = queue.getTaskByReqID(unissuedTask.ID())
 	assert.NotNil(t, activeTask)
 
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.False(t, done)
-
 	activeTask = queue.PopActiveTask(unissuedTask.ID())
 	assert.NotNil(t, activeTask)
-
-	done = queue.TaskDoneTest(unissuedTask.BeginTs() + 1)
-	assert.True(t, done)
 
 	// test utFull
 	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
@@ -476,8 +395,6 @@ func TestTaskScheduler(t *testing.T) {
 	err = sched.Start()
 	assert.NoError(t, err)
 	defer sched.Close()
-
-	assert.True(t, sched.TaskDoneTest(Timestamp(time.Now().Nanosecond())))
 
 	stats, err := sched.getPChanStatistics()
 	assert.NoError(t, err)
