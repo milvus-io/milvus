@@ -108,7 +108,7 @@ func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentra
 // StartSpanFromContextWithOperationName starts a opentracing span with specific operation name.
 // And will log print the current call line number and file name.
 func StartSpanFromContextWithOperationName(ctx context.Context, operationName string, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
-	return StartSpanFromContextWithOperationNameWithSkip(ctx, operationName, 2, opts...)
+	return StartSpanFromContextWithOperationNameWithSkip(ctx, operationName, 3, opts...)
 }
 
 // StartSpanFromContextWithOperationNameWithSkip starts a opentracing span with specific operation name.
