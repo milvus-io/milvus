@@ -1075,6 +1075,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="skip temporarily for debug")
     def test_search_max_dim(self, nq, auto_id, _async):
         """
         target: test search normal case
