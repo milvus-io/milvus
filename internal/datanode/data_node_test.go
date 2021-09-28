@@ -449,31 +449,6 @@ func TestDataNode(t *testing.T) {
 	node.Stop()
 }
 
-func TestDataNodeEtcdAlive(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	node := newIDLEDataNodeMock(ctx)
-	node.Init()
-	node.Start()
-
-	mockCh := make(chan bool)
-	go node.etcdAliveCheck(ctx, mockCh)
-
-	mockCh <- true
-	flag := false
-	select {
-	case <-node.ctx.Done():
-		flag = true
-	default:
-	}
-	assert.False(t, flag)
-
-	close(mockCh)
-
-	_, ok := <-node.ctx.Done()
-	assert.False(t, ok)
-}
-
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
