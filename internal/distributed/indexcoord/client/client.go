@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
+// Client is the grpc client of IndexCoord.
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -99,6 +100,7 @@ func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
+// NewClient creates a new IndexCoord client.
 func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
@@ -114,6 +116,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 	}, nil
 }
 
+// Init initializes IndexCoord's grpc client.
 func (c *Client) Init() error {
 	Params.Init()
 	return c.connect(retry.Attempts(20))
@@ -183,10 +186,12 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	return ret, err
 }
 
+// Start starts IndexCoord's client service. But it does nothing here.
 func (c *Client) Start() error {
 	return nil
 }
 
+// Stop stops IndexCoord's grpc client.
 func (c *Client) Stop() error {
 	c.cancel()
 	c.grpcClientMtx.Lock()
@@ -202,6 +207,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
+// GetComponentStates gets the component states of IndexCoord.
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -217,6 +223,7 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	return ret.(*internalpb.ComponentStates), err
 }
 
+// GetTimeTickChannel gets the time tick channel of IndexCoord.
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -232,6 +239,7 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// GetStatisticsChannel gets the statistics channel of IndexCoord.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -247,6 +255,7 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// BuildIndex sends the build index request to IndexCoord.
 func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -262,6 +271,7 @@ func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest)
 	return ret.(*indexpb.BuildIndexResponse), err
 }
 
+// DropIndex sends the drop index request to IndexCoord.
 func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -277,6 +287,7 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	return ret.(*commonpb.Status), err
 }
 
+// GetIndexStates gets the index states from IndexCoord.
 func (c *Client) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -291,6 +302,8 @@ func (c *Client) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStates
 	}
 	return ret.(*indexpb.GetIndexStatesResponse), err
 }
+
+// GetIndexFilePaths gets the index file paths from IndexCoord.
 func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -306,6 +319,7 @@ func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 	return ret.(*indexpb.GetIndexFilePathsResponse), err
 }
 
+// GetMetrics gets the metrics info of IndexCoord.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
