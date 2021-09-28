@@ -271,11 +271,8 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		)
 
 		bd, ok := ibNode.insertBuffer.Load(currentSegID)
-		if !ok {
-			break
-		}
 
-		if bd.(*BufferData).size <= 0 { // Buffer empty
+		if !ok || bd.(*BufferData).size <= 0 { // Buffer empty
 			log.Debug(".. Buffer empty ...")
 			ibNode.dsSaveBinlog(&segmentFlushUnit{
 				collID:     fmsg.collectionID,
