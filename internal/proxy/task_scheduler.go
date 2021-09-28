@@ -42,7 +42,6 @@ type taskQueue interface {
 	AddActiveTask(t task)
 	PopActiveTask(tID UniqueID) task
 	getTaskByReqID(reqID UniqueID) task
-	TaskDoneTest(ts Timestamp) bool
 	Enqueue(t task) error
 	setMaxTaskNum(num int64)
 	getMaxTaskNum() int64
@@ -160,26 +159,6 @@ func (queue *baseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	}
 
 	return nil
-}
-
-func (queue *baseTaskQueue) TaskDoneTest(ts Timestamp) bool {
-	queue.utLock.RLock()
-	defer queue.utLock.RUnlock()
-	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if e.Value.(task).EndTs() < ts {
-			return false
-		}
-	}
-
-	queue.atLock.RLock()
-	defer queue.atLock.RUnlock()
-	for _, task := range queue.activeTasks {
-		if task.BeginTs() < ts {
-			return false
-		}
-	}
-
-	return true
 }
 
 func (queue *baseTaskQueue) Enqueue(t task) error {
@@ -870,12 +849,6 @@ func (sched *taskScheduler) Start() error {
 func (sched *taskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
-}
-
-func (sched *taskScheduler) TaskDoneTest(ts Timestamp) bool {
-	ddTaskDone := sched.ddQueue.TaskDoneTest(ts)
-	dmTaskDone := sched.dmQueue.TaskDoneTest(ts)
-	return ddTaskDone && dmTaskDone
 }
 
 func (sched *taskScheduler) getPChanStatistics() (map[pChan]*pChanStatistics, error) {
