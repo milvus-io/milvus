@@ -74,8 +74,11 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 	}
 
 	value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
+	if err != nil {
+		return "", err
+	}
 	defer value.Free()
-	return string(value.Data()), err
+	return string(value.Data()), nil
 }
 
 // LoadWithPrefix returns a batch values of keys with a prefix
@@ -134,6 +137,7 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 		if err != nil {
 			return []string{}, err
 		}
+		defer value.Free()
 		values = append(values, string(value.Data()))
 	}
 	return values, nil
