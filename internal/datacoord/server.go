@@ -98,9 +98,9 @@ type Server struct {
 	flushCh   chan UniqueID
 	msFactory msgstream.Factory
 
-	session  *sessionutil.Session
-	activeCh <-chan bool
-	eventCh  <-chan *sessionutil.SessionEvent
+	session *sessionutil.Session
+	liveCh  <-chan bool
+	eventCh <-chan *sessionutil.SessionEvent
 
 	dataNodeCreator        DataNodeCreatorFunc
 	rootCoordClientCreator RootCoordCreatorFunc
@@ -183,7 +183,7 @@ func (s *Server) Register() error {
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	s.activeCh = s.session.Init(typeutil.DataCoordRole, Params.IP, true)
+	s.liveCh = s.session.Init(typeutil.DataCoordRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	return nil
 }
@@ -304,12 +304,14 @@ func (s *Server) initMeta() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(5)
+	s.serverLoopWg.Add(4)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startDataNodeTtLoop(s.serverLoopCtx)
 	go s.startWatchService(s.serverLoopCtx)
-	go s.startActiveCheck(s.serverLoopCtx)
 	go s.startFlushLoop(s.serverLoopCtx)
+	go s.session.LivenessCheck(s.serverLoopCtx, s.liveCh, func() {
+		s.Stop()
+	})
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -466,26 +468,6 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 	default:
 		log.Warn("receive unknown service event type",
 			zap.Any("type", event.EventType))
-	}
-}
-
-func (s *Server) startActiveCheck(ctx context.Context) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	for {
-		select {
-		case _, ok := <-s.activeCh:
-			if ok {
-				continue
-			}
-			go func() { s.Stop() }()
-			log.Debug("disconnect with etcd and shutdown data coordinator")
-			return
-		case <-ctx.Done():
-			log.Debug("connection check shutdown")
-			return
-		}
 	}
 }
 
