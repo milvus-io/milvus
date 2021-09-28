@@ -14,8 +14,15 @@ package grpcconfigs
 import "math"
 
 const (
+	// DefaultServerMaxSendSize defines the maximum size of data per grpc request can send by server side.
 	DefaultServerMaxSendSize = math.MaxInt32
+
+	// DefaultServerMaxRecvSize defines the maximum size of data per grpc request can receive by server side.
 	DefaultServerMaxRecvSize = math.MaxInt32
+
+	// DefaultClientMaxSendSize defines the maximum size of data per grpc request can send by client side.
 	DefaultClientMaxSendSize = 100 * 1024 * 1024
+
+	// DefaultClientMaxRecvSize defines the maximum size of data per grpc request can receive by client side.
 	DefaultClientMaxRecvSize = 100 * 1024 * 1024
 )
