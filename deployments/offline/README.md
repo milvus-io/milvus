@@ -61,13 +61,13 @@ for image in $(find . -type f -name "*.tar.gz") ; do gunzip -c $image | docker l
 
 ## Install Milvus
 
-With Docker Compose
+### With Docker Compose
 
 ```shell
 docker-compose -f docker-compose.yml up -d
 ```
 
-On Kubernetes
+### On Kubernetes
 
 ```shell
 kubectl apply -f milvus_manifest.yaml
@@ -75,13 +75,13 @@ kubectl apply -f milvus_manifest.yaml
 
 ## Uninstall Milvus
 
-With Docker Compose
+### With Docker Compose
 
 ```shell
 docker-compose -f docker-compose.yml down
 ```
 
-On Kubernetes
+### On Kubernetes
 
 ```shell
 kubectl delete -f milvus_manifest.yaml
