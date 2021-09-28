@@ -27,14 +27,17 @@ func newDefaultConfig() *config {
 	}
 }
 
+// Option is used to config the retry function.
 type Option func(*config)
 
+// Attempts is used to config the max retry times.
 func Attempts(attempts uint) Option {
 	return func(c *config) {
 		c.attempts = attempts
 	}
 }
 
+// Sleep is used to config the initial interval time of each execution.
 func Sleep(sleep time.Duration) Option {
 	return func(c *config) {
 		c.sleep = sleep
@@ -45,6 +48,7 @@ func Sleep(sleep time.Duration) Option {
 	}
 }
 
+// MaxSleep is used to config the max interval time of each execution.
 func MaxSleepTime(maxSleepTime time.Duration) Option {
 	return func(c *config) {
 		// ensure max retry interval is always larger than retry interval
