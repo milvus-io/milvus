@@ -52,7 +52,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			dn := newDeleteNode(test.replica, "")
+			dn := newDeleteNode(test.replica, "", make(chan *flushMsg))
 
 			assert.NotNil(t, dn)
 			assert.Equal(t, "deleteNode", dn.Name())
@@ -81,11 +81,13 @@ func TestFlowGraphDeleteNode_Operate(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			dn := deleteNode{}
+			flushCh := make(chan *flushMsg, 10)
+			dn := deleteNode{flushCh: flushCh}
 			if test.invalidIn != nil {
 				rt := dn.Operate(test.invalidIn)
 				assert.Empty(t, rt)
 			} else {
+				flushCh <- &flushMsg{0, 100, 10, 1}
 				rt := dn.Operate(test.validIn)
 				assert.Empty(t, rt)
 			}
@@ -145,7 +147,7 @@ func Test_GetSegmentsByPKs(t *testing.T) {
 	mockReplica.normalSegments[segment4.segmentID] = segment4
 	mockReplica.flushedSegments[segment5.segmentID] = segment5
 	mockReplica.flushedSegments[segment6.segmentID] = segment6
-	dn := newDeleteNode(mockReplica, "test")
+	dn := newDeleteNode(mockReplica, "test", make(chan *flushMsg))
 	results, err := dn.filterSegmentByPK([]int64{0, 1, 2, 3, 4})
 	assert.Nil(t, err)
 	expected := map[int64][]int64{

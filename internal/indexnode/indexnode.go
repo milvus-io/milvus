@@ -147,12 +147,15 @@ func (i *IndexNode) Init() error {
 			BucketName:        Params.MinioBucketName,
 			CreateBucket:      true,
 		}
-		i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
+		kv, err := miniokv.NewMinIOKV(i.loopCtx, option)
 		if err != nil {
 			log.Error("IndexNode NewMinIOKV failed", zap.Error(err))
 			initErr = err
 			return
 		}
+
+		i.kv = kv
+
 		log.Debug("IndexNode NewMinIOKV success")
 		i.closer = trace.InitTracing("index_node")
 
