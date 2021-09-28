@@ -3214,6 +3214,11 @@ class TestLoadPartitionInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_with_invalid_partition_name(self, connect, collection, get_partition_name):
+        """
+        target: test load invalid partition
+        method: load partition with invalid partition name
+        expected: raise exception
+        """
         partition_name = get_partition_name
         with pytest.raises(Exception) as e:
             connect.load_partitions(collection, [partition_name])
