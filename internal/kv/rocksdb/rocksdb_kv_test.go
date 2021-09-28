@@ -64,6 +64,21 @@ func TestRocksdbKV(t *testing.T) {
 	assert.Equal(t, len(vals), len(keys))
 	assert.Equal(t, vals[0], "123")
 	assert.Equal(t, vals[1], "456")
+
+	err = rocksdbKV.MultiRemove(keys)
+	assert.NoError(t, err)
+
+	saves := map[string]string{
+		"s_1": "111",
+		"s_2": "222",
+		"s_3": "333",
+	}
+	removals := []string{"key_3"}
+	err = rocksdbKV.MultiSaveAndRemove(saves, removals)
+	assert.NoError(t, err)
+
+	err = rocksdbKV.DeleteRange("s_1", "s_3")
+	assert.NoError(t, err)
 }
 
 func TestRocksdbKV_Prefix(t *testing.T) {
