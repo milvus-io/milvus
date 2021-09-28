@@ -137,7 +137,6 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 		if err != nil {
 			return []string{}, err
 		}
-		defer value.Free()
 		values = append(values, string(value.Data()))
 		value.Free()
 	}
@@ -187,6 +186,7 @@ func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		err := kv.DB.Delete(kv.WriteOptions, key.Data())
+		key.Free()
 		if err != nil {
 			return nil
 		}
