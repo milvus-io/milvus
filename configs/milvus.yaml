@@ -71,6 +71,7 @@ queryCoord:
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
 queryNode:
+  cacheSize: 32 # GB, default 32 GB, `cacheSize` is the memory used for caching data for faster query. The `cacheSize` must be less than system memory size.
   gracefulTime: 1000 # ms, for search
   port: 21123
 

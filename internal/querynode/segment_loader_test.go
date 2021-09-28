@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -229,7 +228,7 @@ func TestSegmentLoader_CheckSegmentMemory(t *testing.T) {
 	})
 
 	t.Run("test OOM", func(t *testing.T) {
-		totalRAM := metricsinfo.GetMemoryCount()
+		totalRAM := Params.CacheSize * 1024 * 1024 * 1024
 
 		loader := genSegmentLoader()
 		col, err := loader.historicalReplica.getCollectionByID(collectionID)
@@ -239,7 +238,7 @@ func TestSegmentLoader_CheckSegmentMemory(t *testing.T) {
 		assert.NoError(t, err)
 
 		info := genSegmentLoadInfo()
-		info.NumOfRows = int64(totalRAM / uint64(sizePerRecord))
+		info.NumOfRows = totalRAM / int64(sizePerRecord)
 		err = loader.checkSegmentMemory([]*querypb.SegmentLoadInfo{info})
 		assert.Error(t, err)
 	})
