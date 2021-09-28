@@ -228,6 +228,7 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 	return retrieveResults, retrieveSegmentIDs, nil
 }
 
+// search will search all the target segments in historical
 func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []UniqueID, error) {
 
