@@ -104,6 +104,7 @@ func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *Retrieve
 	return retrieveResults, retrieveSegmentIDs, nil
 }
 
+// search will search all the target segments in streaming
 func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
 	plan *SearchPlan, searchTs Timestamp) ([]*SearchResult, error) {
 
