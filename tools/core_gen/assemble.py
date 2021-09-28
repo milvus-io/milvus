@@ -1,7 +1,5 @@
 #!python
 from meta_gen import *
-import copy
-import sys
 import re
 
 def assemble(template, **kwargs):
@@ -30,6 +28,7 @@ def assemble(template, **kwargs):
     return mapping["main"]
 
 
+# import sys
 # if __name__ == "__main__":
 #     assert(len(sys.argv) == 2)
 #     root_file = sys.argv[1]
