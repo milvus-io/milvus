@@ -1,4 +1,4 @@
-name: Chaos Test
+name: Network Partition Chaos Test
 
 on:
   workflow_dispatch:
