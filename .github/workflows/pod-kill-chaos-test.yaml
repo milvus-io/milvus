@@ -1,11 +1,11 @@
-name: Chaos Test
+name: Pod Kill Chaos Test
 
 on:
   workflow_dispatch:
 
 jobs:
   
-  test-network-partition-chaos:
+  test-pod-kill-chaos:
    
     runs-on: ubuntu-latest
     strategy:
@@ -39,20 +39,19 @@ jobs:
           helm repo add chaos-mesh https://charts.chaos-mesh.org
           helm search repo chaos-mesh
           kubectl create ns chaos-testing
-          helm install chaos-mesh chaos-mesh/chaos-mesh -n=chaos-testing --version v2.0.1 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
+          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --version v0.5.3 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
           sleep 60s
           kubectl get po -n chaos-testing
-
       - name: Deploy Milvus
         shell: bash
         run: |
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
-          helm install chaos-testing milvus/milvus --set cluster.enabled=true -n=chaos-testing
+          helm install milvus-chaos milvus/milvus --set cluster.enabled=true -n=chaos-testing
           kubectl get pods -n chaos-testing
           sleep 60s
           kubectl get pods -n chaos-testing
-          kubectl port-forward service/chaos-testing-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
+          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
           sleep 20s
           nc -vz 127.0.0.1 19530
       - name: Chaos Test
@@ -61,6 +60,12 @@ jobs:
         run: |
           pip install -r ../requirements.txt
           pip install --upgrade protobuf
-          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_network_partition.yaml\'/g" constants.py
+          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_podkill.yaml\'/g" constants.py
           cat constants.py
           pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO
+      - name: Verify Pod Kill
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          #in this step, we can verify whether pod has been killed by pod's age
+          kubectl get po -n chaos-testing |grep "milvus-chaos"
