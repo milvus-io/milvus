@@ -84,6 +84,7 @@ func NewMqMsgStream(ctx context.Context,
 	return stream, nil
 }
 
+// AsProducer create producer to send message to channels
 func (ms *mqMsgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
