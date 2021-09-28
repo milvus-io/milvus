@@ -274,6 +274,8 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
 
+	aliases := t.core.MetaTable.ListAliases(collMeta.ID)
+
 	// use lambda function here to guarantee all resources to be released
 	dropCollectionFn := func() error {
 		// lock for ddl operation
@@ -328,6 +330,20 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}
 	// error doesn't matter here
 	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+
+	for _, alias := range aliases {
+		req = proxypb.InvalidateCollMetaCacheRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO, msg type
+				MsgID:     0, //TODO, msg id
+				Timestamp: ts,
+				SourceID:  t.core.session.ServerID,
+			},
+			DbName:         t.Req.DbName,
+			CollectionName: alias,
+		}
+		t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+	}
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
