@@ -282,10 +282,9 @@ func TestTimeTickedFlowGraph_SetEdges(t *testing.T) {
 func TestTimeTickedFlowGraph_Start(t *testing.T) {
 	fg, inputChan, outputChan, cancel := createExampleFlowGraph()
 	defer cancel()
-	go fg.Start()
+	fg.Start()
 
 	// input
-	time.Sleep(10 * time.Millisecond)
 	go func() {
 		for i := 0; i < 10; i++ {
 			a := float64(rand.Int())

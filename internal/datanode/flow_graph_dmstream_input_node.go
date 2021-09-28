@@ -45,6 +45,6 @@ func newDmInputNode(ctx context.Context, factory msgstream.Factory, collID Uniqu
 	}
 
 	var stream msgstream.MsgStream = insertStream
-	node := flowgraph.NewInputNode(&stream, "dmInputNode", maxQueueLength, maxParallelism)
+	node := flowgraph.NewInputNode(stream, "dmInputNode", maxQueueLength, maxParallelism)
 	return node, nil
 }
