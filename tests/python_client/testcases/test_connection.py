@@ -301,9 +301,10 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_add_after_default_connect(self, host, port):
         """
-        target: add_connect passes different params after normal connect passes default alias
-        method: normal connection then add_connect passes different params
-        expected: add_connect failed
+        target: add_connection with different params after default alias connected
+        method: 1. connect with default alias
+                2. add_connection with the same alias but different params
+        expected: add_connection failed
         """
         # create connection that param of alias is default
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,
