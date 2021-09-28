@@ -14,6 +14,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -485,6 +486,99 @@ func (insertCodec *InsertCodec) Close() error {
 		}
 	}
 	return nil
+}
+
+// DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
+// timestamp represents the time when this instance was deleted
+type DeleteData struct {
+	Data map[string]int64 // primary key to timestamp
+}
+
+type DeleteCodec struct {
+	Schema          *etcdpb.CollectionMeta
+	readerCloseFunc []func() error
+}
+
+func NewDeleteCodec(schema *etcdpb.CollectionMeta) *DeleteCodec {
+	return &DeleteCodec{Schema: schema}
+}
+
+// Serialize transfer delete data to blob. .
+// For each delete message, it will save "pk,ts" string to binlog.
+func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *DeleteData) (*Blob, error) {
+	binlogWriter := NewDeleteBinlogWriter(schemapb.DataType_String, deleteCodec.Schema.ID, partitionID, segmentID)
+	eventWriter, err := binlogWriter.NextDeleteEventWriter()
+	if err != nil {
+		return nil, err
+	}
+	startTs, endTs := math.MaxInt64, math.MinInt64
+	for key, value := range data.Data {
+		if value < int64(startTs) {
+			startTs = int(value)
+		}
+		if value > int64(endTs) {
+			endTs = int(value)
+		}
+		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%s,%d", key, value))
+		if err != nil {
+			return nil, err
+		}
+	}
+	eventWriter.SetEventTimestamp(uint64(startTs), uint64(endTs))
+	binlogWriter.SetEventTimeStamp(uint64(startTs), uint64(endTs))
+	err = binlogWriter.Close()
+	if err != nil {
+		return nil, err
+	}
+	buffer, err := binlogWriter.GetBuffer()
+	if err != nil {
+		return nil, err
+	}
+	blob := &Blob{
+		Value: buffer,
+	}
+	return blob, nil
+
+}
+
+func (deleteCodec *DeleteCodec) Deserialize(blob *Blob) (partitionID UniqueID, segmentID UniqueID, data *DeleteData, err error) {
+	if blob == nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
+	}
+	readerClose := func(reader *BinlogReader) func() error {
+		return func() error { return reader.Close() }
+	}
+	binlogReader, err := NewBinlogReader(blob.Value)
+	if err != nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, err
+	}
+	pid, sid := binlogReader.PartitionID, binlogReader.SegmentID
+	eventReader, err := binlogReader.NextEventReader()
+	if err != nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, err
+	}
+	result := &DeleteData{
+		Data: make(map[string]int64),
+	}
+	length, err := eventReader.GetPayloadLengthFromReader()
+	for i := 0; i < length; i++ {
+		singleString, err := eventReader.GetOneStringFromPayload(i)
+		if err != nil {
+			return InvalidUniqueID, InvalidUniqueID, nil, err
+		}
+		splits := strings.Split(singleString, ",")
+		if len(splits) != 2 {
+			return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect")
+		}
+		ts, err := strconv.ParseInt(splits[1], 10, 64)
+		if err != nil {
+			return -1, -1, nil, err
+		}
+		result.Data[splits[0]] = ts
+	}
+	deleteCodec.readerCloseFunc = append(deleteCodec.readerCloseFunc, readerClose(binlogReader))
+	return pid, sid, result, nil
+
 }
 
 // Blob key example:
