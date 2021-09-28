@@ -18,6 +18,9 @@ import (
 	"time"
 )
 
+// Do will run function with retry mechanism.
+// fn is the func to run.
+// Option can control the retry times and timeout.
 func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 	c := newDefaultConfig()
@@ -79,6 +82,7 @@ func Unrecoverable(err error) error {
 	return unrecoverableError{err}
 }
 
+// IsUncoverable is used to judge whether the error is wrapped by unrecoverableError.
 func IsUncoverable(err error) bool {
 	_, isUnrecoverable := err.(unrecoverableError)
 	return isUnrecoverable
