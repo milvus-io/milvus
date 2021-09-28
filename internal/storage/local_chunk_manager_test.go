@@ -44,7 +44,8 @@ func TestLocalChunkManager_Read(t *testing.T) {
 	assert.Error(t, err)
 
 	bin = []byte{1, 2, 3}
-	lcm.Write("1", bin)
+	err = lcm.Write("1", bin)
+	assert.Nil(t, err)
 	res, err := lcm.Read("1")
 	assert.Nil(t, err)
 	assert.Equal(t, len(res), len(bin))
