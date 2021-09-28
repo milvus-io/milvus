@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632734664952,
+  "iteration": 1632796549903,
   "links": [],
   "panels": [
     {
@@ -149,7 +149,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Counter of create collection",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -206,7 +206,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Counter of create collection",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5841,5 +5841,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 116
+  "version": 118
 }
