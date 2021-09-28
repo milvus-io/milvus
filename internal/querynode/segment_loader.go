@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -194,10 +193,10 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 }
 
 func (loader *segmentLoader) checkSegmentMemory(segmentLoadInfos []*querypb.SegmentLoadInfo) error {
-	totalRAM := metricsinfo.GetMemoryCount()
-	usedRAM := metricsinfo.GetUsedMemoryCount()
+	totalRAMInMB := Params.CacheSize * 1024.0
+	usedRAMInMB := loader.historicalReplica.getSegmentsMemSize() / 1024.0 / 1024.0
 
-	segmentTotalSize := uint64(0)
+	segmentTotalSize := int64(0)
 	for _, segInfo := range segmentLoadInfos {
 		collectionID := segInfo.CollectionID
 		segmentID := segInfo.SegmentID
@@ -212,22 +211,21 @@ func (loader *segmentLoader) checkSegmentMemory(segmentLoadInfos []*querypb.Segm
 			return err
 		}
 
-		segmentSize := uint64(int64(sizePerRecord) * segInfo.NumOfRows)
-		segmentTotalSize += segmentSize
-		// TODO: get 0.9 from param table
-		thresholdMemSize := float64(totalRAM) * 0.9
+		segmentSize := int64(sizePerRecord) * segInfo.NumOfRows
+		segmentTotalSize += segmentSize / 1024.0 / 1024.0
+		// TODO: get threshold factor from param table
+		thresholdMemSize := float64(totalRAMInMB) * 0.5
 
-		log.Debug("memory size[byte] stats when load segment",
+		log.Debug("memory stats when load segment",
 			zap.Any("collectionIDs", collectionID),
 			zap.Any("segmentID", segmentID),
 			zap.Any("numOfRows", segInfo.NumOfRows),
-			zap.Any("totalRAM", totalRAM),
-			zap.Any("usedRAM", usedRAM),
-			zap.Any("segmentSize", segmentSize),
-			zap.Any("segmentTotalSize", segmentTotalSize),
-			zap.Any("thresholdMemSize", thresholdMemSize),
+			zap.Any("totalRAM(MB)", totalRAMInMB),
+			zap.Any("usedRAM(MB)", usedRAMInMB),
+			zap.Any("segmentTotalSize(MB)", segmentTotalSize),
+			zap.Any("thresholdMemSize(MB)", thresholdMemSize),
 		)
-		if usedRAM+segmentTotalSize > uint64(thresholdMemSize) {
+		if usedRAMInMB+segmentTotalSize > int64(thresholdMemSize) {
 			return errors.New("load segment failed, OOM if load, collectionID = " + fmt.Sprintln(collectionID))
 		}
 	}

@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -24,6 +25,19 @@ func TestParamTable_PulsarAddress(t *testing.T) {
 	split := strings.Split(address, ":")
 	assert.Equal(t, "pulsar", split[0])
 	assert.Equal(t, "6650", split[len(split)-1])
+}
+
+func TestParamTable_cacheSize(t *testing.T) {
+	cacheSize := Params.CacheSize
+	assert.Equal(t, int64(32), cacheSize)
+	err := os.Setenv("CACHE_SIZE", "2")
+	assert.NoError(t, err)
+	Params.initCacheSize()
+	assert.Equal(t, int64(2), Params.CacheSize)
+	err = os.Setenv("CACHE_SIZE", "32")
+	assert.NoError(t, err)
+	Params.initCacheSize()
+	assert.Equal(t, int64(32), Params.CacheSize)
 }
 
 func TestParamTable_minio(t *testing.T) {

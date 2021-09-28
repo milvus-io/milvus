@@ -12,9 +12,12 @@
 package querynode
 
 import (
+	"os"
 	"strconv"
 	"strings"
 	"sync"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -32,6 +35,7 @@ type ParamTable struct {
 	QueryNodeIP   string
 	QueryNodePort int64
 	QueryNodeID   UniqueID
+	CacheSize     int64
 
 	// channel prefix
 	ClusterChannelPrefix     string
@@ -96,6 +100,8 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
+	p.initCacheSize()
+
 	p.initMinioEndPoint()
 	p.initMinioAccessKeyID()
 	p.initMinioSecretAccessKey()
@@ -128,6 +134,26 @@ func (p *ParamTable) Init() {
 	p.initKnowhereSimdType()
 
 	p.initLogCfg()
+}
+
+func (p *ParamTable) initCacheSize() {
+	const defaultCacheSize = 32 // GB
+	p.CacheSize = defaultCacheSize
+
+	var err error
+	cacheSize := os.Getenv("CACHE_SIZE")
+	if cacheSize == "" {
+		cacheSize, err = p.Load("queryNode.cacheSize")
+		if err != nil {
+			return
+		}
+	}
+	value, err := strconv.ParseInt(cacheSize, 10, 64)
+	if err != nil {
+		return
+	}
+	p.CacheSize = value
+	log.Debug("init cacheSize", zap.Any("cacheSize (GB)", p.CacheSize))
 }
 
 // ---------------------------------------------------------- minio
