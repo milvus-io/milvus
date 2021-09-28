@@ -26,6 +26,8 @@ type deleteNode struct {
 
 	channelName string
 	replica     Replica
+
+	flushCh <-chan *flushMsg
 }
 
 func (dn *deleteNode) Name() string {
@@ -48,6 +50,16 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg")
 		return []Msg{}
+	}
+
+	select {
+	case fmsg := <-dn.flushCh:
+		currentSegID := fmsg.segmentID
+		log.Debug("DeleteNode receives flush message",
+			zap.Int64("segmentID", currentSegID),
+			zap.Int64("collectionID", fmsg.collectionID),
+		)
+	default:
 	}
 
 	return []Msg{}
@@ -75,7 +87,7 @@ func (dn *deleteNode) filterSegmentByPK(pks []int64) (map[int64][]int64, error) 
 	return results, nil
 }
 
-func newDeleteNode(replica Replica, channelName string) *deleteNode {
+func newDeleteNode(replica Replica, channelName string, flushCh <-chan *flushMsg) *deleteNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
 
@@ -84,5 +96,7 @@ func newDeleteNode(replica Replica, channelName string) *deleteNode {
 
 		channelName: channelName,
 		replica:     replica,
+
+		flushCh: flushCh,
 	}
 }

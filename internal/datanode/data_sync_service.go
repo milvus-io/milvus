@@ -31,7 +31,7 @@ type dataSyncService struct {
 	ctx          context.Context
 	cancelFn     context.CancelFunc
 	fg           *flowgraph.TimeTickedFlowGraph
-	flushChan    <-chan *flushMsg
+	flushChs     *flushChans
 	replica      Replica
 	idAllocator  allocatorInterface
 	msFactory    msgstream.Factory
@@ -45,7 +45,7 @@ type dataSyncService struct {
 }
 
 func newDataSyncService(ctx context.Context,
-	flushChan <-chan *flushMsg,
+	flushChs *flushChans,
 	replica Replica,
 	alloc allocatorInterface,
 	factory msgstream.Factory,
@@ -66,7 +66,7 @@ func newDataSyncService(ctx context.Context,
 		ctx:              ctx1,
 		cancelFn:         cancel,
 		fg:               nil,
-		flushChan:        flushChan,
+		flushChs:         flushChs,
 		replica:          replica,
 		idAllocator:      alloc,
 		msFactory:        factory,
@@ -181,7 +181,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		dsService.replica,
 		dsService.msFactory,
 		dsService.idAllocator,
-		dsService.flushChan,
+		dsService.flushChs.insertBufferCh,
 		saveBinlog,
 		vchanInfo.GetChannelName(),
 		dsService.flushingSegCache,
@@ -190,7 +190,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	dn := newDeleteNode(dsService.replica, vchanInfo.GetChannelName())
+	dn := newDeleteNode(dsService.replica, vchanInfo.GetChannelName(), dsService.flushChs.deleteBufferCh)
 
 	var deleteNode Node = dn
 
