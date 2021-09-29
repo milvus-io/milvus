@@ -298,6 +298,46 @@ func TestMqMsgStream_Consume(t *testing.T) {
 	}
 }
 
+func TestMqMsgStream_Chan(t *testing.T) {
+	f := &fixture{t: t}
+	parameters := f.setup()
+	defer f.teardown()
+
+	factory := &ProtoUDFactory{}
+	for i := range parameters {
+		func(client mqclient.Client) {
+			m, err := NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
+			assert.Nil(t, err)
+
+			ch := m.Chan()
+			assert.NotNil(t, ch)
+		}(parameters[i].client)
+	}
+}
+
+func TestMqMsgStream_Seek(t *testing.T) {
+	f := &fixture{t: t}
+	parameters := f.setup()
+	defer f.teardown()
+
+	factory := &ProtoUDFactory{}
+	for i := range parameters {
+		func(client mqclient.Client) {
+			m, err := NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
+			assert.Nil(t, err)
+
+			// seek in not subscribed channel
+			p := []*internalpb.MsgPosition{
+				{
+					ChannelName: "b",
+				},
+			}
+			err = m.Seek(p)
+			assert.NotNil(t, err)
+		}(parameters[i].client)
+	}
+}
+
 /* ========================== Pulsar & RocksMQ Tests ========================== */
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
