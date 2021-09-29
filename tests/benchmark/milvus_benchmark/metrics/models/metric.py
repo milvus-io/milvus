@@ -44,6 +44,7 @@ class Metric(object):
         return hashlib.md5(json_str.encode('utf-8')).hexdigest()
 
     def update_status(self, status):
+        # Set the final result of the test run: RUN_SUCC or RUN_FAILED
         self.status = status
 
     def update_result(self, result):
