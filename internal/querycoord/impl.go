@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
+// GetComponentStates return information about whether the coord is healthy
 func (qc *QueryCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	serviceComponentInfo := &internalpb.ComponentInfo{
 		NodeID:    Params.QueryCoordID,
