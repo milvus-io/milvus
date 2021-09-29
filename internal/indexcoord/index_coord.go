@@ -87,8 +87,8 @@ type IndexCoord struct {
 	closeCallbacks []func()
 }
 
+// UniqueID is an alias of int64, is used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
-type Timestamp = typeutil.Timestamp
 
 // NewIndexCoord creates a new IndexCoord component.
 func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
