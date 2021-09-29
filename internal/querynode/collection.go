@@ -99,6 +99,7 @@ OUTER:
 	}
 }
 
+// getVChannels get virtual channels of collection
 func (c *Collection) getVChannels() []Channel {
 	return c.vChannels
 }
