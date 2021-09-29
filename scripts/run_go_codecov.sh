@@ -12,3 +12,4 @@ for d in $(go list ./internal... | grep -v vendor); do
 done
 
 go tool cover -html=./go_coverage.txt -o ./go_coverage.html
+echo "Export go coverage report to go_coverage.html"
