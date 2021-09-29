@@ -33,6 +33,7 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 		return nil, errors.New("rocksdb name is nil")
 	}
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
+	bbto.SetCacheIndexAndFilterBlocks(true)
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(3 << 30))
 	opts := gorocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)

@@ -118,6 +118,7 @@ type rocksmq struct {
 // 3. Start retention goroutine
 func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
+	bbto.SetCacheIndexAndFilterBlocks(true)
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))
 	opts := gorocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)
