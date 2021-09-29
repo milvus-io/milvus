@@ -340,6 +340,11 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 - [Go SDK](https://github.com/milvus-io/milvus-sdk-go)(开发中)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
+### Milvus insight
+
+Milvus insight 提供了好用的图形化界面，帮助您更好的管理数据和Milvus.
+- [快速开始](https://github.com/milvus-io/milvus-insight#quick-start)
+
 ## 社区
 
 欢迎加入 [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) 频道分享你的建议与问题。你也可以通过 [FAQ](https://milvus.io/cn/docs/performance_faq.md) 页面，查看常见问题及解答。
