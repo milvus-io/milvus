@@ -56,6 +56,7 @@ func (c *Collection) ID() UniqueID {
 	return c.id
 }
 
+// Schema returns the schema of collection
 func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema
 }
