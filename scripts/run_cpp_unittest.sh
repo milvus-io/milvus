@@ -33,16 +33,6 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
       echo ${UNITTEST_DIR}/all_tests "run failed"
       exit 1
   fi
-   
-  #for test in `ls ${UNITTEST_DIR}`; do
-  #  echo $test " running..."
-  #  # run unittest
-  #  ${UNITTEST_DIR}/${test}
-  #  if [ $? -ne 0 ]; then
-  #      echo ${UNITTEST_DIR}/${test} "run failed"
-  #      exit 1
-  #  fi
-  #done
 done
 
 # run cwrapper unittest
