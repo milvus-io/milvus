@@ -109,7 +109,7 @@ message HasCollectionRequest {
   string db_name = 2;
   // The collection name you want to check.
   string collection_name = 3; 
-  // Not useful for now
+  // If time_stamp is not zero, will return true when time_stamp >= created collection timestamp, otherwise will return false.
   uint64 time_stamp = 4;
 }
 
@@ -132,11 +132,11 @@ message DescribeCollectionRequest {
   common.MsgBase base = 1;
   // Not useful for now
   string db_name = 2;
-  // The collection name you want to describe
+  // The collection name you want to describe, you can pass collection_name or collectionID
   string collection_name = 3;
-  // Not useful for now
+  // The collection ID you want to describe
   int64 collectionID = 4;
-  // Not useful for now
+  // If time_stamp is not zero, will describe collection success when time_stamp >= created collection timestamp, otherwise will throw error.
   uint64 time_stamp = 5;
 }
 
@@ -328,24 +328,39 @@ message ReleasePartitionsRequest {
   repeated string partition_names = 4;
 }
 
+/*
+* Get partition statistics like row_count.
+*/
 message GetPartitionStatisticsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  string partition_name = 4; // must
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition name you want to collect statistics
+  string partition_name = 4; 
 }
 
 message GetPartitionStatisticsResponse {
   common.Status status = 1;
   repeated common.KeyValuePair stats = 2;
 }
-
+/*
+* List all partitions for particular collection
+*/
 message ShowPartitionsRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The collection name you want to describe, you can pass collection_name or collectionID
+  string collection_name = 3;
+  // The collection id in milvus
   int64 collectionID = 4;
-  repeated string partition_names = 5; // show partition in querynode, showType = InMemory
+  // When type is InMemory, will return these patitions's inMemory_percentages.(Optional)
+  repeated string partition_names = 5;
+  // Decide return Loaded partitions or All partitions(Optional)
   ShowType type = 6;
 }
 

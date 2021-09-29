@@ -388,7 +388,7 @@ type HasCollectionRequest struct {
 	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	// The collection name you want to check.
 	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	// Not useful for now
+	// If time_stamp is not zero, will return true when time_stamp >= created collection timestamp, otherwise will return false.
 	TimeStamp            uint64   `protobuf:"varint,4,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
@@ -549,11 +549,11 @@ type DescribeCollectionRequest struct {
 	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	// Not useful for now
 	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	// The collection name you want to describe
+	// The collection name you want to describe, you can pass collection_name or collectionID
 	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	// Not useful for now
+	// The collection ID you want to describe
 	CollectionID int64 `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	// Not useful for now
+	// If time_stamp is not zero, will describe collection success when time_stamp >= created collection timestamp, otherwise will throw error.
 	TimeStamp            uint64   `protobuf:"varint,5,opt,name=time_stamp,json=timeStamp,proto3" json:"time_stamp,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
@@ -1486,14 +1486,20 @@ func (m *ReleasePartitionsRequest) GetPartitionNames() []string {
 	return nil
 }
 
+//
+// Get partition statistics like row_count.
 type GetPartitionStatisticsRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	PartitionName        string            `protobuf:"bytes,4,opt,name=partition_name,json=partitionName,proto3" json:"partition_name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name in milvus
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// The partition name you want to collect statistics
+	PartitionName        string   `protobuf:"bytes,4,opt,name=partition_name,json=partitionName,proto3" json:"partition_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *GetPartitionStatisticsRequest) Reset()         { *m = GetPartitionStatisticsRequest{} }
@@ -1596,16 +1602,24 @@ func (m *GetPartitionStatisticsResponse) GetStats() []*commonpb.KeyValuePair {
 	return nil
 }
 
+//
+// List all partitions for particular collection
 type ShowPartitionsRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	CollectionID         int64             `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	PartitionNames       []string          `protobuf:"bytes,5,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
-	Type                 ShowType          `protobuf:"varint,6,opt,name=type,proto3,enum=milvus.proto.milvus.ShowType" json:"type,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The collection name you want to describe, you can pass collection_name or collectionID
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// The collection id in milvus
+	CollectionID int64 `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	// When type is InMemory, will return these patitions's inMemory_percentages.(Optional)
+	PartitionNames []string `protobuf:"bytes,5,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
+	// Decide return Loaded partitions or All partitions(Optional)
+	Type                 ShowType `protobuf:"varint,6,opt,name=type,proto3,enum=milvus.proto.milvus.ShowType" json:"type,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *ShowPartitionsRequest) Reset()         { *m = ShowPartitionsRequest{} }
