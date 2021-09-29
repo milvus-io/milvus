@@ -88,8 +88,9 @@ func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentra
 		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
 		return span, ctx
 	}
-	fn := runtime.FuncForPC(pcs[0])
-	name := fn.Name()
+	frames := runtime.CallersFrames(pcs[:])
+	frame, _ := frames.Next()
+	name := frame.Function
 	if lastSlash := strings.LastIndexByte(name, '/'); lastSlash > 0 {
 		name = name[lastSlash+1:]
 	}
@@ -99,7 +100,7 @@ func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentra
 	}
 	span := opentracing.StartSpan(name, opts...)
 
-	file, line := fn.FileLine(pcs[0])
+	file, line := frame.File, frame.Line
 	span.LogFields(log.String("filename", file), log.Int("line", line))
 
 	return span, opentracing.ContextWithSpan(ctx, span)
@@ -125,7 +126,9 @@ func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operatio
 		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
 		return span, ctx
 	}
-	file, line := runtime.FuncForPC(pcs[0]).FileLine(pcs[0])
+	frames := runtime.CallersFrames(pcs[:])
+	frame, _ := frames.Next()
+	file, line := frame.File, frame.Line
 
 	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
 		opts = append(opts, opentracing.ChildOf(parentSpan.Context()))
@@ -153,7 +156,9 @@ func LogError(span opentracing.Span, err error) error {
 		return err
 	}
 
-	file, line := runtime.FuncForPC(pcs[0]).FileLine(pcs[0])
+	frames := runtime.CallersFrames(pcs[:])
+	frame, _ := frames.Next()
+	file, line := frame.File, frame.Line
 	span.LogFields(log.String("filename", file), log.Int("line", line), log.Error(err))
 
 	return err
