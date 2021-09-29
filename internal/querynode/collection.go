@@ -164,6 +164,7 @@ func (c *Collection) deleteReleasedPartition(partitionID UniqueID) {
 	log.Debug("queryNode collection info after reload a released partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
+// checkReleasedPartitions returns error if any partition has been released
 func (c *Collection) checkReleasedPartitions(partitionIDs []UniqueID) error {
 	c.releaseMu.RLock()
 	defer c.releaseMu.RUnlock()
