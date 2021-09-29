@@ -52,22 +52,22 @@ class TestInsertBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_empty_entity(self, connect, collection):
-        '''
+        """
         target: test insert with empty entity list
         method: set empty entity list as insert method params
         expected: raises a ParamError exception
-        '''
+        """
         entities = []
         with pytest.raises(ParamError) as e:
             connect.insert(collection, entities)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_None(self, connect, collection):
-        '''
+        """
         target: test insert with None
         method: set None as insert method params
         expected: raises a ParamError
-        '''
+        """
         entity = None
         with pytest.raises(Exception) as e:
             connect.insert(collection, entity)
@@ -75,33 +75,33 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_collection_not_existed(self, connect):
-        '''
+        """
         target: test insert, with collection not existed
         method: insert entity into a random named collection
         expected: raise a BaseException
-        '''
+        """
         collection_name = gen_unique_str(uid)
         with pytest.raises(BaseException) as e:
             connect.insert(collection_name, default_entities)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_without_connect(self, dis_connect, collection):
-        '''
+        """
         target: test insert entities without connection
         method: create collection and insert entities in it, check if inserted successfully
         expected: raise exception
-        '''
+        """
         with pytest.raises(Exception) as e:
             dis_connect.insert(collection, default_entities)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_drop_collection(self, connect, collection):
-        '''
+        """
         target: test delete collection after insert entities
         method: insert entities and drop collection
         expected: has_collection false
-        '''
+        """
         result = connect.insert(collection, default_entity)
         assert len(result.primary_keys) == 1
         connect.drop_collection(collection)
@@ -110,11 +110,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_flush_drop_collection(self, connect, collection):
-        '''
+        """
         target: test drop collection after insert entities for a while
         method: insert entities, sleep, and delete collection
         expected: has_collection false
-        '''
+        """
         result = connect.insert(collection, default_entity)
         assert len(result.primary_keys) == 1
         connect.flush([collection])
@@ -124,11 +124,11 @@ class TestInsertBase:
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index(self, connect, collection, get_simple_index):
-        '''
+        """
         target: test build index insert after entities
         method: insert entities and build index
         expected: no error raised
-        '''
+        """
         result = connect.insert(collection, default_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
@@ -141,11 +141,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
-        '''
+        """
         target: test build index insert after vector
         method: insert entities and build index
         expected: no error raised
-        '''
+        """
         connect.create_index(collection, field_name, get_simple_index)
         result = connect.insert(collection, default_entities)
         assert len(result.primary_keys) == default_nb
@@ -157,11 +157,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_search(self, connect, collection):
-        '''
+        """
         target: test search entity after insert entity after a while
         method: insert entity, sleep, and search collection
         expected: no error raised
-        '''
+        """
         result = connect.insert(collection, default_entities)
         connect.flush([collection])
         connect.load_collection(collection)
