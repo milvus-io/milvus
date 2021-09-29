@@ -226,9 +226,34 @@ type RootCoord interface {
 	// error is always nil
 	ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 
-	//index builder service
+	// CreateIndex notifies RootCoord to create an index for the specified field in the collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name, field name and index parameters
+	//
+	// The `ErrorCode` of `Status` is `Success` if create index successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+
+	// DescribeIndex notifies RootCoord to get specified index information for specified field
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name, field name and index name
+	//
+	// The `Status` in response struct `DescribeIndexResponse` indicates if this operation is processed successfully or fail cause;
+	// index information is filled in `IndexDescriptions`
+	// error is always nil
 	DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+
+	// DropIndex notifies RootCoord to drop the specified index for the specified field
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name, field name and index name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop index successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	// collection alias
