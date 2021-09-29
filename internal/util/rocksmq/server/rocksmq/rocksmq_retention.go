@@ -279,7 +279,7 @@ func (ri *retentionInfo) retention() error {
 	for {
 		select {
 		case <-ri.ctx.Done():
-			log.Debug("aaaaaaaaaaaaa")
+			log.Debug("Rocksmq retention finish!")
 			return nil
 		case t := <-ticker.C:
 			timeNow := t.Unix()
