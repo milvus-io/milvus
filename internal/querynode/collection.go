@@ -186,6 +186,7 @@ func (c *Collection) getLoadType() loadType {
 	return c.loadType
 }
 
+// newCollection returns a new Collection
 func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
 	/*
 		CCollection
