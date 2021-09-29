@@ -182,6 +182,7 @@ func (c *Collection) setLoadType(l loadType) {
 	c.loadType = l
 }
 
+// getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) getLoadType() loadType {
 	return c.loadType
 }
