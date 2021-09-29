@@ -559,7 +559,7 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 		err = replica.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
 		assert.Nil(t, err)
 
-		totalSegments := replica.getSegments("insert-01")
+		totalSegments := replica.filterSegments("insert-01", 0)
 		assert.Equal(t, len(totalSegments), 3)
 	})
 }
