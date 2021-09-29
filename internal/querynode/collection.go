@@ -133,6 +133,7 @@ func (c *Collection) setReleaseTime(t Timestamp) {
 	c.releaseTime = t
 }
 
+// getReleaseTime gets the time when collection is released
 func (c *Collection) getReleaseTime() Timestamp {
 	c.releaseMu.RLock()
 	defer c.releaseMu.RUnlock()
