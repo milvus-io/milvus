@@ -1096,6 +1096,44 @@ func TestDropPartitionEvent(t *testing.T) {
 
 }
 
+/* #nosec G103 */
+func TestIndexFileEvent(t *testing.T) {
+	t.Run("index_file_timestamp", func(t *testing.T) {
+		w, err := newIndexFileEventWriter()
+		assert.Nil(t, err)
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
+
+		payload := "payload"
+		err = w.AddOneStringToPayload(payload)
+		assert.Nil(t, err)
+
+		err = w.Finish()
+		assert.Nil(t, err)
+
+		var buf bytes.Buffer
+		err = w.Write(&buf)
+		assert.Nil(t, err)
+		err = w.Close()
+		assert.Nil(t, err)
+
+		wBuf := buf.Bytes()
+		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
+		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
+		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
+		assert.Equal(t, Timestamp(et), tsoutil.ComposeTS(100, 0))
+
+		payloadOffset := binary.Size(eventHeader{}) + binary.Size(indexFileEventData{})
+		pBuf := wBuf[payloadOffset:]
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		assert.Nil(t, err)
+		value, err := pR.GetOneStringFromPayload(0)
+		assert.Nil(t, err)
+		assert.Equal(t, payload, value)
+		err = pR.Close()
+		assert.Nil(t, err)
+	})
+}
+
 func TestDescriptorEventTsError(t *testing.T) {
 	insertData := &insertEventData{
 		StartTimestamp: 0,
@@ -1264,5 +1302,30 @@ func TestEventClose(t *testing.T) {
 	err = r.readHeader()
 	assert.NotNil(t, err)
 	err = r.readData()
+	assert.NotNil(t, err)
+}
+
+func TestIndexFileEventDataError(t *testing.T) {
+	var err error
+	var buffer bytes.Buffer
+
+	event := newIndexFileEventData()
+
+	event.SetEventTimestamp(0, 1)
+	// start timestamp not set
+	err = event.WriteEventData(&buffer)
+	assert.NotNil(t, err)
+
+	event.SetEventTimestamp(1, 0)
+	// end timestamp not set
+	err = event.WriteEventData(&buffer)
+	assert.NotNil(t, err)
+}
+
+func TestReadIndexFileEventDataFixPart(t *testing.T) {
+	var err error
+	var buffer bytes.Buffer
+	// buffer is empty
+	_, err = readIndexFileEventDataFixPart(&buffer)
 	assert.NotNil(t, err)
 }

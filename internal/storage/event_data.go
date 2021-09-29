@@ -266,6 +266,30 @@ func (data *dropPartitionEventData) WriteEventData(buffer io.Writer) error {
 	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
+type indexFileEventData struct {
+	StartTimestamp typeutil.Timestamp
+	EndTimestamp   typeutil.Timestamp
+}
+
+func (data *indexFileEventData) SetEventTimestamp(start typeutil.Timestamp, end typeutil.Timestamp) {
+	data.StartTimestamp = start
+	data.EndTimestamp = end
+}
+
+func (data *indexFileEventData) GetEventDataFixPartSize() int32 {
+	return int32(binary.Size(data))
+}
+
+func (data *indexFileEventData) WriteEventData(buffer io.Writer) error {
+	if data.StartTimestamp == 0 {
+		return errors.New("hasn't set start time stamp")
+	}
+	if data.EndTimestamp == 0 {
+		return errors.New("hasn't set end time stamp")
+	}
+	return binary.Write(buffer, binary.LittleEndian, data)
+}
+
 func getEventFixPartSize(code EventTypeCode) int32 {
 	switch code {
 	case DescriptorEventType:
@@ -282,6 +306,8 @@ func getEventFixPartSize(code EventTypeCode) int32 {
 		return (&createPartitionEventData{}).GetEventDataFixPartSize()
 	case DropPartitionEventType:
 		return (&dropPartitionEventData{}).GetEventDataFixPartSize()
+	case IndexFileEventType:
+		return (&indexFileEventData{}).GetEventDataFixPartSize()
 	default:
 		return -1
 	}
@@ -344,6 +370,12 @@ func newDropPartitionEventData() *dropPartitionEventData {
 		EndTimestamp:   0,
 	}
 }
+func newIndexFileEventData() *indexFileEventData {
+	return &indexFileEventData{
+		StartTimestamp: 0,
+		EndTimestamp:   0,
+	}
+}
 
 func readInsertEventDataFixPart(buffer io.Reader) (*insertEventData, error) {
 	data := &insertEventData{}
@@ -387,6 +419,14 @@ func readCreatePartitionEventDataFixPart(buffer io.Reader) (*createPartitionEven
 
 func readDropPartitionEventDataFixPart(buffer io.Reader) (*dropPartitionEventData, error) {
 	data := &dropPartitionEventData{}
+	if err := binary.Read(buffer, binary.LittleEndian, data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func readIndexFileEventDataFixPart(buffer io.Reader) (*indexFileEventData, error) {
+	data := &indexFileEventData{}
 	if err := binary.Read(buffer, binary.LittleEndian, data); err != nil {
 		return nil, err
 	}

@@ -247,8 +247,19 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	}
 
 	// serialize index params
-	var indexCodec storage.IndexCodec
-	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, indexName, indexID)
+	indexCodec := storage.NewIndexFileBinlogCodec()
+	serializedIndexBlobs, err := indexCodec.Serialize(
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		indexParams,
+		indexName,
+		indexID,
+		binarySet,
+	)
 	if err != nil {
 		return nil, err
 	}
