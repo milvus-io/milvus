@@ -17,22 +17,22 @@ class TestCreateBase:
     """
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_a(self, connect, collection):
-        '''
+        """
         target: test create partition, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         connect.create_partition(collection, default_tag)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="skip temporarily for debug")
     @pytest.mark.timeout(600)
     def test_create_partition_limit(self, connect, collection, args):
-        '''
+        """
         target: test create partitions, check status returned
         method: call function: create_partition for 4097 times
         expected: exception raised
-        '''
+        """
         threads_num = 8
         threads = []
         if args["handler"] == "HTTP":
@@ -56,11 +56,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_repeat(self, connect, collection):
-        '''
+        """
         target: test create partition, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         connect.create_partition(collection, default_tag)
         try:
             connect.create_partition(collection, default_tag)
@@ -89,11 +89,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_name_name_none(self, connect, collection):
-        '''
+        """
         target: test create partition, tag name set None, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         tag_name = None
         try:
             connect.create_partition(collection, tag_name)
@@ -114,11 +114,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_default(self, connect, id_collection):
-        '''
+        """
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
         result = connect.insert(id_collection, default_entities)
@@ -126,11 +126,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag(self, connect, id_collection):
-        '''
+        """
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
         result = connect.insert(id_collection, default_entities, partition_name=default_tag)
@@ -138,11 +138,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag_not_existed(self, connect, collection):
-        '''
+        """
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status not ok
-        '''
+        """
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)
         ids = [i for i in range(default_nb)]
@@ -156,11 +156,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_same_tags(self, connect, id_collection):
-        '''
+        """
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
         result = connect.insert(id_collection, default_entities, partition_name=default_tag)
@@ -174,11 +174,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
-        '''
+        """
         target: test create two partitions, and insert vectors with the same tag to each collection, check status returned
         method: call function: create_partition
         expected: status ok, collection length is correct
-        '''
+        """
         connect.create_partition(collection, default_tag)
         collection_new = gen_unique_str()
         connect.create_collection(collection_new, default_fields)
@@ -203,31 +203,31 @@ class TestShowBase:
     """
     @pytest.mark.tags(CaseLabel.L0)
     def test_list_partitions(self, connect, collection):
-        '''
+        """
         target: test show partitions, check status and partitions returned
         method: create partition first, then call function: list_partitions
         expected: status ok, partition correct
-        '''
+        """
         connect.create_partition(collection, default_tag)
         assert compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_list_partitions_no_partition(self, connect, collection):
-        '''
+        """
         target: test show partitions with collection name, check status and partitions returned
         method: call function: list_partitions
         expected: status ok, partitions correct
-        '''
+        """
         res = connect.list_partitions(collection)
         assert compare_list_elements(res, ['_default'])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_show_multi_partitions(self, connect, collection):
-        '''
+        """
         target: test show partitions, check status and partitions returned
         method: create partitions first, then call function: list_partitions
         expected: status ok, partitions correct
-        '''
+        """
         tag_new = gen_unique_str()
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
@@ -251,11 +251,11 @@ class TestHasBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_has_partition_a(self, connect, collection):
-        '''
+        """
         target: test has_partition, check status and result
         method: create partition first, then call function: has_partition
         expected: status ok, result true
-        '''
+        """
         connect.create_partition(collection, default_tag)
         res = connect.has_partition(collection, default_tag)
         logging.getLogger().info(res)
@@ -263,11 +263,11 @@ class TestHasBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_has_partition_multi_partitions(self, connect, collection):
-        '''
+        """
         target: test has_partition, check status and result
         method: create partition first, then call function: has_partition
         expected: status ok, result true
-        '''
+        """
         for tag_name in [default_tag, "tag_new", "tag_new_new"]:
             connect.create_partition(collection, tag_name)
         for tag_name in [default_tag, "tag_new", "tag_new_new"]:
@@ -276,22 +276,22 @@ class TestHasBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_has_partition_name_not_existed(self, connect, collection):
-        '''
+        """
         target: test has_partition, check status and result
         method: then call function: has_partition, with tag not existed
         expected: status ok, result empty
-        '''
+        """
         res = connect.has_partition(collection, default_tag)
         logging.getLogger().info(res)
         assert not res
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_has_partition_collection_not_existed(self, connect, collection):
-        '''
+        """
         target: test has_partition, check status and result
         method: then call function: has_partition, with collection not existed
         expected: status not ok
-        '''
+        """
         collection_name = "not_existed_collection"
         try:
             connect.has_partition(collection_name, default_tag)
@@ -303,11 +303,11 @@ class TestHasBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
-        '''
+        """
         target: test has partition, with invalid tag name, check status returned
         method: call function: has_partition
         expected: status ok
-        '''
+        """
         tag_name = get_tag_name
         connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
@@ -323,11 +323,11 @@ class TestDropBase:
     """
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_a(self, connect, collection):
-        '''
+        """
         target: test drop partition, check status and partition if existed
         method: create partitions first, then call function: drop_partition
         expected: status ok, no partitions in db
-        '''
+        """
         connect.create_partition(collection, default_tag)
         res1 = connect.list_partitions(collection)
         assert default_tag in res1
@@ -337,11 +337,11 @@ class TestDropBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_name_not_existed(self, connect, collection):
-        '''
+        """
         target: test drop partition, but tag not existed
         method: create partitions first, then call function: drop_partition
         expected: status not ok
-        '''
+        """
         connect.create_partition(collection, default_tag)
         new_tag = "new_tag"
         try:
@@ -354,11 +354,11 @@ class TestDropBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_name_not_existed_A(self, connect, collection):
-        '''
+        """
         target: test drop partition, but collection not existed
         method: create partitions first, then call function: drop_partition
         expected: status not ok
-        '''
+        """
         connect.create_partition(collection, default_tag)
         new_collection = gen_unique_str()
         try:
@@ -371,11 +371,11 @@ class TestDropBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_repeatedly(self, connect, collection):
-        '''
+        """
         target: test drop partition twice, check status and partition if existed
         method: create partitions first, then call function: drop_partition
         expected: status not ok, no partitions in db
-        '''
+        """
         connect.create_partition(collection, default_tag)
         connect.drop_partition(collection, default_tag)
         time.sleep(2)
@@ -391,11 +391,11 @@ class TestDropBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_create(self, connect, collection):
-        '''
+        """
         target: test drop partition, and create again, check status
         method: create partitions first, then call function: drop_partition, create_partition
         expected: status not ok, partition in db
-        '''
+        """
         connect.create_partition(collection, default_tag)
         assert compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
         connect.drop_partition(collection, default_tag)
@@ -422,11 +422,11 @@ class TestNameInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_with_invalid_collection_name(self, connect, collection, get_collection_name):
-        '''
+        """
         target: test drop partition, with invalid collection name, check status returned
         method: call function: drop_partition
         expected: status not ok
-        '''
+        """
         collection_name = get_collection_name
         connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
@@ -434,11 +434,11 @@ class TestNameInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
-        '''
+        """
         target: test drop partition, with invalid tag name, check status returned
         method: call function: drop_partition
         expected: status not ok
-        '''
+        """
         tag_name = get_tag_name
         connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
@@ -446,11 +446,11 @@ class TestNameInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_list_partitions_with_invalid_collection_name(self, connect, collection, get_collection_name):
-        '''
+        """
         target: test show partitions, with invalid collection name, check status returned
         method: call function: list_partitions
         expected: status not ok
-        '''
+        """
         collection_name = get_collection_name
         connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
@@ -461,11 +461,11 @@ class TestNewCase(object):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_default_partition_A(self, connect, collection):
-        '''
+        """
         target: test drop partition of default, check status returned
         method: call function: drop_partition
         expected: status not ok
-        '''
+        """
         try:
             connect.drop_partition(collection, partition_name='_default')
         except Exception as e:
@@ -478,11 +478,11 @@ class TestNewCase(object):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_default_partition_B(self, connect, collection):
-        '''
+        """
         target: test drop partition of default, check status returned
         method: call function: drop_partition
         expected: status not ok
-        '''
+        """
         connect.create_partition(collection, default_tag)
         try:
             connect.drop_partition(collection, partition_name='_default')
