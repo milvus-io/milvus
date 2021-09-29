@@ -155,6 +155,7 @@ func (c *Collection) addReleasedPartition(partitionID UniqueID) {
 	log.Debug("queryNode collection info after release a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
+// deleteReleasedPartition remove the released partition record from collection
 func (c *Collection) deleteReleasedPartition(partitionID UniqueID) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
