@@ -30,6 +30,7 @@ class Metric(object):
         self.datetime = str(datetime.datetime.now())
 
     def set_run_id(self):
+        # Get current time as run id, which uniquely identifies this test
         self.run_id = int(time.time())
 
     def set_mode(self, mode):
