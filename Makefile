@@ -78,7 +78,7 @@ endif
 
 verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
 
-# Builds various components locally.
+# Build various components locally.
 binlog:
 	@echo "Building binlog ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/binlog/main.go 1>/dev/null
@@ -108,7 +108,7 @@ build-cpp-with-unittest:
 	@(env bash $(PWD)/scripts/core_build.sh -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-# Runs the tests.
+# Run the tests.
 unittest: test-cpp test-go
 
 test-go: build-cpp-with-unittest
@@ -120,7 +120,7 @@ test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
-# Runs code coverage.
+# Run code coverage.
 codecov: codecov-go codecov-cpp
 
 # Run codecov-go
@@ -136,7 +136,7 @@ codecov-cpp: build-cpp-with-unittest
 #TODO: build each component to docker
 docker: verifiers
 
-# Builds each component and installs it to $GOPATH/bin.
+# Build each component and install binary to $GOPATH/bin.
 install: all
 	@echo "Installing binary to './bin'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
