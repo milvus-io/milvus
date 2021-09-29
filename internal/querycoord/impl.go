@@ -70,6 +70,7 @@ func (qc *QueryCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
+// ShowCollections return all the collections that have been loaded
 func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	dbID := req.DbID
 	log.Debug("show collection start", zap.Int64("dbID", dbID))
