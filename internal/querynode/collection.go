@@ -127,6 +127,7 @@ func (c *Collection) getPChannels() []Channel {
 	return c.pChannels
 }
 
+// setReleaseTime records when collection is released
 func (c *Collection) setReleaseTime(t Timestamp) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
