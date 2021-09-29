@@ -225,6 +225,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	return s.dataCoord.GetPartitionStatistics(ctx, req)
 }
 
+// GetSegmentInfoChannel gets channel to which datacoord sends segment information
 func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataCoord.GetSegmentInfoChannel(ctx)
 }
