@@ -69,6 +69,7 @@ func (c *Collection) addPartitionID(partitionID UniqueID) {
 	log.Debug("queryNode collection info after add a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
+// removePartitionID remove the partition id from partition id list of collection
 func (c *Collection) removePartitionID(partitionID UniqueID) {
 	tmpIDs := make([]UniqueID, 0)
 	for _, id := range c.partitionIDs {
