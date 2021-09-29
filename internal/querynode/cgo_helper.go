@@ -60,6 +60,7 @@ func (protoCGo *ProtoCGo) destruct() {
 	protoCGo.blob = nil
 }
 
+// HandleCStatus deal with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	if status.error_code == 0 {
 		return nil
