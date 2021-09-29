@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632907863036,
+  "iteration": 1632912367844,
   "links": [],
   "panels": [
     {
@@ -778,6 +778,7 @@
       "pluginVersion": "7.5.10",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
           "instant": false,
           "interval": "",
@@ -794,7 +795,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total  RootCoord drop collection operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5813,5 +5814,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 123
+  "version": 124
 }
