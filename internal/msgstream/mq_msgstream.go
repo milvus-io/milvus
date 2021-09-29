@@ -539,7 +539,7 @@ func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 				Topic:                       channel,
 				SubscriptionName:            subName,
 				Type:                        mqclient.KeyShared,
-				SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
+				SubscriptionInitialPosition: mqclient.SubscriptionPositionLatest,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
