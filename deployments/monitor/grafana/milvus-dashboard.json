@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632895454780,
+  "iteration": 1632907863036,
   "links": [],
   "panels": [
     {
@@ -455,7 +455,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -464,7 +463,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -739,7 +737,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total success of RootCoord describe collection operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1203,7 +1201,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:109",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1212,7 +1209,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:110",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1307,7 +1303,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:185",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1316,7 +1311,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:186",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3025,7 +3019,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:660",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3034,7 +3027,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:661",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3128,7 +3120,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:584",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3137,7 +3128,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:585",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4166,7 +4156,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:269",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4175,7 +4164,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:270",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4264,7 +4252,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:345",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4273,7 +4260,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:346",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4363,7 +4349,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:421",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4372,7 +4357,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:422",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4461,7 +4445,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:434",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4470,7 +4453,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:435",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4560,7 +4542,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:92",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4569,7 +4550,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:93",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4754,7 +4734,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:51",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4763,7 +4742,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:52",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4851,7 +4829,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4860,7 +4837,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4949,7 +4925,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:455",
           "decimals": null,
           "format": "short",
           "label": null,
@@ -4959,7 +4934,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:456",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -5635,7 +5609,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:204",
           "decimals": null,
           "format": "short",
           "label": null,
@@ -5645,7 +5618,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:205",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -5715,8 +5687,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "default",
-          "value": "default"
+          "text": "test",
+          "value": "test"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -5841,5 +5813,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 122
+  "version": 123
 }
