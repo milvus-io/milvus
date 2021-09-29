@@ -185,7 +185,6 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #8614: can't use alias to create index")
     def test_alias_exec_operations_as_collection(self):
         """
         target: test alias 
@@ -255,7 +254,7 @@ class TestAliasOperation(TestcaseBase):
         
         # assert create index
         pytest.assume(create_index_flag == True and
-                      collection_alias.has_index == True and
+                      collection_alias.has_index() == True and
                       collection_w.has_index()[0] == True)
         
         # load by alias
