@@ -37,7 +37,7 @@ rm -rf ${DIR_LCOV_OUTPUT}
 # generate baseline
 ${LCOV_CMD} -c -i -d ${DIR_GCNO} -o ${FILE_INFO_BASE}
 if [ $? -ne 0 ]; then
-    echo "gen baseline coverage run failed"
+    echo "Failed to generate coverage baseline"
     exit -1
 fi
 
