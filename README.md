@@ -357,7 +357,7 @@ The implemented SDK and its API documentation are listed below:
 
 Milvus insight provides an intuitive and efficient GUI for Milvus.
 
-- [Quick start](https://github.com/milvus-io/milvus-insight#quick-start)
+- [Quick start](https://github.com/zilliztech/milvus-insight#quick-start)
 
 ## Community
 
