@@ -55,6 +55,7 @@ func MarshalForCGo(msg proto.Message) (*ProtoCGo, error) {
 	return protoCGo, nil
 }
 
+// destruct free ProtoCGo go memory
 func (protoCGo *ProtoCGo) destruct() {
 	// NOTE: at ProtoCGo, blob is go heap memory, no need to destruct
 	protoCGo.blob = nil
