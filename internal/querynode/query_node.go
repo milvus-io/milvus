@@ -45,6 +45,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+type Base interface {
+	types.QueryNode
+
+	UpdateStateCode(code internalpb.StateCode)
+	SetRootCoord(rc types.RootCoord) error
+	SetIndexCoord(index types.IndexCoord) error
+}
+
 // QueryNode communicates with outside services and union all
 // services in querynode package.
 //
