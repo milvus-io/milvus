@@ -553,3 +553,22 @@ func TestGrpcTaskBeforeHealthy(t *testing.T) {
 	err = removeAllSession()
 	assert.Nil(t, err)
 }
+
+func Test_GrpcGetQueryChannelFail(t *testing.T) {
+	kv := &testKv{
+		returnFn: failedResult,
+	}
+	meta, err := newMeta(kv)
+	assert.Nil(t, err)
+
+	queryCoord := &QueryCoord{
+		meta: meta,
+	}
+	queryCoord.stateCode.Store(internalpb.StateCode_Healthy)
+
+	res, err := queryCoord.CreateQueryChannel(context.Background(), &querypb.CreateQueryChannelRequest{
+		CollectionID: defaultCollectionID,
+	})
+	assert.NotNil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+}
