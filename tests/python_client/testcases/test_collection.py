@@ -2731,6 +2731,12 @@ class TestLoadCollection:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_collection(self, connect, collection):
+        """
+        target: test load, release non-exist collection
+        method: 1. load, release and drop collection
+                2. load and release dropped collection
+        expected: raise exception
+        """
         collection_name = gen_unique_str(uid_load)
         connect.create_collection(collection_name, cons.default_fields)
         connect.insert(collection_name, cons.default_entities)
