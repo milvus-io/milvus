@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
+// Server is the grpc server of datacoord
 type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
