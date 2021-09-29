@@ -123,6 +123,7 @@ OUTER:
 	}
 }
 
+// getPChannels get physical channels of collection
 func (c *Collection) getPChannels() []Channel {
 	return c.pChannels
 }
