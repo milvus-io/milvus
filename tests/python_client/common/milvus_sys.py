@@ -73,6 +73,11 @@ class MilvusSys:
         """get all the nodes in Milvus deployment"""
         return json.loads(self.sys_info.response).get('nodes_info')
 
-    @property
     def get_nodes_by_type(self, node_type=None):
-        return NotImplementedError
+        target_nodes = []
+        if node_type is not None:
+            for node in self.nodes:
+                if str(node_type).lower() == str(node.get('infos').get('type')).lower():
+                    target_nodes.append(node)
+        return target_nodes
+
