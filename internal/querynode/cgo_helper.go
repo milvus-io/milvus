@@ -78,6 +78,7 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	return errors.New(finalMsg)
 }
 
+// HandleCProtoResult deal with the result proto returned from CGO
 func HandleCProtoResult(cRes *C.CProtoResult, msg proto.Message) error {
 	// Standalone CProto is protobuf created by C side,
 	// Passed from c side
