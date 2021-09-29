@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+// QueryNode implements QueryNode grpc server
 type QueryNode struct {
 	ctx context.Context
 	svr *grpcquerynode.Server
@@ -55,6 +56,7 @@ func (q *QueryNode) Stop() error {
 	return nil
 }
 
+// GetComponentStates returns QueryNode's states
 func (q *QueryNode) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return q.svr.GetComponentStates(ctx, request)
 }

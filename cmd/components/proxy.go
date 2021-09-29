@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+// Proxy implements Proxy grpc server
 type Proxy struct {
 	svr *grpcproxy.Server
 }
@@ -53,6 +54,7 @@ func (n *Proxy) Stop() error {
 	return nil
 }
 
+// GetComponentStates returns Proxy's states
 func (n *Proxy) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return n.svr.GetComponentStates(ctx, request)
 }
