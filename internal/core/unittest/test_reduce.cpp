@@ -22,6 +22,7 @@ TEST(Reduce, SubQueryResult) {
     int64_t num_queries = 512;
     int64_t topk = 32;
     int64_t iteration = 50;
+    int64_t round_decimal = 3;
     constexpr int64_t limit = 100000000L;
     auto metric_type = MetricType::METRIC_L2;
     using queue_type = std::priority_queue<int64_t>;
@@ -33,7 +34,7 @@ TEST(Reduce, SubQueryResult) {
         }
     }
     std::default_random_engine e(42);
-    SubSearchResult final_result(num_queries, topk, metric_type);
+    SubSearchResult final_result(num_queries, topk, metric_type, round_decimal);
     for (int i = 0; i < iteration; ++i) {
         std::vector<int64_t> labels;
         std::vector<float> values;
@@ -48,7 +49,7 @@ TEST(Reduce, SubQueryResult) {
             std::sort(labels.begin() + n * topk, labels.begin() + n * topk + topk);
             std::sort(values.begin() + n * topk, values.begin() + n * topk + topk);
         }
-        SubSearchResult sub_result(num_queries, topk, metric_type);
+        SubSearchResult sub_result(num_queries, topk, metric_type, round_decimal);
         sub_result.mutable_values() = values;
         sub_result.mutable_labels() = labels;
         final_result.merge(sub_result);
@@ -72,6 +73,7 @@ TEST(Reduce, SubSearchResultDesc) {
     int64_t num_queries = 512;
     int64_t topk = 32;
     int64_t iteration = 50;
+    int64_t round_decimal = 3;
     constexpr int64_t limit = 100000000L;
     constexpr int64_t init_value = 0;
     auto metric_type = MetricType::METRIC_INNER_PRODUCT;
@@ -84,7 +86,7 @@ TEST(Reduce, SubSearchResultDesc) {
         }
     }
     std::default_random_engine e(42);
-    SubSearchResult final_result(num_queries, topk, metric_type);
+    SubSearchResult final_result(num_queries, topk, metric_type, round_decimal);
     for (int i = 0; i < iteration; ++i) {
         std::vector<int64_t> labels;
         std::vector<float> values;
@@ -99,7 +101,7 @@ TEST(Reduce, SubSearchResultDesc) {
             std::sort(labels.begin() + n * topk, labels.begin() + n * topk + topk, std::greater<int64_t>());
             std::sort(values.begin() + n * topk, values.begin() + n * topk + topk, std::greater<float>());
         }
-        SubSearchResult sub_result(num_queries, topk, metric_type);
+        SubSearchResult sub_result(num_queries, topk, metric_type, round_decimal);
         sub_result.mutable_values() = values;
         sub_result.mutable_labels() = labels;
         final_result.merge(sub_result);

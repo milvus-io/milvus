@@ -491,9 +491,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
-
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
-
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 	var searchRawData []byte
 	for _, ele := range vec {
 		buf := make([]byte, 4)

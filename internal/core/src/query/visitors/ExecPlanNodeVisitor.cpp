@@ -63,9 +63,9 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 #endif
 
 static SearchResult
-empty_search_result(int64_t num_queries, int64_t topk, MetricType metric_type) {
+empty_search_result(int64_t num_queries, int64_t topk, int64_t round_decimal, MetricType metric_type) {
     SearchResult final_result;
-    SubSearchResult result(num_queries, topk, metric_type);
+    SubSearchResult result(num_queries, topk, metric_type, round_decimal);
     final_result.num_queries_ = num_queries;
     final_result.topk_ = topk;
     final_result.internal_seg_offsets_ = std::move(result.mutable_labels());
@@ -93,7 +93,8 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     // skip all calculation
     if (active_count == 0) {
-        ret_ = empty_search_result(num_queries, node.search_info_.topk_, node.search_info_.metric_type_);
+        ret_ = empty_search_result(num_queries, node.search_info_.topk_, node.search_info_.round_decimal_,
+                                   node.search_info_.metric_type_);
         return;
     }
 

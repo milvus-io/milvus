@@ -91,7 +91,8 @@ TEST(Expr, Range) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -133,7 +134,8 @@ TEST(Expr, RangeBinary) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -284,7 +286,8 @@ TEST(Expr, TestRange) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -366,7 +369,8 @@ TEST(Expr, TestTerm) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -422,7 +426,8 @@ TEST(Expr, TestSimpleDsl) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -537,7 +542,8 @@ TEST(Expr, TestCompare) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
