@@ -103,6 +103,7 @@ func (c *Collection) getVChannels() []Channel {
 	return c.vChannels
 }
 
+// addPChannels add physical channels to physical channels of collection
 func (c *Collection) addPChannels(channels []Channel) {
 OUTER:
 	for _, dstChan := range channels {
