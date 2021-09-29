@@ -33,6 +33,7 @@ class Metric(object):
         self.run_id = int(time.time())
 
     def set_mode(self, mode):
+        # Set the deployment mode of milvus
         self.mode = mode
 
     # including: metric, suite_metric
