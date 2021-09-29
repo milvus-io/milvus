@@ -89,11 +89,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_name_name_none(self, connect, collection):
-        '''
+        """
         target: test create partition, tag name set None, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         tag_name = None
         try:
             connect.create_partition(collection, tag_name)
@@ -126,11 +126,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag(self, connect, id_collection):
-        '''
+        """
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
         result = connect.insert(id_collection, default_entities, partition_name=default_tag)
@@ -138,11 +138,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag_not_existed(self, connect, collection):
-        '''
+        """
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status not ok
-        '''
+        """
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)
         ids = [i for i in range(default_nb)]
@@ -156,11 +156,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_same_tags(self, connect, id_collection):
-        '''
+        """
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status ok
-        '''
+        """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
         result = connect.insert(id_collection, default_entities, partition_name=default_tag)
@@ -174,11 +174,11 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
-        '''
+        """
         target: test create two partitions, and insert vectors with the same tag to each collection, check status returned
         method: call function: create_partition
         expected: status ok, collection length is correct
-        '''
+        """
         connect.create_partition(collection, default_tag)
         collection_new = gen_unique_str()
         connect.create_collection(collection_new, default_fields)
