@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -42,9 +43,11 @@ type ParamTable struct {
 	UpdatedTime time.Time
 }
 
+// Params is an alias for ParamTable.
 var Params ParamTable
 var once sync.Once
 
+// Init is used to initialize configuration items.
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
 	// TODO, load index_node.yaml
@@ -65,6 +68,7 @@ func (pt *ParamTable) Init() {
 	pt.initIndexRootPath()
 }
 
+// InitOnce is used to initialize configuration items, and it will only be called once.
 func (pt *ParamTable) InitOnce() {
 	once.Do(func() {
 		pt.Init()
