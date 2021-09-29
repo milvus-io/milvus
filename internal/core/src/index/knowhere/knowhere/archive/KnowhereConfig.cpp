@@ -27,6 +27,7 @@
 #include "utils/ConfigUtils.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
+#include "index/knowhere/knowhere/common/Exception.h"
 
 #include <string>
 #include <vector>
@@ -36,7 +37,7 @@ namespace engine {
 
 constexpr int64_t M_BYTE = 1024 * 1024;
 
-Status
+std::string
 KnowhereConfig::SetSimdType(const SimdType simd_type) {
     if (simd_type == SimdType::AVX512) {
         faiss::faiss_use_avx512 = true;
@@ -58,12 +59,11 @@ KnowhereConfig::SetSimdType(const SimdType simd_type) {
 
     std::string cpu_flag;
     if (faiss::hook_init(cpu_flag)) {
-        std::cout << "FAISS hook " << cpu_flag << std::endl;
         LOG_KNOWHERE_DEBUG_ << "FAISS hook " << cpu_flag;
-        return Status::OK();
+        return cpu_flag;
     }
 
-    return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
+    KNOWHERE_THROW_MSG("FAISS hook fail, CPU not supported!");
 }
 
 void

@@ -14,6 +14,7 @@
 #include "knowhere/archive/KnowhereConfig.h"
 #include "easyloggingpp/easylogging++.h"
 #include "ConfigKnowhere.h"
+#include "faiss/FaissHook.h"
 
 namespace milvus {
 namespace config {
@@ -36,7 +37,7 @@ KnowhereInitImpl() {
     std::call_once(init_knowhere_once_, init);
 }
 
-void
+std::string
 KnowhereSetSimdType(const char* value) {
     milvus::engine::KnowhereConfig::SimdType simd_type;
     if (strcmp(value, "auto") == 0) {
@@ -50,7 +51,7 @@ KnowhereSetSimdType(const char* value) {
     } else {
         PanicInfo("invalid SIMD type: " + std::string(value));
     }
-    milvus::engine::KnowhereConfig::SetSimdType(simd_type);
+    return milvus::engine::KnowhereConfig::SetSimdType(simd_type);
 }
 
 }  // namespace config

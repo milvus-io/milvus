@@ -21,7 +21,8 @@ SegcoreInit();
 void
 SegcoreSetChunkRows(const int64_t);
 
-void
+// return value must be freed by the caller
+char*
 SegcoreSetSimdType(const char*);
 
 #ifdef __cplusplus

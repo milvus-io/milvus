@@ -12,6 +12,7 @@
 #pragma once
 
 #include <vector>
+#include <string>
 
 #include "utils/Status.h"
 
@@ -30,7 +31,7 @@ class KnowhereConfig {
         AVX512,    // only enable AVX512
     };
 
-    static Status
+    static std::string
     SetSimdType(const SimdType simd_type);
 
     /**

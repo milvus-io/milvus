@@ -124,7 +124,9 @@ func (node *QueryNode) InitSegcore() {
 
 	// override segcore SIMD type
 	cSimdType := C.CString(Params.SimdType)
-	C.SegcoreSetSimdType(cSimdType)
+	cRealSimdType := C.SegcoreSetSimdType(cSimdType)
+	Params.SimdType = C.GoString(cRealSimdType)
+	C.free(unsafe.Pointer(cRealSimdType))
 	C.free(unsafe.Pointer(cSimdType))
 }
 
