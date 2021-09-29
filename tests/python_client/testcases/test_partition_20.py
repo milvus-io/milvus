@@ -290,7 +290,7 @@ class TestPartitionParams(TestcaseBase):
                                       cf.gen_default_tuple_data(10)])
     def test_partition_insert(self, data):
         """
-        target: verify insert multi entities by dataFrame
+        target: verify insert multi entities
         method: 1. create a collection and a partition
                 2. partition.insert(data)
                 3. insert data again
