@@ -1659,14 +1659,22 @@ func (st *searchTask) Execute(ctx context.Context) error {
 	if err != nil {
 		err = st.chMgr.createDQLStream(collID)
 		if err != nil {
-			st.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			st.result.Status.Reason = err.Error()
+			st.result = &milvuspb.SearchResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}
 			return err
 		}
 		stream, err = st.chMgr.getDQLStream(collID)
 		if err != nil {
-			st.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			st.result.Status.Reason = err.Error()
+			st.result = &milvuspb.SearchResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}
 			return err
 		}
 	}
