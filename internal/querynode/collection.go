@@ -79,6 +79,7 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 	c.partitionIDs = tmpIDs
 }
 
+// addVChannels add virtual channels to collection
 func (c *Collection) addVChannels(channels []Channel) {
 OUTER:
 	for _, dstChan := range channels {
