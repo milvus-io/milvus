@@ -12,6 +12,11 @@ filters:
       - zwd1208
     approvers:
       - pr-inspection
+  # go.{mod,sum} files relate to go dependencies, and should be reviewed by @congqixia
   "go\\.(mod|sum)$":
+    required_reviewers:
+      - congqixia
+    approvers:
+      - pr-inspection
     labels:
       - area/dependency
