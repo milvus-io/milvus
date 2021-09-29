@@ -103,7 +103,7 @@ func (h *historical) watchGlobalSegmentMeta() {
 						zap.Any("segmentID", segmentID),
 					)
 					segmentInfo := &querypb.SegmentInfo{}
-					err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
+					err = proto.Unmarshal(event.Kv.Value, segmentInfo)
 					if err != nil {
 						log.Warn("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
 						continue

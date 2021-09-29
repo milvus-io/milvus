@@ -165,7 +165,7 @@ func (c *Cluster) loadFromKV() error {
 
 	for _, v := range values {
 		info := &datapb.DataNodeInfo{}
-		if err := proto.UnmarshalText(v, info); err != nil {
+		if err := proto.Unmarshal([]byte(v), info); err != nil {
 			return err
 		}
 
@@ -177,7 +177,7 @@ func (c *Cluster) loadFromKV() error {
 	//TODO add not value error check
 	if dn != "" {
 		info := &datapb.DataNodeInfo{}
-		if err := proto.UnmarshalText(dn, info); err != nil {
+		if err := proto.Unmarshal([]byte(dn), info); err != nil {
 			return err
 		}
 		c.chanBuffer = info.Channels
@@ -288,7 +288,7 @@ func (c *Cluster) handleEvent(node *NodeInfo) {
 				c.nodes.SetWatched(node.Info.GetVersion(), parseChannelsFromReq(req))
 				c.mu.Unlock()
 				if err = c.saveNode(node); err != nil {
-					log.Warn("failed to save node info", zap.Any("node", node))
+					log.Warn("failed to save node info", zap.Any("node", node), zap.Error(err))
 					continue
 				}
 			case Flush:
@@ -416,7 +416,10 @@ func (c *Cluster) handleRegister(n *NodeInfo) {
 		zap.Any("nodes", nodes),
 		zap.Any("buffer", c.chanBuffer))
 	go c.handleEvent(n)
-	c.txnSaveNodesAndBuffer(nodes, c.chanBuffer)
+	err := c.txnSaveNodesAndBuffer(nodes, c.chanBuffer)
+	if err != nil {
+		log.Warn("DataCoord Cluster handleRegister txnSaveNodesAndBuffer", zap.Error(err))
+	}
 	for _, node := range nodes {
 		c.nodes.SetNode(node.Info.GetVersion(), node)
 	}
@@ -453,7 +456,10 @@ func (c *Cluster) handleUnRegister(n *NodeInfo) {
 		rets = c.unregisterPolicy(cNodes, node)
 	}
 	log.Debug("delta changes after unregister policy", zap.Any("nodes", rets), zap.Any("buffer", c.chanBuffer))
-	c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
+	err := c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
+	if err != nil {
+		log.Warn("DataCoord Cluster handleUnRegister txnSaveNodesAndBuffer", zap.Error(err))
+	}
 	for _, node := range rets {
 		c.nodes.SetNode(node.Info.GetVersion(), node)
 	}
@@ -478,7 +484,10 @@ func (c *Cluster) handleWatchChannel(channel string, collectionID UniqueID) {
 	} else {
 		rets = c.assignPolicy(cNodes, channel, collectionID)
 	}
-	c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
+	err := c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
+	if err != nil {
+		log.Warn("DataCoord Cluster handleWatchChannel txnSaveNodesAndBuffer", zap.Error(err))
+	}
 	for _, node := range rets {
 		c.nodes.SetNode(node.Info.GetVersion(), node)
 	}
@@ -583,8 +592,11 @@ func (c *Cluster) watch(n *NodeInfo) {
 
 func (c *Cluster) saveNode(n *NodeInfo) error {
 	key := fmt.Sprintf("%s%d", clusterPrefix, n.Info.GetVersion())
-	value := proto.MarshalTextString(n.Info)
-	return c.kv.Save(key, value)
+	value, err := proto.Marshal(n.Info)
+	if err != nil {
+		return err
+	}
+	return c.kv.Save(key, string(value))
 }
 
 func (c *Cluster) txnSaveNodesAndBuffer(nodes []*NodeInfo, buffer []*datapb.ChannelStatus) error {
@@ -594,16 +606,22 @@ func (c *Cluster) txnSaveNodesAndBuffer(nodes []*NodeInfo, buffer []*datapb.Chan
 	data := make(map[string]string)
 	for _, n := range nodes {
 		key := fmt.Sprintf("%s%d", clusterPrefix, n.Info.GetVersion())
-		value := proto.MarshalTextString(n.Info)
-		data[key] = value
+		value, err := proto.Marshal(n.Info)
+		if err != nil {
+			return fmt.Errorf("marshal failed key:%s, err:%w", key, err)
+		}
+		data[key] = string(value)
 	}
 
 	// short cut, reusing datainfo to store array of channel status
 	bufNode := &datapb.DataNodeInfo{
 		Channels: buffer,
 	}
-
-	data[clusterBuffer] = proto.MarshalTextString(bufNode)
+	buffData, err := proto.Marshal(bufNode)
+	if err != nil {
+		return fmt.Errorf("marshal bufNode failed:%w", err)
+	}
+	data[clusterBuffer] = string(buffData)
 	return c.kv.MultiSave(data)
 }
 

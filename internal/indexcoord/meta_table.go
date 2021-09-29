@@ -70,7 +70,7 @@ func (mt *metaTable) reloadFromKV() error {
 
 	for i := 0; i < len(values); i++ {
 		indexMeta := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(values[i], &indexMeta)
+		err = proto.Unmarshal([]byte(values[i]), &indexMeta)
 		if err != nil {
 			return fmt.Errorf("IndexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
@@ -86,10 +86,12 @@ func (mt *metaTable) reloadFromKV() error {
 
 // metaTable.lock.Lock() before call this function
 func (mt *metaTable) saveIndexMeta(meta *Meta) error {
-	value := proto.MarshalTextString(meta.indexMeta)
-
+	value, err := proto.Marshal(meta.indexMeta)
+	if err != nil {
+		return err
+	}
 	key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
-	err := mt.client.CompareVersionAndSwap(key, meta.revision, value)
+	err = mt.client.CompareVersionAndSwap(key, meta.revision, string(value))
 	log.Debug("IndexCoord metaTable saveIndexMeta ", zap.String("key", key), zap.Error(err))
 	if err != nil {
 		return err
@@ -115,7 +117,7 @@ func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
 		return nil, errors.New("meta doesn't exist in KV")
 	}
 	im := &indexpb.IndexMeta{}
-	err = proto.UnmarshalText(values[0], im)
+	err = proto.Unmarshal([]byte(values[0]), im)
 	if err != nil {
 		return nil, err
 	}

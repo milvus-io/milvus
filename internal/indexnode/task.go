@@ -126,8 +126,11 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 				zap.Error(err), zap.Any("pre", pre))
 			return err
 		}
+		if len(values) == 0 {
+			return fmt.Errorf("IndexNode checkIndexMeta the indexMeta is empty")
+		}
 		log.Debug("IndexNode checkIndexMeta load meta success", zap.Any("path", it.req.MetaPath), zap.Any("pre", pre))
-		err = proto.UnmarshalText(values[0], &indexMeta)
+		err = proto.Unmarshal([]byte(values[0]), &indexMeta)
 		if err != nil {
 			log.Error("IndexNode checkIndexMeta Unmarshal", zap.Error(err))
 			return err
@@ -139,8 +142,11 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		}
 		if indexMeta.MarkDeleted {
 			indexMeta.State = commonpb.IndexState_Finished
-			v := proto.MarshalTextString(&indexMeta)
-			err := it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, versions[0], v)
+			v, err := proto.Marshal(&indexMeta)
+			if err != nil {
+				return err
+			}
+			err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, versions[0], string(v))
 			if err != nil {
 				return err
 			}
@@ -159,8 +165,15 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 			indexMeta.FailReason = it.err.Error()
 		}
 		log.Debug("IndexNode", zap.Int64("indexBuildID", indexMeta.IndexBuildID), zap.Any("IndexState", indexMeta.State))
+		var metaValue []byte
+		metaValue, err = proto.Marshal(&indexMeta)
+		if err != nil {
+			log.Debug("IndexNode", zap.Int64("indexBuildID", indexMeta.IndexBuildID), zap.Any("IndexState", indexMeta.State),
+				zap.Any("proto.Marshal failed:", err))
+			return err
+		}
 		err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, versions[0],
-			proto.MarshalTextString(&indexMeta))
+			string(metaValue))
 		log.Debug("IndexNode checkIndexMeta CompareVersionAndSwap", zap.Error(err))
 		return err
 	}
@@ -380,7 +393,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 					return err
 				}
 				indexMeta := indexpb.IndexMeta{}
-				err = proto.UnmarshalText(v, &indexMeta)
+				err = proto.Unmarshal([]byte(v), &indexMeta)
 				if err != nil {
 					log.Error("IndexNode Unmarshal indexMeta error ", zap.Error(err))
 					return err

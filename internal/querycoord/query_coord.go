@@ -302,7 +302,7 @@ func (qc *QueryCoord) watchMetaLoop() {
 					log.Error("watch MetaReplica loop error when get segmentID", zap.Any("error", err.Error()))
 				}
 				segmentInfo := &querypb.SegmentInfo{}
-				err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
+				err = proto.Unmarshal(event.Kv.Value, segmentInfo)
 				if err != nil {
 					log.Error("watch MetaReplica loop error when unmarshal", zap.Any("error", err.Error()))
 				}

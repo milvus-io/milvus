@@ -49,7 +49,7 @@ func TestIndexCoord(t *testing.T) {
 	assert.Nil(t, err)
 	ic.reqTimeoutInterval = time.Second * 10
 	ic.durationInterval = time.Second
-	ic.assignTaskInterval = time.Second
+	ic.assignTaskInterval = 200 * time.Millisecond
 	ic.taskLimit = 20
 	Params.Init()
 	err = ic.Register()
@@ -181,6 +181,7 @@ func TestIndexCoord(t *testing.T) {
 	t.Run("Recycle IndexMeta", func(t *testing.T) {
 		indexMeta := ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
 		for indexMeta != nil {
+			log.Info("RecycleIndexMeta", zap.Any("meta", indexMeta))
 			indexMeta = ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
 			time.Sleep(100 * time.Millisecond)
 		}

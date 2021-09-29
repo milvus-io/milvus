@@ -68,10 +68,11 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 	// watch test
 	go n.historical.watchGlobalSegmentMeta()
 	time.Sleep(100 * time.Millisecond) // for etcd latency
-	segmentInfoStr := proto.MarshalTextString(segmentInfo)
+	segmentInfoBytes, err := proto.Marshal(segmentInfo)
+	assert.Nil(t, err)
 	assert.NotNil(t, n.etcdKV)
 	segmentKey := segmentMetaPrefix + "/" + strconv.FormatInt(segmentID, 10)
-	err := n.etcdKV.Save(segmentKey, segmentInfoStr)
+	err = n.etcdKV.Save(segmentKey, string(segmentInfoBytes))
 	assert.NoError(t, err)
 
 	time.Sleep(200 * time.Millisecond) // for etcd latency

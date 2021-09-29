@@ -113,7 +113,7 @@ func (m *MetaReplica) reloadFromKV() error {
 			return err
 		}
 		collectionInfo := &querypb.CollectionInfo{}
-		err = proto.UnmarshalText(collectionValues[index], collectionInfo)
+		err = proto.Unmarshal([]byte(collectionValues[index]), collectionInfo)
 		if err != nil {
 			return err
 		}
@@ -130,7 +130,7 @@ func (m *MetaReplica) reloadFromKV() error {
 			return err
 		}
 		segmentInfo := &querypb.SegmentInfo{}
-		err = proto.UnmarshalText(segmentValues[index], segmentInfo)
+		err = proto.Unmarshal([]byte(segmentValues[index]), segmentInfo)
 		if err != nil {
 			return err
 		}
@@ -147,7 +147,7 @@ func (m *MetaReplica) reloadFromKV() error {
 			return err
 		}
 		queryChannelInfo := &querypb.QueryChannelInfo{}
-		err = proto.UnmarshalText(queryChannelValues[index], queryChannelInfo)
+		err = proto.Unmarshal([]byte(queryChannelValues[index]), queryChannelInfo)
 		if err != nil {
 			return err
 		}
@@ -702,10 +702,13 @@ func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID Uniqu
 //}
 
 func saveGlobalCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, kv kv.MetaKv) error {
-	infoBytes := proto.MarshalTextString(info)
+	infoBytes, err := proto.Marshal(info)
+	if err != nil {
+		return err
+	}
 
 	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
-	return kv.Save(key, infoBytes)
+	return kv.Save(key, string(infoBytes))
 }
 
 func removeGlobalCollectionInfo(collectionID UniqueID, kv kv.MetaKv) error {
@@ -714,10 +717,13 @@ func removeGlobalCollectionInfo(collectionID UniqueID, kv kv.MetaKv) error {
 }
 
 func saveSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo, kv kv.MetaKv) error {
-	infoBytes := proto.MarshalTextString(info)
+	infoBytes, err := proto.Marshal(info)
+	if err != nil {
+		return err
+	}
 
 	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
-	return kv.Save(key, infoBytes)
+	return kv.Save(key, string(infoBytes))
 }
 
 func removeSegmentInfo(segmentID UniqueID, kv kv.MetaKv) error {
@@ -726,13 +732,11 @@ func removeSegmentInfo(segmentID UniqueID, kv kv.MetaKv) error {
 }
 
 func saveQueryChannelInfo(collectionID UniqueID, info *querypb.QueryChannelInfo, kv kv.MetaKv) error {
-	infoBytes := proto.MarshalTextString(info)
+	infoBytes, err := proto.Marshal(info)
+	if err != nil {
+		return err
+	}
 
 	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
-	return kv.Save(key, infoBytes)
+	return kv.Save(key, string(infoBytes))
 }
-
-//func removeQueryChannelInfo(collectionID UniqueID, kv *etcdkv.EtcdKV) error {
-//	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
-//	return kv.Remove(key)
-//}

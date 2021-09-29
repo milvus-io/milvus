@@ -70,14 +70,18 @@ func (inm *Mock) buildIndexTask() {
 					if err != nil {
 						return err
 					}
-					err = proto.UnmarshalText(values[0], &indexMeta)
+					err = proto.Unmarshal([]byte(values[0]), &indexMeta)
 					if err != nil {
 						return err
 					}
 					indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
 					indexMeta.State = commonpb.IndexState_Failed
+					metaData, err := proto.Marshal(&indexMeta)
+					if err != nil {
+						return err
+					}
 					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-						proto.MarshalTextString(&indexMeta))
+						string(metaData))
 					if err != nil {
 						return err
 					}
@@ -94,14 +98,18 @@ func (inm *Mock) buildIndexTask() {
 					if err != nil {
 						return err
 					}
-					err = proto.UnmarshalText(values[0], &indexMeta)
+					err = proto.Unmarshal([]byte(values[0]), &indexMeta)
 					if err != nil {
 						return err
 					}
 					indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
 					indexMeta.State = commonpb.IndexState_Failed
+					metaData, err := proto.Marshal(&indexMeta)
+					if err != nil {
+						return err
+					}
 					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-						proto.MarshalTextString(&indexMeta))
+						string(metaData))
 					if err != nil {
 						return err
 					}
@@ -111,15 +119,19 @@ func (inm *Mock) buildIndexTask() {
 					if err != nil {
 						return err
 					}
-					err = proto.UnmarshalText(values2[0], &indexMeta2)
+					err = proto.Unmarshal([]byte(values2[0]), &indexMeta2)
 					if err != nil {
 						return err
 					}
 					indexMeta2.Version = indexMeta.Version + 1
 					indexMeta2.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
 					indexMeta2.State = commonpb.IndexState_Finished
+					metaData2, err := proto.Marshal(&indexMeta2)
+					if err != nil {
+						return err
+					}
 					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions2[0],
-						proto.MarshalTextString(&indexMeta2))
+						string(metaData2))
 					if err != nil {
 						return err
 					}

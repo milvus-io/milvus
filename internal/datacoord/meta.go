@@ -15,6 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 
@@ -57,10 +60,9 @@ func (m *meta) reloadFromKV() error {
 
 	for _, value := range values {
 		segmentInfo := &datapb.SegmentInfo{}
-		// TODO deprecate all proto text marshal/unmarsahl
-		err = proto.UnmarshalText(value, segmentInfo)
+		err = proto.Unmarshal([]byte(value), segmentInfo)
 		if err != nil {
-			return fmt.Errorf("DataCoord reloadFromKV UnMarshalText datapb.SegmentInfo err:%w", err)
+			return fmt.Errorf("DataCoord reloadFromKV UnMarshal datapb.SegmentInfo err:%w", err)
 		}
 		m.segments.SetSegment(segmentInfo.GetID(), NewSegmentInfo(segmentInfo))
 	}
@@ -208,9 +210,13 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 
 	for id := range modSegments {
 		if segment := m.segments.GetSegment(id); segment != nil {
-			segBytes := proto.MarshalTextString(segment.SegmentInfo)
+			segBytes, err := proto.Marshal(segment.SegmentInfo)
+			if err != nil {
+				log.Error("DataCoord UpdateFlushSegmentsInfo marshal failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+				return fmt.Errorf("DataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
+			}
 			key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-			kv[key] = segBytes
+			kv[key] = string(segBytes)
 		}
 	}
 
@@ -366,17 +372,25 @@ func (m *meta) MoveSegmentBinlogs(segmentID UniqueID, oldPathPrefix string, fiel
 
 	if segment := m.segments.GetSegment(segmentID); segment != nil {
 		k := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		kv[k] = proto.MarshalTextString(segment.SegmentInfo)
+		v, err := proto.Marshal(segment.SegmentInfo)
+		if err != nil {
+			log.Error("DataCoord MoveSegmentBinlogs marshal failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+			return fmt.Errorf("DataCoord MoveSegmentBinlogs segmentID:%d, marshal failed:%w", segment.GetID(), err)
+		}
+		kv[k] = string(v)
 	}
 	return m.client.MultiSaveAndRemoveWithPrefix(kv, removals)
 }
 
 // saveSegmentInfo utility function saving segment info into kv store
 func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {
-	segBytes := proto.MarshalTextString(segment.SegmentInfo)
-
+	segBytes, err := proto.Marshal(segment.SegmentInfo)
+	if err != nil {
+		log.Error("DataCoord saveSegmentInfo marshal failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+		return fmt.Errorf("DataCoord saveSegmentInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
+	}
 	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	return m.client.Save(key, segBytes)
+	return m.client.Save(key, string(segBytes))
 }
 
 // removeSegmentInfo utility function removing segment info from kv store

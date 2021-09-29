@@ -146,9 +146,10 @@ func TestWatchNodeLoop(t *testing.T) {
 		collectionInfo := &querypb.CollectionInfo{
 			CollectionID: defaultCollectionID,
 		}
-		collectionBlobs := proto.MarshalTextString(collectionInfo)
+		collectionBlobs, err := proto.Marshal(collectionInfo)
+		assert.Nil(t, err)
 		nodeKey := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, 100)
-		kvs[nodeKey] = collectionBlobs
+		kvs[nodeKey] = string(collectionBlobs)
 
 		err = kv.MultiSave(kvs)
 		assert.Nil(t, err)
