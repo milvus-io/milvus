@@ -322,25 +322,26 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_add_after_disconnect(self, host, port):
         """
-        target: add_connect after normal connect、disconnect
-        method: normal connect, disconnect then add connect passes the same alias
-        expected: add_connect successfully
+        target: update connection params after connection disconnected
+        method: 1. connect and disconnect a connection
+                2. re-add connection by the same alias with different connection params
+        expected: re-add_connection successfully with new params
         """
 
-        # create connection that param of alias is not exist
+        # add a new connection and connect
         self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=ct.CheckTasks.ccr)
 
-        # disconnect alias is exist
+        # disconnect the connection
         self.connection_wrap.disconnect(alias="test_alias_name")
 
-        # get an addr that is exist
+        # get the connection address after it disconnected
         self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"host": host, "port": port}})
 
-        # add connection after that alias has been disconnected
+        # re-add connection by the same alias with different connection params
         self.connection_wrap.add_connection(test_alias_name={"host": "localhost", "port": "1"})
 
-        # get an addr that is exist
+        # re-get the connection address
         self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"host": "localhost", "port": "1"}})
 
