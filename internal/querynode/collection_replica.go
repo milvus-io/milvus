@@ -98,6 +98,7 @@ type collectionReplica struct {
 	etcdKV *etcdkv.EtcdKV
 }
 
+// getSegmentsMemSize get the memory size in bytes of all the Segments
 func (colReplica *collectionReplica) getSegmentsMemSize() int64 {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
