@@ -32,7 +32,14 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
-      
+
+      - name: Install dependency
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          pip install -r ../requirements.txt
+          pip install --upgrade protobuf      
+
       - name: Deploy Chaos Mesh
         shell: bash
         run: |
@@ -59,8 +66,24 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
-          pip install -r ../requirements.txt
-          pip install --upgrade protobuf
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_network_partition.yaml\'/g" constants.py
           cat constants.py
-          pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO
+          pytest -s -v test_chaos.py --host 127.0.0.1 --log-level=INFO --tb=no
+
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          #in this step, verify whether pod has been killed by pod's age
+          kubectl get po -n chaos-testing
+          # export k8s log for chaos mesh and milvus
+          bash ../../scripts/export_log_k8s.sh chaos-testing chaos-testing
+          bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon
+      
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: logs-${{ matrix.pod }}
+          path: tests/python_client/chaos/k8s_logs     
