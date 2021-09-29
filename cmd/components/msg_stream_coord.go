@@ -15,6 +15,7 @@ import (
 	"context"
 )
 
+// MsgStream is an empty struct
 type MsgStream struct {
 }
 
