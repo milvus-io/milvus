@@ -107,6 +107,8 @@ func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexPa
 
 	var indexParams indexParam
 	var indexName string
+	indexCodec := storage.NewIndexFileBinlogCodec()
+	defer indexCodec.Close()
 	for _, p := range indexPath {
 		log.Debug("", zap.String("load path", fmt.Sprintln(indexPath)))
 		indexPiece, err := loader.kv.Load(p)
@@ -115,7 +117,6 @@ func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexPa
 		}
 		// get index params when detecting indexParamPrefix
 		if path.Base(p) == storage.IndexParamsFile {
-			indexCodec := storage.NewIndexCodec()
 			_, indexParams, indexName, _, err = indexCodec.Deserialize([]*storage.Blob{
 				{
 					Key:   storage.IndexParamsFile,
@@ -126,7 +127,16 @@ func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexPa
 				return nil, nil, "", err
 			}
 		} else {
-			index = append(index, []byte(indexPiece))
+			data, _, _, _, err := indexCodec.Deserialize([]*storage.Blob{
+				{
+					Key:   path.Base(p), // though key is not important here
+					Value: []byte(indexPiece),
+				},
+			})
+			if err != nil {
+				return nil, nil, "", err
+			}
+			index = append(index, data[0].Value)
 		}
 	}
 

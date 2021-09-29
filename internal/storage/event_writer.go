@@ -30,6 +30,7 @@ const (
 	DropCollectionEventType
 	CreatePartitionEventType
 	DropPartitionEventType
+	IndexFileEventType
 	EventTypeEnd
 )
 
@@ -42,6 +43,7 @@ func (code EventTypeCode) String() string {
 		DropCollectionEventType:   "DropCollectionEventType",
 		CreatePartitionEventType:  "CreatePartitionEventType",
 		DropPartitionEventType:    "DropPartitionEventType",
+		IndexFileEventType:        "IndexFileEventType",
 	}
 	if eventTypeStr, ok := codes[code]; ok {
 		return eventTypeStr
@@ -199,6 +201,11 @@ type dropPartitionEventWriter struct {
 	dropPartitionEventData
 }
 
+type indexFileEventWriter struct {
+	baseEventWriter
+	indexFileEventData
+}
+
 func newDescriptorEvent() *descriptorEvent {
 	header := newDescriptorEventHeader()
 	data := newDescriptorEventData()
@@ -353,5 +360,28 @@ func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEven
 	}
 	writer.baseEventWriter.getEventDataSize = writer.dropPartitionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.dropPartitionEventData.WriteEventData
+	return writer, nil
+}
+
+func newIndexFileEventWriter() (*indexFileEventWriter, error) {
+	payloadWriter, err := NewPayloadWriter(schemapb.DataType_String)
+	if err != nil {
+		return nil, err
+	}
+	header := newEventHeader(IndexFileEventType)
+	data := newIndexFileEventData()
+
+	writer := &indexFileEventWriter{
+		baseEventWriter: baseEventWriter{
+			eventHeader:            *header,
+			PayloadWriterInterface: payloadWriter,
+			isClosed:               false,
+			isFinish:               false,
+		},
+		indexFileEventData: *data,
+	}
+	writer.baseEventWriter.getEventDataSize = writer.indexFileEventData.GetEventDataFixPartSize
+	writer.baseEventWriter.writeEventData = writer.indexFileEventData.WriteEventData
+
 	return writer, nil
 }

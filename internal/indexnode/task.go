@@ -296,7 +296,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	storageBlobs := getStorageBlobs(blobs)
 	var insertCodec storage.InsertCodec
 	defer insertCodec.Close()
-	partitionID, segmentID, insertData, err2 := insertCodec.Deserialize(storageBlobs)
+	collectionID, partitionID, segmentID, insertData, err2 := insertCodec.DeserializeAll(storageBlobs)
 	if err2 != nil {
 		return err2
 	}
@@ -305,7 +305,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	}
 	tr.Record("deserialize storage blobs done")
 
-	for _, value := range insertData.Data {
+	for fieldID, value := range insertData.Data {
 		// TODO: BinaryVectorFieldData
 		floatVectorFieldData, fOk := value.(*storage.FloatVectorFieldData)
 		if fOk {
@@ -338,11 +338,23 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		}
 		tr.Record("serialize index done")
 
-		var indexCodec storage.IndexCodec
-		serializedIndexBlobs, err := indexCodec.Serialize(getStorageBlobs(indexBlobs), indexParams, it.req.IndexName, it.req.IndexID)
+		codec := storage.NewIndexFileBinlogCodec()
+		serializedIndexBlobs, err := codec.Serialize(
+			it.req.IndexBuildID,
+			it.req.Version,
+			collectionID,
+			partitionID,
+			segmentID,
+			fieldID,
+			indexParams,
+			it.req.IndexName,
+			it.req.IndexID,
+			getStorageBlobs(indexBlobs),
+		)
 		if err != nil {
 			return err
 		}
+		_ = codec.Close()
 		tr.Record("serialize index codec done")
 
 		getSavePathByKey := func(key string) string {
