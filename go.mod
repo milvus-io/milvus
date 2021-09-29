@@ -5,7 +5,7 @@ go 1.15
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/antonmedv/expr v1.8.9
-	github.com/apache/pulsar-client-go v0.5.0
+	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7 // BUGFIX #8803, update when pulsar-client-go has new release
 	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
 	github.com/bits-and-blooms/bitset v1.2.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
@@ -50,7 +50,7 @@ require (
 )
 
 replace (
-	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.6.0
-	google.golang.org/grpc => google.golang.org/grpc v1.38.0
+	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7 // BUGFIX #8803, update when pulsar-client-go has new release
 	github.com/keybase/go-keychain => github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4
+	google.golang.org/grpc => google.golang.org/grpc v1.38.0
 )
