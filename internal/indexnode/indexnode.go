@@ -114,9 +114,11 @@ func (i *IndexNode) Register() error {
 func (i *IndexNode) initKnowhere() {
 	C.IndexBuilderInit()
 
-	// override segcore SIMD type
+	// override index builder SIMD type
 	cSimdType := C.CString(Params.SimdType)
-	C.IndexBuilderSetSimdType(cSimdType)
+	cRealSimdType := C.IndexBuilderSetSimdType(cSimdType)
+	Params.SimdType = C.GoString(cRealSimdType)
+	C.free(unsafe.Pointer(cRealSimdType))
 	C.free(unsafe.Pointer(cSimdType))
 }
 

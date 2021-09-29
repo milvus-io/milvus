@@ -18,7 +18,8 @@ extern "C" {
 void
 IndexBuilderInit();
 
-void
+// return value must be freed by the caller
+char*
 IndexBuilderSetSimdType(const char*);
 
 #ifdef __cplusplus

@@ -17,7 +17,7 @@ namespace milvus::config {
 void
 KnowhereInitImpl();
 
-void
+std::string
 KnowhereSetSimdType(const char*);
 
 }  // namespace milvus::config

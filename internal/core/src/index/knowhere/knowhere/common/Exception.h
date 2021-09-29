@@ -31,9 +31,9 @@ class KnowhereException : public std::exception {
 
 #define KNOHWERE_ERROR_MSG(MSG) printf("%s", KnowhereException(MSG, __PRETTY_FUNCTION__, __FILE__, __LINE__).what())
 
-#define KNOWHERE_THROW_MSG(MSG)                                                \
-    do {                                                                       \
-        throw KnowhereException(MSG, __PRETTY_FUNCTION__, __FILE__, __LINE__); \
+#define KNOWHERE_THROW_MSG(MSG)                                                                  \
+    do {                                                                                         \
+        throw milvus::knowhere::KnowhereException(MSG, __PRETTY_FUNCTION__, __FILE__, __LINE__); \
     } while (false)
 
 #define KNOHERE_THROW_FORMAT(FMT, ...)                                             \
