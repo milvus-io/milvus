@@ -39,6 +39,7 @@ type ProtoCGo struct {
 	blob   []byte
 }
 
+// MarshalForCGo convert golang proto to ProtoCGo
 func MarshalForCGo(msg proto.Message) (*ProtoCGo, error) {
 	blob, err := proto.Marshal(msg)
 	if err != nil {
