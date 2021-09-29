@@ -302,7 +302,12 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	assignInternalTask(ctx, collectionID, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs)
+	err = assignInternalTask(ctx, collectionID, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs)
+	if err != nil {
+		status.Reason = err.Error()
+		lct.result = status
+		return err
+	}
 	log.Debug("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID))
 
 	log.Debug("LoadCollection execute done",
@@ -581,7 +586,12 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			log.Debug("LoadPartitionTask: set watchDmChannelsRequests", zap.Any("request", watchDmRequest), zap.Int64("collectionID", collectionID))
 		}
 	}
-	assignInternalTask(ctx, collectionID, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmReqs)
+	err := assignInternalTask(ctx, collectionID, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmReqs)
+	if err != nil {
+		status.Reason = err.Error()
+		lpt.result = status
+		return err
+	}
 	log.Debug("LoadPartitionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 
 	log.Debug("LoadPartitionTask Execute done",
@@ -878,7 +888,10 @@ func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 
 		hasWatchQueryChannel := lst.cluster.hasWatchedQueryChannel(lst.ctx, nodeID, collectionID)
 		if !hasWatchQueryChannel {
-			queryChannel, queryResultChannel := lst.meta.GetQueryChannel(collectionID)
+			queryChannel, queryResultChannel, err := lst.meta.GetQueryChannel(collectionID)
+			if err != nil {
+				return nil, err
+			}
 
 			msgBase := proto.Clone(lst.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
@@ -1089,7 +1102,10 @@ func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 
 		hasWatchQueryChannel := wdt.cluster.hasWatchedQueryChannel(wdt.ctx, nodeID, collectionID)
 		if !hasWatchQueryChannel {
-			queryChannel, queryResultChannel := wdt.meta.GetQueryChannel(collectionID)
+			queryChannel, queryResultChannel, err := wdt.meta.GetQueryChannel(collectionID)
+			if err != nil {
+				return nil, err
+			}
 
 			msgBase := proto.Clone(wdt.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
@@ -1348,7 +1364,12 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 						}
 					}
 				}
-				assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs)
+				err = assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs)
+				if err != nil {
+					status.Reason = err.Error()
+					lbt.result = status
+					return err
+				}
 				log.Debug("loadBalanceTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 			}
 		}
@@ -1529,7 +1550,7 @@ func assignInternalTask(ctx context.Context,
 	meta Meta,
 	cluster Cluster,
 	loadSegmentRequests []*querypb.LoadSegmentsRequest,
-	watchDmChannelRequests []*querypb.WatchDmChannelsRequest) {
+	watchDmChannelRequests []*querypb.WatchDmChannelsRequest) error {
 
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
@@ -1607,7 +1628,10 @@ func assignInternalTask(ctx context.Context,
 	for nodeID, watched := range watchQueryChannelInfo {
 		if !watched {
 			ctx = opentracing.ContextWithSpan(context.Background(), sp)
-			queryChannel, queryResultChannel := meta.GetQueryChannel(collectionID)
+			queryChannel, queryResultChannel, err := meta.GetQueryChannel(collectionID)
+			if err != nil {
+				return err
+			}
 
 			msgBase := proto.Clone(parentTask.MsgBase()).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
@@ -1632,4 +1656,6 @@ func assignInternalTask(ctx context.Context,
 			log.Debug("assignInternalTask: add a watchQueryChannelTask childTask", zap.Any("task", watchQueryChannelTask))
 		}
 	}
+
+	return nil
 }
