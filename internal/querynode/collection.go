@@ -60,6 +60,7 @@ func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema
 }
 
+// addPartitionID would add a partition id to partition id list of collection
 func (c *Collection) addPartitionID(partitionID UniqueID) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
