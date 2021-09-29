@@ -27,7 +27,7 @@ type mockReplica struct {
 	flushedSegments map[UniqueID]*Segment
 }
 
-func (replica *mockReplica) getSegments(channelName string) []*Segment {
+func (replica *mockReplica) filterSegments(channelName string, partitionID UniqueID) []*Segment {
 	results := make([]*Segment, 0)
 	for _, value := range replica.newSegments {
 		results = append(results, value)
@@ -148,7 +148,7 @@ func Test_GetSegmentsByPKs(t *testing.T) {
 	mockReplica.flushedSegments[segment5.segmentID] = segment5
 	mockReplica.flushedSegments[segment6.segmentID] = segment6
 	dn := newDeleteNode(mockReplica, "test", make(chan *flushMsg))
-	results, err := dn.filterSegmentByPK([]int64{0, 1, 2, 3, 4})
+	results, err := dn.filterSegmentByPK(0, []int64{0, 1, 2, 3, 4})
 	assert.Nil(t, err)
 	expected := map[int64][]int64{
 		0: {1, 2, 3},
@@ -160,5 +160,4 @@ func Test_GetSegmentsByPKs(t *testing.T) {
 	for key, value := range expected {
 		assert.ElementsMatch(t, value, results[key])
 	}
-
 }
