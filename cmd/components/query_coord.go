@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+// QueryCoord implements QueryCoord grpc server
 type QueryCoord struct {
 	ctx context.Context
 	svr *grpcquerycoord.Server
@@ -54,6 +55,7 @@ func (qs *QueryCoord) Stop() error {
 	return nil
 }
 
+// GetComponentStates returns QueryCoord's states
 func (qs *QueryCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return qs.svr.GetComponentStates(ctx, request)
 }

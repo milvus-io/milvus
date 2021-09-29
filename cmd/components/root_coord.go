@@ -22,6 +22,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 )
 
+// RootCoord implements RoodCoord grpc server
 type RootCoord struct {
 	ctx context.Context
 	svr *rc.Server
@@ -58,6 +59,7 @@ func (rc *RootCoord) Stop() error {
 	return nil
 }
 
+// GetComponentStates returns RootCoord's states
 func (rc *RootCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return rc.svr.GetComponentStates(ctx, request)
 }
