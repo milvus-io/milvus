@@ -12,11 +12,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// MoveBinlogPathHelper is a helper tool to move binlog path in kv storage
 type MoveBinlogPathHelper struct {
 	kv   kv.TxnKV
 	meta *meta
 }
 
+// NewMoveBinlogPathHelper creates a `MoveBinlogPathHelper` with provided kv and meta
 func NewMoveBinlogPathHelper(kv kv.TxnKV, meta *meta) *MoveBinlogPathHelper {
 	return &MoveBinlogPathHelper{
 		kv:   kv,
@@ -24,6 +26,7 @@ func NewMoveBinlogPathHelper(kv kv.TxnKV, meta *meta) *MoveBinlogPathHelper {
 	}
 }
 
+// Execute performs the binlog path migration logic
 func (h *MoveBinlogPathHelper) Execute() error {
 	segmentIds := h.meta.ListSegmentIDs()
 
