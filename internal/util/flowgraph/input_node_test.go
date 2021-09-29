@@ -14,7 +14,6 @@ package flowgraph
 import (
 	"context"
 	"os"
-	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -40,10 +39,10 @@ func TestInputNode(t *testing.T) {
 
 	nodeName := "input_node"
 	inputNode := &InputNode{
-		inStream: &msgStream,
+		inStream: msgStream,
 		name:     nodeName,
 	}
-	inputNode.Close()
+	defer inputNode.Close()
 
 	isInputNode := inputNode.IsInputNode()
 	assert.True(t, isInputNode)
@@ -54,18 +53,8 @@ func TestInputNode(t *testing.T) {
 	stream := inputNode.InStream()
 	assert.NotNil(t, stream)
 
-	var waitGroup sync.WaitGroup
-	OperateFunc := func() {
-		msgs := make([]Msg, 0)
-		output := inputNode.Operate(msgs)
-		assert.Greater(t, len(output), 0)
-		msgStream.Close()
-		waitGroup.Done()
-	}
-
-	waitGroup.Add(1)
-	go OperateFunc()
-	waitGroup.Wait()
+	output := inputNode.Operate([]Msg{})
+	assert.Greater(t, len(output), 0)
 }
 
 func Test_NewInputNode(t *testing.T) {

@@ -191,7 +191,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	assert.Nil(t, err)
 	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)
-	go sync.start()
+	sync.start()
 
 	timeRange := TimeRange{
 		timestampMin: 0,

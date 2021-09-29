@@ -20,8 +20,6 @@ import (
 
 // TimeTickedFlowGraph flowgraph with input from tt msg stream
 type TimeTickedFlowGraph struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
 	nodeCtx   map[NodeName]*nodeCtx
 	stopOnce  sync.Once
 	startOnce sync.Once
@@ -34,6 +32,7 @@ func (fg *TimeTickedFlowGraph) AddNode(node Node) {
 		node:                   node,
 		inputChannels:          make([]chan Msg, 0),
 		downstreamInputChanIdx: make(map[string]int),
+		closeCh:                make(chan struct{}),
 	}
 	fg.nodeCtx[nodeName] = &nodeCtx
 }
@@ -80,7 +79,7 @@ func (fg *TimeTickedFlowGraph) Start() {
 		wg := sync.WaitGroup{}
 		for _, v := range fg.nodeCtx {
 			wg.Add(1)
-			go v.Start(fg.ctx, &wg)
+			v.Start(&wg)
 		}
 		wg.Wait()
 	})
@@ -93,16 +92,12 @@ func (fg *TimeTickedFlowGraph) Close() {
 			// maybe need to stop in order
 			v.Close()
 		}
-		fg.cancel()
 	})
 }
 
 // NewTimeTickedFlowGraph create timetick flowgraph
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
-	ctx1, cancel := context.WithCancel(ctx)
 	flowGraph := TimeTickedFlowGraph{
-		ctx:     ctx1,
-		cancel:  cancel,
 		nodeCtx: make(map[string]*nodeCtx),
 	}
 

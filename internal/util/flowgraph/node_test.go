@@ -71,7 +71,7 @@ func TestNodeCtx_Start(t *testing.T) {
 
 	nodeName := "input_node"
 	inputNode := &InputNode{
-		inStream: &msgStream,
+		inStream: msgStream,
 		name:     nodeName,
 	}
 
@@ -79,18 +79,16 @@ func TestNodeCtx_Start(t *testing.T) {
 		node:                   inputNode,
 		inputChannels:          make([]chan Msg, 2),
 		downstreamInputChanIdx: make(map[string]int),
+		closeCh:                make(chan struct{}),
 	}
 
 	for i := 0; i < len(node.inputChannels); i++ {
 		node.inputChannels[i] = make(chan Msg)
 	}
 
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
-
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(1)
-	go node.Start(ctx, &waitGroup)
+	node.Start(&waitGroup)
 
 	node.Close()
 }

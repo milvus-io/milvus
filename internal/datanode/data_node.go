@@ -282,7 +282,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		zap.Int64("Collection ID", vchan.GetCollectionID()),
 		zap.String("Vchannel name", vchan.GetChannelName()),
 	)
-	go dataSyncService.start()
+	dataSyncService.start()
 
 	return nil
 }

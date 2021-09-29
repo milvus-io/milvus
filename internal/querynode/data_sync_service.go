@@ -99,7 +99,7 @@ func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID
 		if _, ok := dsService.collectionFlowGraphs[collectionID][channel]; ok {
 			// start flow graph
 			log.Debug("start collection flow graph", zap.Any("channel", channel))
-			go dsService.collectionFlowGraphs[collectionID][channel].flowGraph.Start()
+			dsService.collectionFlowGraphs[collectionID][channel].flowGraph.Start()
 		}
 	}
 	return nil
@@ -169,7 +169,7 @@ func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID, 
 		if _, ok := dsService.partitionFlowGraphs[partitionID][channel]; ok {
 			// start flow graph
 			log.Debug("start partition flow graph", zap.Any("channel", channel))
-			go dsService.partitionFlowGraphs[partitionID][channel].flowGraph.Start()
+			dsService.partitionFlowGraphs[partitionID][channel].flowGraph.Start()
 		}
 	}
 	return nil
