@@ -595,7 +595,6 @@ class TestIndexBase:
             connect.release_collection(collection)
             connect.load_collection(collection)
         index = connect.describe_index(collection, "")
-        # assert index == indexs[-1]
         assert not index    # FLAT is the last index_type, drop all indexes in server
 
     @pytest.mark.tags(CaseLabel.L2)
