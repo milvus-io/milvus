@@ -74,6 +74,16 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 ### 源码编译 Milvus
 
+请先安装相关依赖。
+
+```
+go: 1.15
+cmake: >=3.18
+gcc: 7.5
+```
+
+克隆 Milvus 项目并编译。
+
 ```bash
 # 克隆项目
 $ git clone https://github.com/milvus-io/milvus.git
