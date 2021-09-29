@@ -139,6 +139,7 @@ func (c *Collection) getReleaseTime() Timestamp {
 	return c.releaseTime
 }
 
+// addReleasedPartition records the partition to indicate that this partition has been released
 func (c *Collection) addReleasedPartition(partitionID UniqueID) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
