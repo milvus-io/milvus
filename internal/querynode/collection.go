@@ -212,6 +212,7 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	return newCollection
 }
 
+// deleteCollection delete collection and free the collection memory
 func deleteCollection(collection *Collection) {
 	/*
 		void
