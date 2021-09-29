@@ -109,6 +109,7 @@ func (colReplica *collectionReplica) getSegmentsMemSize() int64 {
 	return memSize
 }
 
+// printReplica prints the collections, partitions and segments in the collectionReplica
 func (colReplica *collectionReplica) printReplica() {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
