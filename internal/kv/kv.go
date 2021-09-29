@@ -16,6 +16,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+// BaseKV contains base operations of kv. Include save, load and remove.
 type BaseKV interface {
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
@@ -29,6 +30,7 @@ type BaseKV interface {
 	Close()
 }
 
+// TxnKV contains extra txn operations of kv. The extra operations is transactional.
 type TxnKV interface {
 	BaseKV
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
@@ -36,6 +38,7 @@ type TxnKV interface {
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }
 
+// MetaKv is TxnKV for meta data. It should save data with lease.
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
@@ -52,6 +55,7 @@ type MetaKv interface {
 	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error
 }
 
+// SnapShotKV is TxnKV for snapshot data. It must save timestamp.
 type SnapShotKV interface {
 	Save(key string, value string, ts typeutil.Timestamp) error
 	Load(key string, ts typeutil.Timestamp) (string, error)
