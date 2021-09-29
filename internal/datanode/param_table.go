@@ -127,7 +127,7 @@ func (p *ParamTable) Init() {
 	p.initMinioUseSSL()
 	p.initMinioBucketName()
 
-	p.initLogCfg()
+	p.initRoleName()
 }
 
 // ==== DataNode internal components configs ====
@@ -277,6 +277,6 @@ func (p *ParamTable) initMinioBucketName() {
 	p.MinioBucketName = bucketName
 }
 
-func (p *ParamTable) initLogCfg() {
-	p.InitLogCfg("datanode", p.NodeID)
+func (p *ParamTable) initRoleName() {
+	p.RoleName = "datanode"
 }

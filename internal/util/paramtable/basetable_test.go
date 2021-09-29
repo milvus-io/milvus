@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -224,16 +225,20 @@ func Test_ConvertRangeToIntSlice(t *testing.T) {
 	})
 }
 
-func Test_InitLogCfg(t *testing.T) {
-	t.Run("TestInitLogCfg", func(t *testing.T) {
-		baseParams.InitLogCfg("rootcoord", 0)
-		assert.Equal(t, baseParams.Log.File.Filename, "")
+func Test_SetLogger(t *testing.T) {
+	t.Run("TestSetLooger", func(t *testing.T) {
+		baseParams.RoleName = "rootcoord"
+		baseParams.Save("log.file.rootPath", ".")
+		baseParams.SetLogger(UniqueID(-1))
+		fmt.Println(baseParams.Log.File.Filename)
+		assert.Equal(t, "rootcoord.log", baseParams.Log.File.Filename)
 
-		baseParams.Save("log.file.rootPath", "/")
-		baseParams.InitLogCfg("rootcoord", 0)
-		assert.Equal(t, baseParams.Log.File.Filename, "/rootcoord-0.log")
+		baseParams.RoleName = "datanode"
+		baseParams.SetLogger(UniqueID(1))
+		assert.Equal(t, "datanode-1.log", baseParams.Log.File.Filename)
 
-		baseParams.InitLogCfg("datanode", 8)
-		assert.Equal(t, baseParams.Log.File.Filename, "/datanode-8.log")
+		baseParams.RoleName = "datanode"
+		baseParams.SetLogger(UniqueID(0))
+		assert.Equal(t, "datanode-0.log", baseParams.Log.File.Filename)
 	})
 }

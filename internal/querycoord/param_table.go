@@ -12,7 +12,6 @@
 package querycoord
 
 import (
-	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -39,8 +38,6 @@ type ParamTable struct {
 
 	// timetick
 	TimeTickChannelName string
-
-	RoleName string
 
 	// channels
 	ClusterChannelPrefix      string
@@ -80,8 +77,6 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
-	p.initLogCfg()
-
 	p.initQueryCoordAddress()
 	p.initRoleName()
 
@@ -111,10 +106,6 @@ func (p *ParamTable) initQueryCoordAddress() {
 		panic(err)
 	}
 	p.Address = url
-}
-
-func (p *ParamTable) initRoleName() {
-	p.RoleName = fmt.Sprintf("%s-%d", "QueryCoord", p.NodeID)
 }
 
 func (p *ParamTable) initClusterMsgChannelPrefix() {
@@ -238,6 +229,6 @@ func (p *ParamTable) initMinioBucketName() {
 	p.MinioBucketName = bucketName
 }
 
-func (p *ParamTable) initLogCfg() {
-	p.InitLogCfg("querycoord", 0)
+func (p *ParamTable) initRoleName() {
+	p.RoleName = "querycoord"
 }

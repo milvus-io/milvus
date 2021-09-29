@@ -52,8 +52,6 @@ type ParamTable struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
-
-	RoleName string
 }
 
 // InitOnce initialize once
@@ -93,7 +91,6 @@ func (p *ParamTable) Init() {
 	p.initTimeout()
 	p.initTimeTickInterval()
 
-	p.initLogCfg()
 	p.initRoleName()
 }
 
@@ -217,10 +214,6 @@ func (p *ParamTable) initTimeTickInterval() {
 	p.TimeTickInterval = p.ParseInt("rootcoord.timeTickInterval")
 }
 
-func (p *ParamTable) initLogCfg() {
-	p.InitLogCfg("rootcoord", 0)
-}
-
 func (p *ParamTable) initRoleName() {
-	p.RoleName = "RootCoord"
+	p.RoleName = "rootcoord"
 }

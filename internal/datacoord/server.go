@@ -185,6 +185,7 @@ func (s *Server) Register() error {
 	}
 	s.liveCh = s.session.Init(typeutil.DataCoordRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
+	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil
 }
 

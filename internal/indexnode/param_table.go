@@ -92,7 +92,7 @@ func (pt *ParamTable) initParams() {
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
 	pt.initIndexRootPath()
-	pt.initLogCfg()
+	pt.initRoleName()
 }
 
 func (pt *ParamTable) initMinIOAddress() {
@@ -166,8 +166,8 @@ func (pt *ParamTable) initMinioBucketName() {
 	pt.MinioBucketName = bucketName
 }
 
-func (pt *ParamTable) initLogCfg() {
-	pt.InitLogCfg("indexnode", pt.NodeID)
+func (pt *ParamTable) initRoleName() {
+	pt.RoleName = "indexnode"
 }
 
 func (pt *ParamTable) initKnowhereSimdType() {

@@ -113,6 +113,7 @@ func (i *IndexCoord) Register() error {
 		return errors.New("failed to initialize session")
 	}
 	i.liveCh = i.session.Init(typeutil.IndexCoordRole, Params.Address, true)
+	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil
 }
 

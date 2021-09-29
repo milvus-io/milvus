@@ -106,8 +106,7 @@ func (i *IndexNode) Register() error {
 	}
 	i.liveCh = i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = i.session.ServerID
-	//TODO reset logger
-	//Params.initLogCfg()
+	Params.SetLogger(Params.NodeID)
 	return nil
 }
 

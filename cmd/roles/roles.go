@@ -88,11 +88,8 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 	go func() {
 		rootcoord.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&rootcoord.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		rootcoord.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
@@ -120,11 +117,8 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 		proxy.Params.InitAlias(alias)
 		proxy.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&proxy.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		proxy.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
@@ -151,11 +145,8 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 	go func() {
 		querycoord.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&querycoord.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		querycoord.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		qs, err = components.NewQueryCoord(ctx, factory)
@@ -183,11 +174,8 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 		querynode.Params.InitAlias(alias)
 		querynode.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&querynode.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		querynode.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		qn, err = components.NewQueryNode(ctx, factory)
@@ -214,11 +202,8 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 	go func() {
 		datacoord.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&datacoord.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		datacoord.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		ds, err = components.NewDataCoord(ctx, factory)
@@ -245,12 +230,8 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 	go func() {
 		datanode.Params.InitAlias(alias)
 		datanode.Params.Init()
-
-		if !localMsg {
-			logutil.SetupLogger(&datanode.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		datanode.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		dn, err = components.NewDataNode(ctx, factory)
@@ -277,11 +258,8 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 	go func() {
 		indexcoord.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&indexcoord.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		indexcoord.Params.SetLogConfig(f)
 		var err error
 		is, err = components.NewIndexCoord(ctx)
 		if err != nil {
@@ -308,11 +286,8 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 		indexnode.Params.InitAlias(alias)
 		indexnode.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&indexnode.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		indexnode.Params.SetLogConfig(f)
 		var err error
 		in, err = components.NewIndexNode(ctx)
 		if err != nil {
@@ -491,4 +466,16 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	// some deferred Stop has race with context cancel
 	cancel()
+}
+
+func setLoggerFunc(localMsg bool) func(cfg log.Config) {
+	if !localMsg {
+		return func(cfg log.Config) {
+			log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
+			logutil.SetupLogger(&cfg)
+			defer log.Sync()
+		}
+	}
+	// no need to setup logger for standalone
+	return func(cfg log.Config) {}
 }

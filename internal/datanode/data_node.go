@@ -162,6 +162,7 @@ func (node *DataNode) Register() error {
 	node.liveCh = node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
+	Params.SetLogger(Params.NodeID)
 	// Start node watch node
 	go node.StartWatchChannels(node.ctx)
 

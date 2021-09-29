@@ -53,7 +53,6 @@ func (pt *ParamTable) Init() {
 		panic(err)
 	}*/
 
-	pt.initLogCfg()
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
 	pt.initKvRootPath()
@@ -63,6 +62,7 @@ func (pt *ParamTable) Init() {
 	pt.initMinIOUseSSL()
 	pt.initMinioBucketName()
 	pt.initIndexRootPath()
+	pt.initRoleName()
 }
 
 func (pt *ParamTable) InitOnce() {
@@ -154,6 +154,6 @@ func (pt *ParamTable) initIndexRootPath() {
 	pt.IndexRootPath = path.Join(rootPath, "index_files")
 }
 
-func (pt *ParamTable) initLogCfg() {
-	pt.InitLogCfg("indexcoord", 0)
+func (pt *ParamTable) initRoleName() {
+	pt.RoleName = "indexcoord"
 }
