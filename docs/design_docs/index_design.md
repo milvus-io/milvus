@@ -30,9 +30,9 @@ In Milvus, index building is performed asynchronously. When IndexCoordinate rece
 RootCoordinate, it will first check whether the same index has been created according to the parameters. If the same
 index has been created, it will return the IndexBuildID of the existing task. Otherwise, assign a globally unique
 IndexBuildID to the task, then records the task in the MetaTable, and writes the MetaTable to the ETCD, and then 
-returns it to RootCoordinate. At this point RootCoordinate already knows that it has successfully sent the task to
+returns it to RootCoordinate. At this point, RootCoordinate already knows that it has successfully sent the task to
 IndexCoordinate. In fact, the index construction has not been completed yet. IndexCoordinate will have a background
-process to find all the index tasks that need to be allocated periodically, and then allocate it to IndexNode for 
+process to find all the index tasks that need to be allocated periodically, and then allocate them to IndexNode for 
 actual execution.
 
 When IndexCoordinate receives a request to delete an index from RootCoordinate, IndexCoordinate traverses the MetaTable, 
@@ -42,7 +42,7 @@ When the index task is marked as deleted, and the index status is complete, the 
 deleted from the MetaTable.
 
 When IndexCoordinate receives a query index status request from other components, first check whether the corresponding
-index task is marked for deletion in the MetaTable. If marked for deletion, the return index does not exist, otherwise
+index task is marked for deletion in the MetaTable. If marked for deletion, the return index does not exist, otherwise,
 it returns the index information
 
 ## 8.3 Feature Design
