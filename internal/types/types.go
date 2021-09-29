@@ -172,19 +172,58 @@ type RootCoord interface {
 	// error is always nil
 	DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 
-	// ShowCollections notifies RootCoord to list all collection names in database at specified timestamp
+	// ShowCollections notifies RootCoord to list all collection names and other info in database at specified timestamp
 	//
 	// ctx is the context to control request deadline and cancellation
 	// req contains the request params, including database name(not used), collection name and timestamp
 	//
 	// The `Status` in response struct `ShowCollectionsResponse` indicates if this operation is processed successfully or fail cause;
-	// other fields in `ShowCollectionsResponse` are filled with each collections' names, collection ids,
+	// other fields in `ShowCollectionsResponse` are filled with all collection names, collection ids,
 	// created times, created UTC times, and so on.
 	// error is always nil
 	ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)
+
+	// CreatePartition notifies RootCoord to create a partition
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name and partition name
+	//
+	// The `ErrorCode` of `Status` is `Success` if create partition successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+
+	// DropPartition notifies RootCoord to drop a partition
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name and partition name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop partition successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	//
+	// Default partition cannot be dropped
 	DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+
+	// HasPartition notifies RootCoord to check if a partition with specified name exists in the collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name and partition name
+	//
+	// The `Status` in response struct `BoolResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Value` in `BoolResponse` is `true` if the partition exists in the collection, `false` otherwise.
+	// error is always nil
 	HasPartition(ctx context.Context, req *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+
+	// ShowPartitions notifies RootCoord to list all partition names and other info in the collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name or collection id, and partition names
+	//
+	// The `Status` in response struct `ShowPartitionsResponse` indicates if this operation is processed successfully or fail cause;
+	// other fields in `ShowPartitionsResponse` are filled with all partition names, partition ids,
+	// created times, created UTC times, and so on.
+	// error is always nil
 	ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 
 	//index builder service
