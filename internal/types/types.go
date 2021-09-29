@@ -45,6 +45,15 @@ type DataNode interface {
 	Component
 
 	WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error)
+
+	// FlushSegments notifies DataNode to flush the segments req provids. The flush tasks are async to this
+	//  rpc, DataNode will flush the segments in the background.
+	//
+	// Return UnexpectedError code in status:
+	//     If DataNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY
+	//     If DataNode doesn't find the correspounding segmentID in its memeory replica
+	// Return Success code in status and trigers background flush:
+	//     Log an info log if a segment is under flushing
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
