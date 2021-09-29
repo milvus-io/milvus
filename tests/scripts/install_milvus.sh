@@ -27,8 +27,10 @@ echo "Deleting previous Milvus cluster with name=${MILVUS_HELM_RELEASE_NAME}"
 if ! (helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}" > /dev/null 2>&1); then
   echo "No existing Milvus cluster with name ${MILVUS_HELM_RELEASE_NAME}. Continue..."
 else
-  MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME}"
-  kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{range.items[*]}{.metadata.name} ') || true
+  MILVUS_LABELS1="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME}"
+  MILVUS_LABELS2="release=${MILVUS_HELM_RELEASE_NAME}"
+  kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS1}" -o jsonpath='{range.items[*]}{.metadata.name} ') || true
+  kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS2}" -o jsonpath='{range.items[*]}{.metadata.name} ') || true
 fi
 
 if [[ "${TEST_ENV}" == "kind-metallb" ]]; then
@@ -46,7 +48,8 @@ fi
 
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true
 
-helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
+if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
+  helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
                                --set image.all.repository="${MILVUS_IMAGE_REPO}" \
                                --set image.all.tag="${MILVUS_IMAGE_TAG}" \
                                --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
@@ -55,3 +58,17 @@ helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
                                --namespace "${MILVUS_HELM_NAMESPACE}" \
                                "${MILVUS_HELM_RELEASE_NAME}" \
                                ${@:-} "${MILVUS_HELM_CHART_PATH}"
+else
+  helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
+                               --set image.all.repository="${MILVUS_IMAGE_REPO}" \
+                               --set image.all.tag="${MILVUS_IMAGE_TAG}" \
+                               --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
+                               --set cluster.enabled="${MILVUS_CLUSTER_ENABLED}" \
+                               --set pulsar.enabled=false \
+                               --set minio.mode=standalone \
+                               --set etcd.replicaCount=1 \
+                               --set service.type="${MILVUS_SERVICE_TYPE}" \
+                               --namespace "${MILVUS_HELM_NAMESPACE}" \
+                               "${MILVUS_HELM_RELEASE_NAME}" \
+                               ${@:-} "${MILVUS_HELM_CHART_PATH}"
+fi
