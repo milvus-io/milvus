@@ -45,6 +45,7 @@ func (pt *ParamTable) Init() {
 	})
 }
 
+// initParams initializes params of the configuration items.
 func (pt *ParamTable) initParams() {
 	pt.initServicePort()
 	pt.initServiceAddress()
