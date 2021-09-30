@@ -195,6 +195,7 @@ func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID)
 	delete(dsService.partitionFlowGraphs, partitionID)
 }
 
+// newDataSyncService returns a new dataSyncService
 func newDataSyncService(ctx context.Context,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
