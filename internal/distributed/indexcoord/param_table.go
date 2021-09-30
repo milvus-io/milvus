@@ -53,6 +53,7 @@ func (pt *ParamTable) initParams() {
 	pt.initServerMaxRecvSize()
 }
 
+// initServicePort initializes the port of IndexCoord service.
 func (pt *ParamTable) initServicePort() {
 	pt.ServicePort = pt.ParseInt("indexCoord.port")
 }
