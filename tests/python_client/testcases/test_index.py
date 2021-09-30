@@ -484,7 +484,7 @@ class TestIndexBase:
         expected: raise exception
         """
         with pytest.raises(Exception) as e:
-            dis_connect.create_index(collection, field_name, get_simple_index)
+            dis_connect.create_index(collection, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.timeout(BUILD_TIMEOUT)
