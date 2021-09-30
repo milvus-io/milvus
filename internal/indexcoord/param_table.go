@@ -123,6 +123,7 @@ func (pt *ParamTable) initMinIOAccessKeyID() {
 	pt.MinIOAccessKeyID = ret
 }
 
+// initMinIOSecretAccessKey initializes the minio secret access key.
 func (pt *ParamTable) initMinIOSecretAccessKey() {
 	ret, err := pt.Load("minio.secretAccessKey")
 	if err != nil {
