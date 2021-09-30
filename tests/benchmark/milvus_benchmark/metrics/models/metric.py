@@ -39,6 +39,7 @@ class Metric(object):
 
     # including: metric, suite_metric
     def set_case_metric_type(self):
+        # The current test types on argo are all case
         self._type = "case"
 
     def json_md5(self):
