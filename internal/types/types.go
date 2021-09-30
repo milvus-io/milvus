@@ -295,7 +295,14 @@ type RootCoord interface {
 	// error is always nil
 	AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
 
-	//global timestamp allocator
+	// AllocTimestamp notifies RootCoord to alloc timestamps
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the count of timestamps need to be allocated
+	//
+	// The `Status` in response struct `AllocTimestampResponse` indicates if this operation is processed successfully or fail cause;
+	// `Timestamp` is the first available timestamp allocated
+	// error is always nil
 	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
