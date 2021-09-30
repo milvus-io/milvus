@@ -487,6 +487,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 	}, nil
 }
 
+// GetSegmentInfo returns infomation of all the segments on queryNodes, and the infomation includes memSize, numRow, indexName, indexID ...
 func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
