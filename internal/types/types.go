@@ -289,6 +289,8 @@ type RootCoordComponent interface {
 	RootCoord
 
 	UpdateStateCode(internalpb.StateCode)
+
+	// SetDataCoord set DataCoord for RootCoord
 	SetDataCoord(context.Context, DataCoord) error
 	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryCoord) error
