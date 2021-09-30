@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
+// Base is a base class abstracted from components.
 type Base interface {
 	types.IndexCoord
 
