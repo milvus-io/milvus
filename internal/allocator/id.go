@@ -28,13 +28,14 @@ const (
 	IDCountPerRPC = 200000
 )
 
+// UniqueID is alias of typeutil.UniqueID
 type UniqueID = typeutil.UniqueID
 
 type idAllocatorInterface interface {
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 }
 
-// ID Allocator allocate Unique and monotonically increasing IDs from Root Coord.
+// IDAllocator allocate Unique and monotonically increasing IDs from Root Coord.
 // It could also batch allocate for less root coord server access
 type IDAllocator struct {
 	Allocator
@@ -49,6 +50,7 @@ type IDAllocator struct {
 	PeerID UniqueID
 }
 
+// NewIDAllocator creates an ID Allocator allocate Unique and monotonically increasing IDs from Root Coord.
 func NewIDAllocator(ctx context.Context, idAlloctor idAllocatorInterface, peerID UniqueID) (*IDAllocator, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &IDAllocator{
@@ -70,6 +72,7 @@ func NewIDAllocator(ctx context.Context, idAlloctor idAllocatorInterface, peerID
 	return a, nil
 }
 
+// Start creates some working goroutines of IDAllocator.
 func (ia *IDAllocator) Start() error {
 	return ia.Allocator.Start()
 }
@@ -143,6 +146,7 @@ func (ia *IDAllocator) processFunc(req Request) error {
 	return nil
 }
 
+// AllocOne allocates one id.
 func (ia *IDAllocator) AllocOne() (UniqueID, error) {
 	ret, _, err := ia.Alloc(1)
 	if err != nil {
@@ -151,6 +155,7 @@ func (ia *IDAllocator) AllocOne() (UniqueID, error) {
 	return ret, nil
 }
 
+// Alloc allocates the id of the count number.
 func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 	req := &IDRequest{BaseRequest: BaseRequest{Done: make(chan error), Valid: false}}
 
