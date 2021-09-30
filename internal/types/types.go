@@ -334,6 +334,15 @@ type RootCoord interface {
 	// segment index information is filled in `IndexID`, `BuildID` and `EnableIndex`.
 	// error is always nil
 	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
+
+	// ShowSegments notifies RootCoord to list all segment ids in the collection or partition
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including collection id and partition id
+	//
+	// The `Status` in response struct `ShowSegmentsResponse` indicates if this operation is processed successfully or fail cause;
+	// `SegmentIDs` in `ShowSegmentsResponse` records all segment ids.
+	// error is always nil
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 	SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error)
