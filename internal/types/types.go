@@ -292,6 +292,8 @@ type RootCoordComponent interface {
 	SetDataCoord(context.Context, DataCoord) error
 	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryCoord) error
+
+	// SetNewProxyClient set Proxy client creator func for RootCoord
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
