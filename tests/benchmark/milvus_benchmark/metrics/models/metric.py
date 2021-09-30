@@ -55,4 +55,5 @@ class Metric(object):
         self.metrics["value"].update(result)
 
     def update_message(self, err_message):
+        # If there is an error message in the test result, record the error message and report it
         self.err_message = err_message
