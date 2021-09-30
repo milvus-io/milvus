@@ -275,7 +275,14 @@ type RootCoord interface {
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 
-	//segment
+	// DescribeSegment notifies RootCoord to get specified segment information in the collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including collection id and segment id
+	//
+	// The `Status` in response struct `DescribeSegmentResponse` indicates if this operation is processed successfully or fail cause;
+	// segment index information is filled in `IndexID`, `BuildID` and `EnableIndex`.
+	// error is always nil
 	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
