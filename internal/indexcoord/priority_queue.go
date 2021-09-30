@@ -126,7 +126,7 @@ func (pq *PriorityQueue) Remove(key UniqueID) {
 	}
 }
 
-// PeekClient picks an key with the lowest load.
+// Peek picks an key with the lowest load.
 func (pq *PriorityQueue) Peek() UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
