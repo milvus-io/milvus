@@ -57,6 +57,7 @@ func (pt *ParamTable) initServicePort() {
 	pt.ServicePort = pt.ParseInt("indexCoord.port")
 }
 
+// initServiceAddress initializes the address of IndexCoord service.
 func (pt *ParamTable) initServiceAddress() {
 	ret, err := pt.Load("_IndexCoordAddress")
 	if err != nil {
