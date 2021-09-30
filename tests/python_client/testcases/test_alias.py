@@ -137,12 +137,9 @@ class TestAliasOperation(TestcaseBase):
         assert [p.name for p in collection_2.partitions] == [p.name for p in collection_alias_b.partitions]
         
         # collection_1 alter alias to alias_b
-        # so collection_1 has two alias name, alias_a and alias_b, but collection_2 has no alias
         collection_1.alter_alias(alias_b_name)
 
-        # assert collection_1 is equal to alias_b
-        # assert collection_1 is equal to alias_a
-        # assert collections_2 is not equal to alias_b
+        # collection_1 has two alias name, alias_a and alias_b, but collection_2 has no alias any more
         assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_b.partitions]
         assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_a.partitions]
         assert [p.name for p in collection_2.partitions] != [p.name for p in collection_alias_b.partitions]
