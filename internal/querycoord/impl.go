@@ -530,6 +530,7 @@ func (qc *QueryCoord) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
+// GetMetrics returns all the queryCoord's metrics
 func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("QueryCoord.GetMetrics",
 		zap.Int64("node_id", Params.QueryCoordID),
