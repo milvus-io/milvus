@@ -40,7 +40,7 @@ services:
         make check-proto-product && make verifiers && make unittest"
 
   etcd:
-    image: quay.io/coreos/etcd:v3.5.0
+    image: docker.io/bitnami/etcd:3.5.0-debian-10-r24
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
