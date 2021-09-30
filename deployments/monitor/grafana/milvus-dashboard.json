@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632912367844,
+  "iteration": 1632966738566,
   "links": [],
   "panels": [
     {
@@ -852,7 +852,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total success of RootCoord drop collection operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5814,5 +5814,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 124
+  "version": 125
 }
