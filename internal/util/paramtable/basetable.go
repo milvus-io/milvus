@@ -238,6 +238,22 @@ func (gp *BaseTable) tryloadFromEnv() {
 	if err != nil {
 		panic(err)
 	}
+
+	insertBufferFlushSize := os.Getenv("DATA_NODE_IBUFSIZE")
+	if insertBufferFlushSize == "" {
+		//var err error
+		insertBufferFlushSize, err = gp.Load("datanode.flush.insertBufSize")
+		if err != nil {
+			panic(err)
+		}
+	}
+	if insertBufferFlushSize == "" {
+		insertBufferFlushSize = "16777216" //use default
+	}
+	err = gp.Save("_DATANODE_INSERTBUFSIZE", insertBufferFlushSize)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (gp *BaseTable) Load(key string) (string, error) {
