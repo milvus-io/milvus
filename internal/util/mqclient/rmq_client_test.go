@@ -94,9 +94,10 @@ func TestRmqClient_Subscribe(t *testing.T) {
 
 	subName := "subName"
 	consumerOpts := ConsumerOptions{
-		Topic:            "",
-		SubscriptionName: subName,
-		BufSize:          1024,
+		Topic:                       "",
+		SubscriptionName:            subName,
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
+		BufSize:                     1024,
 	}
 
 	consumer, err := client.Subscribe(consumerOpts)
