@@ -6,7 +6,7 @@ String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 int total_timeout_minutes = 660
-int e2e_timeout_seconds = 4 * 60 * 60
+int e2e_timeout_seconds = 6 * 60 * 60
 
 pipeline {
     agent none
@@ -78,7 +78,7 @@ pipeline {
                                             --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
                                             --skip-export-logs \
                                             --skip-cleanup \
-                                            --test-extra-arg "--tags L0 L1 L2" \
+                                            --test-extra-arg "--tags L0 L1 L2 --repeat-scope=session" \
                                             --test-timeout ${e2e_timeout_seconds}
                                             """
                                         } else {
