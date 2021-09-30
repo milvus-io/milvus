@@ -291,6 +291,8 @@ type RootCoordComponent interface {
 	UpdateStateCode(internalpb.StateCode)
 	SetDataCoord(context.Context, DataCoord) error
 	SetIndexCoord(IndexCoord) error
+
+	// SetQueryCoord set QueryCoord for RootCoord
 	SetQueryCoord(QueryCoord) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
 
