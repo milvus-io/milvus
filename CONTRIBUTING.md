@@ -9,8 +9,8 @@ As for everything else in the project, the contributions to Milvus are governed 
 **Content**
 
 - [Contributing to Milvus](#contributing-to-milvus)
-  - [What contributions can I make?](#what-contributions-can-i-make)
-  - [How can I contribute?](#how-can-i-contribute)
+  - [What contributions can you make?](#what-contributions-can-you-make)
+  - [How can you contribute?](#how-can-you-contribute)
     - [Contributing code](#contributing-code)
     - [GitHub workflow](#github-workflow)
     - [General guidelines](#general-guidelines)
@@ -23,7 +23,7 @@ As for everything else in the project, the contributions to Milvus are governed 
     - [C++](#c)
   - [Commits and PRs](#commits-and-prs)
 
-## What contributions can I make?
+## What contributions can you make?
 
 | Suitable for                             | Projects                                                     | Resources                                                    |
 | ---------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
@@ -34,7 +34,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 | Tech writers and docs enthusiasts        | [milvus-docs](https://github.com/milvus-io/milvus-docs)      | [Contributing to milvus docs](https://github.com/milvus-io/milvus-docs/blob/v2.0.0/CONTRIBUTING.md) |
 | Web developers                           | [milvus-insight](https://github.com/zilliztech/milvus-insight)||
 
-## How can I contribute?
+## How can you contribute?
 ### Contributing code
 
 **If you encountered a bug, you can**
