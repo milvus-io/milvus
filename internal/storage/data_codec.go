@@ -36,6 +36,14 @@ const (
 	IndexParamsFile = "indexParams"
 )
 
+// when the blob of index file is too large, we can split blob into several rows,
+// fortunately, the blob has no other semantics which differs from other binlog type,
+// we then assemble these several rows into a whole blob when deserialize index binlog.
+// num rows = math.Ceil(len(blob) / maxLengthPerRowOfIndexFile)
+// There is only a string row in the past version index file which is a subset case of splitting into several rows.
+// So splitting index file won't introduce incompatibility with past version.
+const maxLengthPerRowOfIndexFile = 4 * 1024 * 1024
+
 type (
 	UniqueID  = typeutil.UniqueID
 	FieldID   = typeutil.UniqueID
@@ -820,9 +828,17 @@ func (codec *IndexFileBinlogCodec) Serialize(
 			return nil, err
 		}
 
-		err = eventWriter.AddOneStringToPayload(string(datas[pos].Value))
-		if err != nil {
-			return nil, err
+		length := (len(datas[pos].Value) + maxLengthPerRowOfIndexFile - 1) / maxLengthPerRowOfIndexFile
+		for i := 0; i < length; i++ {
+			start := i * maxLengthPerRowOfIndexFile
+			end := (i + 1) * maxLengthPerRowOfIndexFile
+			if end > len(datas[pos].Value) {
+				end = len(datas[pos].Value)
+			}
+			err = eventWriter.AddOneStringToPayload(string(datas[pos].Value[start:end]))
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		eventWriter.SetEventTimestamp(ts, ts)
@@ -854,9 +870,17 @@ func (codec *IndexFileBinlogCodec) Serialize(
 	}
 
 	params, _ := json.Marshal(indexParams)
-	err = eventWriter.AddOneStringToPayload(string(params))
-	if err != nil {
-		return nil, err
+	length := (len(params) + maxLengthPerRowOfIndexFile - 1) / maxLengthPerRowOfIndexFile
+	for i := 0; i < length; i++ {
+		start := i * maxLengthPerRowOfIndexFile
+		end := (i + 1) * maxLengthPerRowOfIndexFile
+		if end > len(params) {
+			end = len(params)
+		}
+		err = eventWriter.AddOneStringToPayload(string(params[start:end]))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	eventWriter.SetEventTimestamp(ts, ts)
@@ -963,6 +987,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 				}
 
+				var content []byte
 				for i := 0; i < length; i++ {
 					singleString, err := eventReader.GetOneStringFromPayload(i)
 					if err != nil {
@@ -971,14 +996,16 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 						return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 					}
 
-					if key == "indexParams" {
-						_ = json.Unmarshal([]byte(singleString), &indexParams)
-					} else {
-						datas = append(datas, &Blob{
-							Key:   key,
-							Value: []byte(singleString),
-						})
-					}
+					content = append(content, []byte(singleString)...)
+				}
+
+				if key == "indexParams" {
+					_ = json.Unmarshal(content, &indexParams)
+				} else {
+					datas = append(datas, &Blob{
+						Key:   key,
+						Value: content,
+					})
 				}
 			}
 		}

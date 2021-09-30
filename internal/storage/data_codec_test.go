@@ -373,6 +373,10 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 			Key:   "ivf2",
 			Value: []byte{4, 5, 6},
 		},
+		{
+			Key:   "large",
+			Value: []byte(funcutil.RandomString(maxLengthPerRowOfIndexFile + 1)),
+		},
 	}
 
 	codec := NewIndexFileBinlogCodec()
