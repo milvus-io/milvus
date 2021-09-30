@@ -261,7 +261,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		}
 	}
 
-	// Manul Flush
+	// Manual Flush
 	select {
 	case fmsg := <-ibNode.flushChan:
 		currentSegID := fmsg.segmentID
