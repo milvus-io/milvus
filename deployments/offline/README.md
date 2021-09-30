@@ -8,7 +8,7 @@ Milvus installation may fail when images are not properly loaded from public Doc
 
 #### If you install Milvus with the **docker-compose.yml** file, use these commands:
 
-1. Download Milvus standalone docker-compose.yml
+#### 1. Download Milvus standalone docker-compose.yml
    ```shell
    wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/standalone/docker-compose.yml -O docker-compose.yml
    ```
@@ -19,7 +19,7 @@ Milvus installation may fail when images are not properly loaded from public Doc
    wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/cluster/docker-compose.yml -O docker-compose.yml
    ```
 
-2. Pull and save Docker images
+#### 2. Pull and save Docker images
    ```shell
    pip3 install -r requirements.txt
    python3 save_image.py --manifest docker-compose.yml
