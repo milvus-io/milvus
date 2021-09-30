@@ -561,7 +561,7 @@ class TestPartitionOperations(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release_dropped_partition(self):
         """
-        target: verify release an dropped partition
+        target: verify release a dropped partition
         method: 1.create a partition
                 2. drop the partition
                 3. release the partition
@@ -580,7 +580,7 @@ class TestPartitionOperations(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release_dropped_collection(self):
         """
-        target: verify release an dropped collection
+        target: verify release a dropped collection
         method: 1.create a collection and partition
                 2. drop the collection
                 3. release the partition
