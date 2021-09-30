@@ -373,7 +373,7 @@ Milvus insight 提供了好用的图形化界面，帮助您更好的管理数�
 - [Bilibili](http://space.bilibili.com/478166626)
 - Zilliz 技术交流微信群
 
-<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/wechat_2abac21f5a.png" alt="Wechat QR Code">
+<img src="https://assets.zilliz.com/wechat_2abac21f5a.png" alt="Wechat QR Code">
 
 ## 加入我们
 
