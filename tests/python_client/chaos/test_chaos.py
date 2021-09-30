@@ -34,7 +34,7 @@ class TestChaosBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = 'localhost'
+    host = '127.0.0.1'
     port = 19530
     _chaos_config = None
     health_checkers = {}
