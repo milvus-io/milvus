@@ -28,6 +28,7 @@ const (
 	StartParamsKey = "START_PARAMS"
 )
 
+// ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -54,6 +55,7 @@ type ParamTable struct {
 	UpdatedTime time.Time
 }
 
+// Params is an alias for ParamTable.
 var Params ParamTable
 var once sync.Once
 
@@ -61,6 +63,7 @@ func (pt *ParamTable) InitAlias(alias string) {
 	pt.Alias = alias
 }
 
+// Init is used to initialize configuration items.
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
 	if err := pt.LoadYaml("advanced/knowhere.yaml"); err != nil {
@@ -77,6 +80,7 @@ func (pt *ParamTable) Init() {
 	pt.initKnowhereSimdType()
 }
 
+// InitOnce is used to initialize configuration items, and it will only be called once.
 func (pt *ParamTable) InitOnce() {
 	once.Do(func() {
 		pt.Init()
