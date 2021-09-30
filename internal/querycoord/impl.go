@@ -351,6 +351,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	return status, nil
 }
 
+// ReleasePartition clears all data related to this partition on the querynode
 func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	//dbID := req.DbID
 	collectionID := req.CollectionID
