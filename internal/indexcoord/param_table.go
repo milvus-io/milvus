@@ -142,6 +142,7 @@ func (pt *ParamTable) initMinIOUseSSL() {
 	}
 }
 
+// initMinioBucketName initializes the minio bucket name of configuration items.
 func (pt *ParamTable) initMinioBucketName() {
 	bucketName, err := pt.Load("minio.bucketName")
 	if err != nil {
