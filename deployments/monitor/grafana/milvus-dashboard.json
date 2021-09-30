@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1632966738566,
+  "iteration": 1632968543633,
   "links": [],
   "panels": [
     {
@@ -909,7 +909,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total  RootCoord drop partition operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -950,6 +950,7 @@
       "pluginVersion": "7.5.10",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
           "instant": false,
           "interval": "",
@@ -5814,5 +5815,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 125
+  "version": 128
 }
