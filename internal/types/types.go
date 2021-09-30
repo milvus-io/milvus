@@ -273,6 +273,15 @@ type RootCoord interface {
 	//global timestamp allocator
 	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
+
+	// UpdateChannelTimeTick notifies RootCoord to update each Proxy's safe timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including physical channel names, channels' safe timestamps and default timestamp
+	//
+	// The `ErrorCode` of `Status` is `Success` if update channel timetick successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 
 	//segment
