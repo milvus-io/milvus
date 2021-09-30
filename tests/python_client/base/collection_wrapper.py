@@ -1,8 +1,9 @@
 import sys
 
+from pymilvus import Collection
+
 sys.path.append("..")
-from check.param_check import *
-from check.func_check import *
+from check.func_check import ResponseChecker
 from utils.api_request import api_request
 from utils.util_log import test_log as log
 
