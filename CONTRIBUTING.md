@@ -148,13 +148,7 @@ $ sudo apt-get install clang-format
 
 Check code style
 ```shell
-$ ./build.sh -l
-```
-
-To format the code
-```shell
-$ cd cmake_build
-$ make clang-format
+$ make cppcheck
 ```
 
 ## Run unit test with code coverage
@@ -191,7 +185,7 @@ $ sudo apt-get install lcov
 ```
 Run unit test and generate code for code coverage check
 ```shell
-$ ./build.sh -u -c
+$ make codecov-cpp
 ```
 
 ## Commits and PRs
