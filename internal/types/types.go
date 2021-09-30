@@ -265,7 +265,14 @@ type RootCoord interface {
 	// error is always nil
 	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
-	// collection alias
+	// CreateAlias notifies RootCoord to create an alias for the collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including collection name and alias
+	//
+	// The `ErrorCode` of `Status` is `Success` if create alias successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error)
 	DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error)
 	AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
