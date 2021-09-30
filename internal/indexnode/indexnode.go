@@ -127,7 +127,7 @@ func (i *IndexNode) Init() error {
 	i.initOnce.Do(func() {
 		Params.Init()
 		i.UpdateStateCode(internalpb.StateCode_Initializing)
-		log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
+		log.Debug("IndexNode init", zap.Any("State", internalpb.StateCode_Initializing))
 		connectEtcdFn := func() error {
 			etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 			i.etcdKV = etcdKV
@@ -139,7 +139,7 @@ func (i *IndexNode) Init() error {
 			initErr = err
 			return
 		}
-		log.Debug("IndexNode try connect etcd success")
+		log.Debug("IndexNode connect to etcd successfully")
 
 		option := &miniokv.Option{
 			Address:           Params.MinIOAddress,
@@ -158,7 +158,7 @@ func (i *IndexNode) Init() error {
 
 		i.kv = kv
 
-		log.Debug("IndexNode NewMinIOKV success")
+		log.Debug("IndexNode NewMinIOKV successfully")
 		i.closer = trace.InitTracing("index_node")
 
 		i.initKnowhere()
@@ -203,7 +203,7 @@ func (i *IndexNode) Stop() error {
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
-	log.Debug("NodeImpl  closed.")
+	log.Debug("Index node stopped.")
 	return nil
 }
 
@@ -225,7 +225,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 			Reason:    "state code is not healthy",
 		}, nil
 	}
-	log.Debug("IndexNode building index ...",
+	log.Info("IndexNode building index ...",
 		zap.Int64("IndexBuildID", request.IndexBuildID),
 		zap.String("IndexName", request.IndexName),
 		zap.Int64("IndexID", request.IndexID),
@@ -256,11 +256,12 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 
 	err := i.sched.IndexBuildQueue.Enqueue(t)
 	if err != nil {
+		log.Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", request.IndexBuildID), zap.Error(err))
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Debug("IndexNode", zap.Int64("IndexNode successfully schedule with indexBuildID", request.IndexBuildID))
+	log.Info("IndexNode successfully schedule", zap.Int64("indexBuildID", request.IndexBuildID))
 
 	return ret, nil
 }
@@ -344,9 +345,6 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		}, nil
 	}
 
-	log.Debug("IndexNode.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
@@ -360,7 +358,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		return metrics, err
 	}
 
-	log.Debug("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
