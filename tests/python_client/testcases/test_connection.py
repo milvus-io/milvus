@@ -348,9 +348,10 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_add_after_remove(self, host, port):
         """
-        target: add_connect after normal connect、remove_connection
-        method: normal connect, remove_connection then add connect passes the same alias
-        expected: add_connect successfully
+        target: add_connection after normal connect、remove_connection
+        method: 1. connect and remove_connection
+                2. add connection by the same alias with different params
+        expected: add_connection by the same alias with different params successfully
         """
 
         # create connection that param of alias is not exist
