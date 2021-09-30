@@ -74,6 +74,7 @@ class MilvusSys:
         return json.loads(self.sys_info.response).get('nodes_info')
 
     def get_nodes_by_type(self, node_type=None):
+        """get milvus nodes by node type"""
         target_nodes = []
         if node_type is not None:
             for node in self.nodes:
