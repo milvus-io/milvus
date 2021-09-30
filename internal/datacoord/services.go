@@ -67,7 +67,9 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		resp.Status.Reason = fmt.Sprintf("failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
 	}
-	log.Debug("flush response with segments", zap.Any("segments", sealedSegments))
+	log.Debug("flush response with segments",
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Any("segments", sealedSegments))
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.DbID = req.GetDbID()
 	resp.CollectionID = req.GetCollectionID()
