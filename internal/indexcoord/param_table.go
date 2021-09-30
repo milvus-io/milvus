@@ -83,6 +83,7 @@ func (pt *ParamTable) initEtcdEndpoints() {
 	pt.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
+// initMetaRootPath initializes the root path of etcd.
 func (pt *ParamTable) initMetaRootPath() {
 	rootPath, err := pt.Load("etcd.rootPath")
 	if err != nil {
