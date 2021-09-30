@@ -46,12 +46,12 @@ func healthyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type GetComponentStatesInterface interface {
+type getComponentStatesInterface interface {
 	GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error)
 }
 
 type componentsHealthzHandler struct {
-	component GetComponentStatesInterface
+	component getComponentStatesInterface
 }
 
 func (handler *componentsHealthzHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
