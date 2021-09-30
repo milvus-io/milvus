@@ -1,5 +1,5 @@
 <a href="https://milvus.io/hacktoberfest-2021">
-    <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/milvus_hacktoberfest_15ba8e5083.jpeg" alt="Join Hacktoberfest with Milvus">
+    <img src="https://assets.zilliz.com/milvus_hacktoberfest_15ba8e5083.jpeg" alt="Join Hacktoberfest with Milvus">
 </a>
 
 
@@ -113,17 +113,17 @@ See [Milvus 2.0 vs. 1.x](https://github.com/milvus-io/milvus/blob/master/milvus2
   <tr>
     <td width="30%">
       <a href="https://zilliz.com/milvus-demos">
-        <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/image_search_59a64e4f22.gif" />
+        <img src="https://assets.zilliz.com/image_search_59a64e4f22.gif" />
       </a>
     </td>
     <td width="30%">
 <a href="https://zilliz.com/milvus-demos">
-<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/qa_df5ee7bd83.gif" />
+<img src="https://assets.zilliz.com/qa_df5ee7bd83.gif" />
 </a>
     </td>
     <td width="30%">
 <a href="https://zilliz.com/milvus-demos">
-<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/mole_search_76f8340572.gif" />
+<img src="https://assets.zilliz.com/mole_search_76f8340572.gif" />
 </a>
     </td>
   </tr>
@@ -365,7 +365,7 @@ Milvus insight provides an intuitive and efficient GUI for Milvus.
 Join the Milvus community on [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) to share your suggestions, advice, and questions with our engineering team.
 
 <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
-    <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_slack_4a07c4c92f.png" alt="Miluvs Slack Channel"  height="150" width="500">
+    <img src="https://assets.zilliz.com/readme_slack_4a07c4c92f.png" alt="Miluvs Slack Channel"  height="150" width="500">
 </a>
 
 You can also check out our [FAQ page](https://milvus.io/docs/performance_faq.md) to discover solutions or answers to your issues or questions.
