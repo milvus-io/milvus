@@ -93,13 +93,13 @@ func (qc *QueryCoord) Init() error {
 	}
 	var initError error = nil
 	qc.initOnce.Do(func() {
-		log.Debug("query coordinator try to connect etcd")
+		log.Debug("query coordinator trying to connect to etcd")
 		initError = retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
 		if initError != nil {
-			log.Debug("query coordinator try to connect etcd failed", zap.Error(initError))
+			log.Debug("query coordinator trying to connect to etcd failed", zap.Error(initError))
 			return
 		}
-		log.Debug("query coordinator try to connect etcd success")
+		log.Debug("query coordinator trying to connect to etcd success")
 		qc.meta, initError = newMeta(qc.kvClient)
 		if initError != nil {
 			log.Error("query coordinator init meta failed", zap.Error(initError))
@@ -195,7 +195,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 	ctx, cancel := context.WithCancel(qc.loopCtx)
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("query coordinator start watch node loop")
+	log.Debug("query coordinator starting watch node loop")
 
 	offlineNodes, err := qc.cluster.offlineNodes()
 	if err == nil {
@@ -236,7 +236,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				log.Debug("start add a queryNode to cluster", zap.Any("nodeID", serverID))
+				log.Debug("start adding a queryNode to cluster", zap.Any("nodeID", serverID))
 				err := qc.cluster.registerNode(ctx, event.Session, serverID, disConnect)
 				if err != nil {
 					log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
@@ -244,10 +244,10 @@ func (qc *QueryCoord) watchNodeLoop() {
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
-				log.Debug("get a del event after queryNode down", zap.Int64("nodeID", serverID))
+				log.Debug("got a del event after queryNode down", zap.Int64("nodeID", serverID))
 				_, err := qc.cluster.getNodeByID(serverID)
 				if err != nil {
-					log.Error("queryNode not exist", zap.Int64("nodeID", serverID))
+					log.Error("queryNode does not exist", zap.Int64("nodeID", serverID))
 					continue
 				}
 
@@ -274,7 +274,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 					meta:               qc.meta,
 				}
 				qc.scheduler.Enqueue([]task{loadBalanceTask})
-				log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
+				log.Debug("starting a loadBalance task", zap.Any("task", loadBalanceTask))
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
 		}
@@ -286,7 +286,7 @@ func (qc *QueryCoord) watchMetaLoop() {
 
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("query coordinator start watch MetaReplica loop")
+	log.Debug("query coordinator starting watch MetaReplica loop")
 
 	watchChan := qc.kvClient.WatchWithPrefix("queryNode-segmentMeta")
 
@@ -299,12 +299,12 @@ func (qc *QueryCoord) watchMetaLoop() {
 			for _, event := range resp.Events {
 				segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
 				if err != nil {
-					log.Error("watch MetaReplica loop error when get segmentID", zap.Any("error", err.Error()))
+					log.Error("watch MetaReplica loop: error when getting segmentID", zap.Any("error", err.Error()))
 				}
 				segmentInfo := &querypb.SegmentInfo{}
 				err = proto.Unmarshal(event.Kv.Value, segmentInfo)
 				if err != nil {
-					log.Error("watch MetaReplica loop error when unmarshal", zap.Any("error", err.Error()))
+					log.Error("watch MetaReplica loop: error when unmarshalling", zap.Any("error", err.Error()))
 				}
 				switch event.Type {
 				case mvccpb.PUT:
