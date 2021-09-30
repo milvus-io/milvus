@@ -50,6 +50,7 @@ class Metric(object):
         self.status = status
 
     def update_result(self, result):
+        # Customized test result update, different test types have different results
         self.metrics["value"].update(result)
 
     def update_message(self, err_message):
