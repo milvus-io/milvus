@@ -40,6 +40,7 @@ import (
 // TODO: use storage.Blob instead later
 type Blob = storage.Blob
 
+// Index is an interface used to call the interface to build the index task in 'C'.
 type Index interface {
 	Serialize() ([]*Blob, error)
 	Load([]*Blob) error
@@ -48,10 +49,12 @@ type Index interface {
 	Delete() error
 }
 
+// CIndex is a pointer used to access 'CGO'.
 type CIndex struct {
 	indexPtr C.CIndex
 }
 
+// Serialize serializes vector data into bytes data so that it can be accessed in 'C'.
 func (index *CIndex) Serialize() ([]*Blob, error) {
 	var cBinary C.CBinary
 
@@ -86,6 +89,7 @@ func (index *CIndex) Serialize() ([]*Blob, error) {
 	return ret, nil
 }
 
+// Load loads data from 'C'.
 func (index *CIndex) Load(blobs []*Blob) error {
 	binarySet := &indexcgopb.BinarySet{Datas: make([]*indexcgopb.Binary, 0)}
 	for _, blob := range blobs {
@@ -111,6 +115,7 @@ func (index *CIndex) Load(blobs []*Blob) error {
 	return nil
 }
 
+// BuildFloatVecIndexWithoutIds builds indexes for float vector.
 func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {
 	/*
 		CStatus
@@ -128,6 +133,7 @@ func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {
 	return nil
 }
 
+// BuildBinaryVecIndexWithoutIds builds indexes for binary vector.
 func (index *CIndex) BuildBinaryVecIndexWithoutIds(vectors []byte) error {
 	/*
 		CStatus
@@ -143,6 +149,7 @@ func (index *CIndex) BuildBinaryVecIndexWithoutIds(vectors []byte) error {
 	return nil
 }
 
+// Delete removes the pointer to build the index in 'C'.
 func (index *CIndex) Delete() error {
 	/*
 		void
@@ -154,6 +161,7 @@ func (index *CIndex) Delete() error {
 	return nil
 }
 
+// NewCIndex creates a new pointer to build the index in 'C'.
 func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	protoTypeParams := &indexcgopb.TypeParams{
 		Params: make([]*commonpb.KeyValuePair, 0),
