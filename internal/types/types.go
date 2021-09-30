@@ -304,6 +304,15 @@ type RootCoord interface {
 	// `Timestamp` is the first available timestamp allocated
 	// error is always nil
 	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
+
+	// AllocID notifies RootCoord to alloc IDs
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the count of IDs need to be allocated
+	//
+	// The `Status` in response struct `AllocTimestampResponse` indicates if this operation is processed successfully or fail cause;
+	// `ID` is the first available id allocated
+	// error is always nil
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 
