@@ -319,8 +319,9 @@ class TestAliasOperation(TestcaseBase):
         alias_name = cf.gen_unique_str(prefix)     
         collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
-                                                                     check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+                                                                   check_task=CheckTasks.check_collection_property,
+                                                                   check_items={exp_name: alias_name,
+                                                                                exp_schema: default_schema})
         res, _ = self.utility_wrap.has_collection(alias_name)
 
         assert res == True
@@ -344,8 +345,9 @@ class TestAliasOperation(TestcaseBase):
         alias_name = cf.gen_unique_str(prefix)     
         collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
-                                                                     check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+                                                                   check_task=CheckTasks.check_collection_property,
+                                                                   check_items={exp_name: alias_name,
+                                                                                exp_schema: default_schema})
         assert self.utility_wrap.has_collection(c_name)[0]
         self.utility_wrap.drop_collection(alias_name)
         assert not self.utility_wrap.has_collection(c_name)[0]
@@ -371,8 +373,9 @@ class TestAliasOperation(TestcaseBase):
         alias_name = cf.gen_unique_str(prefix)     
         collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
-                                                                     check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_name, exp_schema: default_schema})
+                                                                   check_task=CheckTasks.check_collection_property,
+                                                                   check_items={exp_name: alias_name,
+                                                                                exp_schema: default_schema})
         res, _ = self.utility_wrap.has_partition(alias_name, partition_name)
 
         assert res == True
@@ -526,7 +529,8 @@ class TestAliasOperationInvalid(TestcaseBase):
         collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
-                                                                   check_items={exp_name: alias_name, exp_schema: default_schema})
+                                                                   check_items={exp_name: alias_name,
+                                                                                exp_schema: default_schema})
         
         with pytest.raises(Exception):
             collection_alias.drop()
