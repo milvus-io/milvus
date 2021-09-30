@@ -150,6 +150,7 @@ func (pt *ParamTable) initMinioBucketName() {
 	pt.MinioBucketName = bucketName
 }
 
+// initIndexRootPath initializes the root path of index files.
 func (pt *ParamTable) initIndexRootPath() {
 	rootPath, err := pt.Load("minio.rootPath")
 	if err != nil {
