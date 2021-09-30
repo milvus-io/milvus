@@ -243,6 +243,8 @@ type RootCoord interface {
 	// The `ErrorCode` of `Status` is `Success` if create index successfully;
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
+	//
+	// RootCoord forwards this request to IndexCoord to create index
 	CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 
 	// DescribeIndex notifies RootCoord to get specified index information for specified field
