@@ -2,8 +2,7 @@ from pymilvus import utility
 import sys
 
 sys.path.append("..")
-from check.param_check import *
-from check.func_check import *
+from check.func_check import ResponseChecker
 from utils.api_request import api_request
 
 
@@ -79,8 +78,6 @@ class ApiUtilityWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        collection_name=collection_name,
                                        timeout=timeout, using=using).run()
-        log.debug(res)
-        log.debug(check_result)
         return res, check_result
 
     def list_collections(self, timeout=None, using="default", check_task=None, check_items=None):
