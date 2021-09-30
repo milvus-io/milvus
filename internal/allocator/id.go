@@ -25,8 +25,7 @@ import (
 )
 
 const (
-	// IDCountPerRPC specifies the minimum number of IDs for each RPC request.
-	IDCountPerRPC = 200000
+	idCountPerRPC = 200000
 )
 
 // UniqueID is alias of typeutil.UniqueID
@@ -60,7 +59,7 @@ func NewIDAllocator(ctx context.Context, idAlloctor idAllocatorInterface, peerID
 			CancelFunc: cancel,
 			Role:       "IDAllocator",
 		},
-		countPerRPC: IDCountPerRPC,
+		countPerRPC: idCountPerRPC,
 		idAllocator: idAlloctor,
 		PeerID:      peerID,
 	}
