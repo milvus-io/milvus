@@ -76,9 +76,15 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	}
 	if exist, con := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName); exist {
 		log.Debug("ConsumerGroup already existed", zap.Any("topic", options.Topic), zap.Any("SubscriptionName", options.SubscriptionName))
-		consumer, err := newConsumer1(c, options, con.MsgMutex)
+		consumer, err := getExistedConsumer(c, options, con.MsgMutex)
 		if err != nil {
 			return nil, err
+		}
+		if options.SubscriptionInitialPosition == SubscriptionPositionLatest {
+			err = c.server.SeekToLatest(options.Topic, options.SubscriptionName)
+			if err != nil {
+				return nil, err
+			}
 		}
 		c.wg.Add(1)
 		go c.consume(consumer)
@@ -95,6 +101,12 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 
+	if options.SubscriptionInitialPosition == SubscriptionPositionLatest {
+		err = c.server.SeekToLatest(options.Topic, options.SubscriptionName)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Register self in rocksmq server
 	cons := &server.Consumer{
 		Topic:     consumer.topic,

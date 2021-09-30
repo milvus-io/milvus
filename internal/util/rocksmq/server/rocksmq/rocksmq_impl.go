@@ -653,6 +653,37 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	return nil
 }
 
+func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
+	rmq.storeMu.Lock()
+	defer rmq.storeMu.Unlock()
+	key := groupName + "/" + topicName + "/current_id"
+	if !rmq.checkKeyExist(key) {
+		log.Debug("RocksMQ: channel " + key + " not exists")
+		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
+	}
+
+	readOpts := gorocksdb.NewDefaultReadOptions()
+	defer readOpts.Destroy()
+	readOpts.SetPrefixSameAsStart(true)
+	iter := rmq.store.NewIterator(readOpts)
+	defer iter.Close()
+
+	fixChanName, _ := fixChannelName(topicName)
+	iter.Seek([]byte(fixChanName + "/"))
+	if iter.Valid() {
+		iter.SeekToLast()
+	} else {
+		return fmt.Errorf("RocksMQ: can't get message key of channel %s", topicName)
+	}
+	msgKey := iter.Key()
+	msgID, err := strconv.ParseInt(string(msgKey.Data())[FixedChannelNameLen+1:], 10, 64)
+	if err != nil {
+		return err
+	}
+	err = rmq.kv.Save(key, strconv.FormatInt(msgID, 10))
+	return err
+}
+
 func (rmq *rocksmq) Notify(topicName, groupName string) {
 	if vals, ok := rmq.consumers.Load(topicName); ok {
 		for _, v := range vals.([]*Consumer) {

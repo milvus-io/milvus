@@ -43,6 +43,7 @@ type RocksMQ interface {
 	Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error)
 	Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error)
 	Seek(topicName string, groupName string, msgID UniqueID) error
+	SeekToLatest(topicName, groupName string) error
 	ExistConsumerGroup(topicName string, groupName string) (bool, *Consumer)
 
 	Notify(topicName, groupName string)

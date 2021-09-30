@@ -552,3 +552,55 @@ func TestRocksmq_CopyData(t *testing.T) {
 	assert.Equal(t, 3, len(cMsgs1))
 	assert.Equal(t, emptyTargetData, cMsgs1[0].Payload)
 }
+
+func TestRocksmq_SeekToLatest(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
+	assert.Nil(t, err)
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_seektolatest"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	rmq, err := NewRocksMQ(name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	channelName := "channel_test"
+	err = rmq.CreateTopic(channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyTopic(channelName)
+	loopNum := 100
+
+	err = rmq.SeekToLatest(channelName, "dummy_group")
+	assert.Error(t, err)
+
+	// Consume loopNum message once
+	groupName := "group_test"
+	_ = rmq.DestroyConsumerGroup(channelName, groupName)
+	err = rmq.CreateConsumerGroup(channelName, groupName)
+	assert.Nil(t, err)
+
+	err = rmq.SeekToLatest(channelName, groupName)
+	assert.Error(t, err)
+
+	pMsgs := make([]ProducerMessage, loopNum)
+	for i := 0; i < loopNum; i++ {
+		msg := "message_" + strconv.Itoa(i+loopNum)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs[i] = pMsg
+	}
+	_, err = rmq.Produce(channelName, pMsgs)
+	assert.Nil(t, err)
+
+	err = rmq.SeekToLatest(channelName, groupName)
+	assert.Nil(t, err)
+
+	cMsgs, err := rmq.Consume(channelName, groupName, loopNum)
+	assert.Nil(t, err)
+	assert.Equal(t, len(cMsgs), 0)
+}

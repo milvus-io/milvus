@@ -77,8 +77,9 @@ func TestClient_Subscribe(t *testing.T) {
 	assert.NoError(t, err)
 
 	consumer, err := client.Subscribe(ConsumerOptions{
-		Topic:            newTopicName(),
-		SubscriptionName: newConsumerName(),
+		Topic:                       newTopicName(),
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	})
 	assert.Error(t, err)
 	assert.Nil(t, consumer)
@@ -93,8 +94,9 @@ func TestClient_Subscribe(t *testing.T) {
 	assert.NoError(t, err)
 	defer client1.Close()
 	opt := ConsumerOptions{
-		Topic:            newTopicName(),
-		SubscriptionName: newConsumerName(),
+		Topic:                       newTopicName(),
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	}
 	consumer1, err := client1.Subscribe(opt)
 	assert.NoError(t, err)
@@ -102,6 +104,18 @@ func TestClient_Subscribe(t *testing.T) {
 	consumer2, err := client1.Subscribe(opt)
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer2)
+
+	opt1 := ConsumerOptions{
+		Topic:                       newTopicName(),
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: SubscriptionPositionLatest,
+	}
+	consumer3, err := client1.Subscribe(opt1)
+	assert.Error(t, err)
+	assert.Nil(t, consumer3)
+	consumer4, err := client1.Subscribe(opt1)
+	assert.Error(t, err)
+	assert.Nil(t, consumer4)
 
 	producer1, err := client1.CreateProducer(ProducerOptions{
 		Topic: newTopicName(),
@@ -130,8 +144,9 @@ func TestClient_consume(t *testing.T) {
 	assert.NoError(t, err)
 
 	opt := ConsumerOptions{
-		Topic:            topicName,
-		SubscriptionName: newConsumerName(),
+		Topic:                       topicName,
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	}
 	consumer, err := client.Subscribe(opt)
 	assert.NoError(t, err)

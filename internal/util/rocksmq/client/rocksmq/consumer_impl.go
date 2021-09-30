@@ -54,7 +54,7 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 	}, nil
 }
 
-func newConsumer1(c *client, options ConsumerOptions, msgMutex chan struct{}) (*consumer, error) {
+func getExistedConsumer(c *client, options ConsumerOptions, msgMutex chan struct{}) (*consumer, error) {
 	if c == nil {
 		return nil, newError(InvalidConfiguration, "client is nil")
 	}
