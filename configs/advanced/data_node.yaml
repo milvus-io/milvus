@@ -17,5 +17,5 @@ dataNode:
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
 
   flush:
-    # max buffer size to flush
+    # Max buffer size to flush for a single segment.
     insertBufSize: 16777216 # Bytes, 16 MB
