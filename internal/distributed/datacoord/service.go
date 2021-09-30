@@ -192,6 +192,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.dataCoord.GetStatisticsChannel(ctx)
 }
 
+// GetSegmentInfo gets segment information according to segment id
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	return s.dataCoord.GetSegmentInfo(ctx, req)
 }
