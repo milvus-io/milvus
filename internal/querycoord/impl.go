@@ -276,6 +276,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 	}, nil
 }
 
+// LoadPartition loads all the sealed segments of this partition to queryNodes, and assigns watchDmChannelRequest to queryNodes
 func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
