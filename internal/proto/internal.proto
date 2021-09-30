@@ -99,19 +99,22 @@ message DropPartitionRequest {
 
 message CreateAliasRequest {
   common.MsgBase base = 1;
-  string collection_name = 2;
-  string alias = 3;
+  string db_name = 2;
+  string collection_name = 3;
+  string alias = 4;
 }
 
 message DropAliasRequest {
   common.MsgBase base = 1;
-  string alias = 2;
+  string db_name = 2;
+  string alias = 3;
 }
 
 message AlterAliasRequest{
   common.MsgBase base = 1;
-  string collection_name = 2;
-  string alias = 3;
+  string db_name = 2;
+  string collection_name = 3;
+  string alias = 4;
 }
 
 message CreateIndexRequest {
