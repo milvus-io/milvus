@@ -107,6 +107,7 @@ func (pt *ParamTable) initKvRootPath() {
 	pt.KvRootPath = rootPath + "/" + subPath
 }
 
+// initMinIOAddress initializes init the minio address of configuration items.
 func (pt *ParamTable) initMinIOAddress() {
 	ret, err := pt.Load("_MinioAddress")
 	if err != nil {
