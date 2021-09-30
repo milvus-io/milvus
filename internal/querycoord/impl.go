@@ -417,6 +417,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	return status, nil
 }
 
+// CreateQueryChannel assigns unique querychannel and resultchannel to the specified collecion
 func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
