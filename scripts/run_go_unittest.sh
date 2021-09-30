@@ -12,7 +12,7 @@ ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
 # ignore Minio,S3 unittes
 MILVUS_DIR="${ROOT_DIR}/internal/"
-echo $MILVUS_DIR
+echo "Run go unittest under $MILVUS_DIR"
 
 go test -race -cover "${MILVUS_DIR}/allocator/..." -failfast
 go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
