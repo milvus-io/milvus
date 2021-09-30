@@ -51,9 +51,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is an alias of int64, is used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
-type Timestamp = typeutil.Timestamp
 
+// IndexNode is a component that executes the task of building indexes.
 type IndexNode struct {
 	stateCode atomic.Value
 
@@ -80,6 +81,7 @@ type IndexNode struct {
 	initOnce sync.Once
 }
 
+// NewIndexNode creates a new IndexNode component.
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 	log.Debug("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
@@ -98,7 +100,7 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 	return b, nil
 }
 
-// Register register index node at etcd
+// Register register index node at etcd.
 func (i *IndexNode) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	if i.session == nil {
@@ -122,6 +124,7 @@ func (i *IndexNode) initKnowhere() {
 	C.free(unsafe.Pointer(cSimdType))
 }
 
+// Init initializes the IndexNode component.
 func (i *IndexNode) Init() error {
 	var initErr error = nil
 	i.initOnce.Do(func() {
@@ -169,6 +172,7 @@ func (i *IndexNode) Init() error {
 	return initErr
 }
 
+// Start starts the IndexNode component.
 func (i *IndexNode) Start() error {
 	var startErr error = nil
 	i.once.Do(func() {
@@ -194,7 +198,7 @@ func (i *IndexNode) Start() error {
 	return startErr
 }
 
-// Stop Close closes the server.
+// Stop closes the server.
 func (i *IndexNode) Stop() error {
 	i.loopCancel()
 	if i.sched != nil {
@@ -207,6 +211,7 @@ func (i *IndexNode) Stop() error {
 	return nil
 }
 
+// UpdateStateCode updates the component state of IndexNode.
 func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
 }
@@ -265,6 +270,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 	return ret, nil
 }
 
+// GetComponentStates gets the component states of IndexNode.
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexNode components states ...")
 	stateInfo := &internalpb.ComponentInfo{
@@ -288,6 +294,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 	return ret, nil
 }
 
+// GetTimeTickChannel gets the time tick channel of IndexNode.
 func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	log.Debug("get IndexNode time tick channel ...")
 
@@ -298,6 +305,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 	}, nil
 }
 
+// GetStatisticsChannel gets the statistics channel of IndexNode.
 func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	log.Debug("get IndexNode statistics channel ...")
 	return &milvuspb.StringResponse{
@@ -307,6 +315,7 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
+// GetMetrics gets the metrics info of IndexNode.
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("IndexNode.GetMetrics",
