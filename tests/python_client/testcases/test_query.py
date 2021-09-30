@@ -222,7 +222,7 @@ class TestQueryParams(TestcaseBase):
         term_expr = f'{ct.default_bool_field_name} in [True]'
         res, _ = self.collection_wrap.query(term_expr, output_fields=[ct.default_bool_field_name])
         assert len(res) == ct.default_nb / 2
-        assert set(res[0].keys()) == set(ct.default_int64_field_name, ct.default_bool_field_name)
+        assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_bool_field_name}
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_by_int8_field(self):
@@ -427,7 +427,7 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_float_field_name])
-        assert set(res[0].keys()) == set([ct.default_int64_field_name, ct.default_float_field_name])
+        assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_float_field_name}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_all_fields(self):
