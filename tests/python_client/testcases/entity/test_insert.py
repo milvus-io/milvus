@@ -192,11 +192,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_ids(self, connect, id_collection, insert_count):
-        '''
+        """
         target: test insert entities in collection, use customize ids
         method: create collection and insert entities in it, check the ids returned and the collection length after entities inserted
         expected: the length of ids and the collection row count
-        '''
+        """
         nb = insert_count
         ids = [i for i in range(nb)]
         entities = gen_entities(nb)
@@ -211,11 +211,11 @@ class TestInsertBase:
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_the_same_ids(self, connect, id_collection, insert_count):
-        '''
+        """
         target: test insert vectors in collection, use customize the same ids
         method: create collection and insert vectors in it, check the ids returned and the collection length after vectors inserted
         expected: the length of ids and the collection row count
-        '''
+        """
         nb = insert_count
         ids = [1 for i in range(nb)]
         entities = gen_entities(nb)
@@ -230,11 +230,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_ids_fields(self, connect, get_filter_field, get_vector_field):
-        '''
+        """
         target: test create normal collection with different fields, insert entities into id with ids
         method: create collection with diff fields: metric/field_type/..., insert, and count
         expected: row count correct
-        '''
+        """
         nb = 5
         filter_field = get_filter_field
         vector_field = get_vector_field
@@ -256,11 +256,11 @@ class TestInsertBase:
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_not_match(self, connect, id_collection, insert_count):
-        '''
+        """
         target: test insert entities in collection without ids
         method: create id_collection and insert entities without
         expected: exception raised
-        '''
+        """
         nb = insert_count
         with pytest.raises(Exception) as e:
             entities = gen_entities(nb)
