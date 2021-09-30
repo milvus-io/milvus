@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
@@ -279,6 +280,35 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		task := loadSegmentsTask{
 			req:  genLoadEmptySegmentsRequest(),
 			node: node,
+		}
+		task.req.LoadCondition = querypb.TriggerCondition_handoff
+		err = task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("test OOM", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		totalRAM := Params.CacheSize * 1024 * 1024 * 1024
+
+		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+
+		sizePerRecord, err := typeutil.EstimateSizePerRecord(col.schema)
+		assert.NoError(t, err)
+
+		task := loadSegmentsTask{
+			req:  genLoadEmptySegmentsRequest(),
+			node: node,
+		}
+		task.req.Infos = []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:    defaultSegmentID,
+				PartitionID:  defaultPartitionID,
+				CollectionID: defaultCollectionID,
+				NumOfRows:    totalRAM / int64(sizePerRecord),
+			},
 		}
 		task.req.LoadCondition = querypb.TriggerCondition_handoff
 		err = task.Execute(ctx)

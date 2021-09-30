@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -69,11 +68,6 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 	// no segment needs to load, return
 	if len(req.Infos) == 0 {
 		return nil
-	}
-
-	err := loader.checkSegmentMemory(req.Infos)
-	if err != nil {
-		return err
 	}
 
 	newSegments := make([]*Segment, 0)
@@ -193,47 +187,6 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		err = loader.indexLoader.loadIndex(segment, id)
 		if err != nil {
 			return err
-		}
-	}
-
-	return nil
-}
-
-func (loader *segmentLoader) checkSegmentMemory(segmentLoadInfos []*querypb.SegmentLoadInfo) error {
-	totalRAMInMB := Params.CacheSize * 1024.0
-	usedRAMInMB := loader.historicalReplica.getSegmentsMemSize() / 1024.0 / 1024.0
-
-	segmentTotalSize := int64(0)
-	for _, segInfo := range segmentLoadInfos {
-		collectionID := segInfo.CollectionID
-		segmentID := segInfo.SegmentID
-
-		col, err := loader.historicalReplica.getCollectionByID(collectionID)
-		if err != nil {
-			return err
-		}
-
-		sizePerRecord, err := typeutil.EstimateSizePerRecord(col.schema)
-		if err != nil {
-			return err
-		}
-
-		segmentSize := int64(sizePerRecord) * segInfo.NumOfRows
-		segmentTotalSize += segmentSize / 1024.0 / 1024.0
-		// TODO: get threshold factor from param table
-		thresholdMemSize := float64(totalRAMInMB) * 0.5
-
-		log.Debug("memory stats when load segment",
-			zap.Any("collectionIDs", collectionID),
-			zap.Any("segmentID", segmentID),
-			zap.Any("numOfRows", segInfo.NumOfRows),
-			zap.Any("totalRAM(MB)", totalRAMInMB),
-			zap.Any("usedRAM(MB)", usedRAMInMB),
-			zap.Any("segmentTotalSize(MB)", segmentTotalSize),
-			zap.Any("thresholdMemSize(MB)", thresholdMemSize),
-		)
-		if usedRAMInMB+segmentTotalSize > int64(thresholdMemSize) {
-			return errors.New("load segment failed, OOM if load, collectionID = " + fmt.Sprintln(collectionID))
 		}
 	}
 

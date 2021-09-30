@@ -137,6 +137,8 @@ func (p *ParamTable) Init() {
 }
 
 func (p *ParamTable) initCacheSize() {
+	defer log.Debug("init cacheSize", zap.Any("cacheSize (GB)", p.CacheSize))
+
 	const defaultCacheSize = 32 // GB
 	p.CacheSize = defaultCacheSize
 
@@ -153,7 +155,6 @@ func (p *ParamTable) initCacheSize() {
 		return
 	}
 	p.CacheSize = value
-	log.Debug("init cacheSize", zap.Any("cacheSize (GB)", p.CacheSize))
 }
 
 // ---------------------------------------------------------- minio

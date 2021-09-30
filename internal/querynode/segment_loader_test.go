@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestSegmentLoader_loadSegment(t *testing.T) {
@@ -190,60 +189,6 @@ func TestSegmentLoader_notOnService(t *testing.T) {
 	}
 	err = loader.loadSegment(req, false)
 	assert.NoError(t, err)
-}
-
-func TestSegmentLoader_CheckSegmentMemory(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	collectionID := UniqueID(0)
-	segmentID := UniqueID(0)
-
-	genSegmentLoader := func() *segmentLoader {
-		replica := newCollectionReplica(nil)
-		err := replica.addCollection(collectionID, genTestCollectionSchema(collectionID, false, 128))
-		assert.NoError(t, err)
-		loader := newSegmentLoader(ctx, nil, nil, replica, nil)
-		return loader
-	}
-
-	genSegmentLoadInfo := func() *querypb.SegmentLoadInfo {
-		return &querypb.SegmentLoadInfo{
-			SegmentID:    segmentID,
-			PartitionID:  UniqueID(0),
-			CollectionID: collectionID,
-			NumOfRows:    1000,
-		}
-	}
-
-	t.Run("valid test", func(t *testing.T) {
-		loader := genSegmentLoader()
-		err := loader.checkSegmentMemory([]*querypb.SegmentLoadInfo{genSegmentLoadInfo()})
-		assert.NoError(t, err)
-	})
-
-	t.Run("test no collection", func(t *testing.T) {
-		loader := genSegmentLoader()
-		loader.historicalReplica.freeAll()
-		err := loader.checkSegmentMemory([]*querypb.SegmentLoadInfo{genSegmentLoadInfo()})
-		assert.Error(t, err)
-	})
-
-	t.Run("test OOM", func(t *testing.T) {
-		totalRAM := Params.CacheSize * 1024 * 1024 * 1024
-
-		loader := genSegmentLoader()
-		col, err := loader.historicalReplica.getCollectionByID(collectionID)
-		assert.NoError(t, err)
-
-		sizePerRecord, err := typeutil.EstimateSizePerRecord(col.schema)
-		assert.NoError(t, err)
-
-		info := genSegmentLoadInfo()
-		info.NumOfRows = totalRAM / int64(sizePerRecord)
-		err = loader.checkSegmentMemory([]*querypb.SegmentLoadInfo{info})
-		assert.Error(t, err)
-	})
 }
 
 func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {

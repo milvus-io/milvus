@@ -381,6 +381,12 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		}
 	}
 
+	err = checkSegmentMemory(l.req.Infos, l.node.historical.replica, l.node.streaming.replica)
+	if err != nil {
+		log.Warn(err.Error())
+		return err
+	}
+
 	switch l.req.LoadCondition {
 	case queryPb.TriggerCondition_handoff:
 		err = l.node.historical.loader.loadSegmentOfConditionHandOff(l.req)
