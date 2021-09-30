@@ -115,6 +115,7 @@ func (pt *ParamTable) initMinIOAddress() {
 	pt.MinIOAddress = ret
 }
 
+// initMinIOAccessKeyID initializes the minio access key of configuration items.
 func (pt *ParamTable) initMinIOAccessKeyID() {
 	ret, err := pt.Load("minio.accessKeyID")
 	if err != nil {
