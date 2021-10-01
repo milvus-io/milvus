@@ -24,10 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
-const (
-	StartParamsKey = "START_PARAMS"
-)
-
 // ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
