@@ -247,19 +247,19 @@ func (rmsf *RmqMsgStreamFactory) NewTtMsgStream() *MsgStream
 // PulsarMsgStream
 
 type PulsarMsgStream struct {
-	ctx							context.Context
-	client					 pulsar.Client
-	producers				[]Producer
-	consumers				[]Consumer
-	consumerChannels []string
-	repackFunc			 RepackFunc
-	unmarshal				UnmarshalDispatcher
-	receiveBuf			 chan *MsgPack
-	wait						 *sync.WaitGroup
-	streamCancel		 func()
+	ctx					context.Context
+	client				pulsar.Client
+	producers			[]Producer
+	consumers			[]Consumer
+	consumerChannels 	[]string
+	repackFunc			RepackFunc
+	unmarshal			UnmarshalDispatcher
+	receiveBuf			chan *MsgPack
+	wait				*sync.WaitGroup
+	streamCancel		func()
 	pulsarBufSize		int64
-	consumerLock		 *sync.Mutex
-	consumerReflects []reflect.SelectCase
+	consumerLock		*sync.Mutex
+	consumerReflects 	[]reflect.SelectCase
 	
 	scMap *sync.Map
 }
