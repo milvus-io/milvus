@@ -52,6 +52,11 @@ def update_values(src_values_file, deploy_params_file):
         values_dict["cluster"]["enabled"] = True
     elif deploy_mode == config.CLUSTER_3RD_DEPLOY_MODE:
         cluster = True
+    elif deploy_mode == config.SINGLE_DEPLOY_MODE:
+        values_dict["cluster"]["enabled"] = False
+        values_dict["etcd"]["replicaCount"] = 1
+        values_dict["minio"]["mode"] = "standalone"
+        values_dict["pulsar"]["enabled"] = False
     server_tag = utils.get_server_tag(deploy_params)
     print(server_tag)
     # TODO: update milvus config
