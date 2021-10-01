@@ -204,6 +204,26 @@ $ pip install -r requirements.txt
 $ pytest --tags=L0 -n auto
 ```
 
+### Test on local branch
+#### on linux
+start the cluster on your host machine
+
+```shell
+$ ./scripts/start_cluster.sh
+```
+
+#### With docker
+start the cluster on your host machine
+```shell
+$ ./build/builder.sh make install // build milvus
+$ ./build/build_image.sh // build milvus lastest docker
+$ docker images // check if milvus latest image is ready
+REPOSITORY                 TAG                                 IMAGE ID       CREATED          SIZE
+milvusdb/milvus            latest                              63c62ff7c1b7   52 minutes ago   570MB
+$ install with docker compose
+```
+
+
 ## GitHub Flow
 
 To check out code to work on, please refer to the [GitHub Flow](https://guides.github.com/introduction/flow/).
