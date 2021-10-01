@@ -411,6 +411,14 @@ type QueryNode interface {
 	AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error)
 	RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error)
 	WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	// LoadSegments notifies QueryNode to load the sealed segments from storage. The load tasks are sync to this
+	// rpc, QueryNode will return after all the sealed segments are loaded.
+	//
+	// Return UnexpectedError code in status:
+	//     If QueryNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY.
+	//     If any segment is loaded failed in QueryNode.
+	// Return Success code in status:
+	//     All the sealed segments are loaded.
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
 	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
