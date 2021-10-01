@@ -49,7 +49,7 @@ def update_values(src_values_file, deploy_params_file):
     values_dict["service"]["type"] = "ClusterIP"
     if deploy_mode != config.DEFUALT_DEPLOY_MODE:
         cluster = True
-        values_dict["cluster"]["enabled"] = True
+        # values_dict["cluster"]["enabled"] = True
     elif deploy_mode == config.CLUSTER_3RD_DEPLOY_MODE:
         cluster = True
     elif deploy_mode == config.SINGLE_DEPLOY_MODE:
