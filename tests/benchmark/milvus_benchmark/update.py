@@ -75,7 +75,7 @@ def update_values(src_values_file, deploy_params_file):
         cpus = res["cpus"]
         mems = res["mems"]
         gpus = res["gpus"]
-    if cpus:
+    if cpus and mems:
         # Set the scope of cpu application according to the configuration
         resources = {
                 "limits": {
