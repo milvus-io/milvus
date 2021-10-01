@@ -99,6 +99,7 @@ func (node *Proxy) Register() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.ProxyRole, Params.NetworkAddress, false)
 	Params.ProxyID = node.session.ServerID
+	Params.SetLogger(Params.ProxyID)
 	Params.initProxySubName()
 	// TODO Reset the logger
 	//Params.initLogCfg()

@@ -133,7 +133,7 @@ func (p *ParamTable) Init() {
 	p.initSegcoreChunkRows()
 	p.initKnowhereSimdType()
 
-	p.initLogCfg()
+	p.initRoleName()
 }
 
 func (p *ParamTable) initCacheSize() {
@@ -320,6 +320,6 @@ func (p *ParamTable) initKnowhereSimdType() {
 	p.SimdType = simdType
 }
 
-func (p *ParamTable) initLogCfg() {
-	p.InitLogCfg("querynode", p.QueryNodeID)
+func (p *ParamTable) initRoleName() {
+	p.RoleName = "querynode"
 }

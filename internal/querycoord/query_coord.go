@@ -79,6 +79,7 @@ func (qc *QueryCoord) Register() error {
 	qc.session = sessionutil.NewSession(qc.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	qc.liveCh = qc.session.Init(typeutil.QueryCoordRole, Params.Address, true)
 	Params.NodeID = uint64(qc.session.ServerID)
+	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil
 }
 

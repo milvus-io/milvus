@@ -44,7 +44,9 @@ type BaseTable struct {
 	params    *memkv.MemoryKV
 	configDir string
 
-	Log log.Config
+	RoleName          string
+	Log               log.Config
+	LogConfigFunction func(log.Config)
 }
 
 func (gp *BaseTable) Init() {
@@ -59,6 +61,8 @@ func (gp *BaseTable) Init() {
 	gp.loadFromCommonYaml()
 
 	gp.tryloadFromEnv()
+
+	gp.InitLogCfg()
 }
 
 func (gp *BaseTable) GetConfigDir() string {
@@ -419,7 +423,7 @@ func ConvertRangeToIntSlice(rangeStr, sep string) []int {
 	return ret
 }
 
-func (gp *BaseTable) InitLogCfg(role string, id UniqueID) {
+func (gp *BaseTable) InitLogCfg() {
 	gp.Log = log.Config{}
 	format, err := gp.Load("log.format")
 	if err != nil {
@@ -434,13 +438,29 @@ func (gp *BaseTable) InitLogCfg(role string, id UniqueID) {
 	gp.Log.File.MaxSize = gp.ParseInt("log.file.maxSize")
 	gp.Log.File.MaxBackups = gp.ParseInt("log.file.maxBackups")
 	gp.Log.File.MaxDays = gp.ParseInt("log.file.maxAge")
+}
+
+func (gp *BaseTable) SetLogConfig(f func(log.Config)) {
+	gp.LogConfigFunction = f
+}
+
+func (gp *BaseTable) SetLogger(id UniqueID) {
 	rootPath, err := gp.Load("log.file.rootPath")
 	if err != nil {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		gp.Log.File.Filename = path.Join(rootPath, role+"-"+strconv.FormatInt(id, 10)+".log")
+		log.Debug("Set logger ", zap.Int64("id", id), zap.String("role", gp.RoleName))
+		if id < 0 {
+			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+".log")
+		} else {
+			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+"-"+strconv.FormatInt(id, 10)+".log")
+		}
 	} else {
 		gp.Log.File.Filename = ""
+	}
+
+	if gp.LogConfigFunction != nil {
+		gp.LogConfigFunction(gp.Log)
 	}
 }

@@ -864,6 +864,7 @@ func (c *Core) Register() error {
 		return fmt.Errorf("session is nil, maybe the etcd client connection fails")
 	}
 	c.sessCloseCh = c.session.Init(typeutil.RootCoordRole, Params.Address, true)
+	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil
 }
 

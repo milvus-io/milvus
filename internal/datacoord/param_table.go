@@ -93,7 +93,7 @@ func (p *ParamTable) Init() {
 	p.initTimeTickChannelName()
 	p.initSegmentInfoChannelName()
 	p.initDataCoordSubscriptionName()
-	p.initLogCfg()
+	p.initRoleName()
 
 	p.initFlushStreamPosSubPath()
 	p.initStatsStreamPosSubPath()
@@ -235,8 +235,8 @@ func (p *ParamTable) initDataCoordSubscriptionName() {
 	p.DataCoordSubscriptionName = strings.Join(s, "-")
 }
 
-func (p *ParamTable) initLogCfg() {
-	p.InitLogCfg("datacoord", 0)
+func (p *ParamTable) initRoleName() {
+	p.RoleName = "datacoord"
 }
 
 func (p *ParamTable) initFlushStreamPosSubPath() {
