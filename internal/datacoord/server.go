@@ -304,7 +304,10 @@ func (s *Server) startServerLoop() {
 	go s.startWatchService(s.serverLoopCtx)
 	go s.startFlushLoop(s.serverLoopCtx)
 	go s.session.LivenessCheck(s.serverLoopCtx, s.liveCh, func() {
-		s.Stop()
+		err := s.Stop()
+		if err != nil {
+			log.Error("server stop fail", zap.Error(err))
+		}
 	})
 }
 
@@ -391,7 +394,11 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
-			s.segmentManager.ExpireAllocations(ch, ts)
+			err = s.segmentManager.ExpireAllocations(ch, ts)
+			if err != nil {
+				log.Warn("expire allocations failed", zap.Error(err))
+				continue
+			}
 			segments, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
 			if err != nil {
 				log.Warn("get flushable segments failed", zap.Error(err))
