@@ -374,8 +374,8 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_connect_alias_not_exist(self):
         """
-        target: connect passes alias that is not exist and raise error
-        method: connect passes alias that is not exist
+        target: connect with a non existing alias and raise error
+        method: connect with a non existing alias
         expected: response of connect is error
         """
 
