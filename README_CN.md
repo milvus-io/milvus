@@ -1,4 +1,4 @@
-<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_ch_69fbf0fc45.png" alt="Milvus banner">
+<img src="https://assets.zilliz.com/readme_ch_69fbf0fc45.png" alt="Milvus banner">
 
 <div class="column" align="middle">
   <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
@@ -112,17 +112,17 @@ $ make milvus
   <tr>
     <td width="30%">
       <a href="https://zilliz.com/milvus-demos">
-        <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/image_search_59a64e4f22.gif" />
+        <img src="https://assets.zilliz.com/image_search_59a64e4f22.gif" />
       </a>
     </td>
     <td width="30%">
 <a href="https://zilliz.com/milvus-demos">
-<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/qa_df5ee7bd83.gif" />
+<img src="https://assets.zilliz.com/qa_df5ee7bd83.gif" />
 </a>
     </td>
     <td width="30%">
 <a href="https://zilliz.com/milvus-demos">
-<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/mole_search_76f8340572.gif" />
+<img src="https://assets.zilliz.com/mole_search_76f8340572.gif" />
 </a>
     </td>
   </tr>
@@ -368,7 +368,7 @@ Milvus insight 提供了好用的图形化界面，帮助您更好的管理数�
 
 关注 Milvus 社交媒体：
 
-- [知乎](https://zilliz.atlassian.net/wiki/spaces/TC/pages/251658753/CN%2BTranslation%2BWhat%2Bis%2BMilvus#)
+- [知乎](https://www.zhihu.com/org/zilliz-11)
 - [CSDN](http://zilliz.blog.csdn.net/)
 - [Bilibili](http://space.bilibili.com/478166626)
 - Zilliz 技术交流微信群
