@@ -211,7 +211,8 @@ class TestAliasOperation(TestcaseBase):
         collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
-                                                                   check_items={exp_name: alias_name, exp_schema: default_schema})
+                                                                   check_items={exp_name: alias_name,
+                                                                                exp_schema: default_schema})
         
         # create partition by alias
         partition_name = cf.gen_unique_str("partition")
