@@ -2484,6 +2484,11 @@ class TestHasCollectionInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test list collections with invalid scenario
+        method: show collection with invalid collection name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
