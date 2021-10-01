@@ -71,26 +71,6 @@ pull_request_rules:
         remove:
           - ci-passed
 
-  - name: Remove ci-passed when ci failed
-    conditions:
-      - base=master
-      - -title~=\[skip ci\]
-      - "check-failure=continuous-integration/jenkins/pr-merge"
-    actions:
-      label:
-        remove:
-          - ci-passed
-
-  - name: Remove ci-passed when ci pending
-    conditions:
-      - base=master
-      - -title~=\[skip ci\]
-      - "check-pending=continuous-integration/jenkins/pr-merge"
-    actions:
-      label:
-        remove:
-          - ci-passed
-
   - name: Blocking PR if missing a related issue or PR doesn't have kind/improvement label
     conditions:
       - base=master
