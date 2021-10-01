@@ -506,11 +506,23 @@ class CreateAliasRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kCollectionNameFieldNumber = 2,
-    kAliasFieldNumber = 3,
+    kDbNameFieldNumber = 2,
+    kCollectionNameFieldNumber = 3,
+    kAliasFieldNumber = 4,
     kBaseFieldNumber = 1,
   };
-  // string collection_name = 2;
+  // string db_name = 2;
+  void clear_db_name();
+  const std::string& db_name() const;
+  void set_db_name(const std::string& value);
+  void set_db_name(std::string&& value);
+  void set_db_name(const char* value);
+  void set_db_name(const char* value, size_t size);
+  std::string* mutable_db_name();
+  std::string* release_db_name();
+  void set_allocated_db_name(std::string* db_name);
+
+  // string collection_name = 3;
   void clear_collection_name();
   const std::string& collection_name() const;
   void set_collection_name(const std::string& value);
@@ -521,7 +533,7 @@ class CreateAliasRequest :
   std::string* release_collection_name();
   void set_allocated_collection_name(std::string* collection_name);
 
-  // string alias = 3;
+  // string alias = 4;
   void clear_alias();
   const std::string& alias() const;
   void set_alias(const std::string& value);
@@ -545,6 +557,7 @@ class CreateAliasRequest :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr alias_;
   ::milvus::proto::common::MsgBase* base_;
@@ -666,10 +679,22 @@ class DropAliasRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kAliasFieldNumber = 2,
+    kDbNameFieldNumber = 2,
+    kAliasFieldNumber = 3,
     kBaseFieldNumber = 1,
   };
-  // string alias = 2;
+  // string db_name = 2;
+  void clear_db_name();
+  const std::string& db_name() const;
+  void set_db_name(const std::string& value);
+  void set_db_name(std::string&& value);
+  void set_db_name(const char* value);
+  void set_db_name(const char* value, size_t size);
+  std::string* mutable_db_name();
+  std::string* release_db_name();
+  void set_allocated_db_name(std::string* db_name);
+
+  // string alias = 3;
   void clear_alias();
   const std::string& alias() const;
   void set_alias(const std::string& value);
@@ -693,6 +718,7 @@ class DropAliasRequest :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr alias_;
   ::milvus::proto::common::MsgBase* base_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -813,11 +839,23 @@ class AlterAliasRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kCollectionNameFieldNumber = 2,
-    kAliasFieldNumber = 3,
+    kDbNameFieldNumber = 2,
+    kCollectionNameFieldNumber = 3,
+    kAliasFieldNumber = 4,
     kBaseFieldNumber = 1,
   };
-  // string collection_name = 2;
+  // string db_name = 2;
+  void clear_db_name();
+  const std::string& db_name() const;
+  void set_db_name(const std::string& value);
+  void set_db_name(std::string&& value);
+  void set_db_name(const char* value);
+  void set_db_name(const char* value, size_t size);
+  std::string* mutable_db_name();
+  std::string* release_db_name();
+  void set_allocated_db_name(std::string* db_name);
+
+  // string collection_name = 3;
   void clear_collection_name();
   const std::string& collection_name() const;
   void set_collection_name(const std::string& value);
@@ -828,7 +866,7 @@ class AlterAliasRequest :
   std::string* release_collection_name();
   void set_allocated_collection_name(std::string* collection_name);
 
-  // string alias = 3;
+  // string alias = 4;
   void clear_alias();
   const std::string& alias() const;
   void set_alias(const std::string& value);
@@ -852,6 +890,7 @@ class AlterAliasRequest :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr alias_;
   ::milvus::proto::common::MsgBase* base_;
@@ -11573,7 +11612,58 @@ inline void CreateAliasRequest::set_allocated_base(::milvus::proto::common::MsgB
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.CreateAliasRequest.base)
 }
 
-// string collection_name = 2;
+// string db_name = 2;
+inline void CreateAliasRequest::clear_db_name() {
+  db_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& CreateAliasRequest::db_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.CreateAliasRequest.db_name)
+  return db_name_.GetNoArena();
+}
+inline void CreateAliasRequest::set_db_name(const std::string& value) {
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.CreateAliasRequest.db_name)
+}
+inline void CreateAliasRequest::set_db_name(std::string&& value) {
+  
+  db_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.CreateAliasRequest.db_name)
+}
+inline void CreateAliasRequest::set_db_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.CreateAliasRequest.db_name)
+}
+inline void CreateAliasRequest::set_db_name(const char* value, size_t size) {
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.CreateAliasRequest.db_name)
+}
+inline std::string* CreateAliasRequest::mutable_db_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.CreateAliasRequest.db_name)
+  return db_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* CreateAliasRequest::release_db_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.CreateAliasRequest.db_name)
+  
+  return db_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void CreateAliasRequest::set_allocated_db_name(std::string* db_name) {
+  if (db_name != nullptr) {
+    
+  } else {
+    
+  }
+  db_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), db_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.CreateAliasRequest.db_name)
+}
+
+// string collection_name = 3;
 inline void CreateAliasRequest::clear_collection_name() {
   collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -11624,7 +11714,7 @@ inline void CreateAliasRequest::set_allocated_collection_name(std::string* colle
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.CreateAliasRequest.collection_name)
 }
 
-// string alias = 3;
+// string alias = 4;
 inline void CreateAliasRequest::clear_alias() {
   alias_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -11724,7 +11814,58 @@ inline void DropAliasRequest::set_allocated_base(::milvus::proto::common::MsgBas
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.DropAliasRequest.base)
 }
 
-// string alias = 2;
+// string db_name = 2;
+inline void DropAliasRequest::clear_db_name() {
+  db_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& DropAliasRequest::db_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DropAliasRequest.db_name)
+  return db_name_.GetNoArena();
+}
+inline void DropAliasRequest::set_db_name(const std::string& value) {
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DropAliasRequest.db_name)
+}
+inline void DropAliasRequest::set_db_name(std::string&& value) {
+  
+  db_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.DropAliasRequest.db_name)
+}
+inline void DropAliasRequest::set_db_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.DropAliasRequest.db_name)
+}
+inline void DropAliasRequest::set_db_name(const char* value, size_t size) {
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.DropAliasRequest.db_name)
+}
+inline std::string* DropAliasRequest::mutable_db_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.DropAliasRequest.db_name)
+  return db_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* DropAliasRequest::release_db_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.DropAliasRequest.db_name)
+  
+  return db_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void DropAliasRequest::set_allocated_db_name(std::string* db_name) {
+  if (db_name != nullptr) {
+    
+  } else {
+    
+  }
+  db_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), db_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.DropAliasRequest.db_name)
+}
+
+// string alias = 3;
 inline void DropAliasRequest::clear_alias() {
   alias_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -11824,7 +11965,58 @@ inline void AlterAliasRequest::set_allocated_base(::milvus::proto::common::MsgBa
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.AlterAliasRequest.base)
 }
 
-// string collection_name = 2;
+// string db_name = 2;
+inline void AlterAliasRequest::clear_db_name() {
+  db_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& AlterAliasRequest::db_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.AlterAliasRequest.db_name)
+  return db_name_.GetNoArena();
+}
+inline void AlterAliasRequest::set_db_name(const std::string& value) {
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.AlterAliasRequest.db_name)
+}
+inline void AlterAliasRequest::set_db_name(std::string&& value) {
+  
+  db_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.AlterAliasRequest.db_name)
+}
+inline void AlterAliasRequest::set_db_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.AlterAliasRequest.db_name)
+}
+inline void AlterAliasRequest::set_db_name(const char* value, size_t size) {
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.AlterAliasRequest.db_name)
+}
+inline std::string* AlterAliasRequest::mutable_db_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.AlterAliasRequest.db_name)
+  return db_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* AlterAliasRequest::release_db_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.AlterAliasRequest.db_name)
+  
+  return db_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void AlterAliasRequest::set_allocated_db_name(std::string* db_name) {
+  if (db_name != nullptr) {
+    
+  } else {
+    
+  }
+  db_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), db_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.AlterAliasRequest.db_name)
+}
+
+// string collection_name = 3;
 inline void AlterAliasRequest::clear_collection_name() {
   collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -11875,7 +12067,7 @@ inline void AlterAliasRequest::set_allocated_collection_name(std::string* collec
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.AlterAliasRequest.collection_name)
 }
 
-// string alias = 3;
+// string alias = 4;
 inline void AlterAliasRequest::clear_alias() {
   alias_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
