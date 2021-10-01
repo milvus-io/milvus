@@ -50,6 +50,7 @@ type historical struct {
 	etcdKV *etcdkv.EtcdKV
 }
 
+// newHistorical returns a new historical
 func newHistorical(ctx context.Context,
 	rootCoord types.RootCoord,
 	indexCoord types.IndexCoord,
