@@ -15,9 +15,11 @@ import (
 	"context"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"go.uber.org/zap"
 )
 
 // ClusterStore is the interface stores DataNodes information
@@ -108,7 +110,10 @@ func (n *NodeInfo) GetClient() types.DataNode {
 func (n *NodeInfo) Dispose() {
 	defer n.cancel()
 	if n.client != nil {
-		n.client.Stop()
+		err := n.client.Stop()
+		if err != nil {
+			log.Warn("DataCoord Cluster node dispose", zap.Error(err))
+		}
 	}
 }
 

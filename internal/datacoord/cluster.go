@@ -441,7 +441,10 @@ func (c *Cluster) handleUnRegister(n *NodeInfo) {
 	node.Dispose()
 	// save deleted node to kv
 	deleted := node.Clone(SetChannels(nil))
-	c.saveNode(deleted)
+	err := c.saveNode(deleted)
+	if err != nil {
+		log.Warn("DataCoord Cluster handleUnRegister save deleted node error", zap.Error(err))
+	}
 	c.nodes.DeleteNode(n.Info.GetVersion())
 
 	cNodes := c.nodes.GetNodes()
@@ -456,7 +459,7 @@ func (c *Cluster) handleUnRegister(n *NodeInfo) {
 		rets = c.unregisterPolicy(cNodes, node)
 	}
 	log.Debug("delta changes after unregister policy", zap.Any("nodes", rets), zap.Any("buffer", c.chanBuffer))
-	err := c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
+	err = c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
 	if err != nil {
 		log.Warn("DataCoord Cluster handleUnRegister txnSaveNodesAndBuffer", zap.Error(err))
 	}
