@@ -438,7 +438,8 @@ func TestGetSegmentInfo(t *testing.T) {
 		segInfo := &datapb.SegmentInfo{
 			ID: 0,
 		}
-		svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		assert.Nil(t, err)
 
 		req := &datapb.GetSegmentInfoRequest{
 			SegmentIDs: []int64{0, 1},
