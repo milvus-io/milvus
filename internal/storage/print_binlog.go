@@ -24,6 +24,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
+// PrintBinlogFiles call printBinlogFile in turn for the file list specified by parameter fileList.
+// Return an error early if it encounters any error.
 func PrintBinlogFiles(fileList []string) error {
 	for _, file := range fileList {
 		if err := printBinlogFile(file); err != nil {
