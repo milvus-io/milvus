@@ -361,7 +361,7 @@ type ProducerMessage struct {
 }
 
 type ConsumerMessage struct {
-	msgID	 UniqueID
+	msgID	UniqueID
 	payload []byte
 }
 
