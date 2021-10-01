@@ -62,12 +62,14 @@ jobs:
           kubectl get pods -n chaos-testing
           kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
           sleep 20s
+          # check whether port-forward success
           nc -vz 127.0.0.1 19530
       
       - name: Chaos Test
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
+          # replace chaos object
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_podkill.yaml\'/g" constants.py
           cat constants.py
           pytest -s -v test_chaos.py --host 127.0.0.1 --log-level=INFO --tb=no
