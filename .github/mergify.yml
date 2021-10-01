@@ -33,16 +33,6 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Test passed for document changed
-    conditions:
-      - base=master
-      - -files~=^[^\.]+$
-      - -files~=\S+\.(?!md$|png$)
-    actions:
-      label:
-        add:
-          - ci-passed
-
   - name: Test passed for mergify changed
     conditions:
       - base=master
