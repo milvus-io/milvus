@@ -125,6 +125,7 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
 
 
 def main():
+    # Parse the incoming parameters and run the corresponding test cases
     arg_parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # helm mode with scheduler
