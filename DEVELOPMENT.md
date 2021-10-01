@@ -20,6 +20,9 @@ Table of contents
     - [Unit Tests](#unit-tests)
     - [Code coverage](#code-coverage)
     - [E2E Tests](#e2e-tests)
+    - [Test on local branch](#test-on-local-branch)
+      - [On Linux](#on-linux)
+      - [With docker](#with-docker)
   - [GitHub Flow](#github-flow)
 
 
@@ -205,7 +208,7 @@ $ pytest --tags=L0 -n auto
 ```
 
 ### Test on local branch
-#### on linux
+#### On Linux
 start the cluster on your host machine
 
 ```shell
