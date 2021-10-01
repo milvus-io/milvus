@@ -191,6 +191,7 @@ def update_values(src_values_file, deploy_params_file):
         'mountPath': '/test'
     }]
 
+    print(values_dict)
     # Update content of src_values_file
     with open(src_values_file, 'w') as f:
         dump(values_dict, f, default_flow_style=False)
