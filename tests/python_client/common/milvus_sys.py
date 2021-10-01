@@ -35,7 +35,10 @@ class MilvusSys:
 
     @property
     def simd_type(self):
-        """get the first query node's simd type"""
+        """
+        get simd type that milvus is running against
+        return the first query node's simd type
+        """
         for node in self.nodes:
             if 'QueryNode' == node.get('infos').get('type'):
                 return node.get('infos').get('system_configurations').get('simd_type')
