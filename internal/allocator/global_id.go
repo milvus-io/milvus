@@ -27,7 +27,7 @@ type GIDAllocator interface {
 	UpdateID() error
 }
 
-// GlobalTSOAllocator is the global single point TSO allocator.
+// GlobalIDAllocator is the global single point TSO allocator.
 type GlobalIDAllocator struct {
 	allocator tso.Allocator
 }
@@ -46,6 +46,7 @@ func (gia *GlobalIDAllocator) Initialize() error {
 	return gia.allocator.Initialize()
 }
 
+// Alloc allocates the id of the count number.
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (gia *GlobalIDAllocator) Alloc(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
