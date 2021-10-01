@@ -33,6 +33,7 @@ type metaService struct {
 	rootCoord    types.RootCoord
 }
 
+// newMetaService creates a new metaService with provided RootCoord and collectionID
 func newMetaService(rc types.RootCoord, collectionID UniqueID) *metaService {
 	return &metaService{
 		rootCoord:    rc,
@@ -40,8 +41,8 @@ func newMetaService(rc types.RootCoord, collectionID UniqueID) *metaService {
 	}
 }
 
+// getCollectionSchema get collection schema with provided collection id at specified timestamp
 func (mService *metaService) getCollectionSchema(ctx context.Context, collID UniqueID, timestamp Timestamp) (*schemapb.CollectionSchema, error) {
-	// fmt.Println("Describing collection", collID)
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,
@@ -66,6 +67,8 @@ func (mService *metaService) getCollectionSchema(ctx context.Context, collID Uni
 	return response.GetSchema(), nil
 }
 
+// printCollectionStruct util function to print schema data
+// used in tests only
 func printCollectionStruct(obj *etcdpb.CollectionMeta) {
 	v := reflect.ValueOf(obj)
 	v = reflect.Indirect(v)
