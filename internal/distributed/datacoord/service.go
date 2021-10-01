@@ -142,6 +142,8 @@ func (s *Server) start() error {
 	return s.dataCoord.Start()
 }
 
+// Stop stops the DataCoord server gracefully.
+// Need to call the GracefulStop interface of grpc server and call the stop method of the inner DataCoord object.
 func (s *Server) Stop() error {
 	var err error
 	if s.closer != nil {
@@ -165,6 +167,7 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// Run starts the Server. Need to call inner init and start method.
 func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
