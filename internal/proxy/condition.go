@@ -16,6 +16,7 @@ import (
 	"errors"
 )
 
+// Condition defines the interface of variable condition.
 type Condition interface {
 	WaitToFinish() error
 	Notify(err error)
