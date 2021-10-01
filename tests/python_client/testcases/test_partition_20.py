@@ -674,9 +674,9 @@ class TestPartitionOperations(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_insert_dropped_partition(self):
         """
-        target: verify insert data into dropped partition
+        target: verify insert data into a dropped partition
         method: 1.create a collection
-                2. insert some data into dropped partition
+                2. insert some data into a dropped partition
         expected: raise exception
         """
         # create partition
@@ -694,9 +694,9 @@ class TestPartitionOperations(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_insert_dropped_collection(self):
         """
-        target: verify insert data into dropped collection
+        target: verify insert data into a dropped collection
         method: 1.create a collection
-                2. insert some data into dropped collection
+                2. insert some data into a dropped collection
         expected: raise exception
         """
         # create collection
