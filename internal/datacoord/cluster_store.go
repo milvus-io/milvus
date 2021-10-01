@@ -112,6 +112,9 @@ func (n *NodeInfo) Dispose() {
 	}
 }
 
+// make sure NodesInfo implements ClusterStore
+var _ ClusterStore = (*NodesInfo)(nil)
+
 // NodesInfo wraps a map UniqueID -> NodeInfo
 // implements ClusterStore interface
 // not lock related field is required so all operations shall be protected outside
