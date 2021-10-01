@@ -1448,7 +1448,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total RootCoord Create partition operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5843,5 +5843,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 131
+  "version": 132
 }
