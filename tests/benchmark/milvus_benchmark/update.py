@@ -79,10 +79,12 @@ def update_values(src_values_file, deploy_params_file):
         # Set the scope of cpu application according to the configuration
         resources = {
                 "limits": {
-                    "cpu": str(int(cpus)) + ".0"
+                    "cpu": str(int(cpus)) + ".0",
+                    "memory": str(int(mems)) + "Gi"
                 },
                 "requests": {
-                    "cpu": str(int(cpus) // 2 + 1) + ".0"
+                    "cpu": str(int(cpus) // 2 + 1) + ".0",
+                    "memory": str(int(mems) // 2 + 1) + "Gi"
                     # "cpu": "4.0"
                     # "cpu": str(int(cpus) - 1) + ".0"
                 }
