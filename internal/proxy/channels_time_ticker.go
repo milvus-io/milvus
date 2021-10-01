@@ -26,6 +26,7 @@ import (
 // ticker can update ts only when the minTs greater than the ts of ticker, we can use maxTs to update current later
 type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
 
+// channelsTimeTicker manages the timestamp statistics
 type channelsTimeTicker interface {
 	start() error
 	close() error
