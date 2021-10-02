@@ -206,6 +206,20 @@ class ResponseChecker:
 
     @staticmethod
     def check_query_results(query_res, func_name, check_items):
+        """
+        According to the check_items to check actual query result, which return from func_name.
+
+        :param: query_res: A list that contains all results
+        :type: list
+
+        :param func_name: Query API name
+        :type func_name: str
+
+        :param check_items: The items expected to be checked, including exp_res, with_vec
+                            The type of exp_res value is as same as query_res
+                            The type of with_vec value is bool, True value means check vector field, False otherwise
+        :type check_items: dict
+        """
         if func_name != 'query':
             log.warning("The function name is {} rather than {}".format(func_name, "query"))
         if not isinstance(query_res, list):
