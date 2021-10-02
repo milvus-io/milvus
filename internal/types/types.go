@@ -384,6 +384,8 @@ type RootCoordComponent interface {
 
 	// SetDataCoord set DataCoord for RootCoord
 	SetDataCoord(context.Context, DataCoord) error
+
+	// SetIndexCoord set IndexCoord for RootCoord
 	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryCoord) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
