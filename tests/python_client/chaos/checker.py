@@ -80,6 +80,7 @@ class SearchChecker(Checker):
 
 
 class InsertFlushChecker(Checker):
+    """check Insert and flush operations in a dependent thread"""
     def __init__(self, flush=False):
         super().__init__()
         self._flush = flush
