@@ -395,9 +395,10 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_connect_default_alias_invalid(self, port):
         """
-        target: connect passes configure is not exist and raise error
-        method: connect passes configure is not exist
-        expected: response of connect is error
+        target: connect with non existing params
+        method: 1. add connection with non existing params
+                2. try to connect
+        expected: raise an exception
         """
 
         # add invalid default connection
