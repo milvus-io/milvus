@@ -4,7 +4,7 @@
 
 假设对于某个特定的 Search 请求，该 Search 请求 nq = 2，topk = 10，Proxy 收到来自 Query Nodes 的 4 份 Search Result。
 
-每一份 Search Result 都是 nq * topk 的二维结构，如下图所示，该结果表示用户输入了 nq 个向量，希望分别获取和这 nq 个向量最相似的 topk 个向量。
+每一份 Search Result 都是 nq \* topk 的二维结构，如下图所示，该结果表示用户输入了 nq 个向量，希望分别获取和这 nq 个向量最相似的 topk 个向量。
 
 ![search_result_format](./figs/nq_topk_search_results.png)
 
@@ -53,4 +53,4 @@ for i -> topk:
 
 这样子保证了我们每次取的结果都是剩余结果中最大的。
 
-该算法最多只会线性扫描所有的 Search Results，因此该算法的时间复杂度为 n * topk。
+该算法最多只会线性扫描所有的 Search Results，因此该算法的时间复杂度为 n \* topk。
