@@ -121,7 +121,7 @@ type insertTask struct {
 
 	result         *milvuspb.MutationResult
 	rowIDAllocator *allocator.IDAllocator
-	segIDAssigner  *segIDAssinger
+	segIDAssigner  *segIDAssigner
 	chMgr          channelsMgr
 	chTicker       channelsTimeTicker
 	vChannels      []vChan

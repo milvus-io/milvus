@@ -67,7 +67,7 @@ type Proxy struct {
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *TimestampAllocator
-	segAssigner  *segIDAssinger
+	segAssigner  *segIDAssigner
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
