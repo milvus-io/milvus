@@ -265,6 +265,8 @@ type RootCoord interface {
 	// The `ErrorCode` of `Status` is `Success` if drop index successfully;
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
+	//
+	// RootCoord forwards this request to IndexCoord to drop index
 	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	// CreateAlias notifies RootCoord to create an alias for the collection
