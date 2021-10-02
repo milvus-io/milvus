@@ -117,6 +117,17 @@ class ResponseChecker:
 
     @staticmethod
     def check_collection_property(res, func_name, check_items):
+        """
+        According to the check_items to check collection properties of res, which return from func_name
+        :param res: actual response of init collection
+        :type res: Collection
+
+        :param func_name: init collection API
+        :type func_name: str
+
+        :param check_items: which items expected to be checked, including name, schema, num_entities, primary
+        :type check_items: dict, {check_key: expected_value}
+        """
         exp_func_name = "init_collection"
         exp_func_name_2 = "construct_from_dataframe"
         if func_name != exp_func_name and func_name != exp_func_name_2:
