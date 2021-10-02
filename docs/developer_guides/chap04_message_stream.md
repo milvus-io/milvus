@@ -303,12 +303,12 @@ func NewPulsarTtMsgStream(ctx context.Context, pulsarAddr string, bufferSize int
 // RmqMsgStream
 
 type RmqMsgStream struct {
-		client		 *rockermq.RocksMQ
+		client	   *rockermq.RocksMQ
 		repackFunc RepackFunc
-		producers	[]string
-		consumers	[]string
-		subName		string
-		unmarshal	*UnmarshalDispatcher
+		producers  []string
+		consumers  []string
+		subName	   string
+		unmarshal  *UnmarshalDispatcher
 }
 
 func (ms *RmqMsgStream) Start() error
