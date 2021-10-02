@@ -390,6 +390,8 @@ type RootCoordComponent interface {
 
 	// SetQueryCoord set QueryCoord for RootCoord
 	SetQueryCoord(QueryCoord) error
+
+	// SetNewProxyClient set Proxy client creator func for RootCoord
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
 
 	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
