@@ -46,8 +46,8 @@ As for everything else in the project, the contributions to Milvus are governed 
 **If you're interested in existing issues, you can**
 - (**Recommended**) Provide answers for issue labeled `question`.
 - Provide help for issues labeled `bug`, `improvement`, and `enhancement` by
-    - (**Recommended**) Asking questions, reproducing the issue, or providing solutions.
-    - Pulling a request to fix the issue.
+    - (**Recommended**) Ask questions, reproduce the issue, or providie solutions.
+    - (Optional) Pull a request to fix the issue.
 
 **If you require new feature or major enhancement, you can**
 - (**Recommended**) File an issue about the feature/enhancement with reasons.
