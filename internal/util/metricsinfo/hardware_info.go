@@ -29,6 +29,7 @@ func GetCPUCoreCount(logical bool) int {
 	return c
 }
 
+// GetCPUUsage returns the cpu usage in percentage.
 func GetCPUUsage() float64 {
 	percents, err := cpu.Percent(0, false)
 	if err != nil {
