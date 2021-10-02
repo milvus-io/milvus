@@ -22,6 +22,7 @@ import (
 const DefaultMetricsRetention = time.Second * 5
 
 // TODO(dragondriver): we can use a map to manage the metrics if there are too many kind metrics
+// MetricsCacheManager manage the cache of metrics information.
 type MetricsCacheManager struct {
 	systemInfoMetrics                *milvuspb.GetMetricsResponse
 	systemInfoMetricsInvalid         bool
