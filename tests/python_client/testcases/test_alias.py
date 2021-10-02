@@ -385,14 +385,14 @@ class TestAliasOperationInvalid(TestcaseBase):
     """ Negative test cases of alias interface operations"""
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_create_dupcation_alias(self):
+    def test_alias_create_duplication_alias(self):
         """
         target: test two collections creating alias with same name
         method: 
                 1.create a collection_1 with alias name alias_a
                 2.create a collection_2 also with alias name alias_a
         expected: 
-                in step 2, creating alias with a dupcation name is not allowed
+                in step 2, creating alias with a duplication name is not allowed
         """        
 
         self._connect()
@@ -487,7 +487,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                                 check_items=error)
     
     @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_cerate_dup_name_collection(self):
+    def test_alias_create_dup_name_collection(self):
         """
         target: test creating a collection with a same name as alias, but a different schema
         method:
