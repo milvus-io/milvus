@@ -48,7 +48,7 @@ func Sleep(sleep time.Duration) Option {
 	}
 }
 
-// MaxSleep is used to config the max interval time of each execution.
+// MaxSleepTime is used to config the max interval time of each execution.
 func MaxSleepTime(maxSleepTime time.Duration) Option {
 	return func(c *config) {
 		// ensure max retry interval is always larger than retry interval
