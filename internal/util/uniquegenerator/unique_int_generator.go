@@ -14,16 +14,19 @@ package uniquegenerator
 import "sync"
 
 type (
+	// UniqueIntGenerator provide methods to generate unique integers
 	UniqueIntGenerator interface {
 		GetInt() int
 		GetInts(count int) (int, int)
 	}
+	// NaiveUniqueIntGenerator is a native implement of UniqueIntGenerator
 	NaiveUniqueIntGenerator struct {
 		now int
 		mtx sync.Mutex
 	}
 )
 
+// GetInts returns the begin and end of a batch of unique integers
 func (generator *NaiveUniqueIntGenerator) GetInts(count int) (int, int) {
 	generator.mtx.Lock()
 	defer func() {
@@ -33,11 +36,13 @@ func (generator *NaiveUniqueIntGenerator) GetInts(count int) (int, int) {
 	return generator.now, generator.now + count
 }
 
+// GetInt returns a unique integer
 func (generator *NaiveUniqueIntGenerator) GetInt() int {
 	begin, _ := generator.GetInts(1)
 	return begin
 }
 
+// NewNaiveUniqueIntGenerator returns a new NaiveUniqueIntGenerator object
 func NewNaiveUniqueIntGenerator() *NaiveUniqueIntGenerator {
 	return &NaiveUniqueIntGenerator{
 		now: 0,
@@ -47,6 +52,7 @@ func NewNaiveUniqueIntGenerator() *NaiveUniqueIntGenerator {
 var uniqueIntGeneratorIns UniqueIntGenerator
 var getUniqueIntGeneratorInsOnce sync.Once
 
+// GetUniqueIntGeneratorIns returns a singleton of UniqueIntGenerator
 func GetUniqueIntGeneratorIns() UniqueIntGenerator {
 	getUniqueIntGeneratorInsOnce.Do(func() {
 		uniqueIntGeneratorIns = NewNaiveUniqueIntGenerator()
