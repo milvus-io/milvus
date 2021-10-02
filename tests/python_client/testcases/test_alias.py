@@ -78,7 +78,8 @@ class TestAliasOperation(TestcaseBase):
         collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
-                                                                   check_items={exp_name: alias_name, exp_schema: default_schema})
+                                                                   check_items={exp_name: alias_name,
+                                                                                exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
 
@@ -111,7 +112,8 @@ class TestAliasOperation(TestcaseBase):
         collection_1.create_alias(alias_a_name)
         collection_alias_a, _ = self.collection_wrap.init_collection(name=alias_a_name,
                                                                      check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_a_name, exp_schema: default_schema})
+                                                                     check_items={exp_name: alias_a_name,
+                                                                                  exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_a.partitions]        
         
@@ -132,7 +134,8 @@ class TestAliasOperation(TestcaseBase):
         collection_2.create_alias(alias_b_name)
         collection_alias_b, _ = self.collection_wrap.init_collection(name=alias_b_name,
                                                                      check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_b_name, exp_schema: default_schema})
+                                                                     check_items={exp_name: alias_b_name,
+                                                                                  exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_2.partitions] == [p.name for p in collection_alias_b.partitions]
         
@@ -171,7 +174,8 @@ class TestAliasOperation(TestcaseBase):
         collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
-                                                                   check_items={exp_name: alias_name, exp_schema: default_schema})
+                                                                   check_items={exp_name: alias_name,
+                                                                                exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
 
