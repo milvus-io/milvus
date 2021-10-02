@@ -18,12 +18,17 @@ import (
 )
 
 const (
-	L2       = "L2"
-	IP       = "IP"
-	HAMMING  = "HAMMING"
+	// L2 represents the Euclidean distance
+	L2 = "L2"
+	// IP represents the inner product distance
+	IP = "IP"
+	// HAMMING represents the hamming distance
+	HAMMING = "HAMMING"
+	// TANIMOTO represents the tanimoto distance
 	TANIMOTO = "TANIMOTO"
 )
 
+// ValidateMetricType returns metric text or error
 func ValidateMetricType(metric string) (string, error) {
 	if metric == "" {
 		err := errors.New("Metric type is empty")
@@ -39,6 +44,7 @@ func ValidateMetricType(metric string) (string, error) {
 	return metric, err
 }
 
+// ValidateFloatArrayLength is used validate float vector length
 func ValidateFloatArrayLength(dim int64, length int) error {
 	if length == 0 || int64(length)%dim != 0 {
 		err := errors.New("Invalid float vector length")
@@ -48,6 +54,7 @@ func ValidateFloatArrayLength(dim int64, length int) error {
 	return nil
 }
 
+// CalcL2 returns the Euclidean distance of input vectors
 func CalcL2(dim int64, left []float32, lIndex int64, right []float32, rIndex int64) float32 {
 	var sum float32 = 0.0
 	lFrom := lIndex * dim
@@ -60,6 +67,7 @@ func CalcL2(dim int64, left []float32, lIndex int64, right []float32, rIndex int
 	return sum
 }
 
+// CalcIP returns the inner product distance of input vectors
 func CalcIP(dim int64, left []float32, lIndex int64, right []float32, rIndex int64) float32 {
 	var sum float32 = 0.0
 	lFrom := lIndex * dim
