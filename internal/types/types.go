@@ -378,6 +378,8 @@ type RootCoord interface {
 type RootCoordComponent interface {
 	RootCoord
 
+	// UpdateStateCode updates state code for RootCoord
+	// State includes: Initializing, Healthy and Abnormal
 	UpdateStateCode(internalpb.StateCode)
 	SetDataCoord(context.Context, DataCoord) error
 	SetIndexCoord(IndexCoord) error
