@@ -65,6 +65,7 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 	return nil
 }
 
+// ValidateCollectionAlias returns true if collAlias is a valid alias name for collection, otherwise returns false.
 func ValidateCollectionAlias(collAlias string) error {
 	return validateCollectionNameOrAlias(collAlias, "alias")
 }
