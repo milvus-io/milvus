@@ -131,15 +131,14 @@ Stop Dev Container
 Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
 
 ```shell
-$ cd deployments/docker/dev
-$ docker-compose up -d
-$ cd ../../../
-# Running Milvus
-$ build/builder.sh /bin/bash -c "export ROCKSMQ_PATH='/tmp/milvus/rdb_data' && ./scripts/start_standalone.sh && cat"
-
-# or
-
-$ build/builder.sh /bin/bash -c "./scripts/start_cluster.sh && cat"
+cd deployments/docker/dev
+docker-compose up -d
+cd ../../../
+build/builder.sh /bin/bash -c "export ROCKSMQ_PATH='/tmp/milvus/rdb_data' && ./scripts/start_standalone.sh && cat"
+```
+or
+```shell
+build/builder.sh /bin/bash -c "./scripts/start_cluster.sh && cat"
 ```
 
 To run E2E tests, use these command:
