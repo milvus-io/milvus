@@ -324,12 +324,12 @@ func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc)
 func NewRmqMsgStream(ctx context.Context) *RmqMsgStream
 
 type RmqTtMsgStream struct {
-		client		 *rockermq.RocksMQ
+		client	   *rockermq.RocksMQ
 		repackFunc RepackFunc
-		producers	[]string
-		consumers	[]string
-		subName		string
-		unmarshal	*UnmarshalDispatcher
+		producers  []string
+		consumers  []string
+		subName	   string
+		unmarshal  *UnmarshalDispatcher
 }
 
 func (ms *RmqTtMsgStream) Start() error
