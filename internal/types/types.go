@@ -384,6 +384,7 @@ type RootCoordComponent interface {
 	SetQueryCoord(QueryCoord) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
 
+	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
