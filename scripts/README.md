@@ -71,3 +71,9 @@ refer: https://docs.docker.com/compose/install/
 ```shell script
     make unittest
 ```
+
+#### Run code coverage
+
+```shell script
+    make codecov
+```
