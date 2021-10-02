@@ -287,7 +287,7 @@ func (s *Server) initMeta() error {
 		}
 
 		s.kvClient = etcdKV
-		s.meta, err = NewMeta(s.kvClient)
+		s.meta, err = newMeta(s.kvClient)
 		if err != nil {
 			return err
 		}

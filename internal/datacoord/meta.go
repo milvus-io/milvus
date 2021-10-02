@@ -38,7 +38,7 @@ type meta struct {
 }
 
 // NewMeta create meta from provided `kv.TxnKV`
-func NewMeta(kv kv.TxnKV) (*meta, error) {
+func newMeta(kv kv.TxnKV) (*meta, error) {
 	mt := &meta{
 		client:      kv,
 		collections: make(map[UniqueID]*datapb.CollectionInfo),
