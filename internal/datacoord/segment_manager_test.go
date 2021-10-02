@@ -397,7 +397,7 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := NewMeta(memoryKV)
+		meta, err := newMeta(memoryKV)
 
 		assert.Nil(t, err)
 
@@ -423,7 +423,7 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := NewMeta(memoryKV)
+		meta, err := newMeta(memoryKV)
 
 		assert.Nil(t, err)
 
