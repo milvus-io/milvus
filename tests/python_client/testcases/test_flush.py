@@ -181,7 +181,6 @@ class TestFlushBase:
             connect.flush([collection])
         res = connect.get_collection_stats(collection)
         assert res["row_count"] == len(result.primary_keys)
-        # query_vecs = [vectors[0], vectors[1], vectors[-1]]
         connect.load_collection(collection)
         res = connect.search(collection, default_single_query)
         logging.getLogger().debug(res)
