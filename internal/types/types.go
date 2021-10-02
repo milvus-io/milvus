@@ -81,6 +81,19 @@ type DataCoord interface {
 	// Flushed segments can be check via `GetFlushedSegments` API
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
 
+	// AssignSegmentID applies allocations for specified Coolection/Partition and related Channel Name(Virtial Channel)
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the requester's info(id and role) and the list of Assigment Request,
+	// which coontains the specified collection, partitaion id, the related VChannel Name and row count it needs
+	//
+	// response struct `AssignSegmentIDResponse` contains the the assignment result for each request
+	// error is returned only when some communication issue occurs
+	// if some error occurs in the process of `AssignSegmentID`, it will be recorded and returned in `Status` field of response
+	//
+	// `AssignSegmentID` will applies current configured allocation policies for each request
+	// if the VChannel is newly used, `WatchDmlChannels` will be invoked to notify a `DataNode`(selected by policy) to watch it
+	// if there is anything make the allocation impossible, the response will not contain the corresponding result
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
