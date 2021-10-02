@@ -25,6 +25,7 @@ import (
 )
 
 const (
+	// IDCountPerRPC specifies the minimum number of IDs for each RPC request.
 	IDCountPerRPC = 200000
 )
 
