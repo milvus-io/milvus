@@ -76,6 +76,9 @@ type DataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode,
 // RootCoordCreatorFunc creator function for rootcoord
 type RootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
 
+// makes sure Server implements `DataCoord`
+var _ types.DataCoord = (*Server)(nil)
+
 // Server implements `types.Datacoord`
 // handles Data Cooridinator related jobs
 type Server struct {
