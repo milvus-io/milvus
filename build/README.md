@@ -49,7 +49,7 @@ Milvus' computing operations depend on CPU’s support for SIMD (Single Instruct
 Run the lscpu command to check if your CPU supports the SIMD instruction sets mentioned above:
 
 ```
-$ lscpu | grep -e sse4_2 -e avx -e avx2 -e avx512
+lscpu | grep -e sse4_2 -e avx -e avx2 -e avx512
 ```
 </details>
 
