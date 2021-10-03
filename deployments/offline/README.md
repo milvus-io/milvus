@@ -43,7 +43,7 @@ Milvus installation may fail when images are not properly loaded from public Doc
    helm template --set cluster.enabled=true my-release milvus/milvus > milvus_manifest.yaml
    ```
 
-3. Pull and save Docker images
+#### 3. Pull and save Docker images
    ```shell
    pip3 install -r requirements.txt
    python3 save_image.py --manifest milvus_manifest.yaml
