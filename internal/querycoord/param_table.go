@@ -57,6 +57,7 @@ type ParamTable struct {
 	MinioBucketName      string
 }
 
+// Params are variables of the ParamTable type
 var Params ParamTable
 var once sync.Once
 
