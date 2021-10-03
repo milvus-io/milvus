@@ -157,6 +157,8 @@ def main():
         metavar='FILE',
         help='load test suite from FILE',
         default='')
+
+    # Milvus deploy config file
     arg_parser.add_argument(
         '--server-config',
         metavar='FILE',
