@@ -126,6 +126,7 @@ class CreateChecker(Checker):
 
 
 class IndexChecker(Checker):
+    """check Insert operations in a dependent thread"""
     def __init__(self):
         super().__init__()
         self.c_wrap.insert(data=cf.gen_default_list_data(nb=5*constants.ENTITIES_FOR_SEARCH),
