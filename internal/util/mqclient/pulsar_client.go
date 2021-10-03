@@ -27,6 +27,8 @@ type pulsarClient struct {
 var sc *pulsarClient
 var once sync.Once
 
+// GetPulsarClientInstance creates a pulsarClient object
+// according to the parameter opts of type pulsar.ClientOptions
 func GetPulsarClientInstance(opts pulsar.ClientOptions) (*pulsarClient, error) {
 	once.Do(func() {
 		c, err := pulsar.NewClient(opts)
