@@ -195,7 +195,6 @@ class TestAliasOperation(TestcaseBase):
                 6.releasing collection,
         method: follow the steps in target
         expected: all steps operated by alias can work
-
         """
         create_partition_flag = True
         insert_data_flag = True
@@ -309,7 +308,6 @@ class TestAliasOperation(TestcaseBase):
                2.call has_collection function with alias as param
         expected: result is True
         """
-
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
@@ -335,7 +333,6 @@ class TestAliasOperation(TestcaseBase):
                2.call drop_collection function with alias as param
         expected: collection is dropped
         """
-
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
@@ -361,7 +358,6 @@ class TestAliasOperation(TestcaseBase):
                2.call has_partition function with alias as param
         expected: result is True
         """
-
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
@@ -395,8 +391,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                 2.create a collection_2 also with alias name alias_a
         expected: 
                 in step 2, creating alias with a duplication name is not allowed
-        """        
-
+        """
         self._connect()
         c_1_name = cf.gen_unique_str("collection")
         collection_1 = self.init_collection_wrap(name=c_1_name, schema=default_schema,
@@ -424,7 +419,6 @@ class TestAliasOperationInvalid(TestcaseBase):
         expected: 
                 in step 2, alter alias with a not exist name is not allowed
         """
-
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
@@ -447,8 +441,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                 1.create a collection with alias
                 2.collection drop alias which is not exist
         expected: drop alias failed
-        """        
-
+        """
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
@@ -472,8 +465,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                 2.collection drop alias
                 3.collection drop alias again
         expected: drop alias failed
-        """        
-
+        """
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
@@ -497,7 +489,6 @@ class TestAliasOperationInvalid(TestcaseBase):
                 2.create a collection with same name as alias, but a different schema
         expected: in step 2, create collection failed
         """
-
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
@@ -519,7 +510,6 @@ class TestAliasOperationInvalid(TestcaseBase):
                 2.drop a collection by alias
         expected: in step 2, drop collection by alias failed by design
         """
-
         self._connect()
         c_name = cf.gen_unique_str("collection")
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
