@@ -383,6 +383,7 @@ Follow Milvus on social media:
 
 - [Medium](https://medium.com/@milvusio)
 - [Twitter](https://twitter.com/milvusio)
+- [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
 
 ## Join Us
 
