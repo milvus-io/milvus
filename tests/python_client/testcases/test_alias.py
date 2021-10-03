@@ -121,7 +121,6 @@ class TestAliasOperation(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_2_name, exp_schema: default_schema})
 
-
         for _ in range(5):
             partition_name = cf.gen_unique_str("partition")
             # create partition with different names and check the partition exists
@@ -225,7 +224,7 @@ class TestAliasOperation(TestcaseBase):
             collection_w.create_partition(partition_name)
         
         # assert partition
-        pytest.assume(create_partition_flag == True and
+        pytest.assume(create_partition_flag is True and
                       [p.name for p in collection_alias.partitions] == [p.name for p in collection_w.partitions])
         
         # insert data by alias
@@ -238,7 +237,7 @@ class TestAliasOperation(TestcaseBase):
             collection_w.insert(data=df)
         
         # assert insert data
-        pytest.assume(insert_data_flag == True and
+        pytest.assume(insert_data_flag is True and
                       collection_alias.num_entities == ct.default_nb and
                       collection_w.num_entities == ct.default_nb)            
 
@@ -252,9 +251,9 @@ class TestAliasOperation(TestcaseBase):
             collection_w.create_index(field_name="float_vector", index_params=default_index)
         
         # assert create index
-        pytest.assume(create_index_flag == True and
-                      collection_alias.has_index() == True and
-                      collection_w.has_index()[0] == True)
+        pytest.assume(create_index_flag is True and
+                      collection_alias.has_index() is True and
+                      collection_w.has_index()[0] is True)
         
         # load by alias
         try:
@@ -264,7 +263,7 @@ class TestAliasOperation(TestcaseBase):
             load_collection_flag = False
             collection_w.load()
         # assert load
-        pytest.assume(load_collection_flag == True)
+        pytest.assume(load_collection_flag is True)
 
         # search by alias
         topK = 5
@@ -286,7 +285,7 @@ class TestAliasOperation(TestcaseBase):
             "int64 >= 0", output_fields=["int64"]
         )
         # assert search
-        pytest.assume(search_flag == True and alias_res[0].ids == collection_res[0].ids)
+        pytest.assume(search_flag is True and alias_res[0].ids == collection_res[0].ids)
 
         # release by alias
         try:
@@ -296,8 +295,7 @@ class TestAliasOperation(TestcaseBase):
             release_collection_flag = False
             collection_w.release()
         # assert release
-        pytest.assume(release_collection_flag == True)
-
+        pytest.assume(release_collection_flag is True)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_called_by_utility_has_collection(self):
@@ -322,7 +320,7 @@ class TestAliasOperation(TestcaseBase):
                                                                                 exp_schema: default_schema})
         res, _ = self.utility_wrap.has_collection(alias_name)
 
-        assert res == True
+        assert res is True
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_called_by_utility_drop_collection(self):
@@ -374,9 +372,7 @@ class TestAliasOperation(TestcaseBase):
                                                                                 exp_schema: default_schema})
         res, _ = self.utility_wrap.has_partition(alias_name, partition_name)
 
-        assert res == True
-
-
+        assert res is True
 
 
 class TestAliasOperationInvalid(TestcaseBase):
