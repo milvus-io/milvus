@@ -1,4 +1,4 @@
-## Binlog
+## 8 Binlog
 
 InsertBinlog、DeleteBinlog、DDLBinlog
 
@@ -11,7 +11,7 @@ Schema column records the DDL of the collection.
 
 Binlog file consists of 4 bytes magic number and a series of events. The first event must be descriptor event.
 
-### Event format
+### 8.1 Event format
 
 ```
 +=====================================+=====================================================================+
@@ -30,7 +30,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 ```
 
 
-### Descriptor Event format
+### 8.2 Descriptor Event format
 
 ```
 +=====================================+=====================================================================+
@@ -65,7 +65,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 ```
 
 
-### Type code
+### 8.3 Type code
 
 ```
 DESCRIPTOR_EVENT
@@ -86,7 +86,7 @@ DELETE_EVENT 只能用于 primary key 的 binlog 文件（目前只有按照 pri
 CREATE_COLLECTION_EVENT、DROP_COLLECTION_EVENT、CREATE_PARTITION_EVENT、DROP_PARTITION_EVENT 只出现在 DDL binlog 文件
 
 
-### Event data part
+### 8.4 Event data part
 
 ```
 event data part
@@ -107,7 +107,7 @@ other events are similar with INSERT_EVENT
 ```
 
 
-### Example
+### 8.5 Example
 
 Schema
 
