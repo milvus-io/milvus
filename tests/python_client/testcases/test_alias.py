@@ -150,7 +150,7 @@ class TestAliasOperation(TestcaseBase):
         """
         target: test collection dropping alias
         method: 
-                1.create a collection with 10 partitons
+                1.create a collection with 10 partitions
                 2.collection create a alias
                 3.collection drop the alias
         expected: 
