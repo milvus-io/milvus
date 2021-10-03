@@ -105,6 +105,7 @@ Confirm that cmake is available:
 ```shell
 $ cmake --version
 ```
+Note: 3.18 or higher cmake version is required to build Milvus. 
 
 #### Go
 
