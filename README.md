@@ -403,7 +403,7 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 
-## Acknowledgments
+## Acknowledgements
 
 Milvus adopts dependencies from the following:
 
