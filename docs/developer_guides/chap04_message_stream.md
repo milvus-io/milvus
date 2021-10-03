@@ -215,11 +215,13 @@ type MsgStream interface {
 	AsProducer(channels []string)
 	AsConsumer(channels []string, subName string)
 	SetRepackFunc(repackFunc RepackFunc)
-	
-	Produce(context.Context, *MsgPack) error
-	Broadcast(context.Context, *MsgPack) error
-	Consume() (*MsgPack, context.Context)
-	Seek(offset *MsgPosition) error
+	ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32
+	GetProduceChannels() []string
+	Produce(*MsgPack) error
+	Broadcast(*MsgPack) error
+	BroadcastMark(*MsgPack) (map[string][]MessageID, error)
+	Consume() *MsgPack
+	Seek(offset []*MsgPosition) error
 }
 
 type MsgStreamFactory interface {
