@@ -44,11 +44,18 @@ type HardwareMetrics struct {
 }
 
 const (
+	// GitCommitEnvKey defines the key to retrieve the commit corresponding to the current milvus version
+	// from the metrics information
 	GitCommitEnvKey = "MILVUS_GIT_COMMIT"
 
-	// maybe MILVUS_DEPLOY_MODE is more reasonable? not easy to change this due to compatible issue
-	DeployModeEnvKey     = "DEPLOY_MODE"
-	ClusterDeployMode    = "DISTRIBUTED"
+	// DeployModeEnvKey defines the key to retrieve the current milvus deployment mode
+	// from the metrics information
+	DeployModeEnvKey = "DEPLOY_MODE"
+
+	// ClusterDeployMode represents distributed deployment mode
+	ClusterDeployMode = "DISTRIBUTED"
+
+	// StandaloneDeployMode represents the stand-alone deployment mode
 	StandaloneDeployMode = "STANDALONE"
 )
 
