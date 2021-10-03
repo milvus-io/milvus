@@ -171,7 +171,15 @@ type DescribeCollectionRequest struct {
 
 See _Master API_ for detailed definitions.
 
-- _GetCollectionStatistics_
+- _GetCollectionStatisticsRequest_
+
+```go
+type GetCollectionStatisticsRequest struct {
+	Base            *commonpb.MsgBase
+	DbName          string
+	CollectionName  string
+}
+```
 
 See _Master API_ for detailed definitions.
 
