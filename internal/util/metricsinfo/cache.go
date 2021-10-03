@@ -33,6 +33,7 @@ type MetricsCacheManager struct {
 	retentionMtx sync.RWMutex // necessary?
 }
 
+// NewMetricsCacheManager returns a cache manager of metrics information.
 func NewMetricsCacheManager() *MetricsCacheManager {
 	manager := &MetricsCacheManager{
 		systemInfoMetrics:                nil,
