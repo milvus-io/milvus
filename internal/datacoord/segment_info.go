@@ -78,7 +78,7 @@ func (s *SegmentsInfo) SetRowCount(segmentID UniqueID, rowCount int64) {
 	}
 }
 
-// SetStates sets Segment State info for SegmentInfo with provided segmentID
+// SetState sets Segment State info for SegmentInfo with provided segmentID
 // if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetState(segmentID UniqueID, state commonpb.SegmentState) {
 	if segment, ok := s.segments[segmentID]; ok {
