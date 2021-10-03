@@ -25,6 +25,7 @@ func GetFunctionName(i interface{}) string {
 }
 
 // Reference: https://stackoverflow.com/questions/40809504/idiomatic-goroutine-termination-and-error-handling
+// ProcessFuncParallel process function in parallel.
 func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname string) error {
 	if maxParallel <= 0 {
 		maxParallel = 1
