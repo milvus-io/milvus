@@ -325,27 +325,6 @@ func (ms *RmqMsgStream) Seek(mp *MsgPosition) error
 func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc)
 
 func NewRmqMsgStream(ctx context.Context) *RmqMsgStream
-
-type RmqTtMsgStream struct {
-		client	   *rockermq.RocksMQ
-		repackFunc RepackFunc
-		producers  []string
-		consumers  []string
-		subName	   string
-		unmarshal  *UnmarshalDispatcher
-}
-
-func (ms *RmqTtMsgStream) Start() error
-func (ms *RmqTtMsgStream) Close() error
-func (ms *RmqTtMsgStream) AsProducer(channels []string)
-func (ms *RmqTtMsgStream) AsConsumer(channels []string, subName string)
-func (ms *RmqTtMsgStream) Produce(ctx context.Context, msgs *MsgPack) error
-func (ms *RmqTtMsgStream) Broadcast(ctx conext.Context) msgs *MsgPack) error
-func (ms *RmqTtMsgStream) Consume() (*MsgPack, context.Context)
-func (ms *RmqTtMsgStream) Seek(mp *MsgPosition) error
-func (ms *RmqTtMsgStream) SetRepackFunc(repackFunc RepackFunc)
-
-func NewRmqTtMsgStream(ctx context.Context) *RmqTtMsgStream
 ```
 
 
