@@ -84,7 +84,7 @@ type DataCoord interface {
 	// AssignSegmentID applies allocations for specified Coolection/Partition and related Channel Name(Virtial Channel)
 	//
 	// ctx is the context to control request deadline and cancellation
-	// req contains the requester's info(id and role) and the list of Assigment Request,
+	// req contains the requester's info(id and role) and the list of Assignment Request,
 	// which coontains the specified collection, partitaion id, the related VChannel Name and row count it needs
 	//
 	// response struct `AssignSegmentIDResponse` contains the the assignment result for each request
@@ -95,6 +95,16 @@ type DataCoord interface {
 	// if the VChannel is newly used, `WatchDmlChannels` will be invoked to notify a `DataNode`(selected by policy) to watch it
 	// if there is anything make the allocation impossible, the response will not contain the corresponding result
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
+
+	// GetSegmentStates requests segment state information
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the list of segment id to query
+	//
+	// response struct `GetSegmentStatesResponse` contains the list of each state query result
+	// 	when the segment is not found, the state entry will has the field `Status`  to identify failure
+	// 	otherwise the Segment State and Start position information will be returned
+	// error is returned only when some communication issue occurs
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
