@@ -99,7 +99,7 @@ func (p *ParamTable) Init() {
 	p.initStatsStreamPosSubPath()
 }
 
-// Init once ensure param table is a singleton
+// InitOnce ensures param table is a singleton
 func (p *ParamTable) InitOnce() {
 	once.Do(func() {
 		p.Init()
