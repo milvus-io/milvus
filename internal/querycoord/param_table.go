@@ -24,6 +24,7 @@ import (
 
 type UniqueID = typeutil.UniqueID
 
+// ParamTable maintains some of the environment variables that are required for the QuryCoord runtime
 type ParamTable struct {
 	paramtable.BaseTable
 
