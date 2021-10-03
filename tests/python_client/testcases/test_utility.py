@@ -956,11 +956,14 @@ class TestUtilityBase(TestcaseBase):
         method: calculated distance between two random vectors
         expected: distance calculated successfully
         """
+        log.info("Creating connection")
         self._connect()
+        log.info("Creating vectors for distance calculation")
         vectors_l = cf.gen_vectors(default_nb, default_dim)
         vectors_r = cf.gen_vectors(default_nb, default_dim)
         op_l = {"float_vectors": vectors_l}
         op_r = {"float_vectors": vectors_r}
+        log.info("Calculating distance for generated vectors")
         self.utility_wrap.calc_distance(op_l, op_r,
                                         check_task=CheckTasks.check_distance,
                                         check_items={"vectors_l": vectors_l,
