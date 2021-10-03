@@ -63,7 +63,7 @@ type ParamTable struct {
 var Params ParamTable
 var once sync.Once
 
-/* Init params from base table as well as data coord yaml*/
+// Init inits params from base table as well as data coord yaml
 func (p *ParamTable) Init() {
 	// load yaml
 	p.BaseTable.Init()
