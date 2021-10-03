@@ -2697,7 +2697,7 @@ class TestLoadCollection:
     def test_release_collection_not_existed(self, connect, collection):
         """
         target: test release a not existed collection
-        method: release with a not existed collection anme
+        method: release with a not existed collection name
         expected: raise exception
         """
         collection_name = gen_unique_str(uid_load)
@@ -2883,7 +2883,7 @@ class TestReleaseAdvanced:
         """
         target: test release collection during searching
         method: insert entities into collection, flush and load collection, release collection during searching
-        expected:
+        expected: raise exception
         """
         nq = 1000
         top_k = 1
@@ -2901,7 +2901,7 @@ class TestReleaseAdvanced:
         """
         target: test release partition during searching
         method: insert entities into partition, flush and load partition, release partition during searching
-        expected:
+        expected: raise exception
         """
         nq = 1000
         top_k = 1
