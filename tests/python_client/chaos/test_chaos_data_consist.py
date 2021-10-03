@@ -55,7 +55,7 @@ class TestChaosData:
         collection_w.init_collection(name=c_name,
                                      schema=cf.gen_default_collection_schema())
         tt = datetime.datetime.now() - t0
-        log.debug(f"assert create: {tt}")
+        log.info(f"assert create: {tt}")
         assert collection_w.name == c_name
 
         # insert
@@ -63,14 +63,14 @@ class TestChaosData:
         t0 = datetime.datetime.now()
         _, res = collection_w.insert(data)
         tt = datetime.datetime.now() - t0
-        log.debug(f"assert insert: {tt}")
+        log.info(f"assert insert: {tt}")
         assert res
 
         # flush
         t0 = datetime.datetime.now()
         assert collection_w.num_entities == nb
         tt = datetime.datetime.now() - t0
-        log.debug(f"assert flush: {tt}")
+        log.info(f"assert flush: {tt}")
 
         # search
         collection_w.load()
@@ -81,7 +81,7 @@ class TestChaosData:
                                             anns_field=ct.default_float_vec_field_name,
                                             param=search_params, limit=1)
         tt = datetime.datetime.now() - t0
-        log.debug(f"assert search: {tt}")
+        log.info(f"assert search: {tt}")
         assert len(search_res) == 1
 
         # index
@@ -90,7 +90,7 @@ class TestChaosData:
                                              index_params=index_params,
                                              name=i_name)
         tt = datetime.datetime.now() - t0
-        log.debug(f"assert index: {tt}")
+        log.info(f"assert index: {tt}")
         assert len(collection_w.indexes) == 1
 
         # query
@@ -98,7 +98,7 @@ class TestChaosData:
         t0 = datetime.datetime.now()
         query_res, _ = collection_w.query(term_expr)
         tt = datetime.datetime.now() - t0
-        log.debug(f"assert query: {tt}")
+        log.info(f"assert query: {tt}")
         assert len(query_res) == 4
 
         # reboot a pod
@@ -110,25 +110,25 @@ class TestChaosData:
 
         # verify collection persists
         assert utility.has_collection(c_name)
-        log.debug("assert collection persists")
+        log.info("assert collection persists")
         collection_w2 = ApiCollectionWrapper()
         collection_w2.init_collection(c_name)
         # verify data persist
         assert collection_w2.num_entities == nb
-        log.debug("assert data persists")
+        log.info("assert data persists")
         # verify index persists
         assert collection_w2.has_index(i_name)
-        log.debug("assert index persists")
+        log.info("assert index persists")
         # verify search results persist
         collection_w2.load()
         search_res, _ = collection_w.search(data=search_vectors,
                                             anns_field=ct.default_float_vec_field_name,
                                             param=search_params, limit=1)
         tt = datetime.datetime.now() - t0
-        log.debug(f"assert search: {tt}")
+        log.info(f"assert search: {tt}")
         assert len(search_res) == 1
         # verify query results persist
         query_res2, _ = collection_w2.query(term_expr)
         assert len(query_res2) == len(query_res)
-        log.debug("assert query result persists")
+        log.info("assert query result persists")
 
