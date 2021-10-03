@@ -39,20 +39,20 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 **If you encountered a bug, you can**
 - (**Recommended**) File an issue about the bug.
-- (*Optional*) Provide clear and concrete ways/scripts to reproduce the bug.
-- (*Optional*) Provide possible solutions for the bug.
-- (*Optional*) Pull a request to fix the bug.
+- Provide clear and concrete ways/scripts to reproduce the bug.
+- Provide possible solutions for the bug.
+- Pull a request to fix the bug.
 
 **If you're interested in existing issues, you can**
 - (**Recommended**) Provide answers for issue labeled `question`.
 - Provide help for issues labeled `bug`, `improvement`, and `enhancement` by
     - (**Recommended**) Ask questions, reproduce the issue, or providie solutions.
-    - (Optional) Pull a request to fix the issue.
+    - Pull a request to fix the issue.
 
 **If you require new feature or major enhancement, you can**
 - (**Recommended**) File an issue about the feature/enhancement with reasons.
-- (*Optional*) Provide a MEP for the feature/enhancement.
-- (*Optional*) Pull a request to implement the MEP.
+- Provide a MEP for the feature/enhancement.
+- Pull a request to implement the MEP.
 
 **If you are a reviewer/approver of Milvus, you can**
 - Participate in [PR review](CODE_REVIEW.md) process.
