@@ -138,7 +138,7 @@ Usage:
                                 Refer: https://helm.sh/docs/helm/helm_install/#helm-install
 
     --test-extra-arg            Run e2e test extra configuration
-                                For example, \"--tag=smoke\"
+                                For example, \"--tags=L0\"
 
     --test-timeout              To specify timeout period of e2e test. Timeout time is specified in seconds.
 
