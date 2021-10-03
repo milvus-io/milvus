@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is an alias for the Int64 type
 type UniqueID = typeutil.UniqueID
 
 type ParamTable struct {
