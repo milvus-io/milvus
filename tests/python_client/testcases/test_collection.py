@@ -2410,6 +2410,11 @@ class TestDropCollectionInvalid(object):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("collection_name", ('', None))
     def test_drop_collection_with_empty_or_None_collection_name(self, connect, collection_name):
+        """
+        target: test drop invalid collection
+        method: drop collection with empty or None collection name
+        expected: raise exception
+        """
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
 
