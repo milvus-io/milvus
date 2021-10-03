@@ -153,6 +153,8 @@ def main():
         '--port',
         help='server port param for local mode',
         default='19530')
+
+    # Client configuration file
     arg_parser.add_argument(
         '--suite',
         metavar='FILE',
