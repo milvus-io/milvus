@@ -64,6 +64,9 @@ const (
 
 const illegalRequestErrStr = "Illegal request"
 
+// makes sure DataNode implements types.DataNode
+var _ types.DataNode = (*DataNode)(nil)
+
 // DataNode communicates with outside services and unioun all
 // services in datanode package.
 //
