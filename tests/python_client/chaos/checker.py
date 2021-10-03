@@ -106,6 +106,7 @@ class InsertFlushChecker(Checker):
 
 
 class CreateChecker(Checker):
+    """check create operations in a dependent thread"""
     def __init__(self):
         super().__init__()
 
