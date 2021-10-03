@@ -140,6 +140,7 @@ def main():
         help="load test schedule from FILE")
 
     # local mode
+    # Use the deployed milvus server, and pass host and port
     arg_parser.add_argument(
         '--local',
         action='store_true',
