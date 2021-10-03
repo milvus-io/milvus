@@ -58,6 +58,7 @@ func GetMemoryCount() uint64 {
 	return stats.Total
 }
 
+// GetUsedMemoryCount returns the memory usage in bytes.
 func GetUsedMemoryCount() uint64 {
 	stats, err := mem.VirtualMemory()
 	if err != nil {
