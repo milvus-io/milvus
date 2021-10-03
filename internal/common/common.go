@@ -19,10 +19,21 @@ package common
 // 102: ...
 
 const (
+	// StartOfUserFieldID represents the starting ID of the user-defined field
 	StartOfUserFieldID = 100
+
+	// RowIDField is the ID of the RowID field reserved by the system
 	RowIDField         = 0
+
+	// TimeStampField is the ID of the Timestamp field reserved by the system
 	TimeStampField     = 1
+
+	// RowIDFieldName defines the name of the RowID field
 	RowIDFieldName     = "RowID"
+
+	// TimeStampFieldName defines the name of the Timestamp field
 	TimeStampFieldName = "Timestamp"
+
+	// DefaultShardsNum defines the default number of shards when creating a collection
 	DefaultShardsNum   = int32(2)
 )
