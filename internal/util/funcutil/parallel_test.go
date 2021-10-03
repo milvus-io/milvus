@@ -104,9 +104,12 @@ func Test_ProcessFuncParallel(t *testing.T) {
 		return nil
 	}
 
-	ProcessFuncParallel(total, 1, randomErrorF, "randomErrorF") // serial
+	err = ProcessFuncParallel(total, 1, randomErrorF, "randomErrorF") // serial
+	assert.NotNil(t, err)
 
-	ProcessFuncParallel(total, total, randomErrorF, "randomErrorF") // Totally Parallel
+	err = ProcessFuncParallel(total, total, randomErrorF, "randomErrorF") // Totally Parallel
+	assert.NotNil(t, err)
 
-	ProcessFuncParallel(total, runtime.NumCPU(), randomErrorF, "randomErrorF") // Parallel by CPU
+	err = ProcessFuncParallel(total, runtime.NumCPU(), randomErrorF, "randomErrorF") // Parallel by CPU
+	assert.NotNil(t, err)
 }
