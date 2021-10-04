@@ -420,9 +420,11 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L0)
     def test_connection_connect_default_alias_effective(self, host, port):
         """
-        target: connect passes useful configure that adds by add_connect
-        method: connect passes configure that add by add_connect
-        expected: connect successfully
+        target: verify connections by default alias
+        method: 1. add connection with default alias
+                2. connect with default alias
+                3. list connections and get connection address
+        expected: 1. add connection, connect, list and get connection address successfully
         """
 
         # add a valid default connection
