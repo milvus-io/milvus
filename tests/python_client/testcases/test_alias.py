@@ -271,7 +271,7 @@ class TestAliasOperation(TestcaseBase):
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
              
         query = [[random.random() for _ in range(ct.default_dim)] for _ in range(1)]
-        
+        alias_res = None
         try:
             alias_res = collection_alias.search(
                 query, "float_vector", search_params, topK,
