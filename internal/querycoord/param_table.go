@@ -63,6 +63,7 @@ type ParamTable struct {
 var Params ParamTable
 var once sync.Once
 
+// InitOnce guarantees that variables are initialized only once
 func (p *ParamTable) InitOnce() {
 	once.Do(func() {
 		p.Init()
