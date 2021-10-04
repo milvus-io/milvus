@@ -2925,7 +2925,7 @@ class TestReleaseAdvanced:
         """
         target: test release collection during searching
         method: insert entities into partition, flush and load partition, release collection during searching
-        expected:
+        expected: raise exception
         """
         nq = 1000
         top_k = 1
@@ -2943,7 +2943,7 @@ class TestReleaseAdvanced:
         """
         target: test release collection during loading
         method: insert entities into collection, flush, release collection during loading
-        expected:
+        expected: raise exception
         """
         connect.insert(collection, cons.default_entities)
         connect.flush([collection])
