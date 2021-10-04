@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// GetCPUCoreCount returns the count of cpu core.
 func GetCPUCoreCount(logical bool) int {
 	c, err := cpu.Counts(logical)
 	if err != nil {
