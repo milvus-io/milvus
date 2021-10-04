@@ -43,7 +43,7 @@ class TestAliasParamsInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
-        error = {ct.err_code: 1, ct.err_msg: f"Invalid collection alias: {alias_name}. The first character of a collection alias must be an underscore or letter"}
+        error = {ct.err_code: 1, ct.err_msg: f"Invalid collection alias: {alias_name}"}
         collection_w.create_alias(alias_name,
                                   check_task=CheckTasks.err_res,
                                   check_items=error)
@@ -91,7 +91,7 @@ class TestAliasOperation(TestcaseBase):
         expected: 
                 in step 1, collection_1 is equal to alias_a
                 in step 2, collection_2 is equal to alias_b
-                in step 3, collection_1 is equal to alias_a and alias_b, and collection_2 is not equal to alias_b any more
+                in step 3, collection_1 is equal to alias_a and alias_b, and collection_2 is not equal to alias_b
         """
         self._connect()
 
@@ -177,7 +177,8 @@ class TestAliasOperation(TestcaseBase):
         assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
 
         collection_w.drop_alias(alias_name)
-        error = {ct.err_code: 0, ct.err_msg: f"Collection '{alias_name}' not exist, or you can pass in schema to create one"}
+        error = {ct.err_code: 0,
+                 ct.err_msg: f"Collection '{alias_name}' not exist, or you can pass in schema to create one"}
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.err_res,
                                                                    check_items=error)
@@ -493,7 +494,8 @@ class TestAliasOperationInvalid(TestcaseBase):
         alias_name = cf.gen_unique_str(prefix)
         collection_w.create_alias(alias_name)
 
-        error = {ct.err_code: 0, ct.err_msg: "The collection already exist, but the schema is not the same as the schema passed in"} 
+        error = {ct.err_code: 0,
+                 ct.err_msg: "The collection already exist, but the schema is not the same as the schema passed in"}
         self.init_collection_wrap(alias_name, schema=default_binary_schema,
                                   check_task=CheckTasks.err_res,
                                   check_items=error)
