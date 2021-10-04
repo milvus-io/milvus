@@ -32,6 +32,7 @@ func (inNode *InputNode) IsInputNode() bool {
 	return true
 }
 
+// Start is used to start input msgstream
 func (inNode *InputNode) Start() {
 	inNode.inStream.Start()
 }
@@ -54,7 +55,7 @@ func (inNode *InputNode) InStream() msgstream.MsgStream {
 	return inNode.inStream
 }
 
-// empty input and return one *Msg
+// Operate consume a message pack from msgstream and return
 func (inNode *InputNode) Operate(in []Msg) []Msg {
 	msgPack := inNode.inStream.Consume()
 

@@ -183,18 +183,22 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 	}
 }
 
+// MaxQueueLength returns the maximal queue length
 func (node *BaseNode) MaxQueueLength() int32 {
 	return node.maxQueueLength
 }
 
+// MaxParallelism returns the maximal parallelism
 func (node *BaseNode) MaxParallelism() int32 {
 	return node.maxParallelism
 }
 
+// SetMaxQueueLength is used to set the maximal queue length
 func (node *BaseNode) SetMaxQueueLength(n int32) {
 	node.maxQueueLength = n
 }
 
+// SetMaxParallelism is used to set the maximal parallelism
 func (node *BaseNode) SetMaxParallelism(n int32) {
 	node.maxParallelism = n
 }
@@ -207,5 +211,5 @@ func (node *BaseNode) IsInputNode() bool {
 // Start implementing Node, base node does nothing when starts
 func (node *BaseNode) Start() {}
 
-// Stop, implementing Node, base node does nothing when stops
+// Close implementing Node, base node does nothing when stops
 func (node *BaseNode) Close() {}
