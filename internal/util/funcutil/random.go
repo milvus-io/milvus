@@ -33,6 +33,7 @@ func RandomString(n int) string {
 	return string(b)
 }
 
+// GenRandomStr generates a random string.
 func GenRandomStr() string {
 	l := rand.Uint64()%10 + 1
 	b := make([]byte, l)
