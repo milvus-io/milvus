@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// Timestamp is an alias for the Int64 type
 type Timestamp = typeutil.Timestamp
 
 type queryChannelInfo struct {
