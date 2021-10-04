@@ -13,6 +13,7 @@ package funcutil
 
 import "reflect"
 
+// SliceContain returns true if slice s contains item.
 func SliceContain(s interface{}, item interface{}) bool {
 	ss := reflect.ValueOf(s)
 	if ss.Kind() != reflect.Slice {
