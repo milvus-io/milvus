@@ -1,8 +1,4 @@
-import threading
-import time
 import pytest
-import random
-import numpy as np
 
 from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
