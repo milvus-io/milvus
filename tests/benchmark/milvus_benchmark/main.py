@@ -32,6 +32,7 @@ def positive_int(s):
 
 
 def get_image_tag(image_version):
+    """ Set the image version to the latest version """
     return "%s-latest" % (image_version)
 
 
