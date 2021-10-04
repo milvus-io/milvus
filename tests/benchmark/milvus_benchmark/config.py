@@ -21,6 +21,7 @@ BRANCH = "master"
 
 DEFAULT_CPUS = 48
 
+# path of NAS mount
 RAW_DATA_DIR = "/test/milvus/raw_data/"
 
 # nars log
