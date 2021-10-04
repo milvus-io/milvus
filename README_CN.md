@@ -374,6 +374,9 @@ Milvus insight 提供了好用的图形化界面，帮助您更好的管理数�
 - [知乎](https://www.zhihu.com/org/zilliz-11)
 - [CSDN](http://zilliz.blog.csdn.net/)
 - [Bilibili](http://space.bilibili.com/478166626)
+- [Medium](https://medium.com/@milvusio)
+- [Twitter](https://twitter.com/milvusio)
+- [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
 - Zilliz 技术交流微信群
 
 <img src="https://assets.zilliz.com/wechat_2abac21f5a.png" alt="Wechat QR Code">
