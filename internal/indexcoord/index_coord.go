@@ -44,6 +44,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// make sure IndexCoord implements types.IndexCoord
+var _ types.IndexCoord = (*IndexCoord)(nil)
+
 // IndexCoord is a component responsible for scheduling index construction tasks and maintaining index status.
 // IndexCoord accepts requests from rootcoord to build indexes, delete indexes, and query index information.
 // IndexCoord is responsible for assigning IndexBuildID to the request to build the index, and forwarding the
