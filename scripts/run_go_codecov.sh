@@ -17,4 +17,4 @@ done
 
 # generate html report
 go tool cover -html=./${FILE_COVERAGE_INFO} -o ./${FILE_COVERAGE_HTML}
-echo "Export go coverage report to ${FILE_COVERAGE_HTML}"
+echo "Generate go coverage report to ${FILE_COVERAGE_HTML}"
