@@ -69,6 +69,8 @@ func (p *ParamTable) InitOnce() {
 		p.Init()
 	})
 }
+
+//Init is used to initialize params
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 	err := p.LoadYaml("advanced/query_node.yaml")
