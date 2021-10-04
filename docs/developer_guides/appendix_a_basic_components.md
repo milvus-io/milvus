@@ -1,5 +1,3 @@
-
-
 ## Appendix A. Basic Components
 
 #### A.1 System Component
@@ -17,7 +15,7 @@ type Component interface {
 }
 ```
 
-* *GetComponentStates*
+- _GetComponentStates_
 
 ```go
 
@@ -46,57 +44,55 @@ type ComponentStates struct {
 
 If a component needs to process timetick message to align timetick, it needs to implement TimeTickProvider interface.
 
-
 ```go
 type TimeTickProvider interface {
 	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 ```
 
-
 #### A.2 Session
+
 ###### ServerID
 
 The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/session/id". The initial value is 0. When a service is registered, it is incremented by 1 and returned to the next registered service.
 
 ###### Registration
 
-* Registration is achieved through etcd's lease mechanism.
+- Registration is achieved through etcd's lease mechanism.
 
-* The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is available through the key.
+- The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is available through the key.
 
-* key: metaRoot + "/session" + "/ServerName(-ServerID)(optional)"
+- key: metaRoot + "/session" + "/ServerName(-ServerID)(optional)"
 
-* value: json format
+- value: json format
 
   ```json
   {
     "ServerID": "ServerID",
     "ServerName": "ServerName",
     "Address": "ip:port",
-    "Exclusive": "Exclusive",
+    "Exclusive": "Exclusive"
   }
   ```
 
-* By obtaining the address, you can establish a connection with other services
+- By obtaining the address, you can establish a connection with other services
 
-* If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value.
+- If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value.
 
 ###### Discovery
 
-* All currently available services can be obtained by obtaining all the key-value pairs deposited during registration. If you want to get all the available nodes for a certain type of service, you can pass in the prefix of the corresponding key
+- All currently available services can be obtained by obtaining all the key-value pairs deposited during registration. If you want to get all the available nodes for a certain type of service, you can pass in the prefix of the corresponding key
 
-* Registration time can be compared with ServerID for ServerID will increase according to time.
-
+- Registration time can be compared with ServerID for ServerID will increase according to time.
 
 ###### Interface
 
-```go
+````go
 const (
 	DefaultServiceRoot = "session/"
 	DefaultIDKey       = "id"
 	DefaultRetryTimes  = 30
-	DefaultTTL         = 60 
+	DefaultTTL         = 60
 )
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -158,10 +154,9 @@ func (gp *BaseTable) WriteNodeIDList() []UniqueID
 func (gp *BaseTable) DataNodeIDList() []UniqueID
 func (gp *BaseTable) ProxyIDList() []UniqueID
 func (gp *BaseTable) QueryNodeIDList() []UniqueID
-```
+````
 
-
-* *LoadYaml(filePath string)* turns a YAML file into multiple key-value pairs. For example, given the following YAML
+- _LoadYaml(filePath string)_ turns a YAML file into multiple key-value pairs. For example, given the following YAML
 
 ```yaml
 etcd:
@@ -170,7 +165,7 @@ etcd:
   rootpath: milvus/etcd
 ```
 
-*BaseTable.LoadYaml* will insert three key-value pairs into *params*
+_BaseTable.LoadYaml_ will insert three key-value pairs into _params_
 
 ```go
 	"etcd.address" -> "localhost"
@@ -178,11 +173,10 @@ etcd:
 	"etcd.rootpath" -> "milvus/etcd"
 ```
 
-
-
 #### A.4 Time Ticked Flow Graph
 
 //TODO remove?
+
 ###### A.4.1 Flow Graph States
 
 ```go
@@ -238,7 +232,7 @@ type nodeCtx struct {
 func (nodeCtx *nodeCtx) Start(ctx context.Context) error
 ```
 
-*Start()* will enter a loop. In each iteration, it tries to collect input messages from *inputChan*, then prepares the node's input. When the input is ready, it will trigger *node.Operate*. When *node.Operate* returns, it sends the returned *Msg* to *outputChans*, which connects to the downstreams' *inputChans*.
+_Start()_ will enter a loop. In each iteration, it tries to collect input messages from _inputChan_, then prepares the node's input. When the input is ready, it will trigger _node.Operate_. When _node.Operate_ returns, it sends the returned _Msg_ to _outputChans_, which connects to the downstreams' _inputChans_.
 
 ```go
 type TimeTickedFlowGraph struct {
@@ -286,7 +280,6 @@ func (ta *Allocator) CleanCache() error
 
 ```
 
-
 #### A.6 ID Allocator
 
 ```go
@@ -310,10 +303,6 @@ func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error)
 
 func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error)
 ```
-
-
-
-
 
 #### A.6 Timestamp Allocator
 
@@ -351,8 +340,6 @@ type timestamp struct {
 type Timestamp uint64
 ```
 
-
-
 ###### A.6.2 Timestamp Oracle
 
 ```go
@@ -372,8 +359,6 @@ func (t *timestampOracle) ResetUserTimestamp(tso uint64) error
 func (t *timestampOracle) UpdateTimestamp() error
 func (t *timestampOracle) ResetTimestamp()
 ```
-
-
 
 ###### A.6.3 Timestamp Allocator
 
@@ -398,15 +383,9 @@ func (ta *TimestampAllocator) ClearCache()
 func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAllocator, error)
 ```
 
+- Batch Allocation of Timestamps
 
-
-* Batch Allocation of Timestamps
-
-* Expiration of Timestamps
-
-
-
-
+- Expiration of Timestamps
 
 #### A.7 KV
 
@@ -497,7 +476,7 @@ func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan
 func NewEtcdKV(etcdAddr string, rootPath string) *EtcdKV
 ```
 
-EtcdKV implements all *TxnKV* interfaces.
+EtcdKV implements all _TxnKV_ interfaces.
 
 ###### A.7.6 Memory KV
 
@@ -522,7 +501,7 @@ func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error
 func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 ```
 
-MemoryKV implements all *TxnKV* interfaces.
+MemoryKV implements all _TxnKV_ interfaces.
 
 ###### A.7.7 MinIO KV
 
@@ -544,7 +523,7 @@ func (kv *MinIOKV) MultiRemove(keys []string) error
 func (kv *MinIOKV) Close()
 ```
 
-MinIOKV implements all *KV* interfaces.
+MinIOKV implements all _KV_ interfaces.
 
 ###### A.7.8 RocksdbKV KV
 
@@ -572,4 +551,4 @@ func (kv *RocksdbKV) MultiRemoveWithPrefix(keys []string) error
 func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 ```
 
-RocksdbKV implements all *TxnKV* interfaces.h
+RocksdbKV implements all _TxnKV_ interfaces.h
