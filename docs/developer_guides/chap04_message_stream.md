@@ -240,11 +240,12 @@ type PmsFactory struct {
 	PulsarBufSize  int64
 }
 
-//TODO
-// RockMQ
-type RmqMsgStreamFactory interface {}
-func (rmsf *RmqMsgStreamFactory) NewMsgStream() *MsgStream
-func (rmsf *RmqMsgStreamFactory) NewTtMsgStream() *MsgStream
+// RmsFactory
+type RmsFactory struct {
+	dispatcherFactory ProtoUDFactory
+	ReceiveBufSize int64
+	RmqBufSize     int64
+}
 ```
 
 
