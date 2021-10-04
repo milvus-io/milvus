@@ -102,12 +102,12 @@ func WaitForComponentInitOrHealthy(ctx context.Context, service types.Component,
 	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy}, attempts, sleep)
 }
 
-// WaitForComponentInitOrHealthy wait for component's state to be initializing
+// WaitForComponentInit wait for component's state to be initializing
 func WaitForComponentInit(ctx context.Context, service types.Component, serviceName string, attempts uint, sleep time.Duration) error {
 	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Initializing}, attempts, sleep)
 }
 
-// WaitForComponentInitOrHealthy wait for component's state to be healthy
+// WaitForComponentHealthy wait for component's state to be healthy
 func WaitForComponentHealthy(ctx context.Context, service types.Component, serviceName string, attempts uint, sleep time.Duration) error {
 	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Healthy}, attempts, sleep)
 }
@@ -128,6 +128,7 @@ func ParseIndexParamsMap(mStr string) (map[string]string, error) {
 }
 
 const (
+	// PulsarMaxMessageSizeKey is the key of config item
 	PulsarMaxMessageSizeKey = "maxMessageSize"
 )
 

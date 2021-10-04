@@ -20,12 +20,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// GetFunctionName returns the name of input
 func GetFunctionName(i interface{}) string {
 	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
 
-// Reference: https://stackoverflow.com/questions/40809504/idiomatic-goroutine-termination-and-error-handling
 // ProcessFuncParallel process function in parallel.
+// Reference: https://stackoverflow.com/questions/40809504/idiomatic-goroutine-termination-and-error-handling
 func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname string) error {
 	if maxParallel <= 0 {
 		maxParallel = 1
