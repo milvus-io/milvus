@@ -24,6 +24,7 @@ type rmqClient struct {
 	client rocksmq.Client
 }
 
+// NewRmqClient returns a new rmqClient object
 func NewRmqClient(opts rocksmq.ClientOptions) (*rmqClient, error) {
 	c, err := rocksmq.NewClient(opts)
 	if err != nil {
