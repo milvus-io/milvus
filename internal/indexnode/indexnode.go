@@ -33,6 +33,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"go.uber.org/zap"
@@ -53,6 +54,9 @@ import (
 
 // UniqueID is an alias of int64, is used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
+
+// make sure IndexNode implements types.IndexNode
+var _ types.IndexNode = (*IndexNode)(nil)
 
 // IndexNode is a component that executes the task of building indexes.
 type IndexNode struct {
