@@ -163,12 +163,12 @@ $ go test -v ./internal/proxy/ -test.run TestSearchTask
 
 Before submitting your Pull Request, make sure your code change is covered by unit test. Use the following commands to check code coverage rate:
 
-Install lcov(cpp code coverage tool)
+Install lcov(cpp code coverage tool):
 ```shell
 $ sudo apt-get install lcov
 ```
 
-Run unit test and generate report for code coverage
+Run unit test and generate code coverage report:
 ```shell
 $ make codecov
 ```
