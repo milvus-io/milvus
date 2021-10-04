@@ -1,10 +1,8 @@
-
-
-## 10. Root Coordinator 
+## 6. Root Coordinator
 
 <img src="./figs/root_coord.png">
 
-#### 10.1 Root Coordinator Interface
+#### 6.1 Root Coordinator Interface
 
 ```go
 type RootCoord interface {
@@ -311,7 +309,7 @@ type ChannelTimeTickMsg struct {
 }
 ```
 
-#### 10.2 Dd (Data definitions) Message 
+#### 6.2 Dd (Data definitions) Message
 
 `RC` would put `Dd Message` into the `DML MsgSteams`
 
@@ -402,11 +400,11 @@ type DropPartitionMsg struct {
 }
 ```
 
-#### 10.3 Create Index automatically 
+#### 6.3 Create Index automatically
 `RC` would notify `IC(Index Coord)` to build index automatically when the segment has been flushed.
 <img src="./figs/root_coord_create_index_automatically.png">
 
-#### 10.4 RootCoord Instance
+#### 6.4 RootCoord Instance
 
 ```go
 type Core struct {
@@ -493,9 +491,9 @@ type Core struct {
 ```
 
 
-#### 10.5 Data definition Request Scheduler
+#### 6.5 Data definition Request Scheduler
 
-###### 10.5.1 Task
+###### 6.5.1 Task
 
 RootCoord receives data definition requests via grpc. Each request (described by a proto) will be wrapped as a task for further scheduling. The task interface is
 
@@ -531,9 +529,9 @@ In most cases, a data definition task need to
 * send `DD Message` into related `DML MsgStream`, so that the `Data Node` and `Query Node` would take it 
 
 
-#### 10.6 Meta Table
+#### 6.6 Meta Table
 
-###### 10.6.1 Meta
+###### 6.6.1 Meta
 
 * Tenant Meta
 
@@ -599,7 +597,7 @@ message SegmentIndexInfo {
 }
 ```
 
-###### 10.6.2 KV pairs in EtcdKV
+###### 6.6.2 KV pairs in EtcdKV
 
 ```go
 "tenant/$tenantId" string -> tenantMetaBlob string
@@ -615,7 +613,7 @@ Note that *tenantId*, *proxyId*, *collectionId*, *partitionId*, *indexId*, *segm
 *tenantMetaBlob*, *proxyMetaBlob*, *collectionInfoBlob*, *partitionInfoBlob*, *IndexInfoBlob*, *segmentIndexInfoBlog* are serialized protos.
 
 
-###### 10.6.3 Meta Table
+###### 6.6.3 Meta Table
 
 ```go
 type metaTable struct {
@@ -674,7 +672,7 @@ func (mt *metaTable) AddFlushedSegment(segID typeutil.UniqueID) error
 
 
 
-#### 10.7 System Time Synchronization
+#### 6.7 System Time Synchronization
 
 <img src="./figs/root_coord_time_sync.png">
 
