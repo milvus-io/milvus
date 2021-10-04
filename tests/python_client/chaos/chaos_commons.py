@@ -51,6 +51,7 @@ def get_env_variable_by_name(name):
 
 
 def get_chaos_yamls():
+    """get chaos yaml file(s) from configured environment path"""
     chaos_env = get_env_variable_by_name(constants.CHAOS_CONFIG_ENV)
     if chaos_env is not None:
         if os.path.isdir(chaos_env):
