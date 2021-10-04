@@ -5,7 +5,9 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
-from utils.utils import *
+from pymilvus import IndexType
+
+from utils.utils import get_milvus, gen_vectors, default_dim
 from common.common_type import CaseLabel
 
 class TestMysql:
