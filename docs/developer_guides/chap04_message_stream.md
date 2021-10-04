@@ -253,35 +253,7 @@ type RmsFactory struct {
 ```go
 // PulsarMsgStream
 
-type PulsarMsgStream struct {
-	ctx					context.Context
-	client				pulsar.Client
-	producers			[]Producer
-	consumers			[]Consumer
-	consumerChannels 	[]string
-	repackFunc			RepackFunc
-	unmarshal			UnmarshalDispatcher
-	receiveBuf			chan *MsgPack
-	wait				*sync.WaitGroup
-	streamCancel		func()
-	pulsarBufSize		int64
-	consumerLock		*sync.Mutex
-	consumerReflects 	[]reflect.SelectCase
-	
-	scMap *sync.Map
-}
-
-func (ms *PulsarMsgStream) Start() error
-func (ms *PulsarMsgStream) Close() error
-func (ms *PulsarMsgStream) AsProducer(channels []string)
-func (ms *PulsarMsgStream) AsConsumer(channels []string, subName string)
-func (ms *PulsarMsgStream) Produce(ctx context.Context, msgs *MsgPack) error
-func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgs *MsgPack) error
-func (ms *PulsarMsgStream) Consume() (*MsgPack, context.Context)
-func (ms *PulsarMsgStream) Seek(mp *MsgPosition) error
-func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc)
-
-func NewPulsarMsgStream(ctx context.Context, pulsarAddr string, bufferSize int64) *PulsarMsgStream
+func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error)
 
 
 type PulsarTtMsgStream struct {
