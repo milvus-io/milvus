@@ -231,11 +231,14 @@ type Factory interface {
 	NewQueryMsgStream(ctx context.Context) (MsgStream, error)
 }
 
-//TODO
 // Pulsar
-type PulsarMsgStreamFactory interface {}
-func (pmsf *PulsarMsgStreamFactory) NewMsgStream() *MsgStream
-func (pmsf *PulsarMsgStreamFactory) NewTtMsgStream() *MsgStream
+type PmsFactory struct {
+	dispatcherFactory ProtoUDFactory
+	// the following members must be public, so that mapstructure.Decode() can access them
+	PulsarAddress  string
+	ReceiveBufSize int64
+	PulsarBufSize  int64
+}
 
 //TODO
 // RockMQ
