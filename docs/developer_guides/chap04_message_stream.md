@@ -237,11 +237,12 @@ type PulsarMsgStreamFactory interface {}
 func (pmsf *PulsarMsgStreamFactory) NewMsgStream() *MsgStream
 func (pmsf *PulsarMsgStreamFactory) NewTtMsgStream() *MsgStream
 
-//TODO
-// RockMQ
-type RmqMsgStreamFactory interface {}
-func (rmsf *RmqMsgStreamFactory) NewMsgStream() *MsgStream
-func (rmsf *RmqMsgStreamFactory) NewTtMsgStream() *MsgStream
+// RmsFactory
+type RmsFactory struct {
+	dispatcherFactory ProtoUDFactory
+	ReceiveBufSize int64
+	RmqBufSize     int64
+}
 ```
 
 
