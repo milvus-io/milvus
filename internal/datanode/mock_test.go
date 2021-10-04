@@ -51,10 +51,10 @@ func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
-	node.SetRootCoordInterface(rc)
+	node.rootCoord = rc
 
 	ds := &DataCoordFactory{}
-	node.SetDataCoordInterface(ds)
+	node.dataCoord = ds
 
 	return node
 }
@@ -82,11 +82,10 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
-
-	node.SetRootCoordInterface(ms)
+	node.rootCoord = ms
 
 	ds := &DataCoordFactory{}
-	node.SetDataCoordInterface(ds)
+	node.dataCoord = ds
 
 	return node
 }
