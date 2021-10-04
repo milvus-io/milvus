@@ -45,18 +45,22 @@ func (pid *pulsarID) PartitionIdx() int32 {
 	return pid.messageID.PartitionIdx()
 }
 
+// SerializePulsarMsgID returns the serialized message ID
 func SerializePulsarMsgID(messageID pulsar.MessageID) []byte {
 	return messageID.Serialize()
 }
 
+// DeserializePulsarMsgID returns the deserialized message ID
 func DeserializePulsarMsgID(messageID []byte) (pulsar.MessageID, error) {
 	return pulsar.DeserializeMessageID(messageID)
 }
 
+// PulsarMsgIDToString is used to convert a message ID to string
 func PulsarMsgIDToString(messageID pulsar.MessageID) string {
 	return strings.ToValidUTF8(string(messageID.Serialize()), "")
 }
 
+// StringToPulsarMsgID is used to convert a string to message ID
 func StringToPulsarMsgID(msgString string) (pulsar.MessageID, error) {
 	return pulsar.DeserializeMessageID([]byte(msgString))
 }

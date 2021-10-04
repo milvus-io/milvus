@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 )
 
+// RmqConsumer is a client that used to consume messages from rocksmq
 type RmqConsumer struct {
 	c          rocksmq.Consumer
 	msgChannel chan ConsumerMessage
@@ -24,10 +25,12 @@ type RmqConsumer struct {
 	once       sync.Once
 }
 
+// Subscription returns the subscription name of this consumer
 func (rc *RmqConsumer) Subscription() string {
 	return rc.c.Subscription()
 }
 
+// Chan returns a channel to read messages from rocksmq
 func (rc *RmqConsumer) Chan() <-chan ConsumerMessage {
 	if rc.msgChannel == nil {
 		rc.once.Do(func() {
@@ -52,14 +55,17 @@ func (rc *RmqConsumer) Chan() <-chan ConsumerMessage {
 	return rc.msgChannel
 }
 
+// Seek is used to seek the position in rocksmq topic
 func (rc *RmqConsumer) Seek(id MessageID) error {
 	msgID := id.(*rmqID).messageID
 	return rc.c.Seek(msgID)
 }
 
+// Ack is used to ask a rocksmq message
 func (rc *RmqConsumer) Ack(message ConsumerMessage) {
 }
 
+// Close is used to free the resources of this consumer
 func (rc *RmqConsumer) Close() {
 	rc.c.Close()
 	close(rc.closeCh)
