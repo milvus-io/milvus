@@ -29,6 +29,7 @@ func SliceContain(s interface{}, item interface{}) bool {
 	return false
 }
 
+// SliceSetEqual is used to compare two Slice
 func SliceSetEqual(s1 interface{}, s2 interface{}) bool {
 	ss1 := reflect.ValueOf(s1)
 	ss2 := reflect.ValueOf(s2)
@@ -49,6 +50,7 @@ func SliceSetEqual(s1 interface{}, s2 interface{}) bool {
 	return true
 }
 
+// SortedSliceEqual is used to compare two Sorted Slice
 func SortedSliceEqual(s1 interface{}, s2 interface{}) bool {
 	ss1 := reflect.ValueOf(s1)
 	ss2 := reflect.ValueOf(s2)
