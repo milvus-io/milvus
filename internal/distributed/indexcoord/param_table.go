@@ -68,6 +68,7 @@ func (pt *ParamTable) initServiceAddress() {
 	pt.ServiceAddress = ret
 }
 
+// initServerMaxSendSize initializes the max send size of IndexCoord service.
 func (pt *ParamTable) initServerMaxSendSize() {
 	var err error
 
