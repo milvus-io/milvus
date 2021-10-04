@@ -271,11 +271,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_twice_ids_no_ids(self, connect, id_collection):
-        '''
+        """
         target: check the result of insert, with params ids and no ids
         method: test insert vectors twice, use customize ids first, and then use no ids
         expected:  BaseException raised
-        '''
+        """
         ids = [i for i in range(default_nb)]
         entities = copy.deepcopy(default_entities)
         entities[0]["values"] = ids
@@ -287,11 +287,11 @@ class TestInsertBase:
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_not_ids(self, connect, id_collection):
-        '''
+        """
         target: check the result of insert, with params ids and no ids
         method: test insert vectors twice, use not ids first, and then use customize ids
         expected:  error raised
-        '''
+        """
         entities = copy.deepcopy(default_entities)
         del entities[0]
         with pytest.raises(Exception) as e:
@@ -300,11 +300,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_ids_length_not_match_batch(self, connect, id_collection):
-        '''
+        """
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
         method: create collection and insert vectors in it
         expected: raise an exception
-        '''
+        """
         ids = [i for i in range(1, default_nb)]
         logging.getLogger().info(len(ids))
         entities = copy.deepcopy(default_entities)
@@ -315,11 +315,11 @@ class TestInsertBase:
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_length_not_match_single(self, connect, id_collection):
-        '''
+        """
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
         method: create collection and insert vectors in it
         expected: raise an exception
-        '''
+        """
         ids = [i for i in range(1, default_nb)]
         logging.getLogger().info(len(ids))
         entity = copy.deepcopy(default_entity)
@@ -330,11 +330,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_partition(self, connect, collection):
-        '''
+        """
         target: test insert entities in collection created before
         method: create collection and insert entities in it, with the partition_name param
         expected: the collection row count equals to nq
-        '''
+        """
         connect.create_partition(collection, default_tag)
         result = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
@@ -347,11 +347,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_partition_with_ids(self, connect, id_collection):
-        '''
+        """
         target: test insert entities in collection created before, insert with ids
         method: create collection and insert entities in it, with the partition_name param
         expected: the collection row count equals to nq
-        '''
+        """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
         entities = gen_entities(default_nb)
@@ -363,11 +363,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_default_partition(self, connect, collection):
-        '''
+        """
         target: test insert entities into default partition
         method: create partition and insert info collection without tag params
         expected: the collection row count equals to nb
-        '''
+        """
         result = connect.insert(collection, default_entities, partition_name=default_partition_name)
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
@@ -377,11 +377,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_partition_not_existed(self, connect, collection):
-        '''
+        """
         target: test insert entities in collection created before
         method: create collection and insert entities in it, with the not existed partition_name param
         expected: error raised
-        '''
+        """
         tag = gen_unique_str()
         with pytest.raises(Exception) as e:
             connect.insert(collection, default_entities, partition_name=tag)
@@ -389,11 +389,11 @@ class TestInsertBase:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_partition_repeatedly(self, connect, collection):
-        '''
+        """
         target: test insert entities in collection created before
         method: create collection and insert entities in it repeatly, with the partition_name param
         expected: the collection row count equals to nq
-        '''
+        """
         connect.create_partition(collection, default_tag)
         result = connect.insert(collection, default_entities, partition_name=default_tag)
         result = connect.insert(collection, default_entities, partition_name=default_tag)
@@ -403,11 +403,11 @@ class TestInsertBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_dim_not_matched(self, connect, collection):
-        '''
+        """
         target: test insert entities, the vector dimension is not equal to the collection dimension
         method: the entities dimension is half of the collection dimension, check the status
         expected: error raised
-        '''
+        """
         vectors = gen_vectors(default_nb, int(default_dim) // 2)
         insert_entities = copy.deepcopy(default_entities)
         insert_entities[-1]["values"] = vectors
@@ -416,33 +416,33 @@ class TestInsertBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_field_name_not_match(self, connect, collection):
-        '''
+        """
         target: test insert entities, with the entity field name updated
         method: update entity field name
         expected: error raised
-        '''
+        """
         tmp_entity = update_field_name(copy.deepcopy(default_entity), "int64", "int64new")
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_field_type_not_match(self, connect, collection):
-        '''
+        """
         target: test insert entities, with the entity field type updated
         method: update entity field type
         expected: error raised
-        '''
+        """
         tmp_entity = update_field_type(copy.deepcopy(default_entity), "int64", DataType.FLOAT)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_field_value_not_match(self, connect, collection):
-        '''
+        """
         target: test insert entities, with the entity field value updated
         method: update entity field value
         expected: error raised
-        '''
+        """
         tmp_entity = update_field_value(copy.deepcopy(default_entity), DataType.FLOAT, 's')
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
