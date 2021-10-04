@@ -12,6 +12,16 @@ filters:
       - zwd1208
     approvers:
       - pr-inspection
+
+  # markdown files should be reviewed by authors
+  "*\\.md$":
+    required_reviewers:
+      - scsven
+      - XuanYang-cn
+      - xiaofan-luan
+    approvers:
+      - pr-inspection
+
   # go.{mod,sum} files relate to go dependencies, and should be reviewed by @congqixia
   "go\\.(mod|sum)$":
     required_reviewers:
