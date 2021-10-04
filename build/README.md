@@ -1,6 +1,6 @@
 # Building Milvus with Docker
 
-Building Milvus is easy if you take advantage of the containerized build environment. This document will help guide you through understanding this build process.
+Building Milvus is easy if you take advantage of the containerized build environment. This document will guide you through this build process.
 
 1. Docker, using one of the following configurations:
   * **macOS** Install Docker for Mac. See installation instructions [here](https://docs.docker.com/docker-for-mac/).
@@ -13,7 +13,7 @@ You must install and configure Google Cloud SDK if you want to upload your relea
 
 ## Overview
 
-While it is possible to build Milvus using a local golang installation, we have a build process that runs in a Docker container.  This simplifies initial set up and provides for a very consistent build and test environment.
+While it is possible to build Milvus using a local golang installation, we have a build process that runs in a Docker container. This simplifies initial set up and provides for a very consistent build and test environment.
 
 
 ## Before You Begin
