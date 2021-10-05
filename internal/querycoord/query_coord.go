@@ -45,6 +45,7 @@ type queryChannelInfo struct {
 	responseChannel string
 }
 
+// QueryCoord is the coordinator of queryNodes
 type QueryCoord struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
