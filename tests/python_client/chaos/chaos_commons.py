@@ -31,6 +31,7 @@ def gen_experiment_config(yaml):
 
 
 def start_monitor_threads(checkers={}):
+    """start the threads by checkers"""
     threads = {}
     for k, ch in checkers.items():
         t = threading.Thread(target=ch.keep_running, args=())
