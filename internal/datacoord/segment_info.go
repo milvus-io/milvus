@@ -134,6 +134,7 @@ func (s *SegmentsInfo) SetBinlogs(segmentID UniqueID, binlogs []*datapb.FieldBin
 	}
 }
 
+// SetFlushTime sets flush time for segment
 func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetFlushTime(t))
