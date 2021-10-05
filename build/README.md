@@ -13,7 +13,7 @@ You must install and configure Google Cloud SDK if you want to upload your relea
 
 ## Overview
 
-While it is possible to build Milvus using a local golang installation, we have a build process that runs in a Docker container. This simplifies initial set up and provides for a very consistent build and test environment.
+While it is possible to build Milvus using a local golang installation, we have a build process that runs in a Docker container. This simplifies initial set up and provides a very consistent build and test environment.
 
 
 ## Before You Begin
@@ -58,8 +58,8 @@ lscpu | grep -e sse4_2 -e avx -e avx2 -e avx512
 
 The following scripts are found in the [`build/`](.) directory. Note that all scripts must be run from the Milvus root directory.
 
-* [`build/builder.sh`](builder.sh): Run a command in a build docker container.  Common invocations:
-  * `build/builder.sh make` Build just linux binaries in the container.  Pass options and packages as necessary.
+* [`build/builder.sh`](builder.sh): Run a command in a build docker container. Common invocations:
+  * `build/builder.sh make` Build just linux binary in the container. Pass options and packages as necessary.
   * `build/builder.sh make verifiers`: Run all pre-submission verification check
   * `build/builder.sh make unittest`: Run all unit tests
   * `build/builder.sh make clean`: Clean up all the generated files
@@ -74,19 +74,19 @@ build/builder.sh make
 ```
 
 ## Dev Containers
-Users can also get into the dev containers for development.
+User can also get into the dev containers for development.
 
 Enter root path of Milvus project on your host machine, execute the following commands:
 
 ```shell
 $ ./scripts/devcontainer.sh up        # start Dev container
 
-Creating network "milvus-distributed_milvus" with the default driver
-Creating milvus_jaeger_1 ... done
-Creating milvus_minio_1  ... done
-Creating milvus_pulsar_1 ... done
-Creating milvus_etcd_1   ... done
-Creating milvus_ubuntu_1 ... done
+Creating network "milvus-dev" with the default driver
+Creating milvus_jaeger_1  ... done
+Creating milvus_minio_1   ... done
+Creating milvus_pulsar_1  ... done
+Creating milvus_etcd_1    ... done
+Creating milvus_builder_1 ... done
 ```
 
 Check running state of Dev Container:
