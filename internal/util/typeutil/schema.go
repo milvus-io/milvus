@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+// EstimateSizePerRecord returns the estimate size of a record in a collection
 func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	res := 0
 	for _, fs := range schema.Fields {
@@ -60,6 +61,7 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	return res, nil
 }
 
+// SchemaHelper provides methods to get the schema of fields
 type SchemaHelper struct {
 	schema           *schemapb.CollectionSchema
 	nameOffset       map[string]int
@@ -67,6 +69,7 @@ type SchemaHelper struct {
 	primaryKeyOffset int
 }
 
+// CreateSchemaHelper returns a new SchemaHelper object
 func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error) {
 	if schema == nil {
 		return nil, errors.New("schema is nil")
@@ -91,6 +94,7 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 	return &schemaHelper, nil
 }
 
+// GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
 		return nil, fmt.Errorf("no primary in schema")
@@ -98,6 +102,7 @@ func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) 
 	return helper.schema.Fields[helper.primaryKeyOffset], nil
 }
 
+// GetFieldFromName is used to find the schema by field name
 func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.nameOffset[fieldName]
 	if !ok {
@@ -106,6 +111,7 @@ func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldS
 	return helper.schema.Fields[offset], nil
 }
 
+// GetFieldFromID returns the schema of specified field
 func (helper *SchemaHelper) GetFieldFromID(fieldID int64) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.idOffset[fieldID]
 	if !ok {
@@ -114,6 +120,7 @@ func (helper *SchemaHelper) GetFieldFromID(fieldID int64) (*schemapb.FieldSchema
 	return helper.schema.Fields[offset], nil
 }
 
+// GetVectorDimFromID returns the dimension of specified field
 func (helper *SchemaHelper) GetVectorDimFromID(filedID int64) (int, error) {
 	sch, err := helper.GetFieldFromID(filedID)
 	if err != nil {
@@ -134,6 +141,7 @@ func (helper *SchemaHelper) GetVectorDimFromID(filedID int64) (int, error) {
 	return 0, fmt.Errorf("fieldID(%d) not has dim", filedID)
 }
 
+// IsVectorType returns true if input is a vector type, otherwise false
 func IsVectorType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector:
@@ -143,6 +151,7 @@ func IsVectorType(dataType schemapb.DataType) bool {
 	}
 }
 
+// IsIntegerType returns true if input is a integer type, otherwise false
 func IsIntegerType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
@@ -153,6 +162,7 @@ func IsIntegerType(dataType schemapb.DataType) bool {
 	}
 }
 
+// IsFloatingType returns true if input is a floating type, otherwise false
 func IsFloatingType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Float, schemapb.DataType_Double:
@@ -162,6 +172,7 @@ func IsFloatingType(dataType schemapb.DataType) bool {
 	}
 }
 
+// IsBoolType returns true if input is a bool type, otherwise false
 func IsBoolType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Bool:
