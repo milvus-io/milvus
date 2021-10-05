@@ -102,12 +102,18 @@ func (s *SegmentsInfo) SetStartPosition(segmentID UniqueID, pos *internalpb.MsgP
 	}
 }
 
+// SetAllocations sets allocations for segment with specified id
+// if the segment id is not found, do nothing
+// uses `ShadowClone` since internal SegmentInfo is not changed
 func (s *SegmentsInfo) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetAllocations(allocations))
 	}
 }
 
+// AddAllocation adds a new allocation to specified segment
+// if the segment is not found, do nothing
+// uses `Clone` since internal SegmentInfo's LastExpireTime is changed
 func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(AddAllocation(allocation))
