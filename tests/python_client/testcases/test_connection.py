@@ -507,9 +507,9 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_nme"])
     def test_connection_connect_wrong_params(self, host, port, connect_name):
         """
-        target: connect directly via wrong parameters and raise error
-        method: connect directly via wrong parameters
-        expected: response of connect is error
+        target: connect directly via invalid parameters and raise error
+        method: connect directly via invalid parameters
+        expected: raise exception with error msg
         """
 
         # created connection with wrong connect name
