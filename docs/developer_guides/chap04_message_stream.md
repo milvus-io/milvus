@@ -280,29 +280,6 @@ func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc)
 func NewPulsarMsgStream(ctx context.Context, pulsarAddr string, bufferSize int64) *PulsarMsgStream
 
 
-type PulsarTtMsgStream struct {
-	client			*pulsar.Client
-	repackFunc	RepackFunc
-	producers	 []*pulsar.Producer
-	consumers	 []*pulsar.Consumer
-	unmarshal	 *UnmarshalDispatcher
-	inputBuf		[]*TsMsg
-	unsolvedBuf []*TsMsg
-	msgPacks		[]*MsgPack
-}
-
-func (ms *PulsarTtMsgStream) Start() error
-func (ms *PulsarTtMsgStream) Close() error
-func (ms *PulsarTtMsgStream) AsProducer(channels []string)
-func (ms *PulsarTtMsgStream) AsConsumer(channels []string, subName string)
-func (ms *PulsarTtMsgStream) Produce(ctx context.Context, msgs *MsgPack) error
-func (ms *PulsarTtMsgStream) Broadcast(ctx context.Context, msgs *MsgPack) error
-func (ms *PulsarTtMsgStream) Consume() (*MsgPack, context.Context) //return messages in one time tick
-func (ms *PulsarTtMsgStream) Seek(mp *MsgPosition) error
-func (ms *PulsarTtMsgStream) SetRepackFunc(repackFunc RepackFunc)
-
-func NewPulsarTtMsgStream(ctx context.Context, pulsarAddr string, bufferSize int64) *PulsarTtMsgStream
-
 // RmqMsgStream
 
 type RmqMsgStream struct {
