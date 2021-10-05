@@ -67,6 +67,7 @@ func (manager *MetricsCacheManager) ResetRetention() {
 	manager.retention = DefaultMetricsRetention
 }
 
+// InvalidateSystemInfoMetrics invalidates the system information metrics.
 func (manager *MetricsCacheManager) InvalidateSystemInfoMetrics() {
 	manager.systemInfoMetricsMtx.Lock()
 	defer manager.systemInfoMetricsMtx.Unlock()
