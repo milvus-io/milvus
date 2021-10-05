@@ -92,6 +92,7 @@ func (pt *ParamTable) initServerMaxSendSize() {
 		zap.Int("indexCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
 }
 
+// initServerMaxSendSize initializes the max receive size of IndexCoord service.
 func (pt *ParamTable) initServerMaxRecvSize() {
 	var err error
 
