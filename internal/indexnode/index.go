@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
-// TODO: use storage.Blob instead later
+// Blob is an alias for the storage.Blob type
 type Blob = storage.Blob
 
 // Index is an interface used to call the interface to build the index task in 'C'.
