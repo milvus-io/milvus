@@ -48,6 +48,7 @@ func GetCPUUsage() float64 {
 	return percents[0]
 }
 
+// GetMemoryCount returns the memory count in bytes.
 func GetMemoryCount() uint64 {
 	stats, err := mem.VirtualMemory()
 	if err != nil {
