@@ -201,7 +201,7 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
         self.collection_wrap.load()
         error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(invalid_c_name)}
@@ -216,7 +216,7 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
         self.collection_wrap.load()
         error = {ct.err_code: 1, ct.err_msg: "describe collection failed: can't find collection"}
