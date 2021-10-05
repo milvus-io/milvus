@@ -449,55 +449,55 @@ class TestInsertBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_field_more(self, connect, collection):
-        '''
+        """
         target: test insert entities, with more fields than collection schema
         method: add entity field
         expected: error raised
-        '''
+        """
         tmp_entity = add_field(copy.deepcopy(default_entity))
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_field_vector_more(self, connect, collection):
-        '''
+        """
         target: test insert entities, with more fields than collection schema
         method: add entity vector field
         expected: error raised
-        '''
+        """
         tmp_entity = add_vector_field(default_nb, default_dim)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_field_less(self, connect, collection):
-        '''
+        """
         target: test insert entities, with less fields than collection schema
         method: remove entity field
         expected: error raised
-        '''
+        """
         tmp_entity = remove_field(copy.deepcopy(default_entity))
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_field_vector_less(self, connect, collection):
-        '''
+        """
         target: test insert entities, with less fields than collection schema
         method: remove entity vector field
         expected: error raised
-        '''
+        """
         tmp_entity = remove_vector_field(copy.deepcopy(default_entity))
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_no_field_vector_value(self, connect, collection):
-        '''
+        """
         target: test insert entities, with no vector field value
         method: remove entity values of vector field
         expected: error raised
-        '''
+        """
         tmp_entity = copy.deepcopy(default_entity)
         del tmp_entity[-1]["values"]
         with pytest.raises(Exception):
@@ -505,11 +505,11 @@ class TestInsertBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_no_field_vector_type(self, connect, collection):
-        '''
+        """
         target: test insert entities, with no vector field type
         method: remove entity vector field
         expected: error raised
-        '''
+        """
         tmp_entity = copy.deepcopy(default_entity)
         del tmp_entity[-1]["type"]
         with pytest.raises(Exception):
@@ -517,11 +517,11 @@ class TestInsertBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_no_field_vector_name(self, connect, collection):
-        '''
+        """
         target: test insert entities, with no vector field name
         method: remove entity vector field
         expected: error raised
-        '''
+        """
         tmp_entity = copy.deepcopy(default_entity)
         del tmp_entity[-1]["name"]
         with pytest.raises(Exception):
@@ -531,12 +531,12 @@ class TestInsertBase:
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(30)
     def test_collection_insert_rows_count_multi_threading(self, args, collection):
-        '''
+        """
         target: test collection rows_count is correct or not with multi threading
         method: create collection and insert entities in it(idmap),
             assert the value returned by count_entities method is equal to length of entities
         expected: the count is equal to the length of entities
-        '''
+        """
         if args["handler"] == "HTTP":
             pytest.skip("Skip test in http mode")
         thread_num = 8
@@ -560,11 +560,11 @@ class TestInsertBase:
     # TODO: unable to set config
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_disable_auto_flush(self, connect, collection):
-        '''
+        """
         target: test insert entities, with disable autoflush
         method: disable autoflush and insert, get entity
         expected: the count is equal to 0
-        '''
+        """
         delete_nums = 500
         disable_flush(connect)
         result = connect.insert(collection, default_entities)
@@ -585,11 +585,11 @@ class TestInsertBinary:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_binary_entities(self, connect, binary_collection):
-        '''
+        """
         target: test insert entities in binary collection
         method: create collection and insert binary entities in it
         expected: the collection row count equals to nb
-        '''
+        """
         result = connect.insert(binary_collection, default_binary_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([binary_collection])
@@ -598,11 +598,11 @@ class TestInsertBinary:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_binary_partition(self, connect, binary_collection):
-        '''
+        """
         target: test insert entities and create partition tag
         method: create collection and insert binary entities in it, with the partition_name param
         expected: the collection row count equals to nb
-        '''
+        """
         connect.create_partition(binary_collection, default_tag)
         result = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
         assert len(result.primary_keys) == default_nb
@@ -613,11 +613,11 @@ class TestInsertBinary:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_binary_multi_times(self, connect, binary_collection):
-        '''
+        """
         target: test insert entities multi times and final flush
         method: create collection and insert binary entity multi and final flush
         expected: the collection row count equals to nb
-        '''
+        """
         for i in range(default_nb):
             result = connect.insert(binary_collection, default_binary_entity)
             assert len(result.primary_keys) == 1
@@ -627,11 +627,11 @@ class TestInsertBinary:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_binary_after_create_index(self, connect, binary_collection, get_binary_index):
-        '''
+        """
         target: test insert binary entities after build index
         method: build index and insert entities
         expected: no error raised
-        '''
+        """
         connect.create_index(binary_collection, binary_field_name, get_binary_index)
         result = connect.insert(binary_collection, default_binary_entities)
         assert len(result.primary_keys) == default_nb
@@ -643,11 +643,11 @@ class TestInsertBinary:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
-        '''
+        """
         target: test build index insert after vector
         method: insert vector and build index
         expected: no error raised
-        '''
+        """
         result = connect.insert(binary_collection, default_binary_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([binary_collection])
@@ -658,11 +658,11 @@ class TestInsertBinary:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_binary_search(self, connect, binary_collection):
-        '''
+        """
         target: test search vector after insert vector after a while
         method: insert vector, sleep, and search collection
         expected: no error raised
-        '''
+        """
         result = connect.insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         query, vecs = gen_query_vectors(binary_field_name, default_binary_entities, default_top_k, 1,
@@ -699,11 +699,11 @@ class TestInsertAsync:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_async(self, connect, collection, insert_count):
-        '''
+        """
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
-        '''
+        """
         nb = insert_count
         future = connect.insert(collection, gen_entities(nb), _async=True)
         ids = future.result().primary_keys
@@ -712,11 +712,11 @@ class TestInsertAsync:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_async_false(self, connect, collection, insert_count):
-        '''
+        """
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
-        '''
+        """
         nb = insert_count
         result = connect.insert(collection, gen_entities(nb), _async=False)
         # ids = future.result()
@@ -725,11 +725,11 @@ class TestInsertAsync:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_async_callback(self, connect, collection, insert_count):
-        '''
+        """
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
-        '''
+        """
         nb = insert_count
         future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_result)
         future.done()
