@@ -251,10 +251,6 @@ type RmsFactory struct {
 
 
 ```go
-// PulsarMsgStream
-
-func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error)
-
 
 type PulsarTtMsgStream struct {
 	client			*pulsar.Client
