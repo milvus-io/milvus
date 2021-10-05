@@ -1042,6 +1042,11 @@ class TestInsertInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test insert with invalid scenario
+        method: insert with invalid collection name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception):
             connect.insert(collection_name, default_entity)
