@@ -79,6 +79,9 @@ type RootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEnd
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
 
+// makes sure Server implements `positionProvider`
+var _ positionProvider = (*Server)(nil)
+
 // Server implements `types.Datacoord`
 // handles Data Cooridinator related jobs
 type Server struct {
