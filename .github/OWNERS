@@ -1,6 +1,8 @@
+# Maintainers of GitHub Actions and Mergify
 reviewers:
-  - XuanYang-cn
+  - LoveEachDay
   - scsven
+  - XuanYang-cn
 
 approvers:
   - pr-inspection
