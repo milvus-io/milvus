@@ -19,10 +19,12 @@ import (
 	"strings"
 	"sync"
 
+	slog "github.com/milvus-io/milvus/internal/log"
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/log"
 	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
+	"go.uber.org/zap"
 )
 
 var tracingCloserMtx sync.Mutex
@@ -142,9 +144,9 @@ func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operatio
 }
 
 // LogError is a method to log error with span.
-func LogError(span opentracing.Span, err error) error {
+func LogError(span opentracing.Span, err error) {
 	if err == nil {
-		return nil
+		return
 	}
 
 	// Get caller frame.
@@ -153,15 +155,13 @@ func LogError(span opentracing.Span, err error) error {
 	if n < 1 {
 		span.LogFields(log.Error(err))
 		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
-		return err
+		slog.Warn("trace log error failed", zap.Error(err))
 	}
 
 	frames := runtime.CallersFrames(pcs[:])
 	frame, _ := frames.Next()
 	file, line := frame.File, frame.Line
 	span.LogFields(log.String("filename", file), log.Int("line", line), log.Error(err))
-
-	return err
 }
 
 // InfoFromSpan is a method return span details.
