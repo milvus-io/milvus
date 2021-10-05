@@ -120,6 +120,7 @@ func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation)
 	}
 }
 
+// SetCurrentRows sets rows count for segment
 func (s *SegmentsInfo) SetCurrentRows(segmentID UniqueID, rows int64) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetCurrentRows(rows))
