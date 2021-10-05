@@ -36,7 +36,11 @@ entity = gen_entities(1, is_normal=True)
 entities = gen_entities(default_nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, default_query_vecs = gen_query_vectors(field_name, entities, default_top_k, nq)
-default_binary_query, default_binary_query_vecs = gen_query_vectors(binary_field_name, binary_entities, default_top_k, nq)
+default_binary_query, default_binary_query_vecs = gen_query_vectors(binary_field_name,
+                                                                    binary_entities,
+                                                                    default_top_k,
+                                                                    nq)
+
 
 class TestCollectionSearchInvalid(TestcaseBase):
     """ Test case of search interface """
@@ -101,12 +105,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("None is valid for output_fields")
         yield request.param
 
-
     """
     ******************************************************************
     #  The followings are invalid cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_no_connection(self):
         """
@@ -223,9 +227,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items=
-                            {"err_code": 1,
-                             "err_msg": "`anns_field` value {} is illegal".format(invalid_search_field)})
+                            check_items={"err_code": 1,
+                                         "err_msg": "`anns_field` value {} is illegal".format(invalid_search_field)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_field_value(self, get_invalid_fields_value):
@@ -329,7 +332,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid limit (topK)
         log.info("test_search_param_invalid_limit: searching with "
-                 "invalid limit (topK) = %s" % limit)        
+                 "invalid limit (topK) = %s" % limit)
         err_msg = "limit %d is too large!" % limit
         if limit == 0:
             err_msg = "`limit` value 0 is illegal"
@@ -352,13 +355,14 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_expr = get_invalid_expr_type
         log.info("test_search_param_invalid_expr_type: searching with "
                  "invalid expr: {}".format(invalid_search_expr))
-        
+
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": "The type of expr must be string ,"
                                                     "but {} is given".format(type(invalid_search_expr))})
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_expr_value(self, get_invalid_expr_value):
         """
@@ -539,7 +543,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. create different index
         if params.get("m"):
             if (default_dim % params["m"]) != 0:
-                params["m"] = default_dim//4
+                params["m"] = default_dim // 4
         log.info("test_search_different_index_invalid_params: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -652,6 +656,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "Search doesn't support "
                                                     "vector field as output_fields"})
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
     def test_search_output_field_invalid_wildcard(self, output_fields):
@@ -670,6 +675,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": f"Field {output_fields[-1]} not exist"})
+
 
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
@@ -700,6 +706,7 @@ class TestCollectionSearch(TestcaseBase):
     #  The following are valid base cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_normal(self, nq, dim, auto_id):
         """
@@ -719,8 +726,8 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit}) 
-                                    
+                                         "limit": default_limit})
+
     @pytest.mark.tag(CaseLabel.L0)
     def test_search_with_hit_vectors(self, nq, dim, auto_id):
         """
@@ -743,7 +750,7 @@ class TestCollectionSearch(TestcaseBase):
         for hits in search_res:
             # verify that top 1 hit is itself,so min distance is 0
             assert hits.distances[0] == 0.0
-        
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self, dim, auto_id, _async):
         """
@@ -830,7 +837,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids[:entity_num],
-                                         "limit": limit-deleted_entity_num,
+                                         "limit": limit - deleted_entity_num,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1067,7 +1074,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": nb_old+nb_new,
+                                         "limit": nb_old + nb_new,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1112,10 +1119,10 @@ class TestCollectionSearch(TestcaseBase):
         # 2. create index and load
         if params.get("m"):
             if (dim % params["m"]) != 0:
-                params["m"] = dim//4
+                params["m"] = dim // 4
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
-                params["PQM"] = dim//4
+                params["PQM"] = dim // 4
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
@@ -1151,10 +1158,10 @@ class TestCollectionSearch(TestcaseBase):
         # 2. create different index
         if params.get("m"):
             if (dim % params["m"]) != 0:
-                params["m"] = dim//4
+                params["m"] = dim // 4
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
-                params["PQM"] = dim//4
+                params["PQM"] = dim // 4
         log.info("test_search_after_index_different_metric_type: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
@@ -1188,7 +1195,7 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search for multiple times
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         for i in range(search_num):
-            log.info("test_search_collection_multiple_times: searching round %d" % (i+1))
+            log.info("test_search_collection_multiple_times: searching round %d" % (i + 1))
             collection_w.search(vectors[:nq], default_search_field,
                                 default_search_params, default_limit,
                                 default_search_exp, _async=_async,
@@ -1285,7 +1292,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       is_index=True)
-        
+
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -1546,7 +1553,7 @@ class TestCollectionSearch(TestcaseBase):
             float = _vectors.float[i]
             if not expression or eval(expression):
                 filter_ids.append(_id)
-        
+
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
@@ -1566,7 +1573,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             search_res.done()
             search_res = search_res.result()
-        
+
         filter_ids_set = set(filter_ids)
         for hits in search_res:
             ids = hits.ids
@@ -1640,8 +1647,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                              auto_id=True,
                                                                              dim=dim,
                                                                              is_index=True)
-        
-        
+
         # filter result with expression in collection
         _vectors = _vectors[0]
         expression = expression.replace("&&", "and").replace("||", "or")
@@ -1650,12 +1656,11 @@ class TestCollectionSearch(TestcaseBase):
             exec(f"{default_float_field_name} = _vectors.{default_float_field_name}[i]")
             if not expression or eval(expression):
                 filter_ids.append(_id)
-        
+
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
-
 
         # 3. search with different expressions
         log.info("test_search_with_expression: searching with expression: %s" % expression)
@@ -1671,11 +1676,11 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             search_res.done()
             search_res = search_res.result()
-        
+
         filter_ids_set = set(filter_ids)
         for hits in search_res:
             ids = hits.ids
-            assert set(ids).issubset(filter_ids_set)        
+            assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async):
@@ -1750,7 +1755,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)
         # 2. search
         log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
-        
+
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   default_search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -1810,7 +1815,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
-        
+
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   default_search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -1936,6 +1941,7 @@ def init_binary_data(connect, collection, nb=3000, insert=True, partition_names=
         ids = res.primary_keys
     return insert_raw_vectors, insert_entities, ids
 
+
 def check_id_result(result, id):
     limit_in = 5
     ids = [entity.id for entity in result]
@@ -1943,6 +1949,7 @@ def check_id_result(result, id):
         return id in ids[:limit_in]
     else:
         return id in ids
+
 
 class TestSearchBase:
     """
@@ -2019,7 +2026,6 @@ class TestSearchBase:
     )
     def get_nq(self, request):
         yield request.param
-
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_flat_top_k(self, connect, collection, get_nq):
@@ -2619,12 +2625,14 @@ class TestSearchBase:
         for i in range(num):
             connect.drop_collection(collection_names[i])
 
+
 class TestSearchDSL(object):
     """
     ******************************************************************
     #  The following cases are used to build invalid query expr
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_no_must(self, connect, collection):
         """
@@ -2701,6 +2709,7 @@ class TestSearchDSL(object):
     #  The following cases are used to build valid query expr
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_term_value_not_in(self, connect, collection):
         """
@@ -3020,6 +3029,7 @@ class TestSearchDSL(object):
     #  The following cases are used to build query expr multi range and term
     ************************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_multi_term_has_common(self, connect, collection):
         """
@@ -3152,6 +3162,7 @@ class TestSearchDSL(object):
     #  The following cases are used to build query expr both term and range
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_single_term_range_has_common(self, connect, collection):
         """
@@ -3189,6 +3200,7 @@ class TestSearchDSL(object):
     #  The following cases are used to build multi vectors query expr
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_multi_vectors_same_field(self, connect, collection):
         """
