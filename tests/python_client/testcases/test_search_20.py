@@ -73,7 +73,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_expr_type(self, request):
         if isinstance(request.param, str):
             pytest.skip("string is valid type for expr")
-        if request.param == None:
+        if request.param is None:
             pytest.skip("None is valid for expr")
         yield request.param
 
@@ -89,7 +89,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_partition(self, request):
         if request.param == []:
             pytest.skip("empty is valid for partition")
-        if request.param == None:
+        if request.param is None:
             pytest.skip("None is valid for partition")
         yield request.param
 
@@ -97,7 +97,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_output_fields(self, request):
         if request.param == []:
             pytest.skip("empty is valid for output_fields")
-        if request.param == None:
+        if request.param is None:
             pytest.skip("None is valid for output_fields")
         yield request.param
 
