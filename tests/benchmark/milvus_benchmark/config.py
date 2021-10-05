@@ -27,6 +27,7 @@ RAW_DATA_DIR = "/test/milvus/raw_data/"
 # nars log
 LOG_PATH = "/test/milvus/benchmark/logs/{}/".format(BRANCH)
 
+# Three deployment methods currently supported
 DEFAULT_DEPLOY_MODE = "single"
 SINGLE_DEPLOY_MODE = "single"
 CLUSTER_DEPLOY_MODE = "cluster"
