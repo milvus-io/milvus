@@ -25,9 +25,13 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	// === DataNode Internal Components Configs ===
-	NodeID                  UniqueID
-	IP                      string
+	// ID of the current DataNode
+	NodeID UniqueID
+
+	// IP of the current DataNode
+	IP string
+
+	// Port of the current DataNode
 	Port                    int
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -36,30 +40,30 @@ type ParamTable struct {
 	StatsBinlogRootPath     string
 	Alias                   string // Different datanode in one machine
 
-	// === DataNode External Components Configs ===
-	// --- Pulsar ---
+	// Pulsar address
 	PulsarAddress string
 
-	// --- Rocksmq ---
+	// Rocksmq path
 	RocksmqPath string
 
-	// --- Cluster channels ---
+	// Cluster channels
 	ClusterChannelPrefix string
 
-	// - seg statistics channel -
+	// Segment statistics channel
 	SegmentStatisticsChannelName string
 
-	// - timetick channel -
+	// Timetick channel
 	TimeTickChannelName string
 
-	// - channel subname -
+	// Channel subscribition name -
 	MsgChannelSubName string
 
-	// --- ETCD ---
+	// ETCD
 	EtcdEndpoints []string
 	MetaRootPath  string
 
-	// --- MinIO ---
+	// MinIO
+
 	MinioAddress         string
 	MinioAccessKeyID     string
 	MinioSecretAccessKey string
@@ -94,33 +98,23 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
-	// === DataNode Internal Components Configs ===
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
 	p.initInsertBinlogRootPath()
 	p.initStatsBinlogRootPath()
 
-	// === DataNode External Components Configs ===
-	// --- Pulsar ---
 	p.initPulsarAddress()
-
 	p.initRocksmqPath()
 
-	// Has to init global msgchannel prefix before other channel names
+	// Must init global msgchannel prefix before other channel names
 	p.initClusterMsgChannelPrefix()
-
-	// - seg statistics channel -
 	p.initSegmentStatisticsChannelName()
-
-	// - timetick channel -
 	p.initTimeTickChannelName()
 
-	// --- ETCD ---
 	p.initEtcdEndpoints()
 	p.initMetaRootPath()
 
-	// --- MinIO ---
 	p.initMinioAddress()
 	p.initMinioAccessKeyID()
 	p.initMinioSecretAccessKey()
@@ -130,8 +124,6 @@ func (p *ParamTable) Init() {
 	p.initRoleName()
 }
 
-// ==== DataNode internal components configs ====
-// ---- flowgraph configs ----
 func (p *ParamTable) initFlowGraphMaxQueueLength() {
 	p.FlowGraphMaxQueueLength = p.ParseInt32("dataNode.dataSync.flowGraph.maxQueueLength")
 }
@@ -140,7 +132,6 @@ func (p *ParamTable) initFlowGraphMaxParallelism() {
 	p.FlowGraphMaxParallelism = p.ParseInt32("dataNode.dataSync.flowGraph.maxParallelism")
 }
 
-// ---- flush configs ----
 func (p *ParamTable) initFlushInsertBufferSize() {
 	p.FlushInsertBufferSize = p.ParseInt64("_DATANODE_INSERTBUFSIZE")
 }
@@ -162,7 +153,6 @@ func (p *ParamTable) initStatsBinlogRootPath() {
 	p.StatsBinlogRootPath = path.Join(rootPath, "stats_log")
 }
 
-// ---- Pulsar ----
 func (p *ParamTable) initPulsarAddress() {
 	url, err := p.Load("_PulsarAddress")
 	if err != nil {
@@ -205,7 +195,6 @@ func (p *ParamTable) initTimeTickChannelName() {
 	p.TimeTickChannelName = strings.Join(s, "-")
 }
 
-// - msg channel subname -
 func (p *ParamTable) initMsgChannelSubName() {
 	config, err := p.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
 	if err != nil {
@@ -215,7 +204,6 @@ func (p *ParamTable) initMsgChannelSubName() {
 	p.MsgChannelSubName = strings.Join(s, "-")
 }
 
-// --- ETCD ---
 func (p *ParamTable) initEtcdEndpoints() {
 	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
@@ -236,7 +224,6 @@ func (p *ParamTable) initMetaRootPath() {
 	p.MetaRootPath = path.Join(rootPath, subPath)
 }
 
-// --- MinIO ---
 func (p *ParamTable) initMinioAddress() {
 	endpoint, err := p.Load("_MinioAddress")
 	if err != nil {
