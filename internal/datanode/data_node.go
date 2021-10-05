@@ -205,7 +205,10 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 				log.Warn("Watch channel failed", zap.Error(event.Err()))
 				// if watch loop return due to event canceled, the datanode is not functional anymore
 				// stop the datanode and wait for restart
-				node.Stop()
+				err := node.Stop()
+				if err != nil {
+					log.Warn("node stop failed", zap.Error(err))
+				}
 				return
 			}
 			for _, evt := range event.Events {
@@ -370,7 +373,10 @@ func (node *DataNode) Start() error {
 	go node.BackGroundGC(node.clearSignal)
 
 	go node.session.LivenessCheck(node.ctx, node.liveCh, func() {
-		node.Stop()
+		err := node.Stop()
+		if err != nil {
+			log.Warn("node stop failed", zap.Error(err))
+		}
 	})
 
 	Params.CreatedTime = time.Now()
@@ -575,7 +581,10 @@ func (node *DataNode) Stop() error {
 	}
 
 	if node.closer != nil {
-		node.closer.Close()
+		err := node.closer.Close()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
