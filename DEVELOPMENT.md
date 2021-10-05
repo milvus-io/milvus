@@ -134,6 +134,13 @@ $ make all
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
 
+If you want to update proto file before make, we can use the following command:
+```shell
+$ make generated-proto-go
+```
+
+If you want to know more, you can read Makefile.
+
 ## A Quick Start for Testing Milvus
 
 ### Presubmission Verification
@@ -152,6 +159,30 @@ Pull requests need to pass all unit tests. To run every unit test, use this comm
 
 ```shell
 $ make unittest
+```
+
+Before using `make unittest` command, we should run a milvus's deployment environment which helps us to do go test. Here we use local docker environment, use the following commands:
+```shell
+# Using cluster environment
+$ cd deployments/docker/dev
+$ docker-compose up -d
+$ cd ../../../
+$ make unittest
+
+# Or using standalone environment
+$ cd deployments/docker/standalone
+$ docker-compose up -d
+$ cd ../../../
+$ make unittest
+```
+To run only cpp test, we can use this command:
+```shell
+make test-cpp
+```
+
+To run only go test, we can use this command:
+```shell
+make test-go
 ```
 
 To run single test case, for instance, run TestSearchTask in /internal/proxy directory, use
@@ -190,14 +221,17 @@ $ make codecov-cpp
 Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
 
 ```shell
+# Running Milvus cluster
 $ cd deployments/docker/dev
 $ docker-compose up -d
 $ cd ../../../
-# Running Milvus standalone
-$ ./scripts/start_standalone.sh
-
-# or running a Milvus cluster
 $ ./scripts/start_cluster.sh
+
+# Or running Milvus standalone
+$ cd deployments/docker/standalone
+$ docker-compose up -d
+$ cd ../../../
+$ ./scripts/start_standalone.sh
 ```
 
 To run E2E tests, use these command:
@@ -210,7 +244,7 @@ $ pytest --tags=L0 -n auto
 
 ### Test on local branch
 #### On Linux
-start the cluster on your host machine
+After preparing deployment environment, we can start the cluster on your host machine
 
 ```shell
 $ ./scripts/start_cluster.sh
