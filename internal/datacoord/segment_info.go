@@ -127,6 +127,7 @@ func (s *SegmentsInfo) SetCurrentRows(segmentID UniqueID, rows int64) {
 	}
 }
 
+// SetBinlogs sets binlog paths for segment
 func (s *SegmentsInfo) SetBinlogs(segmentID UniqueID, binlogs []*datapb.FieldBinlog) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(SetBinlogs(binlogs))
