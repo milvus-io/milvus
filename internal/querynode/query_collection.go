@@ -1167,17 +1167,22 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 func (q *queryCollection) SearchByID(msg queryMsg) error {
 	searchByIdMsg := msg.(*msgstream.SearchByIdMsg)
 	retrieveMsg := &msgstream.RetrieveMsg{
-		BaseMsg: searchByIdMsg.BaseMsg
+		BaseMsg: msgstream.BaseMsg{Ctx: searchByIdMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}}
 		RetrieveRequest: internalpb.RetrieveRequest{
-			Base: SearchByIdMsg.Base
-			ResultChannelID:  searchByIdMsg.ResultChannelID
-			DBID: searchByIdMsg.DBID
-			ConnectionID: searchByIdMsg.ConnectionID
-			PartitionIDs: searchByIdMsg.PartitionIDs
-			SerializedExprPlan: searchByIdMsg.SerializedExprPlan
-			OutputFieldsId: searchByIdMsg.OutputField
-			TravelTimestamp: searchByIdMsg.TravelTimestamp
-			GuaranteeTimestamp: searchByIdMsg.GuaranteeTimestamp
+			Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Retrieve,
+					MsgID:     searchByIdMsg.Base.MsgID,
+					Timestamp: searchTimestamp,
+					SourceID:  searchByIdMsg.Base.SourceID,
+			},
+			ResultChannelID:  searchByIdMsg.ResultChannelID,
+			DBID: searchByIdMsg.DBID,
+			ConnectionID: searchByIdMsg.ConnectionID,
+			PartitionIDs: searchByIdMsg.PartitionIDs,
+			SerializedExprPlan: searchByIdMsg.SerializedExprPlan,
+			OutputFieldsId: searchByIdMsg.OutputField,
+			TravelTimestamp: searchByIdMsg.TravelTimestamp,
+			GuaranteeTimestamp: searchByIdMsg.GuaranteeTimestamp,
 		},
 	}
 	retrieveMsg := msg.(*msgstream.RetrieveMsg)
@@ -1271,20 +1276,25 @@ func (q *queryCollection) SearchByID(msg queryMsg) error {
 
 	// generate searchMsg
 	searchMsg := &msgstream.SearchMsg{
-		BaseMsg: searchByIdMsg.BaseMsg
+		BaseMsg: msgstream.BaseMsg{Ctx: searchByIdMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}}
 		SearchRequest: internalpb.SearchRequest{
-			Base: SearchByIdMsg.Base
-			ResultChannelID:  searchByIdMsg.ResultChannelID
-			DBID: searchByIdMsg.DBID
-			ConnectionID: searchByIdMsg.ConnectionID
-			PartitionIDs: searchByIdMsg.PartitionIDs
+			Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Search,
+					MsgID:     searchByIdMsg.Base.MsgID,
+					Timestamp: searchTimestamp,
+					SourceID:  searchByIdMsg.Base.SourceID,
+			},
+			ResultChannelID:  searchByIdMsg.ResultChannelID,
+			DBID: searchByIdMsg.DBID,
+			ConnectionID: searchByIdMsg.ConnectionID,
+			PartitionIDs: searchByIdMsg.PartitionIDs,
 			Dsl:              dslString,
 			PlaceholderGroup: placeGroupByte,
 			DslType:          commonpb.DslType_Dsl,
-			SerializedExprPlan: searchByIdMsg.SerializedExprPlan
-			OutputFieldsId: searchByIdMsg.OutputField
-			TravelTimestamp: searchByIdMsg.TravelTimestamp
-			GuaranteeTimestamp: searchByIdMsg.GuaranteeTimestamp
+			SerializedExprPlan: searchByIdMsg.SerializedExprPlan,
+			OutputFieldsId: searchByIdMsg.OutputField,
+			TravelTimestamp: searchByIdMsg.TravelTimestamp,
+			GuaranteeTimestamp: searchByIdMsg.GuaranteeTimestamp,
 		},
 	}
 	err = q.search(searchMsg)
