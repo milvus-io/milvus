@@ -55,6 +55,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	searchResultMsg := SearchResultMsg{}
 	retrieveMsg := RetrieveMsg{}
 	retrieveResultMsg := RetrieveResultMsg{}
+	searchByIdMsg := SearchByIdMsg{}
 	timeTickMsg := TimeTickMsg{}
 	createCollectionMsg := CreateCollectionMsg{}
 	dropCollectionMsg := DropCollectionMsg{}
@@ -71,6 +72,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_Delete] = deleteMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Search] = searchMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_SearchResult] = searchResultMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_SearchById] = searchByIdMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Retrieve] = retrieveMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_RetrieveResult] = retrieveResultMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_TimeTick] = timeTickMsg.Unmarshal
