@@ -43,7 +43,7 @@ fi
 
 # run unittest
 for test in `ls ${MILVUS_CORE_UNITTEST_DIR}`; do
-    echo "${MILVUS_CORE_UNITTEST_DIR}/$test"
+    echo "Running cpp unittest: ${MILVUS_CORE_UNITTEST_DIR}/$test"
     # run unittest
     ${MILVUS_CORE_UNITTEST_DIR}/${test}
     if [ $? -ne 0 ]; then
