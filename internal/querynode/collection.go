@@ -190,6 +190,7 @@ func (c *Collection) checkReleasedPartitions(partitionIDs []UniqueID) error {
 	return nil
 }
 
+// setLoadType set the loading type of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) setLoadType(l loadType) {
 	c.loadType = l
 }
