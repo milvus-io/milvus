@@ -128,6 +128,7 @@ func (qc *QueryCoord) Init() error {
 	return initError
 }
 
+// Start function starts the goroutines to watch the meta and node updates
 func (qc *QueryCoord) Start() error {
 	qc.scheduler.Start()
 	log.Debug("start scheduler ...")
