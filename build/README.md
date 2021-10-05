@@ -123,7 +123,7 @@ make unittest
 Stop Dev Container 
 
 ```shell
-./scripts/devcontainer.sh down        # close Dev container
+./scripts/devcontainer.sh down
 ```
 
 ## E2E Tests
