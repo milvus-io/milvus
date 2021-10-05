@@ -8,7 +8,7 @@ import pytest
 from utils.utils import *
 import ujson
 
-CONFIG_TIMEOUT = 80
+# CONFIG_TIMEOUT = 80
 
 # class TestCacheConfig:
 #     """
