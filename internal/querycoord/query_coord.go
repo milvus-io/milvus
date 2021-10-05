@@ -85,6 +85,7 @@ func (qc *QueryCoord) Register() error {
 	return nil
 }
 
+// Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
 	connectEtcdFn := func() error {
 		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
