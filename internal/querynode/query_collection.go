@@ -1166,7 +1166,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 
 func (q *queryCollection) SearchByID(msg queryMsg) error {
 	searchByIdMsg := msg.(*msgstream.SearchByIdMsg)
-	receiveMsg := &msgstream.ReceiveMsg{
+	retrieveMsg := &msgstream.RetrieveMsg{
 		BaseMsg: searchByIdMsg.BaseMsg
 		RetrieveRequest: internalpb.RetrieveRequest{
 			Base: SearchByIdMsg.Base
