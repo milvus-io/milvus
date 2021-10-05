@@ -303,30 +303,6 @@ func (ms *PulsarTtMsgStream) SetRepackFunc(repackFunc RepackFunc)
 
 func NewPulsarTtMsgStream(ctx context.Context, pulsarAddr string, bufferSize int64) *PulsarTtMsgStream
 
-// RmqMsgStream
-
-type RmqMsgStream struct {
-		client	   *rockermq.RocksMQ
-		repackFunc RepackFunc
-		producers  []string
-		consumers  []string
-		subName	   string
-		unmarshal  *UnmarshalDispatcher
-}
-
-func (ms *RmqMsgStream) Start() error
-func (ms *RmqMsgStream) Close() error
-func (ms *RmqMsgStream) AsProducer(channels []string)
-func (ms *RmqMsgStream) AsConsumer(channels []string, subName string)
-func (ms *RmqMsgStream) Produce(ctx context.Context, msgs *MsgPack) error
-func (ms *RmqMsgStream) Broadcast(ctx context.Context, msgs *MsgPack) error
-func (ms *RmqMsgStream) Consume() (*MsgPack, context.Context)
-func (ms *RmqMsgStream) Seek(mp *MsgPosition) error
-func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc)
-
-func NewRmqMsgStream(ctx context.Context) *RmqMsgStream
-```
-
 
 
 
