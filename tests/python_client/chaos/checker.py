@@ -147,6 +147,7 @@ class IndexChecker(Checker):
 
 
 class QueryChecker(Checker):
+    """check query operations in a dependent thread"""
     def __init__(self):
         super().__init__()
         self.c_wrap.load()      # load before query
