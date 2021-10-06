@@ -157,6 +157,7 @@ class MilvusClient(object):
 
     @time_wrapper
     def insert_flush(self, entities, _async=False, collection_name=None):
+        # the method that included insert and flush
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         try:
             insert_res = self._milvus.insert(tmp_collection_name, entities)
