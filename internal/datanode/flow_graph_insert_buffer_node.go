@@ -204,6 +204,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	displaySize := min(10, len(seg2Upload))
 
+	// Log the segment statistics in mem
 	for k, segID := range seg2Upload[:displaySize] {
 		bd, ok := ibNode.insertBuffer.Load(segID)
 		if !ok {
@@ -349,6 +350,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	return nil
 }
 
+// updateSegStatesInReplica updates statistics in replica for the segments in insertMsgs.
+//  If the segment doesn't exist, a new segment will be created.
+//  The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
 func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range insertMsgs {
