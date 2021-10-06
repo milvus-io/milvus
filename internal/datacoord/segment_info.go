@@ -121,6 +121,8 @@ func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation)
 }
 
 // SetCurrentRows sets rows count for segment
+// if the segment is not found, do nothing
+// uses `ShadowClone` since internal SegmentInfo is not changed
 func (s *SegmentsInfo) SetCurrentRows(segmentID UniqueID, rows int64) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetCurrentRows(rows))
@@ -128,6 +130,8 @@ func (s *SegmentsInfo) SetCurrentRows(segmentID UniqueID, rows int64) {
 }
 
 // SetBinlogs sets binlog paths for segment
+// if the segment is not found, do nothing
+// uses `Clone` since internal SegmentInfo's Binlogs is changed
 func (s *SegmentsInfo) SetBinlogs(segmentID UniqueID, binlogs []*datapb.FieldBinlog) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(SetBinlogs(binlogs))
@@ -135,6 +139,8 @@ func (s *SegmentsInfo) SetBinlogs(segmentID UniqueID, binlogs []*datapb.FieldBin
 }
 
 // SetFlushTime sets flush time for segment
+// if the segment is not found, do nothing
+// uses `ShadowClone` since internal SegmentInfo is not changed
 func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetFlushTime(t))
