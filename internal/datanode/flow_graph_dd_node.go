@@ -25,6 +25,20 @@ import (
 	"github.com/opentracing/opentracing-go"
 )
 
+// ddNode filter messages from message streams.
+//
+// ddNode recives all the messages from message stream dml channels, including insert messages,
+//  delete messages and ddl messages like CreateCollectionMsg.
+//
+// ddNode filters insert messages according to the `flushedSegment` and `FilterThreshold`.
+//  If the timestamp of the insert message is earlier than `FilterThreshold`, ddNode will
+//  filter out the insert message for those who belong to `flushedSegment`
+//
+// When receiving a `DropCollection` message, ddNode will send a signal to DataNode `BackgroundGC`
+//  goroutinue, telling DataNode to release the resources of this perticular flow graph.
+//
+// After the filtering process, ddNode passes all the valid insert messages and delete message
+//  to the following flow graph node, which in DataNode is `insertBufferNode`
 type ddNode struct {
 	BaseNode
 
