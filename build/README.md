@@ -74,7 +74,7 @@ build/builder.sh make
 ```
 
 ## Dev Containers
-User can also get into the dev containers for development.
+You can also get into the dev containers for development.
 
 Enter root path of Milvus project on your host machine, execute the following commands:
 
