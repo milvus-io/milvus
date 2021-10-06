@@ -116,6 +116,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
+Note: go1.15 is required to build Milvus.
 
 #### Docker & Docker Compose
 
