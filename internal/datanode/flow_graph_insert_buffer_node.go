@@ -274,13 +274,17 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 		if !ok || bd.(*BufferData).size <= 0 { // Buffer empty
 			log.Debug(".. Buffer empty ...")
-			ibNode.dsSaveBinlog(&segmentFlushUnit{
+			err = ibNode.dsSaveBinlog(&segmentFlushUnit{
 				collID:     fmsg.collectionID,
 				segID:      currentSegID,
 				field2Path: map[UniqueID]string{},
 				checkPoint: ibNode.replica.listSegmentsCheckPoints(),
 				flushed:    true,
 			})
+			if err != nil {
+				log.Debug("insert buffer node save binlog failed", zap.Error(err))
+				break
+			}
 			ibNode.replica.segmentFlushed(currentSegID)
 		} else { // Buffer not empty
 			log.Debug(".. Buffer not empty, flushing ..")
