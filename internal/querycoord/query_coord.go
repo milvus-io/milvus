@@ -190,6 +190,7 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	return service, nil
 }
 
+// SetRootCoord sets root coordinator's client
 func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) {
 	qc.rootCoordClient = rootCoord
 }
