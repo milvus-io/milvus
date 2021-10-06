@@ -1163,6 +1163,11 @@ class TestInsertInvalidBinary(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_field_entity_value(self, connect, binary_collection, get_field_vectors_value):
+        """
+        target: test insert with invalid scenario
+        method: insert with invalid field entity
+        expected: raise exception
+        """
         tmp_entity = copy.deepcopy(default_binary_entity)
         src_vectors = tmp_entity[-1]["values"]
         src_vectors[0] = get_field_vectors_value
