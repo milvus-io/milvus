@@ -19,6 +19,7 @@ def check_config(chaos_config):
 
 
 def reset_counting(checkers={}):
+    """reset checker counts for all checker threads"""
     for ch in checkers.values():
         ch.reset()
 
