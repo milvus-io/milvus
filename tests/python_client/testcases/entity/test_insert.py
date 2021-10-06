@@ -738,11 +738,11 @@ class TestInsertAsync:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_async_long(self, connect, collection):
-        '''
+        """
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
-        '''
+        """
         nb = 50000
         future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_result)
         result = future.result()
@@ -754,11 +754,11 @@ class TestInsertAsync:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_async_callback_timeout(self, connect, collection):
-        '''
+        """
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
-        '''
+        """
         nb = 100000
         future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_status, timeout=1)
         with pytest.raises(Exception) as e:
@@ -766,11 +766,11 @@ class TestInsertAsync:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_async_invalid_params(self, connect):
-        '''
+        """
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
-        '''
+        """
         collection_new = gen_unique_str()
         future = connect.insert(collection_new, default_entities, _async=True)
         future.done()
@@ -780,11 +780,11 @@ class TestInsertAsync:
     # 1339
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_async_invalid_params_raise_exception(self, connect, collection):
-        '''
+        """
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
-        '''
+        """
         entities = []
         future = connect.insert(collection, entities, _async=True)
         future.done()
@@ -812,11 +812,11 @@ class TestInsertMultiCollections:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_entity_multi_collections(self, connect):
-        '''
+        """
         target: test insert entities
         method: create 10 collections and insert entities into them in turn
         expected: row count
-        '''
+        """
         collection_num = 10
         collection_list = []
         for i in range(collection_num):
@@ -834,11 +834,11 @@ class TestInsertMultiCollections:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_collection_insert_entity_another(self, connect, collection):
-        '''
+        """
         target: test insert vector to collection_1 after collection_2 deleted
         method: delete collection_2 and insert vector to collection_1
         expected: row count equals the length of entities inserted
-        '''
+        """
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         connect.drop_collection(collection)
@@ -849,11 +849,11 @@ class TestInsertMultiCollections:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_index_insert_entity_another(self, connect, collection, get_simple_index):
-        '''
+        """
         target: test insert vector to collection_2 after build index for collection_1
         method: build index and insert vector
         expected: status ok
-        '''
+        """
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         connect.create_index(collection, field_name, get_simple_index)
@@ -868,11 +868,11 @@ class TestInsertMultiCollections:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_entity_create_index_another(self, connect, collection, get_simple_index):
-        '''
+        """
         target: test insert vector to collection_2 after build index for collection_1
         method: build index and insert vector
         expected: status ok
-        '''
+        """
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         result = connect.insert(collection, default_entity)
@@ -888,11 +888,11 @@ class TestInsertMultiCollections:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_entity_sleep_create_index_another(self, connect, collection, get_simple_index):
-        '''
+        """
         target: test insert vector to collection_2 after build index for collection_1 for a while
         method: build index and insert vector
         expected: status ok
-        '''
+        """
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         result = connect.insert(collection, default_entity)
@@ -904,11 +904,11 @@ class TestInsertMultiCollections:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_entity_insert_entity_another(self, connect, collection):
-        '''
+        """
         target: test insert entity to collection_1 after search collection_2
         method: search collection and insert entity
         expected: status ok
-        '''
+        """
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         connect.load_collection(collection)
@@ -922,11 +922,11 @@ class TestInsertMultiCollections:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_entity_search_entity_another(self, connect, collection):
-        '''
+        """
         target: test insert entity to collection_1 after search collection_2
         method: search collection and insert entity
         expected: status ok
-        '''
+        """
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         result = connect.insert(collection, default_entity)
@@ -939,11 +939,11 @@ class TestInsertMultiCollections:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_entity_sleep_search_entity_another(self, connect, collection):
-        '''
+        """
         target: test insert entity to collection_1 after search collection_2 a while
         method: search collection, sleep, and insert entity
         expected: status ok
-        '''
+        """
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         result = connect.insert(collection, default_entity)
@@ -955,11 +955,11 @@ class TestInsertMultiCollections:
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_entity_during_release_collection(self, connect, collection):
-        '''
+        """
         target: test insert entity during release
         method: release collection async, then do insert operation
         expected: insert ok
-        '''
+        """
         for i in range(10):
             connect.insert(collection, default_entities)
         connect.flush([collection])
@@ -1030,11 +1030,11 @@ class TestInsertInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_ids_invalid(self, connect, id_collection, get_entity_id):
-        '''
+        """
         target: test insert, with using customize ids, which are not int64
         method: create collection and insert entities in it
         expected: raise an exception
-        '''
+        """
         entity_id = get_entity_id
         ids = [entity_id for _ in range(default_nb)]
         with pytest.raises(Exception):
@@ -1176,11 +1176,11 @@ class TestInsertInvalidBinary(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_ids_invalid(self, connect, binary_id_collection, get_entity_id):
-        '''
+        """
         target: test insert, with using customize ids, which are not int64
         method: create collection and insert entities in it
         expected: raise an exception
-        '''
+        """
         entity_id = get_entity_id
         ids = [entity_id for _ in range(default_nb)]
         with pytest.raises(Exception):
