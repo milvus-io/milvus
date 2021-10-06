@@ -136,6 +136,7 @@ func (pt *ParamTable) initMinIOSecretAccessKey() {
 	pt.MinIOSecretAccessKey = ret
 }
 
+// initMinIOUseSSL initializes the minio use SSL of configuration items.
 func (pt *ParamTable) initMinIOUseSSL() {
 	ret, err := pt.Load("minio.useSSL")
 	if err != nil {
