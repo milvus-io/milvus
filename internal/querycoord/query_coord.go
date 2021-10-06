@@ -158,6 +158,7 @@ func (qc *QueryCoord) Stop() error {
 	return nil
 }
 
+// UpdateStateCode updates the status of the coord, including healthy, unhealthy
 func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 	qc.stateCode.Store(code)
 }
