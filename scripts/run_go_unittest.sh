@@ -39,3 +39,5 @@ go test -race -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
 go test -race -cover -v "${MILVUS_DIR}/rootcoord" -failfast
 go test -race -cover -v "${MILVUS_DIR}/datacoord/..." -failfast
 go test -race -cover -v "${MILVUS_DIR}/indexcoord/..." -failfast
+
+echo " Go unittest finished"
