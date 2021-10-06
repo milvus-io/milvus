@@ -106,6 +106,15 @@ type DataCoord interface {
 	// 	otherwise the Segment State and Start position information will be returned
 	// error is returned only when some communication issue occurs
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
+
+	// GetInsertBinlogPaths requests binlog paths for specified segment
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the segment id to query
+	//
+	// response struct `GetInsertBinlogPathsResponse` contains the fields list
+	// 	and corresponding binlog path list
+	// error is returned only when some communication issue occurs
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
