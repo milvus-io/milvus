@@ -133,7 +133,7 @@ $ make fmt
 ```
 
 ### C++ coding style
-The c++ coding style used in Milvus generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
+The C++ coding style used in Milvus generally follows [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 And we made the following changes based on the guide:
 
 -   4 spaces for indentation
