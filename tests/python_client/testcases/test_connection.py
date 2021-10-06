@@ -531,8 +531,8 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, ct.Not_Exist])
     def test_connection_disconnect_not_exist(self, connect_name):
         """
-        target: disconnect passes alias that is not exist
-        method: disconnect passes alias that is not exist
+        target: disconnect with non existing alias
+        method: disconnect with non existing alias
         expected: check connection list is normal
         """
 
