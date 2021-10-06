@@ -1,7 +1,8 @@
 import pytest
 from pymilvus import DataType, ParamError, BaseException
 from utils.utils import *
-from common.constants import *
+from common.constants import default_entity, default_entities, default_binary_entity, default_binary_entities, \
+    default_fields
 from common.common_type import CaseLabel
 
 ADD_TIMEOUT = 60
