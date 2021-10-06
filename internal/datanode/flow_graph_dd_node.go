@@ -21,9 +21,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 )
+
+// make sure ddNode implements flowgraph.Node
+var _ flowgraph.Node = (*ddNode)(nil)
 
 // ddNode filter messages from message streams.
 //
@@ -49,10 +53,12 @@ type ddNode struct {
 	flushedSegments []UniqueID
 }
 
+// Name returns node name, implementing flowgraph.Node
 func (ddn *ddNode) Name() string {
 	return "ddNode"
 }
 
+// Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
 	// log.Debug("DDNode Operating")
 
