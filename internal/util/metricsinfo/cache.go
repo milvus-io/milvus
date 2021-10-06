@@ -86,6 +86,7 @@ func (manager *MetricsCacheManager) IsSystemInfoMetricsValid() bool {
 		(time.Since(manager.systemInfoMetricsLastUpdatedTime) < retention)
 }
 
+// GetSystemInfoMetrics returns the cached system information metrics.
 func (manager *MetricsCacheManager) GetSystemInfoMetrics() (*milvuspb.GetMetricsResponse, error) {
 	retention := manager.GetRetention()
 
