@@ -779,6 +779,7 @@ func flushSegment(
 	clearFn(true)
 }
 
+// writeHardTimeTick writes timetick once insertBufferNode operates.
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := msgstream.DataNodeTtMsg{
@@ -801,6 +802,10 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	return ibNode.timeTickStream.Produce(&msgPack)
 }
 
+// uploadMemStates2Coord uploads latest changed segments statistics in DataNode memory to DataCoord
+//  through a msgStream channel.
+//
+// Currently, the statistics includes segment ID and its total number of rows in memory.
 func (ibNode *insertBufferNode) uploadMemStates2Coord(segIDs []UniqueID) error {
 	log.Debug("Updating segments statistics...")
 	statsUpdates := make([]*internalpb.SegmentStatisticsUpdates, 0, len(segIDs))
