@@ -662,6 +662,9 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	return nil
 }
 
+// readBinary read data in bytes and write it into receiver.
+//  The receiver can be any type in int8, int16, int32, int64, float32, float64 and bool
+//  readBinary uses LittleEndian ByteOrder.
 func readBinary(data []byte, receiver interface{}, dataType schemapb.DataType) {
 	buf := bytes.NewReader(data)
 	err := binary.Read(buf, binary.LittleEndian, receiver)
