@@ -204,7 +204,7 @@ func (ppRW PropertiesReaderWriter) Set(key, val string) {
 	ppRW.PpMap[key] = val
 }
 
-// ForeachKey iters each key value of PpMap.
+// ForeachKey iterates each key value of PpMap.
 func (ppRW PropertiesReaderWriter) ForeachKey(handler func(key, val string) error) error {
 	for k, val := range ppRW.PpMap {
 		if err := handler(k, val); err != nil {
