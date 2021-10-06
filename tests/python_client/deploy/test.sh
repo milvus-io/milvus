@@ -126,7 +126,7 @@ pushd ${Deploy_Dir}
 # download docker-compose.yml
 wget https://github.com/milvus-io/milvus/releases/download/${release_version}/milvus-${Deploy_Dir}-docker-compose.yml -O docker-compose.yml
 ls
-# clean env to deoploy a fresh milvus
+# clean env to deploy a fresh milvus
 docker-compose down
 docker-compose ps
 echo "$pw"| sudo -S rm -rf ./volumes
@@ -152,7 +152,7 @@ check_healthy
 docker-compose ps
 popd
 
-# test for first deploymnent
+# test for first deployment
 printf "test for first deployment\n"
 if [ "$Task" == "reinstall" ];
 then
