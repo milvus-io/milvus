@@ -75,6 +75,7 @@ func (pt *ParamTable) InitOnce() {
 	})
 }
 
+// initEtcdEndpoints initializes the etcd address of configuration items.
 func (pt *ParamTable) initEtcdEndpoints() {
 	endpoints, err := pt.Load("_EtcdEndpoints")
 	if err != nil {
