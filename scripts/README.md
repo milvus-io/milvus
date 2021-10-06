@@ -9,8 +9,9 @@
     gcc： 7.5
 ```
 
-### Install dependencies
+## Install dependencies
 
+Install compile dependencies
 ```shell script
     sudo apt install -y g++ gcc make libssl-dev zlib1g-dev libboost-regex-dev \
     libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
@@ -20,7 +21,7 @@
     go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
 ```
 
-#### Install OpenBlas library
+Install OpenBlas library
 
 ```shell script
     wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
@@ -29,27 +30,27 @@
     make PREFIX=/usr install
 ```
 
-### Compile
+## Compile
 
-#### Generate the go files from proto file
+Generate the go files from proto file
 
 ```shell script
     make check-proto-product
 ```
 
-#### Check code specifications
+Check code specifications
 
 ```shell script
     make verifiers
 ```
 
-#### Compile
+Compile milvus
 
 ```shell script
     make all
 ```
 
-#### Install docker-compose
+## Install docker-compose
 
 refer: https://docs.docker.com/compose/install/
 ```shell script
@@ -59,21 +60,50 @@ refer: https://docs.docker.com/compose/install/
     docker-compose --version
 ```
 
-#### Start service
+## Start service
 
+Start third-party service:
 ```shell script
-    cd deployments
+    cd [milvus project path]/deployments/docker/cluster
     docker-compose up -d
 ```
 
-#### Run unittest
+Start milvus cluster:
+```shell script
+    cd [milvus project path]/scripts
+    start_cluster.sh
+```
 
+## Run unittest
+
+Run all unittest including go and cpp cases:
 ```shell script
     make unittest
 ```
 
-#### Run code coverage
+You also can run go unittest only:
+```shell script
+    make test-go
+```
 
+Run cpp unittest only:
+```shell script
+    make test-cpp
+```
+
+## Run code coverage
+
+Run code coverage including go and cpp:
 ```shell script
     make codecov
+```
+
+You also can run go code coverage only:
+```shell script
+    make codecov-go
+```
+
+Run cpp code coverage only:
+```shell script
+    make codecov-cpp
 ```
