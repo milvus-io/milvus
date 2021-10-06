@@ -147,6 +147,7 @@ func (qc *QueryCoord) Start() error {
 	return nil
 }
 
+// Stop function stops watching the meta and node updates
 func (qc *QueryCoord) Stop() error {
 	qc.scheduler.Close()
 	log.Debug("close scheduler ...")
