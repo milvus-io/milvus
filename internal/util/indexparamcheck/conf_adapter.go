@@ -97,6 +97,7 @@ type ConfAdapter interface {
 	CheckTrain(map[string]string) bool
 }
 
+// BaseConfAdapter checks if a `FLAT` index can be built.
 type BaseConfAdapter struct {
 }
 
