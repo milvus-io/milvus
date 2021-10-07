@@ -203,7 +203,7 @@ Modify vscode go setups if necessary, the setting path is **code -> preference -
 
 ![image](../docs/imgs/settings.png)
 
-Enable Code debug by remot debugging with dlv, you can enable debugging by run the following command inside your docker:
+Enable Code debug by remote debugging with dlv, you can enable debugging by run the following command inside your docker:
 
 ```shell
 cp /go/bin/dlv /go/bin/dlv-dap
