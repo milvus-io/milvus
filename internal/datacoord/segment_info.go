@@ -153,6 +153,7 @@ func (s *SegmentsInfo) AddSegmentBinlogs(segmentID UniqueID, field2Binlogs map[U
 	}
 }
 
+// Clone deep clone the segment info and return a new instance
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
