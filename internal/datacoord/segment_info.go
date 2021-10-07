@@ -200,6 +200,7 @@ func SetExpireTime(expireTs Timestamp) SegmentInfoOption {
 	}
 }
 
+// SetState is the option to set state for segment info
 func SetState(state commonpb.SegmentState) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.State = state
