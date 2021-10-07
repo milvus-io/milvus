@@ -53,7 +53,7 @@ func newMeta(kv kv.TxnKV) (*meta, error) {
 	return mt, nil
 }
 
-// realodFromKV load meta from KV storage
+// reloadFromKV load meta from KV storage
 func (m *meta) reloadFromKV() error {
 	_, values, err := m.client.LoadWithPrefix(segmentPrefix)
 	if err != nil {
