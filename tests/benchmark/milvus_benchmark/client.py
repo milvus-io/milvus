@@ -472,7 +472,7 @@ class MilvusClient(object):
         logger.debug("[scene_test] Start insert : %s" % collection_name)
         self.insert(entities, collection_name=collection_name)
         logger.debug("[scene_test] Start flush : %s" % collection_name)
-        self.flush()
+        self.flush(collection_name=collection_name)
 
         logger.debug("[scene_test] Start create index : %s" % collection_name)
         self.create_index(field_name='float_vector', index_type="ivf_sq8", metric_type='l2',
