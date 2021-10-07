@@ -19,8 +19,8 @@ As for everything else in the project, the contributions to Milvus are governed 
     - [Golang coding style](#golang-coding-style)
     - [C++ coding style](#c-coding-style)
   - [Run unit test with code coverage](#run-unit-test-with-code-coverage)
-    - [Golang](#golang)
-    - [C++](#c)
+    - [Golang](#run-golang-unit-tests)
+    - [C++](#run-c-unit-tests)
   - [Commits and PRs](#commits-and-prs)
 
 ## What contributions can you make?
@@ -154,7 +154,7 @@ $ make cppcheck
 ## Run unit test with code coverage
 Before submitting your Pull Request, make sure you have run unit test, and your code coverage rate is >= 90%.
 
-### Golang
+### Run golang unit tests
 
 You can run all the Golang unit tests using make.
 ```shell
@@ -178,7 +178,7 @@ $ go test ./internale/datanode -run SegmentReplica/segmentFlushed
 ok  	github.com/milvus-io/milvus/internal/datanode 0.019s
 ```
 
-### C++
+### Run C++ unit tests
 Install lcov
 ```shell
 $ sudo apt-get install lcov
