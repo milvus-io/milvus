@@ -1020,12 +1020,15 @@ class TestUtilityBase(TestcaseBase):
         method: calculate distance between binary vectors
         expected: distance calculated successfully
         """
+        log.info("Creating connection")
         self._connect()
+        log.info("Creating vectors for distance calculation")
         nb = 10
         raw_vectors_l, vectors_l = cf.gen_binary_vectors(nb, default_dim)
         raw_vectors_r, vectors_r = cf.gen_binary_vectors(nb, default_dim)
         op_l = {"bin_vectors": vectors_l}
         op_r = {"bin_vectors": vectors_r}
+        log.info("Calculating distance for binary vectors")
         params = {metric_field: metric_binary}
         vectors_l = raw_vectors_l
         vectors_r = raw_vectors_r
