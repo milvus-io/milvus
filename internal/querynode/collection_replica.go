@@ -122,6 +122,7 @@ func (colReplica *collectionReplica) printReplica() {
 }
 
 //----------------------------------------------------------------------------------------------------- collection
+// getCollectionIDs gets all the collection ids in the collectionReplica
 func (colReplica *collectionReplica) getCollectionIDs() []UniqueID {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
