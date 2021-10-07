@@ -44,6 +44,7 @@ func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	return &rp, nil
 }
 
+// Subscribe subscribes a consumer in rmq client
 func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	receiveChannel := make(chan rocksmq.ConsumerMessage, options.BufSize)
 
