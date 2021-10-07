@@ -189,6 +189,7 @@ func SetRowCount(rowCount int64) SegmentInfoOption {
 	}
 }
 
+// SetExpireTime is the option to set expire time for segment info
 func SetExpireTime(expireTs Timestamp) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.LastExpireTime = expireTs
