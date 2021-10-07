@@ -292,6 +292,7 @@ class MilvusClient(object):
 
     @time_wrapper
     def query(self, vector_query, filter_query=None, collection_name=None, timeout=300):
+        """ This method corresponds to the search method of milvus """
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         must_params = [vector_query]
         if filter_query:
