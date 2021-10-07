@@ -554,8 +554,13 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_disconnect_after_default_connect(self, host, port):
         """
-        target: disconnect default connect and check result
-        method: disconnect default connect
+        target: check results after disconnect with default alias
+        method: 1. connect with default alias
+                2. get connection
+                3. disconnect with default alias
+                4. get connection
+                5. disconnect again
+                6. list connections and get connection address
         expected: the connection was successfully terminated
         """
 
