@@ -62,6 +62,7 @@ func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	return rConsumer, nil
 }
 
+// EarliestMessageID returns the earliest message ID for rmq client
 func (rc *rmqClient) EarliestMessageID() MessageID {
 	rID := rocksmq.EarliestMessageID()
 	return &rmqID{messageID: rID}
