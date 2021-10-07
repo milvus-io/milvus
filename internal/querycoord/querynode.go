@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
+// Node provides many interfaces to access querynode via grpc
 type Node interface {
 	start() error
 	stop()
