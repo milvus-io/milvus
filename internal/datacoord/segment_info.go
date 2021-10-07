@@ -207,6 +207,7 @@ func SetState(state commonpb.SegmentState) SegmentInfoOption {
 	}
 }
 
+// SetDmlPosition is the option to set dml position for segment info
 func SetDmlPosition(pos *internalpb.MsgPosition) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.DmlPosition = pos
