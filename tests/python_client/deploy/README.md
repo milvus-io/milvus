@@ -64,4 +64,4 @@ Provides a way to periodically run docker-compose deployment tests through GitHu
 - [x] Upload logs to artifacts for further debug
 - [x] Email notification for test failure
 - [ ] Support helm deployment tests
-- [ ] Cover more detail information in email notification
+- [x] Cover more detail information in email notification
