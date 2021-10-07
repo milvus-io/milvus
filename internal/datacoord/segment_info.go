@@ -186,6 +186,7 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 // SegmentInfoOption is the option to set fields in segment info
 type SegmentInfoOption func(segment *SegmentInfo)
 
+// SetRowCount is the option to set row count for segment info
 func SetRowCount(rowCount int64) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.NumOfRows = rowCount
