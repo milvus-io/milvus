@@ -207,6 +207,7 @@ func SetDmlPosition(pos *internalpb.MsgPosition) SegmentInfoOption {
 	}
 }
 
+// SetStartPosition is the option to set start position for segment info
 func SetStartPosition(pos *internalpb.MsgPosition) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.StartPosition = pos
