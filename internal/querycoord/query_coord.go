@@ -195,6 +195,7 @@ func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) {
 	qc.rootCoordClient = rootCoord
 }
 
+// SetDataCoord sets data coordinator's client
 func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) {
 	qc.dataCoordClient = dataCoord
 }
