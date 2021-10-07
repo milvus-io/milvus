@@ -1084,6 +1084,11 @@ class TestInsertInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_field_entity_value(self, connect, collection, get_field_vectors_value):
+        """
+        target: test insert with invalid entity
+        method: insert with invalid entity value
+        expected: raise exception
+        """
         tmp_entity = copy.deepcopy(default_entity)
         src_vector = tmp_entity[-1]["values"]
         src_vector[0][1] = get_field_vectors_value
