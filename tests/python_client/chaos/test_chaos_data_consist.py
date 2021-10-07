@@ -44,6 +44,15 @@ class TestChaosData:
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
     def test_chaos_data_consist(self, connection, chaos_yaml):
+        """
+        target: verify data consistence after chaos injected and recovered
+        method: 1. create a collection, insert some data, search and query
+                2. inject a chaos object
+                3. reconnect to service
+                4. verify a) data entities persists, index persists,
+                          b) search and query results persist
+        expected: collection data and results persist
+        """
         c_name = cf.gen_unique_str('chaos_collection_')
         nb = 5000
         i_name = cf.gen_unique_str('chaos_index_')
