@@ -1,4 +1,4 @@
-echo "stopping milvus"
+echo "Stopping milvus..."
 kill -9 $(ps -e | grep milvus | awk '{print $1}')
-echo "milvs stopped"
+echo "Milvs stopped"
 
