@@ -18,6 +18,7 @@ import (
 // Check rmqMessage implements ConsumerMessage
 var _ ConsumerMessage = (*rmqMessage)(nil)
 
+// rmqMessage wraps the message for rocksmq
 type rmqMessage struct {
 	msg rocksmq.ConsumerMessage
 }
