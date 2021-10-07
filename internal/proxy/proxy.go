@@ -83,6 +83,7 @@ type Proxy struct {
 	closeCallbacks []func()
 }
 
+// NewProxy returns a Proxy struct.
 func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
