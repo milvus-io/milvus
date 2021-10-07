@@ -191,9 +191,8 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 					CIndex* res_index);
 	*/
 	var indexPtr C.CIndex
-	log.Debug("before create index ...")
+	log.Debug("Start to create index ...", zap.String("params", indexParamsStr))
 	status := C.CreateIndex(typeParamsPointer, indexParamsPointer, &indexPtr)
-	log.Debug("after create index ...")
 	errorCode := status.error_code
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
@@ -201,6 +200,7 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return nil, fmt.Errorf(" failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
 	}
+	log.Debug("Successfully create index ...")
 
 	return &CIndex{
 		indexPtr: indexPtr,
