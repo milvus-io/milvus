@@ -252,7 +252,23 @@ type RmsFactory struct {
 
 ```go
 
-
+// mqMsgStream
+type mqMsgStream struct {
+	ctx              context.Context
+	client           mqclient.Client
+	producers        map[string]mqclient.Producer
+	producerChannels []string
+	consumers        map[string]mqclient.Consumer
+	consumerChannels []string
+	repackFunc       RepackFunc
+	unmarshal        UnmarshalDispatcher
+	receiveBuf       chan *MsgPack
+	wait             *sync.WaitGroup
+	streamCancel     func()
+	bufSize          int64
+	producerLock     *sync.Mutex
+	consumerLock     *sync.Mutex
+}
 
 
 
