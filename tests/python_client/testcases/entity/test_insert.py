@@ -1054,6 +1054,11 @@ class TestInsertInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_partition_name(self, connect, collection, get_tag_name):
+        """
+        target: test insert with invalid scenario
+        method: insert with invalid partition name
+        expected: raise exception
+        """
         tag_name = get_tag_name
         connect.create_partition(collection, default_tag)
         if tag_name is not None:
