@@ -74,7 +74,7 @@ function replace_image_tag {
 #to check containers all running and minio is healthy
 function check_healthy {
     cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
-    healthy=$(docker-compose ps | grep "Healthy" | wc -l)
+    healthy=$(docker-compose ps | grep "healthy" | wc -l)
     time_cnt=0
     echo "running num $cnt expect num $Expect"
     echo "healthy num $healthy expect num $Expect_health"
@@ -90,7 +90,7 @@ function check_healthy {
         error_exit
     fi
     cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
-    healthy=`docker-compose ps | grep "healthy" | wc -l`
+    healthy=$(docker-compose ps | grep "healthy" | wc -l)
     echo "running num $cnt expect num $Expect"
     echo "healthy num $healthy expect num $Expect_health"
     done
