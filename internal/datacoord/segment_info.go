@@ -147,6 +147,7 @@ func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 	}
 }
 
+// AddSegmentBinlogs adds binlogs for segment
 func (s *SegmentsInfo) AddSegmentBinlogs(segmentID UniqueID, field2Binlogs map[UniqueID][]string) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(addSegmentBinlogs(field2Binlogs))
