@@ -239,6 +239,7 @@ func AddAllocation(allocation *Allocation) SegmentInfoOption {
 	}
 }
 
+// SetCurrentRows is the option to set current row count for segment info
 func SetCurrentRows(rows int64) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.currRows = rows
