@@ -70,6 +70,9 @@ Run multiple test scenario in a category manually(take network partition chaos f
 
    pytest test_chaos.py --host ${Milvus_IP} -v
    ```
+### Github Action
+* [Pod Kill Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/pod-kill-chaos-test.yaml)
+* [Network Partition Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/network-partition-chaos-test.yaml)
 
 ### Nightly 
 still in planning 
