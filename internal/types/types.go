@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // TimeTickProvider is the interface all services implement
@@ -57,6 +58,27 @@ type DataNode interface {
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+}
+
+// DataNodeComponent is used by grpc server of DataNode
+type DataNodeComponent interface {
+	DataNode
+
+	// UpdateStateCode updates state code for DataNode
+	// State includes: Initializing, Healthy and Abnormal
+	UpdateStateCode(internalpb.StateCode)
+
+	// GetStateCode return state code for DataNode
+	GetStateCode() internalpb.StateCode
+
+	// SetRootCoord set RootCoord for DataNode
+	SetRootCoord(RootCoord) error
+
+	// SetDataCoord set DataCoord for DataNode
+	SetDataCoord(DataCoord) error
+
+	// SetNodeID set node id for DataNode
+	SetNodeID(typeutil.UniqueID)
 }
 
 // DataCoord is the interface `datacoord` package implements

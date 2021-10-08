@@ -138,7 +138,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 }
 
 // SetRootCoordInterface sets RootCoord's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetRootCoordInterface(rc types.RootCoord) error {
+func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
 	switch {
 	case rc == nil, node.rootCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -149,7 +149,7 @@ func (node *DataNode) SetRootCoordInterface(rc types.RootCoord) error {
 }
 
 // SetDataCoordInterface sets data service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
+func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 	switch {
 	case ds == nil, node.dataCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -157,6 +157,11 @@ func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
 		node.dataCoord = ds
 		return nil
 	}
+}
+
+// SetNodeID set node id for DataNode
+func (node *DataNode) SetNodeID(id UniqueID) {
+	node.NodeID = id
 }
 
 // Register register datanode to etcd
@@ -389,6 +394,11 @@ func (node *DataNode) Start() error {
 // UpdateStateCode updates datanode's state code
 func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 	node.State.Store(code)
+}
+
+// GetStateCode return datanode's state code
+func (node *DataNode) GetStateCode() internalpb.StateCode {
+	return node.State.Load().(internalpb.StateCode)
 }
 
 func (node *DataNode) isHealthy() bool {
