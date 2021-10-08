@@ -8,7 +8,7 @@ Coordinator, Index Coordinator. The below figure shows that how Proxy interacts 
 
 Proxy divides requests from clients into three classes: `DdRequest`, `DmRequest`, `DqRequest`.
 
-DdRequest is the shorthand of `Data Definition Request`. These requests means a operation on the meta information of
+DdRequest is the shorthand of `Data Definition Request`. It means a operation on the meta information of
 collections, including two parts. One part is of the writing operations on collections, such as defining a schema,
 creating or dropping a partition, creating or dropping the index and etc. Another part is of the reading operations on
 collections, such as listing all collections or partitions, checking if a collection or a partition exists.
