@@ -247,6 +247,9 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropCollection {
 		return fmt.Errorf("drop collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
+	if t.core.MetaTable.IsAlias(t.Req.CollectionName) {
+		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
+	}
 
 	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 	if err != nil {
