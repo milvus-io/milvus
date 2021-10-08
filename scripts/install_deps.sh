@@ -2,14 +2,14 @@
 
 if [[ -x "$(command -v apt)" ]]; then
     sudo apt install -y g++ gcc make ccache libssl-dev zlib1g-dev libboost-regex-dev \
-    libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
-    libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev
+        libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
+        libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev
 elif [[ -x "$(command -v yum)" ]]; then
     sudo yum install -y epel-release centos-release-scl-rh && \
-sudo yum install -y git make automake ccache openssl-devel zlib-devel \
-      libcurl-devel python3-devel \
-      devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
-      llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra
+    sudo yum install -y git make automake ccache openssl-devel zlib-devel \
+        libcurl-devel python3-devel \
+        devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
+        llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra
 
     echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
     echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
