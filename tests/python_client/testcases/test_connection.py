@@ -1,9 +1,9 @@
 import pytest
 import concurrent.futures
-from pymilvus import DefaultConfig
+from pymilvus import DefaultConfig, Milvus
 
 from base.client_base import TestcaseBase
-from utils.utils import *
+from utils.utils import get_milvus, gen_invalid_ips, gen_invalid_ints, gen_invalid_uris
 import common.common_type as ct
 import common.common_func as cf
 from common.code_mapping import ConnectionErrorMessage as cem
