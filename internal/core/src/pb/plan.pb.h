@@ -489,6 +489,7 @@ class QueryInfo :
     kMetricTypeFieldNumber = 3,
     kSearchParamsFieldNumber = 4,
     kTopkFieldNumber = 1,
+    kRoundDecimalFieldNumber = 5,
   };
   // string metric_type = 3;
   void clear_metric_type();
@@ -517,6 +518,11 @@ class QueryInfo :
   ::PROTOBUF_NAMESPACE_ID::int64 topk() const;
   void set_topk(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // int64 round_decimal = 5;
+  void clear_round_decimal();
+  ::PROTOBUF_NAMESPACE_ID::int64 round_decimal() const;
+  void set_round_decimal(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.QueryInfo)
  private:
   class _Internal;
@@ -525,6 +531,7 @@ class QueryInfo :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr metric_type_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr search_params_;
   ::PROTOBUF_NAMESPACE_ID::int64 topk_;
+  ::PROTOBUF_NAMESPACE_ID::int64 round_decimal_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_plan_2eproto;
 };
@@ -2433,6 +2440,20 @@ inline void QueryInfo::set_allocated_search_params(std::string* search_params) {
   }
   search_params_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), search_params);
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.QueryInfo.search_params)
+}
+
+// int64 round_decimal = 5;
+inline void QueryInfo::clear_round_decimal() {
+  round_decimal_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 QueryInfo::round_decimal() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.QueryInfo.round_decimal)
+  return round_decimal_;
+}
+inline void QueryInfo::set_round_decimal(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  round_decimal_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.QueryInfo.round_decimal)
 }
 
 // -------------------------------------------------------------------

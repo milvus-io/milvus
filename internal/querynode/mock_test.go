@@ -50,6 +50,7 @@ const (
 	defaultVecFieldName   = "vec"
 	defaultConstFieldName = "const"
 	defaultTopK           = int64(10)
+	defaultRoundDecimal   = int64(6)
 	defaultDim            = 128
 	defaultNProb          = 10
 	defaultMetricType     = "JACCARD"
@@ -892,11 +893,12 @@ func genSimpleStreaming(ctx context.Context) (*streaming, error) {
 
 // ---------- unittest util functions ----------
 // functions of messages and requests
-func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int64) (string, error) {
+func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int64, roundDecimal int64) (string, error) {
 	var vecFieldName string
 	var metricType string
 	nProbStr := strconv.Itoa(nProb)
 	topKStr := strconv.FormatInt(topK, 10)
+	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
 	for _, f := range schema.Fields {
 		if f.DataType == schemapb.DataType_FloatVector {
 			vecFieldName = f.Name
@@ -912,18 +914,16 @@ func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int64) (string, e
 		return "", err
 	}
 
-	return "{\"bool\": { " +
-		"\"vector\": {" +
-		"\"" + vecFieldName + "\": {" +
-		" \"metric_type\": \"" + metricType + "\", " +
-		" \"params\": {" +
-		" \"nprobe\": " + nProbStr + " " +
-		"}, \"query\": \"$0\",\"topk\": " + topKStr + " \n } \n } \n } \n }", nil
+	return "{\"bool\": { \n\"vector\": {\n \"" + vecFieldName +
+		"\": {\n \"metric_type\": \"" + metricType +
+		"\", \n \"params\": {\n \"nprobe\": " + nProbStr + " \n},\n \"query\": \"$0\",\n \"topk\": " + topKStr +
+		" \n,\"round_decimal\": " + roundDecimalStr +
+		"\n } \n } \n } \n }", nil
 }
 
 func genSimpleDSL() (string, error) {
 	schema := genSimpleSegCoreSchema()
-	return genDSL(schema, defaultNProb, defaultTopK)
+	return genDSL(schema, defaultNProb, defaultTopK, defaultRoundDecimal)
 }
 
 func genSimplePlaceHolderGroup() ([]byte, error) {

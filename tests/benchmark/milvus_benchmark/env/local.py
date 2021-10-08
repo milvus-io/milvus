@@ -16,6 +16,7 @@ class LocalEnv(BaseEnv):
         res = True
         try:
             self.set_hostname(hostname)
+            self.set_port(port)
         except Exception as e:
             logger.error(str(e))
             res = False

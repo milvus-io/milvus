@@ -95,10 +95,12 @@ func newQueryService(ctx context.Context,
 
 func (q *queryService) close() {
 	log.Debug("search service closed")
-	for collectionID := range q.queryCollections {
-		q.stopQueryCollection(collectionID)
-	}
 	q.queryCollectionMu.Lock()
+	for collectionID, sc := range q.queryCollections {
+		sc.close()
+		sc.cancel()
+		delete(q.queryCollections, collectionID)
+	}
 	q.queryCollections = make(map[UniqueID]*queryCollection)
 	q.queryCollectionMu.Unlock()
 	q.cancel()

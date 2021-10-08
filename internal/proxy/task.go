@@ -61,6 +61,7 @@ const (
 	TopKKey                         = "topk"
 	MetricTypeKey                   = "metric_type"
 	SearchParamsKey                 = "params"
+	RoundDecimalKey                 = "round_decimal"
 	HasCollectionTaskName           = "HasCollectionTask"
 	DescribeCollectionTaskName      = "DescribeCollectionTask"
 	GetCollectionStatisticsTaskName = "GetCollectionStatisticsTask"
@@ -1528,11 +1529,20 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return errors.New(SearchParamsKey + " not found in search_params")
 		}
+		roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, st.query.SearchParams)
+		if err != nil {
+			return errors.New(RoundDecimalKey + "not found in search_params")
+		}
+		roundDeciaml, err := strconv.Atoi(roundDecimalStr)
+		if err != nil {
+			return errors.New(RoundDecimalKey + " " + roundDecimalStr + " is not invalid")
+		}
 
 		queryInfo := &planpb.QueryInfo{
 			Topk:         int64(topK),
 			MetricType:   metricType,
 			SearchParams: searchParams,
+			RoundDecimal: int64(roundDeciaml),
 		}
 
 		log.Debug("create query plan",

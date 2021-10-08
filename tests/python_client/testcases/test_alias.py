@@ -345,7 +345,11 @@ class TestAliasOperation(TestcaseBase):
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
         assert self.utility_wrap.has_collection(c_name)[0]
-        self.utility_wrap.drop_collection(alias_name)
+        error = {ct.err_code: 1, ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
+        self.utility_wrap.drop_collection(alias_name,
+                                          check_task=CheckTasks.err_res,
+                                          check_items=error)
+        self.utility_wrap.drop_collection(c_name)
         assert not self.utility_wrap.has_collection(c_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)

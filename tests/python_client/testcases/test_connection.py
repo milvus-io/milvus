@@ -1,9 +1,9 @@
 import pytest
 import concurrent.futures
-from pymilvus import DefaultConfig
+from pymilvus import DefaultConfig, Milvus
 
 from base.client_base import TestcaseBase
-from utils.utils import *
+from utils.utils import get_milvus, gen_invalid_ips, gen_invalid_ints, gen_invalid_uris
 import common.common_type as ct
 import common.common_func as cf
 from common.code_mapping import ConnectionErrorMessage as cem
@@ -595,8 +595,10 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_disconnect_after_connect(self, host, port):
         """
-        target: disconnect test connect and check result
-        method: disconnect test connect
+        target: disconnect with customized alias and check results
+        method: 1. connect with customized alias
+                2. disconnect with the alias
+                3. list connections and get connection address
         expected: the connection was successfully terminated
         """
         test_alias_name = "test_alias_name"

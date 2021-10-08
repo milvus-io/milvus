@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
@@ -636,13 +637,13 @@ func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool
 
 	for _, vchan := range vchans {
 		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
-		flushedSegmentIDs := make([]UniqueID, 0)
+		flushed := make([]*datapb.SegmentInfo, 0)
 		unflushed := make([]*datapb.SegmentInfo, 0)
 		var seekPosition *internalpb.MsgPosition
 		var useUnflushedPosition bool
 		for _, s := range segments {
 			if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
-				flushedSegmentIDs = append(flushedSegmentIDs, s.ID)
+				flushed = append(flushed, s.SegmentInfo)
 				if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
 					seekPosition = s.DmlPosition
 				}
@@ -665,12 +666,26 @@ func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool
 			}
 		}
 
+		if seekPosition == nil {
+			coll := s.meta.GetCollection(vchan.CollectionID)
+			if coll != nil {
+				for _, sp := range coll.GetStartPositions() {
+					if sp.GetKey() == rootcoord.ToPhysicalChannel(vchan.DmlChannel) {
+						seekPosition = &internalpb.MsgPosition{
+							ChannelName: vchan.DmlChannel,
+							MsgID:       sp.GetData(),
+						}
+					}
+				}
+			}
+		}
+
 		pairs = append(pairs, &datapb.VchannelInfo{
 			CollectionID:      vchan.CollectionID,
 			ChannelName:       vchan.DmlChannel,
 			SeekPosition:      seekPosition,
 			UnflushedSegments: unflushed,
-			FlushedSegments:   flushedSegmentIDs,
+			FlushedSegments:   flushed,
 		})
 	}
 	return pairs, nil

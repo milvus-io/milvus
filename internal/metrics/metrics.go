@@ -19,19 +19,19 @@ const (
 )
 
 var (
-	// RootCoordProxyLister used to count the num of registered proxy nodes
+	// RootCoordProxyLister counts the num of registered proxy nodes
 	RootCoordProxyLister = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: subSystemRootCoord,
 			Name:      "list_of_proxy",
-			Help:      "List of proxy nodes which has register with etcd",
+			Help:      "List of proxy nodes which have registered with etcd",
 		}, []string{"client_id"})
 
 	////////////////////////////////////////////////////////////////////////////
 	// for grpc
 
-	// RootCoordCreateCollectionCounter used to count the num of calls of CreateCollection
+	// RootCoordCreateCollectionCounter counts the num of calls of CreateCollection
 	RootCoordCreateCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,

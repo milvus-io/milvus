@@ -125,7 +125,10 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 // Because loadRetentionInfo may need some time, so do this asynchronously. Finally start retention goroutine.
 func (ri *retentionInfo) startRetentionInfo() {
 	var wg sync.WaitGroup
-	ri.kv.ResetPrefixLength(FixedChannelNameLen)
+	err := ri.kv.ResetPrefixLength(FixedChannelNameLen)
+	if err != nil {
+		log.Warn("Start load retention info", zap.Error(err))
+	}
 	for _, topic := range ri.topics {
 		log.Debug("Start load retention info", zap.Any("topic", topic))
 		// Load all page infos
@@ -304,7 +307,7 @@ func (ri *retentionInfo) retention() error {
 // 4. Do delete by range of [start_msg_id, end_msg_id) in rocksdb
 // 5. Delete corresponding data in retentionInfo
 func (ri *retentionInfo) expiredCleanUp(topic string) error {
-	// log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
+	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	var ackedInfo *topicAckedInfo
 	if info, ok := ri.ackedInfo.Load(topic); ok {
 		ackedInfo = info.(*topicAckedInfo)
@@ -428,7 +431,11 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 			} else if pageStartID < pageEndID {
 				pageWriteBatch.DeleteRange([]byte(pageStartKey), []byte(pageEndKey))
 			}
-			ri.kv.DB.Write(gorocksdb.NewDefaultWriteOptions(), pageWriteBatch)
+			err = ri.kv.DB.Write(gorocksdb.NewDefaultWriteOptions(), pageWriteBatch)
+			if err != nil {
+				log.Error("rocksdb write error", zap.Error(err))
+				return err
+			}
 
 			pageInfo.pageEndID = pageInfo.pageEndID[pageRetentionOffset:]
 		}
@@ -456,7 +463,11 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	} else {
 		ackedTsWriteBatch.DeleteRange([]byte(ackedStartIDKey), []byte(ackedEndIDKey))
 	}
-	ri.kv.DB.Write(gorocksdb.NewDefaultWriteOptions(), ackedTsWriteBatch)
+	err = ri.kv.DB.Write(gorocksdb.NewDefaultWriteOptions(), ackedTsWriteBatch)
+	if err != nil {
+		log.Error("rocksdb write error", zap.Error(err))
+		return err
+	}
 
 	// Update acked_size in rocksdb_kv
 

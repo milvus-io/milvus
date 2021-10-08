@@ -36,7 +36,7 @@ func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel, seekFromStartPos
 		pairs = append(pairs, &datapb.VchannelInfo{
 			CollectionID:      vchan.CollectionID,
 			ChannelName:       vchan.DmlChannel,
-			FlushedSegments:   []int64{},
+			FlushedSegments:   []*datapb.SegmentInfo{},
 			UnflushedSegments: []*datapb.SegmentInfo{},
 		})
 	}

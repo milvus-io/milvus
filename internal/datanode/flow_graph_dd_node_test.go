@@ -28,18 +28,19 @@ func TestFlowGraph_DDNode_newDDNode(te *testing.T) {
 		inCollID UniqueID
 
 		inFlushedSegs        []UniqueID
+		inFlushedChannelTs   Timestamp
 		inUnFlushedSegID     UniqueID
 		inUnFlushedChannelTs Timestamp
 
 		description string
 	}{
-		{UniqueID(1), []UniqueID{100, 101, 102}, 200, 666666,
+		{UniqueID(1), []UniqueID{100, 101, 102}, 666666, 200, 666666,
 			"Input VchannelInfo with 3 flushed segs and 1 unflushed seg"},
-		{UniqueID(2), []UniqueID{103}, 200, 666666,
+		{UniqueID(2), []UniqueID{103}, 666666, 200, 666666,
 			"Input VchannelInfo with 1 flushed seg and 1 unflushed seg"},
-		{UniqueID(3), []UniqueID{}, 200, 666666,
+		{UniqueID(3), []UniqueID{}, 666666, 200, 666666,
 			"Input VchannelInfo with 0 flushed segs and 1 unflushed seg"},
-		{UniqueID(3), []UniqueID{104}, 0, 0,
+		{UniqueID(3), []UniqueID{104}, 666666, 0, 0,
 			"Input VchannelInfo with 1 flushed seg and empty unflushed seg"},
 	}
 
@@ -52,19 +53,29 @@ func TestFlowGraph_DDNode_newDDNode(te *testing.T) {
 				di.DmlPosition = &internalpb.MsgPosition{Timestamp: test.inUnFlushedChannelTs}
 			}
 
+			fi := []*datapb.SegmentInfo{}
+			for _, id := range test.inFlushedSegs {
+				s := &datapb.SegmentInfo{ID: id}
+				fi = append(fi, s)
+			}
+
 			ddNode := newDDNode(
 				make(chan UniqueID),
 				test.inCollID,
 				&datapb.VchannelInfo{
-					FlushedSegments:   test.inFlushedSegs,
+					FlushedSegments:   fi,
 					UnflushedSegments: []*datapb.SegmentInfo{di},
 				},
 			)
 
+			flushedSegIDs := make([]int64, 0)
+			for _, seg := range ddNode.flushedSegments {
+				flushedSegIDs = append(flushedSegIDs, seg.ID)
+			}
 			assert.Equal(t, "ddNode", ddNode.Name())
 			assert.Equal(t, test.inCollID, ddNode.collectionID)
 			assert.Equal(t, len(test.inFlushedSegs), len(ddNode.flushedSegments))
-			assert.ElementsMatch(t, test.inFlushedSegs, ddNode.flushedSegments)
+			assert.ElementsMatch(t, test.inFlushedSegs, flushedSegIDs)
 
 			si, ok := ddNode.segID2SegInfo.Load(test.inUnFlushedSegID)
 			assert.True(t, ok)
@@ -120,13 +131,13 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 					collectionID: test.ddnCollID,
 				}
 
-				var createCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
+				var dropCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
 					DropCollectionRequest: internalpb.DropCollectionRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 						CollectionID: test.msgCollID,
 					},
 				}
-				tsMessages := []msgstream.TsMsg{createCollMsg}
+				tsMessages := []msgstream.TsMsg{dropCollMsg}
 				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 
 				rt := ddn.Operate([]Msg{msgStreamMsg})
@@ -169,9 +180,10 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 
 		for _, test := range tests {
 			te.Run(test.description, func(t *testing.T) {
+				fs := &datapb.SegmentInfo{ID: test.ddnFlushedSegment}
 				// Prepare ddNode states
 				ddn := ddNode{
-					flushedSegments: []UniqueID{test.ddnFlushedSegment},
+					flushedSegments: []*datapb.SegmentInfo{fs},
 					collectionID:    test.ddnCollID,
 				}
 				FilterThreshold = test.threshold
@@ -226,9 +238,14 @@ func TestFlowGraph_DDNode_filterMessages(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
+			fs := []*datapb.SegmentInfo{}
+			for _, id := range test.ddnFlushedSegments {
+				s := &datapb.SegmentInfo{ID: id}
+				fs = append(fs, s)
+			}
 			// Prepare ddNode states
 			ddn := ddNode{
-				flushedSegments: test.ddnFlushedSegments,
+				flushedSegments: fs,
 			}
 
 			for k, v := range test.ddnSegID2Ts {
@@ -281,7 +298,12 @@ func TestFlowGraph_DDNode_isFlushed(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			ddn := &ddNode{flushedSegments: test.influshedSegment}
+			fs := []*datapb.SegmentInfo{}
+			for _, id := range test.influshedSegment {
+				s := &datapb.SegmentInfo{ID: id}
+				fs = append(fs, s)
+			}
+			ddn := &ddNode{flushedSegments: fs}
 			assert.Equal(t, test.expectedOut, ddn.isFlushed(test.inSeg))
 		})
 	}

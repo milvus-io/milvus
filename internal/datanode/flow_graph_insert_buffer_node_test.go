@@ -186,7 +186,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	iBNode.Operate([]flowgraph.Msg{fgMsg})
 }
 
-func genFlowGraphMsg(insertChannelName string) flowGraphMsg {
+func genFlowGraphMsg(chanName string) flowGraphMsg {
 
 	timeRange := TimeRange{
 		timestampMin: 0,
@@ -195,13 +195,13 @@ func genFlowGraphMsg(insertChannelName string) flowGraphMsg {
 
 	startPos := []*internalpb.MsgPosition{
 		{
-			ChannelName: insertChannelName,
+			ChannelName: chanName,
 			MsgID:       make([]byte, 0),
 			Timestamp:   0,
 		},
 	}
 
-	var iMsg = &flowGraphMsg{
+	var fgMsg = &flowGraphMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
@@ -212,9 +212,9 @@ func genFlowGraphMsg(insertChannelName string) flowGraphMsg {
 	}
 
 	dataFactory := NewDataFactory()
-	iMsg.insertMessages = append(iMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
+	fgMsg.insertMessages = append(fgMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
 
-	return *iMsg
+	return *fgMsg
 
 }
 
@@ -486,7 +486,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	})
 
-	t.Run("Auto with manul flush", func(t *testing.T) {
+	t.Run("Auto with manual flush", func(t *testing.T) {
 		t.Skipf("Skip, fix later")
 		for i := range inMsg.insertMessages {
 			inMsg.insertMessages[i].SegmentID = 1

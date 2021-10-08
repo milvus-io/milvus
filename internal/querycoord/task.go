@@ -1532,7 +1532,7 @@ func mergeVChannelInfo(info1 *datapb.VchannelInfo, info2 *datapb.VchannelInfo) *
 	checkPoints = append(checkPoints, info1.UnflushedSegments...)
 	checkPoints = append(checkPoints, info2.UnflushedSegments...)
 
-	flushedSegments := make([]UniqueID, 0)
+	flushedSegments := make([]*datapb.SegmentInfo, 0)
 	flushedSegments = append(flushedSegments, info1.FlushedSegments...)
 	flushedSegments = append(flushedSegments, info2.FlushedSegments...)
 

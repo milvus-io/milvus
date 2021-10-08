@@ -1089,6 +1089,11 @@ class TestInsertInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_field_value(self, connect, collection, get_field_int_value):
+        """
+        target: test insert with invalid field
+        method: insert with invalid field value
+        expected: raise exception
+        """
         field_value = get_field_int_value
         tmp_entity = ut.update_field_type(copy.deepcopy(default_entity), 'int64', field_value)
         with pytest.raises(Exception):
