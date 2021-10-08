@@ -46,7 +46,9 @@ func healthyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GetComponentStatesInterface defines the interface that get states from component.
 type GetComponentStatesInterface interface {
+	// GetComponentStates returns the states of component.
 	GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error)
 }
 
