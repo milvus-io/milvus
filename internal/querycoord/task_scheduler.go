@@ -111,6 +111,7 @@ func (queue *TaskQueue) PopTask() task {
 	return ft.Value.(task)
 }
 
+// NewTaskQueue creates a new task queue for scheduler to cache trigger tasks
 func NewTaskQueue() *TaskQueue {
 	return &TaskQueue{
 		tasks:    list.New(),
