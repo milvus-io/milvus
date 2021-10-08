@@ -15,6 +15,7 @@ class MilvusSys:
         if self.client is None:
             raise Exception(f"Connection {alias} is disconnected or nonexistent")
 
+        # TODO: for now it only support non_orm style API for getMetricsRequest
         with self.client._connection() as handler:
             req = milvus_types.GetMetricsRequest(request=sys_info_req)
             self.sys_info = handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
