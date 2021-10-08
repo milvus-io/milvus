@@ -17,17 +17,25 @@ import (
 )
 
 const (
+	// DefaultServiceRoot default root path used in kv by Session
 	DefaultServiceRoot = "session/"
-	DefaultIDKey       = "id"
-	DefaultRetryTimes  = 30
-	DefaultTTL         = 60
+	// DefaultIDKey default id key for Session
+	DefaultIDKey = "id"
+	// DefaultRetryTimes default retry times when registerService or getServerByID
+	DefaultRetryTimes = 30
+	// DefaultTTL default ttl value when granting a lease
+	DefaultTTL = 60
 )
 
+// SessionEventType session event type
 type SessionEventType int
 
 const (
+	// SessionNoneEvent place holder for zero value
 	SessionNoneEvent SessionEventType = iota
+	// SessionAddEvent event type for a new Session Added
 	SessionAddEvent
+	// SessionDelEvent event type for a Session deleted
 	SessionDelEvent
 )
 

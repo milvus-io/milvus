@@ -79,6 +79,9 @@ func (gta *GlobalTSOAllocator) Initialize() error {
 	return gta.tso.InitTimestamp()
 }
 
+// SetLimitMaxLogic is to enable or disable the maximum limit on the logical part of the hybrid timestamp.
+// When enabled, if the logical part of the hybrid timestamp exceeds the maximum limit,
+// GlobalTSOAllocator will sleep for a period and try to allocate the timestamp again.
 func (gta *GlobalTSOAllocator) SetLimitMaxLogic(flag bool) {
 	gta.LimitMaxLogic = flag
 }
@@ -125,6 +128,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 	return 0, errors.New("can not get timestamp")
 }
 
+// Alloc allocates a batch of timestamps. What is returned is the starting timestamp.
 func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
 	//return gta.tso.SyncTimestamp()
 	start, err := gta.GenerateTSO(count)
@@ -138,6 +142,7 @@ func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
 	return start, err
 }
 
+// AllocOne only allocates one timestamp.
 func (gta *GlobalTSOAllocator) AllocOne() (typeutil.Timestamp, error) {
 	return gta.GenerateTSO(1)
 }

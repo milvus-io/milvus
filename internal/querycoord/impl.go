@@ -493,6 +493,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 	}, nil
 }
 
+// GetSegmentInfo returns information of all the segments on queryNodes, and the information includes memSize, numRow, indexName, indexID ...
 func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -536,6 +537,7 @@ func (qc *QueryCoord) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
+// GetMetrics returns all the queryCoord's metrics
 func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("QueryCoord.GetMetrics",
 		zap.Int64("node_id", Params.QueryCoordID),

@@ -1,10 +1,8 @@
-
-
 ## 2. Schema
 
 #### 2.1 Collection Schema
 
-``` go
+```go
 type CollectionSchema struct {
 	Name        string
 	Description string
@@ -15,7 +13,7 @@ type CollectionSchema struct {
 
 #### 2.2 Field Schema
 
-``` go
+```go
 type FieldSchema struct {
 	FieldID      int64
 	Name         string
@@ -24,7 +22,7 @@ type FieldSchema struct {
 	DataType     DataType
 	TypeParams   []*commonpb.KeyValuePair
 	IndexParams  []*commonpb.KeyValuePair
-    AutoID       bool
+  AutoID       bool
 }
 ```
 
@@ -55,8 +53,6 @@ enum DataType {
 
 ###### 2.2.3 Index Params
 
-
-
 # Intro to Index
 
 For more detailed information about indexes, please refer to [Milvus documentation index chapter.](https://milvus.io/docs/v2.0.0/index.md)
@@ -66,8 +62,6 @@ To learn how to choose an appropriate index for your application scenarios, plea
 To learn how to choose an appropriate index for a metric, see [Distance Metrics](https://www.milvus.io/docs/v2.0.0/metric.md).
 
 Different index type uses different index params in construction and query. All index params are represented by the structure of map. This doc shows the map code in python.
-
-
 
 [IVF_FLAT](#IVF_FLAT)
 [BIN_IVF_FLAT](#BIN_IVF_FLAT)
@@ -80,15 +74,11 @@ Different index type uses different index params in construction and query. All 
 [RHNSW_SQ](#RHNSW_SQ)
 [NSG](#NSG)
 
-
-
 ## IVF_FLAT
 
-**IVF** (*Inverted File*) is an index type based on quantization. It divides the points in space into `nlist` units by the clustering method. During searching vectors, it compares the distance between the target vector and the center of all units, and then selects the `nprobe` nearest unit. Afterwards, it compares all the vectors in these selected cells to get the final result.
+**IVF** (_Inverted File_) is an index type based on quantization. It divides the points in space into `nlist` units by the clustering method. During searching vectors, it compares the distance between the target vector and the center of all units, and then selects the `nprobe` nearest unit. Afterwards, it compares all the vectors in these selected cells to get the final result.
 
 IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit is consistent with the original data.
-
-
 
 - building parameters:
 
@@ -157,11 +147,9 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
 }
 ```
 
-
-
 ## IVF_PQ
 
-**PQ** (*Product Quantization*) uniformly decomposes the original high-dimensional vector space into Cartesian products of `m` low-dimensional vector spaces and then quantizes the decomposed low-dimensional vector spaces. Instead of calculating the distances between the target vector and the center of all the units, product quantization enables the calculation of distances between the target vector and the clustering center of each low-dimensional space and greatly reduces the time complexity and space complexity of the algorithm.
+**PQ** (_Product Quantization_) uniformly decomposes the original high-dimensional vector space into Cartesian products of `m` low-dimensional vector spaces and then quantizes the decomposed low-dimensional vector spaces. Instead of calculating the distances between the target vector and the center of all the units, product quantization enables the calculation of distances between the target vector and the clustering center of each low-dimensional space and greatly reduces the time complexity and space complexity of the algorithm.
 
 IVF_PQ performs IVF index clustering, and then quantizes the product of vectors. Its index file is even smaller than IVF_SQ8, but it also causes a loss of accuracy during searching.
 
@@ -278,13 +266,13 @@ The query method is as follows:
 
 ## ANNOY
 
-**ANNOY** (*Approximate Nearest Neighbors Oh Yeah*) is an index that uses a hyperplane to divide a high-dimensional space into multiple subspaces, and then stores them in a tree structure.
+**ANNOY** (_Approximate Nearest Neighbors Oh Yeah_) is an index that uses a hyperplane to divide a high-dimensional space into multiple subspaces, and then stores them in a tree structure.
 
 When searching for vectors, ANNOY follows the tree structure to find subspaces closer to the target vector, and then compares all the vectors in these subspaces (The number of vectors being compared should not be less than `search_k`) to obtain the final result. Obviously, when the target vector is close to the edge of a certain subspace, sometimes it is necessary to greatly increase the number of searched subspaces to obtain a high recall rate. Therefore, ANNOY uses `n_trees` different methods to divide the whole space, and searches all the dividing methods simultaneously to reduce the probability that the target vector is always at the edge of the subspace.
 
 - building parameters:
 
-  **n_trees**:  The number of methods of space division.
+  **n_trees**: The number of methods of space division.
 
 ```python
 # ANNOY
@@ -315,7 +303,7 @@ When searching for vectors, ANNOY follows the tree structure to find subspaces c
 
 ## HNSW
 
-**HNSW** (*Hierarchical Navigable Small World Graph*) is a graph-based indexing algorithm. It builds a multi-layer navigation structure for an image according to certain rules. In this structure, the upper layers are more sparse and the distances between nodes are farther; the lower layers are denser and the distances between nodes are closer. The search starts from the uppermost layer, finds the node closest to the target in this layer, and then enters the next layer to begin another search. After multiple iterations, it can quickly approach the target position.
+**HNSW** (_Hierarchical Navigable Small World Graph_) is a graph-based indexing algorithm. It builds a multi-layer navigation structure for an image according to certain rules. In this structure, the upper layers are more sparse and the distances between nodes are farther; the lower layers are denser and the distances between nodes are closer. The search starts from the uppermost layer, finds the node closest to the target in this layer, and then enters the next layer to begin another search. After multiple iterations, it can quickly approach the target position.
 
 To improve performance, HNSW limits the maximum degree of nodes on each layer of the graph to `M`.
 In addition, you can use `efConstruction` (when building index) or `ef` (when searching targets) to specify a search range.
@@ -437,7 +425,7 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 
 ## NSG
 
-**NSG** (*Refined Navigating Spreading-out Graph*) is a graph-based indexing algorithm. It sets the center position of the whole image as a navigation point, and then uses a specific edge selection strategy to control the out-degree of each point (less than or equal to `out_degree`). Therefore, it can reduce memory usage and quickly locate the target position nearby during searching vectors.
+**NSG** (_Refined Navigating Spreading-out Graph_) is a graph-based indexing algorithm. It sets the center position of the whole image as a navigation point, and then uses a specific edge selection strategy to control the out-degree of each point (less than or equal to `out_degree`). Therefore, it can reduce memory usage and quickly locate the target position nearby during searching vectors.
 
 The graph construction process of NSG is as follows:
 
@@ -473,7 +461,7 @@ The query process is similar to the graph building process. It starts from the n
 
 - search parameters:
 
-	**search_length**: Number of query iterations
+  **search_length**: Number of query iterations
 
 ```python
 # NSG

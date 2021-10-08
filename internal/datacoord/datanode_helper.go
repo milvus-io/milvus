@@ -25,6 +25,8 @@ type positionProvider interface {
 	GetVChanPositions(vchans []vchannel, seekFromStartPosition bool) ([]*datapb.VchannelInfo, error)
 }
 
+var _ positionProvider = (*dummyPosProvider)(nil)
+
 type dummyPosProvider struct{}
 
 //GetVChanPositions implements positionProvider

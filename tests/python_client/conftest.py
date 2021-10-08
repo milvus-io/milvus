@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import functools
 import socket
@@ -8,9 +10,7 @@ from utils.util_log import test_log as log
 from base.client_base import param_info
 from check.param_check import ip_check, number_check
 from config.log_config import log_config
-from utils.utils import *
-
-
+from utils.utils import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
 
 timeout = 60
 dimension = 128
@@ -38,7 +38,6 @@ def pytest_addoption(parser):
     parser.addoption('--term_expr', action='store', default="term_expr", help="expr of query quest")
     parser.addoption('--check_content', action='store', default="check_content", help="content of check")
     parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
-
 
 
 @pytest.fixture
@@ -207,6 +206,7 @@ def get_invalid_partition_name(request):
 def get_invalid_vector_dict(request):
     yield request.param
 
+
 def pytest_configure(config):
     # register an additional marker
     config.addinivalue_line(
@@ -303,12 +303,14 @@ def connect(request):
     except Exception as e:
         logging.getLogger().error(str(e))
         pytest.exit("Milvus server can not connected, exit pytest ...")
+
     def fin():
         try:
             milvus.close()
             pass
         except Exception as e:
             logging.getLogger().info(str(e))
+
     request.addfinalizer(fin)
     return milvus
 
@@ -360,9 +362,11 @@ def collection(request, connect):
         connect.create_collection(collection_name, default_fields)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -378,9 +382,11 @@ def id_collection(request, connect):
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -395,10 +401,12 @@ def binary_collection(request, connect):
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         collection_names = connect.list_collections()
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -414,9 +422,11 @@ def binary_id_collection(request, connect):
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name

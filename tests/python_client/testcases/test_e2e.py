@@ -83,4 +83,3 @@ class TestE2e(TestcaseBase):
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
-        # assert len(res) == 4

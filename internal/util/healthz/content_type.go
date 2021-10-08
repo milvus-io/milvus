@@ -12,6 +12,8 @@
 package healthz
 
 const (
+	// ContentTypeHeader is the health check request type header.
 	ContentTypeHeader = "Content-Type"
-	ContentTypeText   = "text/plain"
+	// ContentTypeText is the health check request type text.
+	ContentTypeText = "text/plain"
 )

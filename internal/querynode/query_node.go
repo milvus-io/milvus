@@ -53,6 +53,12 @@ type Base interface {
 	SetIndexCoord(index types.IndexCoord) error
 }
 
+// make sure QueryNode implements types.QueryNode
+var _ types.QueryNode = (*QueryNode)(nil)
+
+// make sure QueryNode implements Base
+var _ Base = (*QueryNode)(nil)
+
 // QueryNode communicates with outside services and union all
 // services in querynode package.
 //

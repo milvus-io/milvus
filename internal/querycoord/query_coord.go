@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// Timestamp is an alias for the Int64 type
 type Timestamp = typeutil.Timestamp
 
 type queryChannelInfo struct {
@@ -44,6 +45,7 @@ type queryChannelInfo struct {
 	responseChannel string
 }
 
+// QueryCoord is the coordinator of queryNodes
 type QueryCoord struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
@@ -83,6 +85,7 @@ func (qc *QueryCoord) Register() error {
 	return nil
 }
 
+// Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
 	connectEtcdFn := func() error {
 		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
@@ -125,6 +128,7 @@ func (qc *QueryCoord) Init() error {
 	return initError
 }
 
+// Start function starts the goroutines to watch the meta and node updates
 func (qc *QueryCoord) Start() error {
 	qc.scheduler.Start()
 	log.Debug("start scheduler ...")
@@ -143,6 +147,7 @@ func (qc *QueryCoord) Start() error {
 	return nil
 }
 
+// Stop function stops watching the meta and node updates
 func (qc *QueryCoord) Stop() error {
 	qc.scheduler.Close()
 	log.Debug("close scheduler ...")
@@ -153,6 +158,7 @@ func (qc *QueryCoord) Stop() error {
 	return nil
 }
 
+// UpdateStateCode updates the status of the coord, including healthy, unhealthy
 func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 	qc.stateCode.Store(code)
 }
@@ -184,10 +190,12 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	return service, nil
 }
 
+// SetRootCoord sets root coordinator's client
 func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) {
 	qc.rootCoordClient = rootCoord
 }
 
+// SetDataCoord sets data coordinator's client
 func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) {
 	qc.dataCoordClient = dataCoord
 }

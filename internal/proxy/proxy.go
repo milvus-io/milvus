@@ -43,6 +43,9 @@ type Timestamp = typeutil.Timestamp
 const sendTimeTickMsgInterval = 200 * time.Millisecond
 const channelMgrTickerInterval = 100 * time.Millisecond
 
+// make sure Proxy implements types.Proxy
+var _ types.Proxy = (*Proxy)(nil)
+
 type Proxy struct {
 	ctx    context.Context
 	cancel func()
@@ -67,7 +70,7 @@ type Proxy struct {
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *TimestampAllocator
-	segAssigner  *segIDAssinger
+	segAssigner  *segIDAssigner
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -80,6 +83,7 @@ type Proxy struct {
 	closeCallbacks []func()
 }
 
+// NewProxy returns a Proxy struct.
 func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)

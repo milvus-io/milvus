@@ -71,6 +71,7 @@ type Meta interface {
 	//printMeta()
 }
 
+// MetaReplica records the current load information on all querynodes
 type MetaReplica struct {
 	client kv.MetaKv // client of a reliable kv service, i.e. etcd client
 

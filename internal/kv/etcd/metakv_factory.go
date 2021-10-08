@@ -19,6 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// NewMetaKvFactory returns an object that implements the kv.MetaKv interface using etcd.
+// The UseEmbedEtcd in the param is used to determine whether the etcd service is external or embedded.
 func NewMetaKvFactory(rootPath string, param *paramtable.BaseParamTable) (kv.MetaKv, error) {
 	log.Info("start etcd with rootPath",
 		zap.String("rootpath", rootPath),

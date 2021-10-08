@@ -11,17 +11,30 @@
 
 package typeutil
 
+// Timestamp is an alias of uint64
 type Timestamp = uint64
+
+// IntPrimaryKey is an alias of int64
 type IntPrimaryKey = int64
+
+// UniqueID is an alias of int64
 type UniqueID = int64
 
 const (
-	RootCoordRole  = "RootCoord"
-	ProxyRole      = "Proxy"
+	// RootCoordRole is a constant represent RootCoord
+	RootCoordRole = "RootCoord"
+	// ProxyRole is a constant represent Proxy
+	ProxyRole = "Proxy"
+	// QueryCoordRole is a constant represent QueryCoord
 	QueryCoordRole = "QueryCoord"
-	QueryNodeRole  = "QueryNode"
+	// QueryNodeRole is a constant represent QueryNode
+	QueryNodeRole = "QueryNode"
+	// IndexCoordRole is a constant represent IndexCoord
 	IndexCoordRole = "IndexCoord"
-	IndexNodeRole  = "IndexNode"
-	DataCoordRole  = "DataCoord"
-	DataNodeRole   = "DataNode"
+	// IndexNodeRole is a constant represent IndexNode
+	IndexNodeRole = "IndexNode"
+	// DataCoordRole is a constant represent DataCoord
+	DataCoordRole = "DataCoord"
+	// DataNodeRole is a constant represent DataNode
+	DataNodeRole = "DataNode"
 )

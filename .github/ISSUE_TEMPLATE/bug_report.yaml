@@ -1,5 +1,5 @@
 name: 🐞 Bug report
-description: Create a bug report to help us improve Milvus
+description: Create a bug report to help us improve Milvus SDK Go
 title: "[Bug]: "
 labels: [kind/bug, needs-triage]
 body:
@@ -22,7 +22,7 @@ body:
       When I do <X>, <Y> happens and I see the error message attached below:
       ```...```
   validations:
-    required: false
+    required: true
 - type: textarea
   attributes:
     label: Expected Behavior

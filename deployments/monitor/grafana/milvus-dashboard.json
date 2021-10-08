@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1633051158004,
+  "iteration": 1633599211615,
   "links": [],
   "panels": [
     {
@@ -1505,7 +1505,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Successful RootCoord Create partition operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1562,7 +1562,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total RootCoord Has partition operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1619,7 +1619,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total success of RootCoord Has partition operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1979,7 +1979,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total RootCoord Create index operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2036,7 +2036,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total  success of RootCoord Create index operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2093,7 +2093,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total RootCoord Drop index operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2150,7 +2150,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total success of RootCoord Drop index operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2207,7 +2207,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total RootCoord Describe index operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2264,7 +2264,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Successful RootCoord Describe index operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2624,7 +2624,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total RootCoord Show segments operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2681,7 +2681,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Successful RootCoord Show segments operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5843,5 +5843,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 132
+  "version": 145
 }

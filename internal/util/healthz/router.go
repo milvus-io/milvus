@@ -11,4 +11,5 @@
 
 package healthz
 
+// HealthzRouterPath is default path for check health state.
 const HealthzRouterPath = "/healthz"

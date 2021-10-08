@@ -18,6 +18,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/stretchr/testify/assert"
 )
 
 type mockMsgStreamFactory struct {
@@ -87,5 +88,6 @@ func (mtm *mockTtMsgStream) Seek(offset []*internalpb.MsgPosition) error {
 
 func TestNewDmInputNode(t *testing.T) {
 	ctx := context.Background()
-	newDmInputNode(ctx, &mockMsgStreamFactory{}, 0, "abc_adc", new(internalpb.MsgPosition))
+	_, err := newDmInputNode(ctx, &mockMsgStreamFactory{}, 0, "abc_adc", new(internalpb.MsgPosition))
+	assert.Nil(t, err)
 }

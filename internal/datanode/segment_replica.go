@@ -155,6 +155,8 @@ func (replica *SegmentReplica) new2FlushedSegment(segID UniqueID) {
 	delete(replica.newSegments, segID)
 }
 
+// normal2FlushedSegment transfers a segment from *normal* to *flushed* by changing *isFlushed*
+//  flag into true, and mv the segment from normalSegments map to flushedSegments map.
 func (replica *SegmentReplica) normal2FlushedSegment(segID UniqueID) {
 	var seg Segment = *replica.normalSegments[segID]
 

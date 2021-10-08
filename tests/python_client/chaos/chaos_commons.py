@@ -19,6 +19,7 @@ def check_config(chaos_config):
 
 
 def reset_counting(checkers={}):
+    """reset checker counts for all checker threads"""
     for ch in checkers.values():
         ch.reset()
 
@@ -31,6 +32,7 @@ def gen_experiment_config(yaml):
 
 
 def start_monitor_threads(checkers={}):
+    """start the threads by checkers"""
     threads = {}
     for k, ch in checkers.items():
         t = threading.Thread(target=ch.keep_running, args=())
@@ -51,6 +53,7 @@ def get_env_variable_by_name(name):
 
 
 def get_chaos_yamls():
+    """get chaos yaml file(s) from configured environment path"""
     chaos_env = get_env_variable_by_name(constants.CHAOS_CONFIG_ENV)
     if chaos_env is not None:
         if os.path.isdir(chaos_env):
@@ -67,4 +70,5 @@ def get_chaos_yamls():
 
 
 def reconnect(connections, alias='default'):
+    """trying to connect by connection alias"""
     return connections.connect(alias=alias)

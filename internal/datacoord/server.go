@@ -76,6 +76,12 @@ type DataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode,
 // RootCoordCreatorFunc creator function for rootcoord
 type RootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
 
+// makes sure Server implements `DataCoord`
+var _ types.DataCoord = (*Server)(nil)
+
+// makes sure Server implements `positionProvider`
+var _ positionProvider = (*Server)(nil)
+
 // Server implements `types.Datacoord`
 // handles Data Cooridinator related jobs
 type Server struct {
@@ -287,7 +293,7 @@ func (s *Server) initMeta() error {
 		}
 
 		s.kvClient = etcdKV
-		s.meta, err = NewMeta(s.kvClient)
+		s.meta, err = newMeta(s.kvClient)
 		if err != nil {
 			return err
 		}
@@ -304,7 +310,9 @@ func (s *Server) startServerLoop() {
 	go s.startWatchService(s.serverLoopCtx)
 	go s.startFlushLoop(s.serverLoopCtx)
 	go s.session.LivenessCheck(s.serverLoopCtx, s.liveCh, func() {
-		s.Stop()
+		if err := s.Stop(); err != nil {
+			log.Error("failed to stop server", zap.Error(err))
+		}
 	})
 }
 
@@ -391,7 +399,10 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
-			s.segmentManager.ExpireAllocations(ch, ts)
+			if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
+				log.Warn("failed to expire allocations", zap.Error(err))
+				continue
+			}
 			segments, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
 			if err != nil {
 				log.Warn("get flushable segments failed", zap.Error(err))

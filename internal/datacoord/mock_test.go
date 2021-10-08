@@ -34,7 +34,7 @@ import (
 
 func newMemoryMeta(allocator allocator) (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
-	return NewMeta(memoryKV)
+	return newMeta(memoryKV)
 }
 
 var _ allocator = (*MockAllocator)(nil)

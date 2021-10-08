@@ -71,9 +71,9 @@ Run multiple test scenario in a category manually(take network partition chaos f
 still in planning 
 
 ### Todo
-* pod_failure
-* container_kill
-* network attack
+- [ ] pod_failure
+- [ ] container_kill
+- [x] network attack
 
 ## How to contribute
 * Get familiar with chaos engineering and [Chaos Mesh](https://chaos-mesh.org)

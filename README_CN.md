@@ -23,7 +23,7 @@
 
 Milvus 是一款全球领先的开源向量数据库，赋能 AI 应用和向量相似度搜索，加速非结构化数据检索。用户在任何部署环境中均可获得始终如一的用户体验。
 
-Milvus 2.0 是一款云原生向量数据库，采用存储与计算分离的架构设计。该重构版本的所有组件均为无状态组件，极大地增强了系统弹性和灵活性。更多系统架构细节，参考 [Milvus 系统架构](https://milvus.io/cn/docs/v2.0.0/architecture_overview.md)。
+Milvus 2.0 是一款云原生向量数据库，采用存储与计算分离的架构设计。该重构版本的所有组件均为无状态组件，极大地增强了系统弹性和灵活性。更多系统架构细节，参考 [Milvus 系统架构](https://milvus.io/cn/docs/architecture_overview.md)。
 
 Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/master/LICENSE) 协议发布，于 2019 年 10 月正式开源，是 [LF AI & Data 基金会](https://lfaidata.foundation/) 的毕业项目。
 
@@ -162,7 +162,8 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-175-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-179-orange"><br>
+<a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
 <a href="https://github.com/AllenYu1987"><img src="https://avatars.githubusercontent.com/u/12489985?v=4" width="30px" /></a>
@@ -175,6 +176,8 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/CrossRaynor"><img src="https://avatars.githubusercontent.com/u/3909908?v=4" width="30px" /></a>
 <a href="https://github.com/Cupchen"><img src="https://avatars.githubusercontent.com/u/34762375?v=4" width="30px" /></a>
 <a href="https://github.com/DanielHuang1983"><img src="https://avatars.githubusercontent.com/u/4417873?v=4" width="30px" /></a>
+<a href="https://github.com/Deep1Shikha"><img src="https://avatars.githubusercontent.com/u/47516502?v=4" width="30px" /></a>
+<a href="https://github.com/DiptoChakrabarty"><img src="https://avatars.githubusercontent.com/u/45638240?v=4" width="30px" /></a>
 <a href="https://github.com/DragonDriver"><img src="https://avatars.githubusercontent.com/u/31589260?v=4" width="30px" /></a>
 <a href="https://github.com/Emma-Song"><img src="https://avatars.githubusercontent.com/u/64460989?v=4" width="30px" /></a>
 <a href="https://github.com/Fierralin"><img src="https://avatars.githubusercontent.com/u/8857059?v=4" width="30px" /></a>
@@ -239,6 +242,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/dd-He"><img src="https://avatars.githubusercontent.com/u/24242249?v=4" width="30px" /></a>
 <a href="https://github.com/dddddai"><img src="https://avatars.githubusercontent.com/u/41563853?v=4" width="30px" /></a>
 <a href="https://github.com/del-zhenwu"><img src="https://avatars.githubusercontent.com/u/56623710?v=4" width="30px" /></a>
+<a href="https://github.com/donno2048"><img src="https://avatars.githubusercontent.com/u/61805754?v=4" width="30px" /></a>
 <a href="https://github.com/douglarek"><img src="https://avatars.githubusercontent.com/u/1488134?v=4" width="30px" /></a>
 <a href="https://github.com/dvzubarev"><img src="https://avatars.githubusercontent.com/u/14878830?v=4" width="30px" /></a>
 <a href="https://github.com/dyhyfu"><img src="https://avatars.githubusercontent.com/u/64584368?v=4" width="30px" /></a>
@@ -371,6 +375,9 @@ Milvus insight 提供了好用的图形化界面，帮助您更好的管理数�
 - [知乎](https://www.zhihu.com/org/zilliz-11)
 - [CSDN](http://zilliz.blog.csdn.net/)
 - [Bilibili](http://space.bilibili.com/478166626)
+- [Medium](https://medium.com/@milvusio)
+- [Twitter](https://twitter.com/milvusio)
+- [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
 - Zilliz 技术交流微信群
 
 <img src="https://assets.zilliz.com/wechat_2abac21f5a.png" alt="Wechat QR Code">

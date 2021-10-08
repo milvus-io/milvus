@@ -15,10 +15,12 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+// Msg is an abstract class that contains a method to get the time tick of this message
 type Msg interface {
 	TimeTick() Timestamp
 }
 
+// MsgStreamMsg is a wrapper of TsMsg in flowgraph
 type MsgStreamMsg struct {
 	tsMessages     []msgstream.TsMsg
 	timestampMin   Timestamp
@@ -27,6 +29,7 @@ type MsgStreamMsg struct {
 	endPositions   []*MsgPosition
 }
 
+// GenerateMsgStreamMsg is used to create a new MsgStreamMsg object
 func GenerateMsgStreamMsg(tsMessages []msgstream.TsMsg, timestampMin, timestampMax Timestamp, startPos []*MsgPosition, endPos []*MsgPosition) *MsgStreamMsg {
 	return &MsgStreamMsg{
 		tsMessages:     tsMessages,
@@ -37,30 +40,37 @@ func GenerateMsgStreamMsg(tsMessages []msgstream.TsMsg, timestampMin, timestampM
 	}
 }
 
+// TimeTick returns the timetick of this message
 func (msMsg *MsgStreamMsg) TimeTick() Timestamp {
 	return msMsg.timestampMax
 }
 
+// DownStreamNodeIdx returns 0
 func (msMsg *MsgStreamMsg) DownStreamNodeIdx() int {
 	return 0
 }
 
+// TsMessages returns the origin TsMsg object list
 func (msMsg *MsgStreamMsg) TsMessages() []msgstream.TsMsg {
 	return msMsg.tsMessages
 }
 
+// TimestampMin returns the minimal timestamp in the TsMsg list
 func (msMsg *MsgStreamMsg) TimestampMin() Timestamp {
 	return msMsg.timestampMin
 }
 
+// TimestampMax returns the maximal timestamp in the TsMsg list
 func (msMsg *MsgStreamMsg) TimestampMax() Timestamp {
 	return msMsg.timestampMax
 }
 
+// StartPositions returns the start position of TsMsgs
 func (msMsg *MsgStreamMsg) StartPositions() []*MsgPosition {
 	return msMsg.startPositions
 }
 
+// EndPositions returns the end position of TsMsgs
 func (msMsg *MsgStreamMsg) EndPositions() []*MsgPosition {
 	return msMsg.endPositions
 }

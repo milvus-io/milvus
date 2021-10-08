@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// TimeRecorder provides methods to record time duration
 type TimeRecorder struct {
 	header string
 	start  time.Time
@@ -33,6 +34,7 @@ func NewTimeRecorder(header string) *TimeRecorder {
 	}
 }
 
+// RecordSpan return the duration from last record
 func (tr *TimeRecorder) RecordSpan() time.Duration {
 	curr := time.Now()
 	span := curr.Sub(tr.last)
@@ -40,6 +42,7 @@ func (tr *TimeRecorder) RecordSpan() time.Duration {
 	return span
 }
 
+// ElapseSpan return the duration from the beginning
 func (tr *TimeRecorder) ElapseSpan() time.Duration {
 	curr := time.Now()
 	span := curr.Sub(tr.start)

@@ -86,6 +86,9 @@ type Allocation struct {
 	ExpireTime Timestamp
 }
 
+// make sure SegmentManager implements Manager
+var _ Manager = (*SegmentManager)(nil)
+
 // SegmentManager handles segment related logic
 type SegmentManager struct {
 	meta                *meta

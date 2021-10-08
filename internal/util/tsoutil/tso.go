@@ -23,6 +23,7 @@ const (
 	logicalBitsMask = (1 << logicalBits) - 1
 )
 
+// ComposeTS returns a timestamp composed of physical part and logical part
 func ComposeTS(physical, logical int64) uint64 {
 	return uint64((physical << logicalBits) + logical)
 }
@@ -50,6 +51,7 @@ func Mod24H(ts uint64) uint64 {
 	return (physical << logicalBits) | logical
 }
 
+// NewTSOKVBase returns a etcdkv.EtcdKV object
 func NewTSOKVBase(etcdEndpoints []string, tsoRoot, subPath string) (*etcdkv.EtcdKV, error) {
 	return etcdkv.NewEtcdKV(etcdEndpoints, path.Join(tsoRoot, subPath))
 }

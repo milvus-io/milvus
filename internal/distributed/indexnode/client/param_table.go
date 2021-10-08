@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -29,9 +30,11 @@ type ParamTable struct {
 	ClientMaxRecvSize int
 }
 
+// Params is an instance of ParamTable.
 var Params ParamTable
 var once sync.Once
 
+// Init is used to initialize configuration items.
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()

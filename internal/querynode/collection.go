@@ -61,6 +61,7 @@ func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema
 }
 
+// addPartitionID would add a partition id to partition id list of collection
 func (c *Collection) addPartitionID(partitionID UniqueID) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
@@ -70,6 +71,7 @@ func (c *Collection) addPartitionID(partitionID UniqueID) {
 	log.Debug("queryNode collection info after add a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
+// removePartitionID remove the partition id from partition id list of collection
 func (c *Collection) removePartitionID(partitionID UniqueID) {
 	tmpIDs := make([]UniqueID, 0)
 	for _, id := range c.partitionIDs {
@@ -80,6 +82,7 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 	c.partitionIDs = tmpIDs
 }
 
+// addVChannels add virtual channels to collection
 func (c *Collection) addVChannels(channels []Channel) {
 OUTER:
 	for _, dstChan := range channels {
@@ -100,10 +103,12 @@ OUTER:
 	}
 }
 
+// getVChannels get virtual channels of collection
 func (c *Collection) getVChannels() []Channel {
 	return c.vChannels
 }
 
+// addPChannels add physical channels to physical channels of collection
 func (c *Collection) addPChannels(channels []Channel) {
 OUTER:
 	for _, dstChan := range channels {
@@ -124,22 +129,26 @@ OUTER:
 	}
 }
 
+// getPChannels get physical channels of collection
 func (c *Collection) getPChannels() []Channel {
 	return c.pChannels
 }
 
+// setReleaseTime records when collection is released
 func (c *Collection) setReleaseTime(t Timestamp) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
 	c.releaseTime = t
 }
 
+// getReleaseTime gets the time when collection is released
 func (c *Collection) getReleaseTime() Timestamp {
 	c.releaseMu.RLock()
 	defer c.releaseMu.RUnlock()
 	return c.releaseTime
 }
 
+// addReleasedPartition records the partition to indicate that this partition has been released
 func (c *Collection) addReleasedPartition(partitionID UniqueID) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
@@ -156,6 +165,7 @@ func (c *Collection) addReleasedPartition(partitionID UniqueID) {
 	log.Debug("queryNode collection info after release a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
+// deleteReleasedPartition remove the released partition record from collection
 func (c *Collection) deleteReleasedPartition(partitionID UniqueID) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
@@ -165,6 +175,7 @@ func (c *Collection) deleteReleasedPartition(partitionID UniqueID) {
 	log.Debug("queryNode collection info after reload a released partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
+// checkReleasedPartitions returns error if any partition has been released
 func (c *Collection) checkReleasedPartitions(partitionIDs []UniqueID) error {
 	c.releaseMu.RLock()
 	defer c.releaseMu.RUnlock()
@@ -179,14 +190,17 @@ func (c *Collection) checkReleasedPartitions(partitionIDs []UniqueID) error {
 	return nil
 }
 
+// setLoadType set the loading type of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) setLoadType(l loadType) {
 	c.loadType = l
 }
 
+// getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) getLoadType() loadType {
 	return c.loadType
 }
 
+// newCollection returns a new Collection
 func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
 	/*
 		CCollection
@@ -213,6 +227,7 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	return newCollection
 }
 
+// deleteCollection delete collection and free the collection memory
 func deleteCollection(collection *Collection) {
 	/*
 		void

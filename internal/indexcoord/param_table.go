@@ -75,6 +75,7 @@ func (pt *ParamTable) InitOnce() {
 	})
 }
 
+// initEtcdEndpoints initializes the etcd address of configuration items.
 func (pt *ParamTable) initEtcdEndpoints() {
 	endpoints, err := pt.Load("_EtcdEndpoints")
 	if err != nil {
@@ -83,6 +84,7 @@ func (pt *ParamTable) initEtcdEndpoints() {
 	pt.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
+// initMetaRootPath initializes the root path of etcd.
 func (pt *ParamTable) initMetaRootPath() {
 	rootPath, err := pt.Load("etcd.rootPath")
 	if err != nil {
@@ -107,6 +109,7 @@ func (pt *ParamTable) initKvRootPath() {
 	pt.KvRootPath = rootPath + "/" + subPath
 }
 
+// initMinIOAddress initializes init the minio address of configuration items.
 func (pt *ParamTable) initMinIOAddress() {
 	ret, err := pt.Load("_MinioAddress")
 	if err != nil {
@@ -115,6 +118,7 @@ func (pt *ParamTable) initMinIOAddress() {
 	pt.MinIOAddress = ret
 }
 
+// initMinIOAccessKeyID initializes the minio access key of configuration items.
 func (pt *ParamTable) initMinIOAccessKeyID() {
 	ret, err := pt.Load("minio.accessKeyID")
 	if err != nil {
@@ -123,6 +127,7 @@ func (pt *ParamTable) initMinIOAccessKeyID() {
 	pt.MinIOAccessKeyID = ret
 }
 
+// initMinIOSecretAccessKey initializes the minio secret access key.
 func (pt *ParamTable) initMinIOSecretAccessKey() {
 	ret, err := pt.Load("minio.secretAccessKey")
 	if err != nil {
@@ -131,6 +136,7 @@ func (pt *ParamTable) initMinIOSecretAccessKey() {
 	pt.MinIOSecretAccessKey = ret
 }
 
+// initMinIOUseSSL initializes the minio use SSL of configuration items.
 func (pt *ParamTable) initMinIOUseSSL() {
 	ret, err := pt.Load("minio.useSSL")
 	if err != nil {
@@ -142,6 +148,7 @@ func (pt *ParamTable) initMinIOUseSSL() {
 	}
 }
 
+// initMinioBucketName initializes the minio bucket name of configuration items.
 func (pt *ParamTable) initMinioBucketName() {
 	bucketName, err := pt.Load("minio.bucketName")
 	if err != nil {
@@ -150,6 +157,7 @@ func (pt *ParamTable) initMinioBucketName() {
 	pt.MinioBucketName = bucketName
 }
 
+// initIndexRootPath initializes the root path of index files.
 func (pt *ParamTable) initIndexRootPath() {
 	rootPath, err := pt.Load("minio.rootPath")
 	if err != nil {
