@@ -35,6 +35,7 @@ import (
 	oplog "github.com/opentracing/opentracing-go/log"
 )
 
+// TaskQueue is used to cache triggerTasks
 type TaskQueue struct {
 	tasks *list.List
 
