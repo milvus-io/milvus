@@ -85,6 +85,7 @@ func (bt *BaseTask) Notify(err error) {
 	bt.done <- err
 }
 
+// IndexBuildTask is used to record the information of the index tasks.
 type IndexBuildTask struct {
 	BaseTask
 	index     Index
@@ -95,22 +96,27 @@ type IndexBuildTask struct {
 	nodeID    UniqueID
 }
 
+// Ctx is the context of index tasks.
 func (it *IndexBuildTask) Ctx() context.Context {
 	return it.ctx
 }
 
+// ID returns the id of index task.
 func (it *IndexBuildTask) ID() UniqueID {
 	return it.id
 }
 
+// SetID sets the id for index task.
 func (it *IndexBuildTask) SetID(ID UniqueID) {
 	it.BaseTask.setID(ID)
 }
 
+// Name is the name of task to build index.
 func (bt *BaseTask) Name() string {
 	return IndexBuildTaskName
 }
 
+// OnEnqueue enqueues indexing tasks.
 func (it *IndexBuildTask) OnEnqueue() error {
 	it.SetID(it.req.IndexBuildID)
 	log.Debug("IndexNode IndexBuilderTask Enqueue", zap.Int64("TaskID", it.ID()))
