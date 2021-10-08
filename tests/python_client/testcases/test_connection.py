@@ -595,8 +595,10 @@ class TestConnectionOperation(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_disconnect_after_connect(self, host, port):
         """
-        target: disconnect test connect and check result
-        method: disconnect test connect
+        target: disconnect with customized alias and check results
+        method: 1. connect with customized alias
+                2. disconnect with the alias
+                3. list connections and get connection address
         expected: the connection was successfully terminated
         """
         test_alias_name = "test_alias_name"
