@@ -30,7 +30,7 @@ func TestPlan_Plan(t *testing.T) {
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
@@ -81,8 +81,7 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
-
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
 	assert.NotNil(t, plan)

@@ -12,6 +12,7 @@
 #include "exceptions/EasyAssert.h"
 #include "query/SubSearchResult.h"
 #include "segcore/Reduce.h"
+#include <cmath>
 
 namespace milvus::query {
 
@@ -72,6 +73,16 @@ SubSearchResult::merge(const SubSearchResult& left, const SubSearchResult& right
     auto left_copy = left;
     left_copy.merge(right);
     return left_copy;
+}
+
+void
+SubSearchResult::round_values() {
+    if (round_decimal_ == -1)
+        return;
+    const float multiplier = pow(10.0, round_decimal_);
+    for (auto it = this->values_.begin(); it != this->values_.end(); it++) {
+        *it = round(*it * multiplier) / multiplier;
+    }
 }
 
 }  // namespace milvus::query
