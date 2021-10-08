@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/logutil"
+	"github.com/milvus-io/milvus/internal/types"
 
 	"go.uber.org/zap"
 
@@ -45,7 +46,7 @@ type Server struct {
 	cancel context.CancelFunc
 
 	wg        sync.WaitGroup
-	dataCoord *datacoord.Server
+	dataCoord types.DataCoord
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
