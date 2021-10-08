@@ -291,9 +291,6 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			log.Debug(".. Buffer not empty, flushing ..")
 			finishCh := make(chan segmentFlushUnit, 1)
 
-			// Since buffer is not empty, so there must be data for key currentSegID
-			bd, _ := ibNode.insertBuffer.Load(currentSegID)
-
 			ibNode.flushMap.Store(currentSegID, bd.(*BufferData).buffer)
 			clearFn := func() {
 				finishCh <- segmentFlushUnit{field2Path: nil}
