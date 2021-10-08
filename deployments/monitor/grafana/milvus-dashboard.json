@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1633599211615,
+  "iteration": 1633659667791,
   "links": [],
   "panels": [
     {
@@ -2738,7 +2738,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total RootCoord Describe segments operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5843,5 +5843,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 145
+  "version": 146
 }
