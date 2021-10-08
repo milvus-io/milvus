@@ -43,9 +43,9 @@ fi
 if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
   TMP_DIR="$(mktemp -d)"
   if [[ "${MILVUS_PR_CI}" == "true" ]]; then
-    # pr ci only use milvus-helm version: 2.1.22
+    # pr ci only use milvus-helm version: 2.2.0
     git clone  -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
-    cd "${TMP_DIR}" && git checkout -b milvus-2.1.22 milvus-2.1.22 && cd -
+    cd "${TMP_DIR}" && git checkout -b milvus-2.2.0 milvus-2.2.0 && cd -
   else
     git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
   fi
