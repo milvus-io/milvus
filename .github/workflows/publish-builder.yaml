@@ -1,0 +1,86 @@
+name: Publish Builder
+# TODO: do not trigger action for some document file update
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  push:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'build/docker/builder/**'
+      - '.github/workflows/publish-builder.yaml'
+      - '!**.md'
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'build/docker/builder/**'
+      - '.github/workflows/publish-builder.yaml'
+      - '!**.md'
+
+jobs:
+  publish-builder:
+    name: AMD64 ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu18.04, centos7]
+    env:
+      OS_NAME: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Get version from system time after release step
+        id: extracter
+        run: echo "::set-output name=version::$(date +%Y%m%d)"
+      - name: Docker Pull
+        shell: bash
+        run: |
+          docker-compose pull --ignore-pull-failures builder
+      - name: Docker Build
+        shell: bash
+        run: |
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build builder
+          export LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}
+          DATE_VERSION=latest docker-compose build builder
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose push builder
+          DATE_VERSION=latest docker-compose push builder
+      - name: Update Builder Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          sed -i "s#^DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
+          sed -i "s#^LATEST_DATE_VERSION=.*#LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .env
+          git commit -m "Update Builder image changes"
+      - name: Create Pull Request
+        id: cpr
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu18.04'
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          signoff: false
+          branch: update_builder_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update Builder image changes'
+          body: |
+            Update Builder image changes
+
+            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
+      - name: Check outputs
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu18.04'
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

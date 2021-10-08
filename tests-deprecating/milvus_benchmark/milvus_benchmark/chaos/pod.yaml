@@ -1,0 +1,11 @@
+chaos:
+  kind: PodChaos
+  spec:
+    action: pod-kill
+    selector:
+      namespaces:
+        - milvus
+      labelSelectors:
+        "app.kubernetes.io/name": etcd
+    scheduler:
+      cron: "@every 20s"

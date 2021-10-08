@@ -1,0 +1,70 @@
+name: Daily Release
+on:
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    #         ┌───────────── minute (0 - 59)
+    #         │ ┌───────────── hour (0 - 23)
+    #         │ │ ┌───────────── day of the month (1 - 31)
+    #         │ │ │ ┌───────────── month (1 - 12 or JAN-DEC)
+    #         │ │ │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
+    #         │ │ │ │ │
+    #         │ │ │ │ │
+    #         │ │ │ │ │
+    - cron:  '0 18 * * *'
+
+jobs:
+  nightly:
+    name: Run Daily Release
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REPO: "milvusdb"
+      DEV: "milvus-dev"
+      DAILY: "daily-build"
+      TAG_PREFIX: "master-"
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: '0'
+
+    - name: Get the latest of Milvus dev image tag
+      shell: bash
+      working-directory: scripts
+      run: echo "tag=$(./docker_image_find_tag.sh -n ${IMAGE_REPO}/${DEV} -t ${TAG_PREFIX}latest -f ${TAG_PREFIX} -F -L -q)" >> $GITHUB_ENV
+
+
+    - name: Pull latest milvus-dev image with tag prefix master-
+      run: |
+        docker pull "${IMAGE_REPO}/${DEV}:${{ env.tag }}"
+        docker tag "${IMAGE_REPO}/${DEV}:${{ env.tag }}" "${IMAGE_REPO}/${DAILY}:${{ env.tag }}"
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v1
+      with:
+        username: ${{ secrets.DOCKERHUB_USER }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Push Docker image
+      run: |
+        docker push "${IMAGE_REPO}/${DAILY}:${{ env.tag }}"
+
+    - name: Set release build
+      shell: bash
+      run: |
+        tag=${{ env.tag }}
+        IFS=- read branch date sha <<< "$tag"
+        echo "build=$date" >> $GITHUB_ENV
+        echo "sha=$(git rev-parse $sha)" >> $GITHUB_ENV
+
+    - name: Create a daily release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        body: "Image: ${{ env.IMAGE_REPO}}/${{ env.DAILY }}:${{ env.tag }}"
+        prerelease: true
+        tag_name: "v2.0.0-testing-${{ env.build }}"
+        release_name: "milvus-2.0.0-testing-${{ env.build }}"
+        commitish: "${{ env.sha }}"
+
+

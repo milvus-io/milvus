@@ -1,0 +1,166 @@
+# Copyright (C) 2019-2020 Zilliz. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License
+# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied. See the License for the specific language governing permissions and limitations under the License.
+
+# Related configuration of etcd, used to store Milvus metadata.
+etcd:
+  endpoints:
+    - localhost:2379
+  rootPath: by-dev
+  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
+  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
+  segmentBinlogSubPath: datacoord/binlog/segment  # Full Path = rootPath/metaSubPath/segmentBinlogSubPath
+  collectionBinlogSubPath: datacoord/binlog/collection # Full Path = rootPath/metaSubPath/collectionBinglogSubPath
+  flushStreamPosSubPath: datacoord/flushstream # Full path = rootPath/metaSubPath/flushStreamPosSubPath
+  statsStreamPosSubPath: datacoord/statsstream # Full path = rootPath/metaSubPath/statsStreamPosSubPath
+
+# Related configuration of minio, which is responsible for data persistence for Milvus.
+minio:
+  address: localhost
+  port: 9000
+  accessKeyID: minioadmin
+  secretAccessKey: minioadmin
+  useSSL: false
+  bucketName: "a-bucket"
+  rootPath: files
+
+pulsar:
+  address: localhost
+  port: 6650
+  maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes
+
+rocksmq:
+  path: /var/lib/milvus/rdb_data
+  retentionTimeInMinutes: 4320
+  retentionSizeInMB: 0
+
+rootCoord:
+  address: localhost
+  port: 53100
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+proxy:
+  port: 19530
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+queryCoord:
+  address: localhost
+  port: 19531
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+queryNode:
+  cacheSize: 32 # GB, default 32 GB, `cacheSize` is the memory used for caching data for faster query. The `cacheSize` must be less than system memory size.
+  gracefulTime: 1000 # ms, for search
+  port: 21123
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+indexCoord:
+  address: localhost
+  port: 31000
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+indexNode:
+  port: 21121
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+dataCoord:
+  address: localhost
+  port: 13333
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+dataNode:
+  port: 21124
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+# Configure whether to store the vector and the local path when querying/searching in Querynode.
+localStorage:
+  path: /var/lib/milvus/data/
+  enabled: true
+
+# Configures the system log output.
+log:
+  level: debug # info, warn, error, panic, fatal
+  file:
+    rootPath: "" # default to stdout, stderr
+    maxSize: 300 # MB
+    maxAge: 10 # day
+    maxBackups: 20
+  format: text # text/json
+
+msgChannel:
+  # channel name generation rule: ${namePrefix}-${ChannelIdx}
+  chanNamePrefix:
+    cluster:           "by-dev"
+    rootCoordTimeTick: "rootcoord-timetick"
+    rootCoordStatistics: "rootcoord-statistics"
+    rootCoordDml: "rootcoord-dml"
+    search: "search"
+    searchResult: "searchResult"
+    proxyTimeTick: "proxyTimeTick"
+    queryTimeTick: "queryTimeTick"
+    queryNodeStats: "query-node-stats"
+    # cmd for loadIndex, flush, etc...
+    cmd: "cmd"
+    dataCoordInsertChannel: "insert-channel-"
+    dataCoordStatistic: "datacoord-statistics-channel"
+    dataCoordTimeTick: "datacoord-timetick-channel"
+    dataCoordSegmentInfo: "segment-info-channel"
+
+  # sub name generation rule: ${subNamePrefix}-${NodeID}
+  subNamePrefix:
+    rootCoordSubNamePrefix: "rootCoord"
+    proxySubNamePrefix: "proxy"
+    queryNodeSubNamePrefix: "queryNode"
+    dataNodeSubNamePrefix: "dataNode"
+    dataCoordSubNamePrefix: "dataCoord"
+
+common:
+  defaultPartitionName: "_default"  # default partition name for a collection
+  defaultIndexName: "_default_idx"  # default index name

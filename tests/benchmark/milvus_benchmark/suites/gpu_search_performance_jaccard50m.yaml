@@ -1,0 +1,22 @@
+search_performance:
+  collections:
+    - 
+      server:
+        db_config.primary_path: /test/milvus/db_data_gpu/jaccard_50m_128_512_jaccard_ivf
+        cache_config.cpu_cache_capacity: 32
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+      collection_name: jaccard_50m_128_512_jaccard
+      run_count: 1
+      search_params:
+        nprobes: [8, 32]
+        top_ks: [1, 16, 64, 128, 256, 512, 1000]
+        nqs: [1, 10, 100, 200, 500, 1000]

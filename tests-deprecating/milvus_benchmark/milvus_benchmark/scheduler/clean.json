@@ -1,0 +1,11 @@
+[
+    {
+        "server": "poseidon",
+        "suite_params": [
+            {
+                "suite": "clean.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

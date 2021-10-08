@@ -1,0 +1,32 @@
+search_performance:
+  collections:
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10m_128_l2_ivf_flat_16384
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        wal_enable: true
+      collection_name: sift_10m_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10m_128_ip_ivf_flat_16384
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        wal_enable: true
+      collection_name: sift_10m_128_ip
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32

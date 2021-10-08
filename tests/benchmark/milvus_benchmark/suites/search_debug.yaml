@@ -1,0 +1,92 @@
+search_performance:
+  collections:
+#    -
+#      server:
+#        db_config.primary_path: /test/milvus/db_data_8/sift_1b_2048_128_l2_sq8
+#        cache_config.cpu_cache_capacity: 150
+#        engine_config.use_blas_threshold: 0
+#        engine_config.gpu_search_threshold: 200
+#        gpu_resource_config.enable: true
+#        gpu_resource_config.cache_capacity: 6
+#        gpu_resource_config.search_resources:
+#          - gpu0
+#          - gpu1
+#        gpu_resource_config.build_index_resources:
+#          - gpu0
+#          - gpu1
+#        wal_enable: true
+#      collection_name: sift_1b_2048_128_l2
+#      run_count: 2
+#      top_ks: [1, 10, 100, 1000]
+#      nqs: [1, 10, 100, 200, 500, 1000]
+#      search_params:
+#        -
+#          nprobe: 8
+#        -
+#          nprobe: 32
+#    -
+#      server:
+#        db_config.primary_path: /test/milvus/db_data_8/sift_1b_2048_128_l2_sq8
+#        cache_config.cpu_cache_capacity: 150
+#        engine_config.use_blas_threshold: 1100
+#        engine_config.gpu_search_threshold: 200
+#        gpu_resource_config.enable: true
+#        gpu_resource_config.cache_capacity: 6
+#        gpu_resource_config.search_resources:
+#          - gpu0
+#          - gpu1
+#        gpu_resource_config.build_index_resources:
+#          - gpu0
+#          - gpu1
+#        wal_enable: true
+#      collection_name: sift_1b_2048_128_l2
+#      run_count: 2
+#      top_ks: [1, 10, 100, 1000]
+#      nqs: [1, 10, 100, 200, 500, 1000]
+#      search_params:
+#        -
+#          nprobe: 8
+#        -
+#          nprobe: 32
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10m_128_l2_rhnsw_pq
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 200
+        gpu_resource_config.enable: false
+        wal_enable: true
+      collection_name: sift_10m_128_l2
+      run_count: 2
+      top_ks: [100]
+      nqs: [1, 10, 100, 200, 500, 1000]
+      search_params:
+        -
+          ef: 100
+        -
+          ef: 200
+        -
+          ef: 500
+        -
+          ef: 1000
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_011/sift_50m_128_l2_rhnsw_sq
+        cache_config.cpu_cache_capacity: 64GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 200
+        gpu_resource_config.enable: false
+        wal_enable: true
+      collection_name: sift_50m_128_l2
+      run_count: 2
+      top_ks: [100]
+      nqs: [1, 10, 100, 200, 500, 1000]
+      search_params:
+        -
+          ef: 100
+        -
+          ef: 200
+        -
+          ef: 500
+        -
+          ef: 1000

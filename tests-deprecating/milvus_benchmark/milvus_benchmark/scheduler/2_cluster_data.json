@@ -1,0 +1,41 @@
+[
+    {
+        "server": "idc-sh002",
+        "deploy_mode": "cluster",
+        "suite_params": [
+            {
+                "suite": "2_insert_search_sift10m_512.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    },
+    {
+        "deploy_mode": "cluster",
+        "suite_params": [
+            {
+                "suite": "2_cpu_ann_accuracy.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    },
+    {
+        "server": "idc-sh003",
+        "deploy_mode": "cluster",
+        "suite_params": [
+            {
+                "suite": "2_insert_search_sift10m_2048.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    },
+    {
+        "server": "idc-sh005",
+        "deploy_mode": "cluster",
+        "suite_params": [
+            {
+                "suite": "2_insert_search_sift10m_4096.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

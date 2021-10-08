@@ -1,0 +1,87 @@
+insert_performance:
+  collections:
+    - 
+      server:
+        db_config.primary_path: /test/milvus/db_data_gpu/deep_1b_1024_96_ip_ivf
+        cache_config.cpu_cache_capacity: 8
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+      collection_name: deep_1b_1024_96_ip
+      ni_per: 100000
+      build_index: false
+      # index_type: ivf_flat
+      # nlist: 16384
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_gpu/deep_1b_1024_96_ip_sq8
+        cache_config.cpu_cache_capacity: 8
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+      collection_name: deep_1b_1024_96_ip
+      ni_per: 100000
+      build_index: false
+      # index_type: ivf_sq8
+      # nlist: 16384
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_gpu/deep_1b_1024_96_ip_sq8h
+        cache_config.cpu_cache_capacity: 8
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+      collection_name: deep_1b_1024_96_ip
+      ni_per: 100000
+      build_index: false
+      # index_type: ivf_sq8h
+      # nlist: 16384
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_gpu/deep_1b_1024_96_ip_pq
+        cache_config.cpu_cache_capacity: 8
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+      collection_name: deep_1b_1024_96_ip
+      ni_per: 100000
+      build_index: false
+      # index_type: ivf_pq
+      # nlist: 16384
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_gpu/deep_1b_1024_96_ip_nsg
+        cache_config.cpu_cache_capacity: 8
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+      collection_name: deep_1b_1024_96_ip
+      ni_per: 100000
+      build_index: false
+      # index_type: nsg
+      # nlist: 16384

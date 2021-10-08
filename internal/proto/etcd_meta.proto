@@ -1,0 +1,63 @@
+syntax = "proto3";
+package milvus.proto.etcd;
+option go_package="github.com/milvus-io/milvus/internal/proto/etcdpb";
+
+import "common.proto";
+import "schema.proto";
+
+message TenantMeta {
+  int64 ID = 1;
+  int64 num_query_nodes = 2;
+  repeated string insert_channelIDs = 3;
+  string query_channelID = 4;
+}
+
+message ProxyMeta {
+  int64 ID = 1;
+  common.Address address = 2;
+  repeated string result_channelIDs = 3;
+}
+
+message IndexInfo {
+  string index_name = 1;
+  int64 indexID = 2;
+  repeated common.KeyValuePair index_params = 3;
+}
+
+message FieldIndexInfo{
+  int64 filedID = 1;
+  int64 indexID = 2;
+}
+
+message CollectionInfo {
+  int64 ID = 1;
+  schema.CollectionSchema schema = 2;
+  uint64 create_time = 3;
+  repeated int64 partitionIDs = 4;
+  repeated string partitionNames = 5;
+  repeated FieldIndexInfo field_indexes = 6;
+  repeated string virtual_channel_names = 7;
+  repeated string physical_channel_names = 8;
+  repeated uint64 partition_created_timestamps = 9;
+  int32 shards_num = 10;
+  repeated common.KeyDataPair start_positions = 11;
+}
+
+message SegmentIndexInfo {
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  int64 segmentID = 3;
+  int64 fieldID = 4;
+  int64 indexID = 5;
+  int64 buildID = 6;
+  bool enable_index = 7;
+}
+
+message CollectionMeta {
+  int64 ID=1;
+  schema.CollectionSchema schema=2;
+  uint64 create_time=3;
+  repeated int64 segmentIDs=4;
+  repeated string partition_tags=5;
+  repeated int64 partitionIDs=6;
+}

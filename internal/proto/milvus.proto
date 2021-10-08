@@ -1,0 +1,652 @@
+syntax = "proto3";
+package milvus.proto.milvus;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/milvuspb";
+
+import "common.proto";
+import "schema.proto";
+
+service MilvusService {
+  rpc CreateCollection(CreateCollectionRequest) returns (common.Status) {}
+  rpc DropCollection(DropCollectionRequest) returns (common.Status) {}
+  rpc HasCollection(HasCollectionRequest) returns (BoolResponse) {}
+  rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
+  rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+  rpc DescribeCollection(DescribeCollectionRequest) returns (DescribeCollectionResponse) {}
+  rpc GetCollectionStatistics(GetCollectionStatisticsRequest) returns (GetCollectionStatisticsResponse) {}
+  rpc ShowCollections(ShowCollectionsRequest) returns (ShowCollectionsResponse) {}
+
+  rpc CreatePartition(CreatePartitionRequest) returns (common.Status) {}
+  rpc DropPartition(DropPartitionRequest) returns (common.Status) {}
+  rpc HasPartition(HasPartitionRequest) returns (BoolResponse) {}
+  rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {}
+  rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
+  rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
+  rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {}
+
+  rpc CreateAlias(CreateAliasRequest) returns (common.Status) {}
+  rpc DropAlias(DropAliasRequest) returns (common.Status) {}
+  rpc AlterAlias(AlterAliasRequest) returns (common.Status) {}
+
+  rpc CreateIndex(CreateIndexRequest) returns (common.Status) {}
+  rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
+  rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
+  rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
+  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+
+  rpc Insert(InsertRequest) returns (MutationResult) {}
+  rpc Delete(DeleteRequest) returns (MutationResult) {}
+  rpc Search(SearchRequest) returns (SearchResults) {}
+  rpc Flush(FlushRequest) returns (FlushResponse) {}
+  rpc Query(QueryRequest) returns (QueryResults) {}
+  rpc CalcDistance(CalcDistanceRequest) returns (CalcDistanceResults) {}
+
+  rpc GetPersistentSegmentInfo(GetPersistentSegmentInfoRequest) returns (GetPersistentSegmentInfoResponse) {}
+  rpc GetQuerySegmentInfo(GetQuerySegmentInfoRequest) returns (GetQuerySegmentInfoResponse) {}
+
+  rpc Dummy(DummyRequest) returns (DummyResponse) {}
+
+  // TODO: remove
+  rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
+}
+
+message CreateAliasRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string alias = 4;
+}
+
+message DropAliasRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string alias = 3;
+}
+
+message AlterAliasRequest{
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string alias = 4;
+}
+
+/**
+* Create collection in milvus
+*/
+message CreateCollectionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3; 
+  // The serialized `schema.CollectionSchema`(Required)
+  bytes schema = 4; 
+  // Once set, no modification is allowed (Optional)
+  // https://github.com/milvus-io/milvus/issues/6690
+  int32 shards_num = 5;
+}
+
+/**
+* Drop collection in milvus, also will drop data in collection. 
+*/
+message DropCollectionRequest {
+  // Not useful for now
+  common.MsgBase base = 1; 
+  // Not useful for now
+  string db_name = 2;
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3;
+}
+
+/**
+* Check collection exist in milvus or not.
+*/
+message HasCollectionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name you want to check.
+  string collection_name = 3; 
+  // Not useful for now
+  uint64 time_stamp = 4;
+}
+
+
+message BoolResponse {
+  common.Status status = 1;
+  bool value = 2;
+}
+
+message StringResponse {
+  common.Status status = 1;
+  string value = 2;
+}
+
+/**
+* Get collection meta datas like: schema, collectionID, shards number ...
+*/
+message DescribeCollectionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name you want to describe
+  string collection_name = 3;
+  // Not useful for now
+  int64 collectionID = 4;
+  // Not useful for now
+  uint64 time_stamp = 5;
+}
+
+/**
+* DescribeCollection Response
+*/
+message DescribeCollectionResponse {
+  // Contain error_code and reason
+  common.Status status = 1;
+  // The schema param when you created collection.
+  schema.CollectionSchema schema = 2;
+  // The collection id
+  int64 collectionID = 3;
+  // System design related, users should not perceive
+  repeated string virtual_channel_names = 4;
+  // System design related, users should not perceive
+  repeated string physical_channel_names = 5;
+  // Hybrid timestamp in milvus
+  uint64 created_timestamp = 6;
+  // The utc timestamp calculated by created_timestamp
+  uint64 created_utc_timestamp = 7;
+  // The shards number you set.
+  int32 shards_num = 8;
+  // The aliases of this collection
+  repeated string aliases = 9;
+  // The message ID/posititon when collection is created
+  repeated common.KeyDataPair start_positions = 10;
+}
+
+/**
+* Load collection data into query nodes, then you can do vector search on this collection.
+*/
+message LoadCollectionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name you want to load
+  string collection_name = 3;
+}
+
+/**
+* Release collection data from query nodes, then you can't do vector search on this collection.
+*/
+message ReleaseCollectionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name you want to release
+  string collection_name = 3;
+}
+
+/**
+* Get collection statistics like row_count.
+*/
+message GetCollectionStatisticsRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name you want get statistics
+  string collection_name = 3;
+}
+
+/**
+* Will return collection statistics in stats field like [{key:"row_count",value:"1"}]
+*/
+message GetCollectionStatisticsResponse {
+  // Contain error_code and reason
+  common.Status status = 1;
+  // Collection statistics data
+  repeated common.KeyValuePair stats = 2;
+}
+
+/*
+* This is for ShowCollectionsRequest type field.
+*/
+enum ShowType {
+  // Will return all colloections 
+  All = 0;
+  // Will return loaded collections with their inMemory_percentages
+  InMemory = 1;
+}
+
+/*
+* List collections 
+*/
+message ShowCollectionsRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // Not useful for now
+  uint64 time_stamp = 3;
+  // Decide return Loaded collections or All collections(Optional)
+  ShowType type = 4;
+  // When type is InMemory, will return these collection's inMemory_percentages.(Optional)
+  repeated string collection_names = 5; 
+}
+
+/*
+* Return basic collection infos.
+*/
+message ShowCollectionsResponse {
+  // Contain error_code and reason
+  common.Status status = 1;
+  // Collection name array
+  repeated string collection_names = 2;
+  // Collection Id array
+  repeated int64 collection_ids = 3;
+  // Hybrid timestamps in milvus
+  repeated uint64 created_timestamps = 4;
+  // The utc timestamp calculated by created_timestamp
+  repeated uint64 created_utc_timestamps = 5;
+  // Load percentage on querynode when type is InMemory
+  repeated int64 inMemory_percentages = 6; 
+}
+
+/*
+* Create partition in created collection.
+*/
+message CreatePartitionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition name you want to create.
+  string partition_name = 4;
+}
+
+/*
+* Drop partition in created collection.
+*/
+message DropPartitionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition name you want to drop
+  string partition_name = 4; 
+}
+
+/*
+* Check if partition exist in collection or not.
+*/
+message HasPartitionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition name you want to check
+  string partition_name = 4;
+}
+
+/*
+* Load specific partitions data of one collection into query nodes
+* Then you can get these data as result when you do vector search on this collection.
+*/
+message LoadPartitionsRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition names you want to load
+  repeated string partition_names = 4;
+}
+
+/*
+* Release specific partitions data of one collection from query nodes.
+* Then you can not get these data as result when you do vector search on this collection.
+*/
+message ReleasePartitionsRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name in milvus
+  string collection_name = 3;
+  // The partition names you want to release
+  repeated string partition_names = 4;
+}
+
+message GetPartitionStatisticsRequest {
+  common.MsgBase base = 1; // must
+  string db_name = 2;
+  string collection_name = 3; // must
+  string partition_name = 4; // must
+}
+
+message GetPartitionStatisticsResponse {
+  common.Status status = 1;
+  repeated common.KeyValuePair stats = 2;
+}
+
+message ShowPartitionsRequest {
+  common.MsgBase base = 1; // must
+  string db_name = 2;
+  string collection_name = 3; // must
+  int64 collectionID = 4;
+  repeated string partition_names = 5; // show partition in querynode, showType = InMemory
+  ShowType type = 6;
+}
+
+message ShowPartitionsResponse {
+  common.Status status = 1;
+  repeated string partition_names = 2;
+  repeated int64 partitionIDs = 3;
+  repeated uint64 created_timestamps = 4; // hybrid timestamps
+  repeated uint64 created_utc_timestamps = 5; // physical timestamps
+  repeated int64 inMemory_percentages = 6; // load percentage on querynode
+}
+
+message DescribeSegmentRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 segmentID = 3;
+}
+
+message DescribeSegmentResponse {
+  common.Status status = 1;
+  int64 indexID = 2;
+  int64 buildID = 3;
+  bool enable_index = 4;
+}
+
+message ShowSegmentsRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+}
+
+message ShowSegmentsResponse {
+  common.Status status = 1;
+  repeated int64 segmentIDs = 2;
+}
+
+message CreateIndexRequest {
+  common.MsgBase base = 1; // must
+  string db_name = 2;
+  string collection_name = 3; // must
+  string field_name = 4; // must
+  repeated common.KeyValuePair extra_params = 5; // must
+}
+
+message DescribeIndexRequest {
+  common.MsgBase base = 1; // must
+  string db_name = 2;
+  string collection_name = 3; // must
+  string field_name = 4;
+  string index_name = 5; // No need to set up for now @2021.06.30
+}
+
+message IndexDescription {
+  string index_name = 1;
+  int64 indexID = 2;
+  repeated common.KeyValuePair params = 3;
+  string field_name = 4;
+}
+
+message DescribeIndexResponse {
+  common.Status status = 1;
+  repeated IndexDescription index_descriptions = 2;
+}
+
+message GetIndexBuildProgressRequest {
+  common.MsgBase base = 1; // must
+  string db_name = 2 ;
+  string collection_name = 3; // must
+  string field_name = 4;
+  string index_name = 5; // must
+}
+
+message GetIndexBuildProgressResponse {
+  common.Status status = 1;
+  int64 indexed_rows = 2;
+  int64 total_rows = 3;
+}
+
+message GetIndexStateRequest {
+  common.MsgBase base = 1; // must
+  string db_name = 2 ;
+  string collection_name = 3; // must
+  string field_name = 4;
+  string index_name = 5; // No need to set up for now @2021.06.30
+}
+
+message GetIndexStateResponse {
+  common.Status status = 1;
+  common.IndexState state = 2;
+  string fail_reason = 3;
+}
+
+message DropIndexRequest {
+  common.MsgBase base = 1; // must
+  string db_name = 2;
+  string collection_name = 3; // must
+  string field_name = 4;
+  string index_name = 5; // No need to set up for now @2021.06.30
+}
+
+message InsertRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  repeated schema.FieldData fields_data = 5;
+  repeated uint32 hash_keys = 6;
+  uint32 num_rows = 7;
+}
+
+message MutationResult {
+  common.Status status = 1;
+  schema.IDs IDs = 2; // required for insert, delete
+  repeated uint32 succ_index = 3; // error indexes indicate
+  repeated uint32 err_index = 4; // error indexes indicate
+  bool acknowledged = 5;
+  int64 insert_cnt = 6;
+  int64 delete_cnt = 7;
+  int64 upsert_cnt = 8;
+  uint64 timestamp = 9;
+}
+
+message DeleteRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  string expr = 5;
+}
+
+enum PlaceholderType {
+  None = 0;
+  BinaryVector = 100;
+  FloatVector = 101;
+}
+
+message PlaceholderValue {
+  string tag = 1;
+  PlaceholderType type = 2;
+  // values is a 2d-array, every array contains a vector
+  repeated bytes values = 3;
+}
+
+message PlaceholderGroup {
+  repeated PlaceholderValue placeholders = 1;
+}
+
+message SearchRequest {
+  common.MsgBase base = 1; // must
+  string db_name = 2;
+  string collection_name = 3; // must
+  repeated string partition_names = 4; // must
+  string dsl = 5; // must
+  // serialized `PlaceholderGroup`
+  bytes placeholder_group = 6; // must
+  common.DslType dsl_type = 7; // must
+  repeated string output_fields = 8;
+  repeated common.KeyValuePair search_params = 9; // must
+  uint64 travel_timestamp = 10;
+  uint64 guarantee_timestamp = 11; // guarantee_timestamp
+}
+
+message Hits {
+  repeated int64 IDs = 1;
+  repeated bytes row_data = 2;
+  repeated float scores = 3;
+}
+
+message SearchResults {
+  common.Status status = 1;
+  schema.SearchResultData results = 2;
+}
+
+message FlushRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  repeated string collection_names = 3;
+}
+
+message FlushResponse{
+  common.Status status = 1;
+  string db_name = 2;
+  map<string, schema.LongArray> coll_segIDs = 3;
+}
+
+message QueryRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string expr = 4;
+  repeated string output_fields = 5;
+  repeated string partition_names = 6;
+  uint64 travel_timestamp = 7;
+  uint64 guarantee_timestamp = 8; // guarantee_timestamp
+}
+
+message QueryResults {
+  common.Status status = 1;
+  repeated schema.FieldData fields_data = 2;
+}
+
+message VectorIDs {
+  string collection_name = 1;
+  string field_name = 2;
+  schema.IDs id_array = 3;
+  repeated string partition_names = 4;
+}
+
+message VectorsArray {
+  oneof array {
+    VectorIDs id_array = 1; // vector ids
+    schema.VectorField data_array = 2; // vectors data
+  } 
+}
+
+message CalcDistanceRequest {
+  common.MsgBase base = 1;
+  VectorsArray op_left = 2; // vectors on the left of operator
+  VectorsArray op_right = 3; // vectors on the right of operator
+  repeated common.KeyValuePair params = 4; // "metric":"L2"/"IP"/"HAMMIN"/"TANIMOTO"
+}
+
+message CalcDistanceResults {
+  common.Status status = 1;
+  // num(op_left)*num(op_right) distance values, "HAMMIN" return integer distance
+  oneof array {
+    	schema.IntArray int_dist = 2;
+	schema.FloatArray float_dist = 3;
+  }
+}
+
+message PersistentSegmentInfo {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  int64 num_rows = 4;
+  common.SegmentState state = 5;
+}
+
+message GetPersistentSegmentInfoRequest {
+  common.MsgBase base = 1; // must
+  string dbName = 2;
+  string collectionName = 3; // must
+}
+
+message GetPersistentSegmentInfoResponse {
+  common.Status status = 1;
+  repeated PersistentSegmentInfo infos = 2;
+}
+
+message QuerySegmentInfo {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  int64 mem_size = 4;
+  int64 num_rows = 5;
+  string index_name = 6;
+  int64 indexID = 7;
+}
+
+message GetQuerySegmentInfoRequest {
+  common.MsgBase base = 1; // must
+  string dbName = 2;
+  string collectionName = 3; // must
+}
+
+message GetQuerySegmentInfoResponse {
+  common.Status status = 1;
+  repeated QuerySegmentInfo infos = 2;
+}
+
+message DummyRequest {
+  string request_type = 1;
+}
+
+message DummyResponse {
+  string response = 1;
+}
+
+message RegisterLinkRequest {
+}
+
+message RegisterLinkResponse {
+  common.Address address = 1;
+  common.Status status = 2;
+}
+
+message GetMetricsRequest {
+  common.MsgBase base = 1;
+  string request = 2; // request is of jsonic format
+}
+
+message GetMetricsResponse {
+  common.Status status = 1;
+  string response = 2;  // response is of jsonic format
+  string component_name = 3; // metrics from which component
+}
+
+service ProxyService {
+  rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
+}

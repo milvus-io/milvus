@@ -1,0 +1,11 @@
+[
+    {
+        "server": "idc-sh002",
+        "suite_params": [
+            {
+                "suite": "2_locust_search.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

@@ -1,0 +1,16 @@
+segcore:
+  chunk_rows: 32768
+  small_index:
+    - metric_type: ["L2", "IP"]
+      index_type: "IVF"
+      build_params:
+        nlist: 100
+      search_params:
+        nprobe: 4
+    # binary is not ready yet
+    - metric_type: ["jaccard"]
+      index_type: "IVF"
+      build_params:
+        nlist: 100
+      search_params:
+        nprobe: 4

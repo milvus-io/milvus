@@ -1,0 +1,50 @@
+ann_accuracy:
+  collections:
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/cluster/sift_128_euclidean
+        cache_config.cpu_cache_capacity: 16GB
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4GB
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+        cluster: true
+        readonly:
+          replicas: 2
+        external_mysql: true
+      source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
+      collection_name: sift_128_euclidean
+      index_types: ['ivf_flat', 'ivf_sq8']
+      index_params:
+        nlist: [1024, 16384]
+      top_ks: [10]
+      nqs: [10000]
+      search_params:
+        nprobe: [1, 2, 4, 8, 1024]
+
+        #     -
+        #       milvus:
+        #         cache_config.cpu_cache_capacity: 16GB
+        #         engine_config.use_blas_threshold: 1100
+        #         engine_config.gpu_search_threshold: 1
+        #         gpu_resource_config.enable: false
+        #         gpu_resource_config.cache_capacity: 4GB
+        #         gpu_resource_config.search_resources:
+        #           - gpu0
+        #         gpu_resource_config.build_index_resources:
+        #           - gpu0
+        #         cluster: false
+        #         external_mysql: false
+        #       source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
+        #       collection_name: sift_128_euclidean
+        #       index_types: ['ivf_flat', 'ivf_sq8']
+        #       index_params:
+        #         nlist: [1024, 16384]
+        #       top_ks: [10]
+        #       nqs: [10000]
+        #       search_params:
+        #         nprobe: [1, 2, 4, 8, 1024]

@@ -1,0 +1,130 @@
+syntax = "proto3";
+package milvus.proto.rootcoord;
+
+option go_package="github.com/milvus-io/milvus/internal/proto/rootcoordpb";
+
+import "common.proto";
+import "milvus.proto";
+import "internal.proto";
+import "proxy.proto";
+import "data_coord.proto";
+
+service RootCoord {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+    /**
+     * @brief This method is used to create collection
+     *
+     * @param CreateCollectionRequest, use to provide collection information to be created.
+     *
+     * @return Status
+     */
+    rpc CreateCollection(milvus.CreateCollectionRequest) returns (common.Status){}
+
+    /**
+     * @brief This method is used to delete collection.
+     *
+     * @param DropCollectionRequest, collection name is going to be deleted.
+     *
+     * @return Status
+     */
+    rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to test collection existence.
+     *
+     * @param HasCollectionRequest, collection name is going to be tested.
+     *
+     * @return BoolResponse
+     */
+    rpc HasCollection(milvus.HasCollectionRequest) returns (milvus.BoolResponse) {}
+
+    /**
+     * @brief This method is used to get collection schema.
+     *
+     * @param DescribeCollectionRequest, target collection name.
+     *
+     * @return CollectionSchema
+     */
+    rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
+
+    rpc CreateAlias(milvus.CreateAliasRequest) returns (common.Status) {}
+    rpc DropAlias(milvus.DropAliasRequest) returns (common.Status) {}
+    rpc AlterAlias(milvus.AlterAliasRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to list all collections.
+     *
+     * @return StringListResponse, collection name list
+     */
+    rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
+
+    /**
+     * @brief This method is used to create partition
+     *
+     * @return Status
+     */
+    rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to drop partition
+     *
+     * @return Status
+     */
+    rpc DropPartition(milvus.DropPartitionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to test partition existence.
+     *
+     * @return BoolResponse
+     */
+    rpc HasPartition(milvus.HasPartitionRequest) returns (milvus.BoolResponse) {}
+
+    /**
+     * @brief This method is used to show partition information
+     *
+     * @param ShowPartitionRequest, target collection name.
+     *
+     * @return StringListResponse
+     */
+    rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
+
+    rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
+    rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}
+
+    rpc CreateIndex(milvus.CreateIndexRequest) returns (common.Status) {}
+    rpc DescribeIndex(milvus.DescribeIndexRequest) returns (milvus.DescribeIndexResponse) {}
+    rpc DropIndex(milvus.DropIndexRequest) returns (common.Status) {}
+
+    rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
+    rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
+    rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
+    rpc ReleaseDQLMessageStream(proxy.ReleaseDQLMessageStreamRequest) returns (common.Status) {}
+    rpc SegmentFlushCompleted(data.SegmentFlushCompletedMsg) returns (common.Status) {}
+
+    // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+    rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+}
+
+message AllocTimestampRequest {
+  common.MsgBase base = 1;
+  uint32 count = 3;
+}
+
+message AllocTimestampResponse {
+    common.Status status = 1;
+    uint64 timestamp = 2;
+    uint32 count = 3;
+}
+
+message AllocIDRequest {
+  common.MsgBase base = 1;
+  uint32 count = 2;
+}
+
+message AllocIDResponse {
+  common.Status status = 1;
+  int64 ID = 2;
+  uint32 count = 3;
+}

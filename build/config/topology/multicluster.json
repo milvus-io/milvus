@@ -1,0 +1,27 @@
+[
+  {
+    "kind": "Kubernetes",
+    "clusterName": "primary",
+    "podSubnet": "10.10.0.0/16",
+    "svcSubnet": "10.255.10.0/24",
+    "network": "network-1"
+  },
+  {
+    "kind": "Kubernetes",
+    "clusterName": "remote",
+    "podSubnet": "10.20.0.0/16",
+    "svcSubnet": "10.255.20.0/24",
+    "network": "network-1",
+    "primaryClusterName": "primary",
+    "meta": {
+      "fakeVM": false
+    }
+  },
+  {
+    "kind": "Kubernetes",
+    "clusterName": "cross-network-primary",
+    "podSubnet": "10.30.0.0/16",
+    "svcSubnet": "10.255.30.0/24",
+    "network": "network-2"
+  }
+]

@@ -1,0 +1,11 @@
+[
+    {
+        "server": "athena",
+        "suite_params": [
+            {
+                "suite": "locust_mix.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]

@@ -1,0 +1,25 @@
+locust_insert_performance:
+  collections:
+    - 
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/insert_sift_1m_128_l2_2
+      collection_name: local_1m_128_l2
+      ni_per: 50000
+      build_index: false
+      index_type: ivf_sq8
+      index_param:
+        nlist: 1024
+      task: 
+        load_shape: true
+        step_time: 100 
+        step_load: 50
+        spawn_rate: 50
+        connection_num: 1
+        clients_num: 100
+        during_time: 600
+        types:
+          -
+            type: insert_flush
+            weight: 1
+            params:
+              ni_per: 1

@@ -1,0 +1,11 @@
+[
+    {
+        "server": "idc-sh005",
+        "suite_params": [
+            {
+                "suite": "2_locust_insert.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

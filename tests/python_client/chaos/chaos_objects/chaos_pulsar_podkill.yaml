@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: test-proxy-podkill
+  namespace: chaos-testing
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - chaos-testing         # target namespace of milvus deployment
+    labelSelectors:
+      app.kubernetes.io/instance: milvus-chaos
+      app.kubernetes.io/name: milvus
+      component: pulsar
+  scheduler:
+    cron: '@every 5s'

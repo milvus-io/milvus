@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package milvus.proto.index;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/indexpb";
+
+import "common.proto";
+import "internal.proto";
+import "milvus.proto";
+
+service IndexCoord {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+  rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
+  rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
+  rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
+  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+}
+
+service IndexNode {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+  rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+}
+
+message RegisterNodeRequest {
+  common.MsgBase base = 1;
+  common.Address address = 2;
+  int64 nodeID = 3;
+}
+
+message RegisterNodeResponse {
+  common.Status status = 1;
+  internal.InitParams init_params = 2;
+}
+
+message GetIndexStatesRequest {
+  repeated int64 indexBuildIDs = 1;
+}
+
+message IndexInfo {
+  common.IndexState state = 1;
+  int64 indexBuildID = 2;
+  int64 indexID = 3;
+  string index_name = 4;
+  string reason = 5;
+}
+
+message GetIndexStatesResponse {
+  common.Status status = 1;
+  repeated IndexInfo states = 2;
+}
+
+message CreateIndexRequest {
+  int64 indexBuildID = 1;
+  string index_name = 2;
+  int64 indexID = 3;
+  int64 version = 4;
+  string meta_path = 5;
+  repeated string data_paths = 6;
+  repeated common.KeyValuePair type_params = 7;
+  repeated common.KeyValuePair index_params = 8;
+}
+
+message BuildIndexRequest {
+  int64 indexBuildID = 1;
+  string index_name = 2;
+  int64 indexID = 3;
+  repeated string data_paths = 5;
+  repeated common.KeyValuePair type_params = 6;
+  repeated common.KeyValuePair index_params = 7;
+}
+
+message BuildIndexResponse {
+  common.Status status = 1;
+  int64 indexBuildID = 2;
+}
+
+message GetIndexFilePathsRequest {
+  repeated int64 indexBuildIDs = 1;
+}
+
+message IndexFilePathInfo {
+  common.Status status = 1;
+  int64 indexBuildID = 2;
+  repeated string index_file_paths = 3;
+}
+
+message GetIndexFilePathsResponse {
+  common.Status status = 1;
+  repeated IndexFilePathInfo file_paths = 2;
+}
+
+message IndexMeta {
+  int64 indexBuildID = 1;
+  common.IndexState state = 2;
+  string fail_reason = 3;
+  BuildIndexRequest req = 4;
+  repeated string index_file_paths = 5;
+  bool mark_deleted = 6;
+  int64 nodeID = 7;
+  int64 version = 8;
+  bool recycled = 9;
+}
+
+message DropIndexRequest {
+  int64 indexID = 1;
+}

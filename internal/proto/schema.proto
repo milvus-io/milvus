@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package milvus.proto.schema;
+option go_package = "github.com/milvus-io/milvus/internal/proto/schemapb";
+
+import "common.proto";
+
+/**
+ * @brief Field data type
+ */
+enum DataType {
+  None = 0;
+  Bool = 1;
+  Int8 = 2;
+  Int16 = 3;
+  Int32 = 4;
+  Int64 = 5;
+
+  Float = 10;
+  Double = 11;
+
+  String = 20;
+
+  BinaryVector = 100;
+  FloatVector = 101;
+}
+
+/**
+ * @brief Field schema
+ */
+message FieldSchema {
+  int64 fieldID = 1;
+  string name = 2;
+  bool is_primary_key = 3;
+  string description = 4;
+  DataType data_type = 5;
+  repeated common.KeyValuePair type_params = 6;
+  repeated common.KeyValuePair index_params = 7;
+  bool autoID = 8;
+}
+
+/**
+ * @brief Collection schema
+ */
+message CollectionSchema {
+  string name = 1;
+  string description = 2;
+  bool autoID = 3; // deprecated later, keep compatible with c++ part now
+  repeated FieldSchema fields = 4;
+}
+
+message BoolArray {
+  repeated bool data = 1;
+}
+
+message IntArray {
+  repeated int32 data = 1;
+}
+
+message LongArray {
+  repeated int64 data = 1;
+}
+
+message FloatArray {
+  repeated float data = 1;
+}
+
+message DoubleArray {
+  repeated double data = 1;
+}
+
+// For special fields such as bigdecimal, array...
+message BytesArray {
+  repeated bytes data = 1;
+}
+
+message StringArray {
+  repeated string data = 1;
+}
+
+message ScalarField {
+  oneof data {
+    BoolArray bool_data = 1;
+    IntArray int_data = 2;
+    LongArray long_data = 3;
+    FloatArray float_data = 4;
+    DoubleArray double_data = 5;
+    StringArray string_data = 6;
+    BytesArray bytes_data = 7;
+  }
+}
+
+message VectorField {
+  int64 dim = 1;
+  oneof data {
+    FloatArray float_vector = 2;
+    bytes binary_vector = 3;
+  }
+}
+
+message FieldData {
+  DataType type = 1;
+  string field_name = 2;
+  oneof field {
+    ScalarField scalars = 3;
+    VectorField vectors = 4;
+  }
+  int64 field_id = 5;
+}
+
+message IDs {
+  oneof id_field {
+    LongArray int_id = 1;
+    StringArray str_id = 2;
+  }
+}
+
+message SearchResultData {
+  int64 num_queries = 1;
+  int64 top_k = 2;
+  repeated FieldData fields_data = 3;
+  repeated float scores = 4;
+  IDs ids = 5;
+  repeated int64 topks = 6;
+}

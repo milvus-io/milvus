@@ -1,0 +1,9 @@
+*cmake-build-*
+*cmake_build*
+*/build/*
+*thirdparty*
+*src/grpc*
+*output*
+*unittest*
+*bench*
+*src/pb*

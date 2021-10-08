@@ -1,0 +1,301 @@
+syntax = "proto3";
+
+package milvus.proto.data;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/datapb";
+
+import "common.proto";
+import "internal.proto";
+import "milvus.proto";
+import "schema.proto";
+
+service DataCoord {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+
+  rpc Flush(FlushRequest) returns (FlushResponse) {}
+
+  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {}
+
+  rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+  rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
+  rpc GetInsertBinlogPaths(GetInsertBinlogPathsRequest) returns (GetInsertBinlogPathsResponse) {}
+
+  rpc GetCollectionStatistics(GetCollectionStatisticsRequest) returns (GetCollectionStatisticsResponse) {}
+  rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
+
+  rpc GetSegmentInfoChannel(GetSegmentInfoChannelRequest) returns (milvus.StringResponse){}
+
+  rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
+  rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
+  rpc GetFlushedSegments(GetFlushedSegmentsRequest) returns(GetFlushedSegmentsResponse){}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+}
+
+service DataNode {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+
+  rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
+  rpc FlushSegments(FlushSegmentsRequest) returns(common.Status) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+}
+
+message FlushRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 4;
+}
+
+message FlushResponse {
+  common.Status status = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 segmentIDs = 4;
+}
+
+message SegmentIDRequest {
+  uint32 count = 1;
+  string channel_name = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+}
+
+message AssignSegmentIDRequest {
+  int64 nodeID = 1;
+  string peer_role = 2;
+  repeated SegmentIDRequest segmentIDRequests = 3;
+}
+
+message SegmentIDAssignment {
+  int64 segID = 1;
+  string channel_name = 2;
+  uint32 count = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  uint64 expire_time = 6;
+  common.Status status = 7;
+}
+
+message AssignSegmentIDResponse {
+  repeated SegmentIDAssignment segIDAssignments = 1;
+  common.Status status = 2;
+}
+
+message GetSegmentStatesRequest {
+  common.MsgBase base = 1;
+  repeated int64 segmentIDs = 2;
+}
+
+message SegmentStateInfo {
+  int64 segmentID = 1;
+  common.SegmentState state = 2;
+  internal.MsgPosition start_position = 3;
+  internal.MsgPosition end_position = 4;
+  common.Status status = 5;
+}
+
+message GetSegmentStatesResponse {
+  common.Status status = 1;
+  repeated SegmentStateInfo states = 2;
+}
+
+message GetSegmentInfoRequest {
+  common.MsgBase base = 1;
+  repeated int64 segmentIDs = 2;
+}
+
+message GetSegmentInfoResponse {
+  common.Status status = 1;
+  repeated SegmentInfo infos = 2;
+}
+
+message GetInsertBinlogPathsRequest {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+}
+
+message GetInsertBinlogPathsResponse {
+  repeated int64 fieldIDs = 1;
+  repeated internal.StringList paths = 2;
+  common.Status status = 3;
+}
+
+message GetCollectionStatisticsRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+}
+
+message GetCollectionStatisticsResponse {
+  repeated common.KeyValuePair stats = 1;
+  common.Status status = 2;
+}
+
+message GetPartitionStatisticsRequest{
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+}
+
+message GetPartitionStatisticsResponse {
+  repeated common.KeyValuePair stats = 1;
+  common.Status status = 2;
+}
+
+message GetSegmentInfoChannelRequest {
+}
+
+
+message VchannelInfo {
+  int64 collectionID = 1;
+  string channelName = 2;
+  internal.MsgPosition seek_position = 3;
+  repeated SegmentInfo unflushedSegments = 4;
+  repeated int64 flushedSegments = 5;
+}
+
+message WatchDmChannelsRequest {
+  common.MsgBase base = 1;
+  repeated VchannelInfo vchannels = 2;
+}
+
+message FlushSegmentsRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 segmentIDs = 4;
+}
+
+message SegmentMsg{
+  common.MsgBase base = 1;
+  SegmentInfo segment = 2;
+}
+
+message DDLFlushMeta {
+    int64 collectionID = 1;
+    repeated string binlog_paths = 2;
+}
+
+message CollectionInfo {
+  int64 ID = 1;
+  schema.CollectionSchema schema = 2;
+  repeated int64 partitions = 3;
+  repeated common.KeyDataPair start_positions = 4;
+}
+
+message SegmentInfo {
+  int64 ID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  string insert_channel = 4;
+  int64 num_of_rows = 5;
+  common.SegmentState state = 6;
+  int64 max_row_num = 7;
+  uint64 last_expire_time = 8;
+  internal.MsgPosition start_position = 9;
+  internal.MsgPosition dml_position = 10;
+  repeated FieldBinlog binlogs = 11;
+}
+
+message SegmentStartPosition {
+  internal.MsgPosition start_position = 1;
+  int64 segmentID = 2;
+}
+
+message SaveBinlogPathsRequest {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+  int64 collectionID = 3;
+  repeated FieldBinlog field2BinlogPaths = 4;
+  repeated CheckPoint checkPoints = 5;
+  repeated SegmentStartPosition start_positions = 6;                                                             
+  bool flushed = 7;
+}
+
+message CheckPoint {
+  int64 segmentID = 1;
+  internal.MsgPosition position = 2;
+  int64 num_of_rows = 3;
+  
+}
+
+message DataNodeTtMsg {
+    common.MsgBase base =1;
+    string channel_name = 2;
+    uint64 timestamp = 3;
+}
+
+enum ChannelWatchState {
+  Uncomplete = 0;
+  Complete = 1;
+}
+
+message ChannelStatus {
+  string name = 1;
+  ChannelWatchState state=2;
+  int64 collectionID = 3;
+}
+
+message DataNodeInfo {
+  string address = 1;
+  int64 version  = 2;
+  repeated ChannelStatus channels = 3;
+}
+
+message SegmentBinlogs {
+  int64 segmentID = 1;
+  repeated FieldBinlog fieldBinlogs = 2;
+  int64 num_of_rows = 3;
+}
+
+message FieldBinlog{
+  int64 fieldID = 1;
+  repeated string binlogs = 2;
+}
+
+message GetRecoveryInfoResponse {
+  common.Status status = 1;
+  repeated VchannelInfo channels = 2;
+  repeated SegmentBinlogs binlogs = 3;
+}
+
+message GetRecoveryInfoRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+}
+
+message GetFlushedSegmentsRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+}
+
+message GetFlushedSegmentsResponse {
+  common.Status status = 1;
+  repeated int64 segments = 2;
+}
+
+message SegmentFlushCompletedMsg {
+  common.MsgBase base = 1;
+  SegmentInfo segment = 2;
+}
+
+message ChannelWatchInfo {
+    VchannelInfo vchan= 1;
+    int64 startTs = 2;
+    ChannelWatchState state = 3;
+}
+
+// Deprecated
+message SegmentFieldBinlogMeta {
+  int64  fieldID = 1;
+  string binlog_path = 2;
+}

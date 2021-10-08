@@ -1,0 +1,108 @@
+syntax = "proto3";
+package milvus.proto.plan;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/planpb";
+import "schema.proto";
+
+enum OpType {
+  Invalid = 0;
+  GreaterThan = 1;
+  GreaterEqual = 2;
+  LessThan = 3;
+  LessEqual = 4;
+  Equal = 5;
+  NotEqual = 6;
+};
+
+message GenericValue {
+  oneof val {
+    bool bool_val = 1;
+    int64 int64_val = 2;
+    double float_val = 3;
+  };
+}
+
+message QueryInfo {
+  int64 topk = 1;
+  string metric_type = 3;
+  string search_params = 4;
+}
+
+message ColumnInfo {
+  int64 field_id = 1;
+  schema.DataType data_type = 2;
+  bool is_primary_key = 3;
+  bool is_autoID = 4;
+}
+
+message UnaryRangeExpr {
+  ColumnInfo column_info = 1;
+  OpType op = 2;
+  GenericValue value = 3;
+}
+
+message BinaryRangeExpr {
+  ColumnInfo column_info = 1;
+  bool lower_inclusive = 2;
+  bool upper_inclusive = 3;
+  GenericValue lower_value = 4;
+  GenericValue upper_value = 5;
+}
+
+message CompareExpr {
+  ColumnInfo left_column_info = 1;
+  ColumnInfo right_column_info = 2;
+  OpType op = 3;
+}
+
+message TermExpr {
+  ColumnInfo column_info = 1;
+  repeated GenericValue values = 2;
+}
+
+message UnaryExpr {
+  enum UnaryOp {
+    Invalid = 0;
+    Not = 1;
+  };
+  UnaryOp op = 1;
+  Expr child = 2;
+}
+
+message BinaryExpr {
+  enum BinaryOp {
+    Invalid = 0;
+    LogicalAnd = 1;
+    LogicalOr = 2;
+  }
+  BinaryOp op = 1;
+  Expr left = 2;
+  Expr right = 3;
+}
+
+message Expr {
+  oneof expr {
+    TermExpr term_expr = 1;
+    UnaryExpr unary_expr = 2;
+    BinaryExpr binary_expr = 3;
+    CompareExpr compare_expr = 4;
+    UnaryRangeExpr unary_range_expr = 5;
+    BinaryRangeExpr binary_range_expr = 6;
+  };
+}
+
+message VectorANNS {
+  bool is_binary = 1;
+  int64 field_id = 2;
+  Expr predicates = 3;
+  QueryInfo query_info = 4;
+  string placeholder_tag = 5;  // always be "$0"
+}
+
+message PlanNode {
+  oneof node {
+    VectorANNS vector_anns = 1;
+    Expr predicates = 2;
+  }
+  repeated int64 output_field_ids = 3;
+}

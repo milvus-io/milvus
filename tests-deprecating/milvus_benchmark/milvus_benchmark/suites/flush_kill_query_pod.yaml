@@ -1,0 +1,44 @@
+simple_chaos:
+  collections:
+    -
+      milvus: null
+      before:
+        - 
+          interface_name: create_collection
+          params:
+            data_type: local
+            dimension: 128
+        - 
+          interface_name: insert
+          params:
+            batch_size: 5000
+            collection_size: 1000000
+#        - interface_name: create_index
+#          params:
+#            metric_type: l2
+#            index_type: ivf_flat
+#            index_param:
+#              nlist: 16384
+      processing:
+        interface_name: create_index
+        params:
+          field_name: float_vector
+          metric_type: l2
+          index_type: ivf_flat
+          index_param:
+            nlist: 16384
+        chaos:
+          kind: PodChaos
+          spec:
+            action: pod-kill
+            selector:
+              labelSelectors:
+                "statefulset.kubernetes.io/pod-name": etcd
+            scheduler:
+              cron: "@every 60s"
+        assertion: fail
+      after:
+        interface_name: describe_index
+        params:
+          field_name: float_vector
+        assertion: pass

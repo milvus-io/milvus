@@ -1,0 +1,174 @@
+syntax = "proto3";
+
+package milvus.proto.common;
+option go_package="github.com/milvus-io/milvus/internal/proto/commonpb";
+
+
+enum ErrorCode {
+    Success = 0;
+    UnexpectedError = 1;
+    ConnectFailed = 2;
+    PermissionDenied = 3;
+    CollectionNotExists = 4;
+    IllegalArgument = 5;
+    IllegalDimension = 7;
+    IllegalIndexType = 8;
+    IllegalCollectionName = 9;
+    IllegalTOPK = 10;
+    IllegalRowRecord = 11;
+    IllegalVectorID = 12;
+    IllegalSearchResult = 13;
+    FileNotFound = 14;
+    MetaFailed = 15;
+    CacheFailed = 16;
+    CannotCreateFolder = 17;
+    CannotCreateFile = 18;
+    CannotDeleteFolder = 19;
+    CannotDeleteFile = 20;
+    BuildIndexError = 21;
+    IllegalNLIST = 22;
+    IllegalMetricType = 23;
+    OutOfMemory = 24;
+    IndexNotExist = 25;
+    EmptyCollection = 26;
+
+    // internal error code.
+    DDRequestRace = 1000;
+}
+
+enum IndexState {
+    IndexStateNone = 0;
+    Unissued = 1;
+    InProgress = 2;
+    Finished = 3;
+    Failed = 4;
+}
+
+enum SegmentState {
+    SegmentStateNone = 0;
+    NotExist = 1;
+    Growing = 2;
+    Sealed = 3;
+    Flushed = 4;
+    Flushing = 5;
+}
+
+message Status {
+    ErrorCode error_code = 1;
+    string reason = 2;
+}
+
+message KeyValuePair {
+    string key = 1;
+    string value = 2;
+}
+
+message KeyDataPair {
+    string key = 1;
+    bytes data = 2;
+}
+
+message Blob {
+    bytes value = 1;
+}
+
+message Address {
+  string ip = 1;
+  int64 port = 2;
+}
+
+enum MsgType {
+    Undefined = 0;
+    /* DEFINITION REQUESTS: COLLECTION */
+    CreateCollection = 100;
+    DropCollection = 101;
+    HasCollection = 102;
+    DescribeCollection = 103;
+    ShowCollections = 104;
+    GetSystemConfigs = 105;
+    LoadCollection = 106;
+    ReleaseCollection = 107;
+    CreateAlias = 108;
+    DropAlias = 109;
+    AlterAlias = 110;
+
+
+    /* DEFINITION REQUESTS: PARTITION */
+    CreatePartition = 200;
+    DropPartition = 201;
+    HasPartition = 202;
+    DescribePartition = 203;
+    ShowPartitions = 204;
+    LoadPartitions = 205;
+    ReleasePartitions = 206;
+
+    /* DEFINE REQUESTS: SEGMENT */
+    ShowSegments = 250;
+    DescribeSegment = 251;
+    LoadSegments = 252;
+    ReleaseSegments = 253;
+    HandoffSegments = 254;
+    LoadBalanceSegments = 255;
+
+    /* DEFINITION REQUESTS: INDEX */
+    CreateIndex = 300;
+    DescribeIndex = 301;
+    DropIndex = 302;
+
+    /* MANIPULATION REQUESTS */
+    Insert = 400;
+    Delete = 401;
+    Flush = 402;
+
+    /* QUERY */
+    Search = 500;
+    SearchResult = 501;
+    GetIndexState = 502;
+    GetIndexBuildProgress = 503;
+    GetCollectionStatistics = 504;
+    GetPartitionStatistics = 505;
+    Retrieve = 506;
+    RetrieveResult = 507;
+    WatchDmChannels = 508;
+    RemoveDmChannels = 509;
+    WatchQueryChannels = 510;
+    RemoveQueryChannels = 511;
+
+    /* DATA SERVICE */
+    SegmentInfo = 600;
+
+    /* SYSTEM CONTROL */
+    TimeTick = 1200;
+    QueryNodeStats = 1201; // GOOSE TODO: Remove kQueryNodeStats
+    LoadIndex = 1202;
+    RequestID = 1203;
+    RequestTSO = 1204;
+    AllocateSegment = 1205;
+    SegmentStatistics = 1206;
+    SegmentFlushDone = 1207;
+
+    DataNodeTt = 1208;
+}
+
+message MsgBase {
+    MsgType msg_type = 1;
+    int64  msgID = 2;
+    uint64 timestamp = 3;
+    int64 sourceID = 4;
+}
+
+enum DslType {
+    Dsl = 0;
+    BoolExprV1 = 1;
+}
+
+// Don't Modify This. @czs
+message MsgHeader {
+    common.MsgBase base = 1;
+}
+
+// Don't Modify This. @czs
+message DMLMsgHeader {
+    common.MsgBase base = 1;
+    string shardName = 2;
+}

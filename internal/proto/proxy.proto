@@ -1,0 +1,30 @@
+syntax = "proto3";
+package milvus.proto.proxy;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/proxypb";
+
+import "common.proto";
+import "internal.proto";
+import "milvus.proto";
+
+service Proxy {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+
+  rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
+  rpc GetDdChannel(internal.GetDdChannelRequest) returns (milvus.StringResponse) {}
+
+  rpc ReleaseDQLMessageStream(ReleaseDQLMessageStreamRequest) returns (common.Status) {}
+}
+
+message InvalidateCollMetaCacheRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+}
+
+message ReleaseDQLMessageStreamRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+}
