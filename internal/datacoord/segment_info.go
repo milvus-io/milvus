@@ -224,6 +224,7 @@ func SetStartPosition(pos *internalpb.MsgPosition) SegmentInfoOption {
 	}
 }
 
+// SetAllocations is the option to set allocations for segment info
 func SetAllocations(allocations []*Allocation) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.allocations = allocations
