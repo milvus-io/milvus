@@ -486,7 +486,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	})
 
-	t.Run("Auto with manul flush", func(t *testing.T) {
+	t.Run("Auto with manual flush", func(t *testing.T) {
 		t.Skipf("Skip, fix later")
 		for i := range inMsg.insertMessages {
 			inMsg.insertMessages[i].SegmentID = 1
