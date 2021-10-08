@@ -4,11 +4,11 @@ import (
 	"sync"
 )
 
-// Cache stores flusing segments' ids to prevent flushing the same segment again and again.
+// Cache stores flushing segments' ids to prevent flushing the same segment again and again.
 //  Once a segment is flushed, its id will be removed from the cache.
 //
 //  A segment not in cache will be added into the cache when `FlushSegments` is called.
-//   After the flush procedure, wether the segment successfully flushed or not,
+//   After the flush procedure, whether the segment successfully flushed or not,
 //   it'll be removed from the cache. So if flush failed, the secondary flush can be triggered.
 type Cache struct {
 	cacheMu  sync.RWMutex
