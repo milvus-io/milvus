@@ -120,13 +120,13 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 					collectionID: test.ddnCollID,
 				}
 
-				var createCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
+				var dropCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
 					DropCollectionRequest: internalpb.DropCollectionRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 						CollectionID: test.msgCollID,
 					},
 				}
-				tsMessages := []msgstream.TsMsg{createCollMsg}
+				tsMessages := []msgstream.TsMsg{dropCollMsg}
 				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 
 				rt := ddn.Operate([]Msg{msgStreamMsg})
