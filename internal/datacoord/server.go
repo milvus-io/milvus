@@ -400,9 +400,8 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
-			err = s.segmentManager.ExpireAllocations(ch, ts)
-			if err != nil {
-				log.Warn("expire allocations failed", zap.Error(err))
+			if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
+				log.Warn("failed to expire allocations", zap.Error(err))
 				continue
 			}
 			segments, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
