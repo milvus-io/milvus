@@ -137,5 +137,6 @@ func TestConsumer_Seek(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 
-	consumer.Seek(0)
+	err = consumer.Seek(0)
+	assert.NotNil(t, err)
 }

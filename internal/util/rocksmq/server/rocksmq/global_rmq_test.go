@@ -46,9 +46,10 @@ func Test_InitRmq(t *testing.T) {
 func Test_InitRocksMQ(t *testing.T) {
 	// Params.Init()
 	rmqPath := "/tmp/milvus/rdb_data_global"
-	os.Setenv("ROCKSMQ_PATH", rmqPath)
+	err := os.Setenv("ROCKSMQ_PATH", rmqPath)
+	assert.Nil(t, err)
 	defer os.RemoveAll(rmqPath)
-	err := InitRocksMQ()
+	err = InitRocksMQ()
 	defer Rmq.stopRetention()
 	assert.NoError(t, err)
 	defer CloseRocksMQ()
