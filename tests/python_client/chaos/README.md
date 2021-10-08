@@ -15,6 +15,7 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 
 ## Test Scenarios
 ### Milvus in cluster mode
+#### pod kill
 1. root coordinator pod is killed
    
 2. proxy pod is killed
@@ -32,6 +33,9 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 8. query node pod is killed
 
 9. minio pod is killed
+#### pod network partition
+
+two direction(to and from) network isolation between a pod and the rest of the pods
 
 ### Milvus in standalone mode
 1. standalone pod is killed
