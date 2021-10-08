@@ -310,9 +310,8 @@ func (s *Server) startServerLoop() {
 	go s.startWatchService(s.serverLoopCtx)
 	go s.startFlushLoop(s.serverLoopCtx)
 	go s.session.LivenessCheck(s.serverLoopCtx, s.liveCh, func() {
-		err := s.Stop()
-		if err != nil {
-			log.Error("server stop fail", zap.Error(err))
+		if err := s.Stop(); err != nil {
+			log.Error("failed to stop server", zap.Error(err))
 		}
 	})
 }
