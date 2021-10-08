@@ -231,6 +231,7 @@ func SetAllocations(allocations []*Allocation) SegmentInfoOption {
 	}
 }
 
+// AddAllocation is the option to add allocation info for segment info
 func AddAllocation(allocation *Allocation) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.allocations = append(segment.allocations, allocation)
