@@ -35,7 +35,10 @@ import (
 )
 
 const (
-	paramsKeyToParse   = "params"
+	// paramsKeyToParse is the key of the param to build index.
+	paramsKeyToParse = "params"
+
+	// IndexBuildTaskName is the name of the operation to add an index task.
 	IndexBuildTaskName = "IndexBuildTask"
 )
 
@@ -53,6 +56,7 @@ type task interface {
 	SetError(err error)
 }
 
+// BaseTask is an basic instance of task.
 type BaseTask struct {
 	done chan error
 	ctx  context.Context
@@ -60,10 +64,12 @@ type BaseTask struct {
 	err  error
 }
 
+// SetError sets an error to task.
 func (bt *BaseTask) SetError(err error) {
 	bt.err = err
 }
 
+// ID returns the id of index task.
 func (bt *BaseTask) ID() UniqueID {
 	return bt.id
 }
@@ -72,6 +78,7 @@ func (bt *BaseTask) setID(id UniqueID) {
 	bt.id = id
 }
 
+// WaitToFinish will wait for the task to complete, if the context is done, it means that the execution of the task has timed out.
 func (bt *BaseTask) WaitToFinish() error {
 	select {
 	case <-bt.ctx.Done():
@@ -81,6 +88,7 @@ func (bt *BaseTask) WaitToFinish() error {
 	}
 }
 
+// Notify will notify WaitToFinish that the task is completed or failed.
 func (bt *BaseTask) Notify(err error) {
 	bt.done <- err
 }
