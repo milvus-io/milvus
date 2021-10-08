@@ -133,6 +133,7 @@ func (colReplica *collectionReplica) getCollectionIDs() []UniqueID {
 	return collectionIDs
 }
 
+// addCollection creates a new collection and add it to collectionReplica
 func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
