@@ -1452,7 +1452,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
@@ -1489,7 +1489,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 6843")
@@ -1528,7 +1528,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
