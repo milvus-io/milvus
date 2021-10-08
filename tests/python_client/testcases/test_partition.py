@@ -127,9 +127,10 @@ class TestCreateBase:
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag(self, connect, id_collection):
         """
-        target: test create partition, and insert vectors, check status returned
-        method: call function: create_partition
-        expected: status ok
+        target: test create partition, and insert vectors to specific partition
+        method: 1. create_partition
+                2. insert data with partition name specified
+        expected: insert data successfully
         """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
