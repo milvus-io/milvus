@@ -387,7 +387,7 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 
 ## RHNSW_SQ
 
-**RHNSW_SQ** is a variant index type combining SQ and HNSW. It first uses SQ to quantize the vector, then uses HNSW to quantize the SQ quantization result to get the index.
+**RHNSW_SQ** is a variant index type combining SQ and HNSW. It uses SQ to quantize the vector, then uses HNSW to quantize the SQ quantization result to get the index.
 
 - building parameters:
 
