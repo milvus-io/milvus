@@ -226,7 +226,6 @@ func TestDataSyncService_Start(t *testing.T) {
 	vchan := &datapb.VchannelInfo{
 		CollectionID:      collMeta.ID,
 		ChannelName:       insertChannelName,
-		SeekPosition:      &internalpb.MsgPosition{},
 		UnflushedSegments: ufs,
 		FlushedSegments:   fs,
 	}
