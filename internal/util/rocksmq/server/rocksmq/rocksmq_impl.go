@@ -166,6 +166,10 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	return rmq, nil
 }
 
+// Close step:
+// 1. Stop retention
+// 2. Destroy all consumer groups and topics
+// 3. Close rocksdb instance
 func (rmq *rocksmq) Close() {
 	rmq.stopRetention()
 	rmq.storeMu.Lock()
