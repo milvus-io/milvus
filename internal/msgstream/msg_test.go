@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -825,6 +826,53 @@ func TestDataNodeTtMsg(t *testing.T) {
 func TestDataNodeTtMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	dataNodeTtMsg := &DataNodeTtMsg{}
 	tsMsg, err := dataNodeTtMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestSealedSegmentsChangeInfoMsg(t *testing.T) {
+	changeInfoMsg := &SealedSegmentsChangeInfoMsg{
+		BaseMsg: generateBaseMsg(),
+		SealedSegmentsChangeInfo: querypb.SealedSegmentsChangeInfo{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_SealedSegmentsChangeInfo,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			OnlineNodeID:      int64(1),
+			OnlineSegmentIDs:  []int64{1, 2, 3},
+			OfflineNodeID:     int64(2),
+			OfflineSegmentIDs: []int64{4, 5, 6},
+		},
+	}
+
+	assert.NotNil(t, changeInfoMsg.TraceCtx())
+
+	ctx := context.Background()
+	changeInfoMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, changeInfoMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), changeInfoMsg.ID())
+	assert.Equal(t, commonpb.MsgType_SealedSegmentsChangeInfo, changeInfoMsg.Type())
+	assert.Equal(t, int64(3), changeInfoMsg.SourceID())
+
+	bytes, err := changeInfoMsg.Marshal(changeInfoMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := changeInfoMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	changeInfoMsg2, ok := tsMsg.(*SealedSegmentsChangeInfoMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), changeInfoMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_SealedSegmentsChangeInfo, changeInfoMsg2.Type())
+	assert.Equal(t, int64(3), changeInfoMsg2.SourceID())
+}
+
+func TestSealedSegmentsChangeInfoMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	changeInfoMsg := &SealedSegmentsChangeInfoMsg{}
+	tsMsg, err := changeInfoMsg.Unmarshal(10)
 	assert.NotNil(t, err)
 	assert.Nil(t, tsMsg)
 }
