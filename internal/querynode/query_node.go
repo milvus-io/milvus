@@ -240,9 +240,6 @@ func (node *QueryNode) Stop() error {
 	if node.queryService != nil {
 		node.queryService.close()
 	}
-	if node.queryService != nil {
-		node.queryService.close()
-	}
 	return nil
 }
 
