@@ -70,6 +70,7 @@ func (rc *rmqClient) EarliestMessageID() MessageID {
 	return &rmqID{messageID: rID}
 }
 
+// StringToMsgID converts string id to MessageID
 func (rc *rmqClient) StringToMsgID(id string) (MessageID, error) {
 	rID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
