@@ -120,7 +120,7 @@ Note: go1.15 is required to build Milvus.
 
 #### Docker & Docker Compose
 
-Milvus depends on Etcd, Pulsar and minIO. Using Docker Compose to manage these is an easy way in a local development. To install Docker and Docker Compose in your development environment, follow the instructions from the Docker website below:
+Milvus depends on Etcd, Pulsar and MinIO. Using Docker Compose to manage these is an easy way in a local development. To install Docker and Docker Compose in your development environment, follow the instructions from the Docker website below:
 
 -   Docker: https://docs.docker.com/get-docker/
 -   Docker Compose: https://docs.docker.com/compose/install/
