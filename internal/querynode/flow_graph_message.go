@@ -24,6 +24,7 @@ type MsgStreamMsg = flowgraph.MsgStreamMsg
 
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
+	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
 }
 

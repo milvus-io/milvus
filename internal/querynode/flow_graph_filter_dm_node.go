@@ -63,17 +63,24 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	var iMsg = insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
+		deleteMessages: make([]*msgstream.DeleteMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: msgStreamMsg.TimestampMin(),
 			timestampMax: msgStreamMsg.TimestampMax(),
 		},
 	}
+
 	for _, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_Insert:
 			resMsg := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
 			if resMsg != nil {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
+			}
+		case commonpb.MsgType_Delete:
+			resMsg := fdmNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg))
+			if resMsg != nil {
+				iMsg.deleteMessages = append(iMsg.deleteMessages, resMsg)
 			}
 		default:
 			log.Warn("Non supporting", zap.Int32("message type", int32(msg.Type())))
@@ -85,6 +92,66 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		sp.Finish()
 	}
 	return []Msg{res}
+}
+
+func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) *msgstream.DeleteMsg {
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	defer sp.Finish()
+
+	// check if collection and partition exist
+	collection := fdmNode.replica.hasCollection(msg.CollectionID)
+	partition := fdmNode.replica.hasPartition(msg.PartitionID)
+	if fdmNode.loadType == loadTypeCollection && !collection {
+		log.Debug("filter invalid delete message, collection dose not exist",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
+		return nil
+	}
+	if fdmNode.loadType == loadTypePartition && !partition {
+		log.Debug("filter invalid delete message, partition dose not exist",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
+		return nil
+	}
+
+	if msg.CollectionID != fdmNode.collectionID {
+		return nil
+	}
+
+	// if the flow graph type is partition, check if the partition is target partition
+	if fdmNode.loadType == loadTypePartition && msg.PartitionID != fdmNode.partitionID {
+		log.Debug("filter invalid delete message, partition is not the target partition",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
+		return nil
+	}
+
+	// check if partition has been released
+	if fdmNode.loadType == loadTypeCollection {
+		col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
+		if err != nil {
+			log.Warn(err.Error())
+			return nil
+		}
+		if err = col.checkReleasedPartitions([]UniqueID{msg.PartitionID}); err != nil {
+			log.Warn(err.Error())
+			return nil
+		}
+	}
+
+	if len(msg.PrimaryKeys) != len(msg.Timestamps) {
+		log.Warn("Error, misaligned messages detected")
+		return nil
+	}
+
+	if len(msg.Timestamps) <= 0 {
+		log.Debug("filter invalid delete message, no message",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
+		return nil
+	}
+	return msg
 }
 
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
