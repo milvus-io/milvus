@@ -1,6 +1,6 @@
 # Create Collections
 
-`Milvus 2.0` use `Collection` to represent a set of data, like `Table` in a traditional database. Users can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `CreateCollection`, at the end of this article, you should know which components are involved in `CreateCollection`.
+`Milvus 2.0` uses `Collection` to represent a set of data, like `Table` in a traditional database. Users can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `CreateCollection`, at the end of this article, you should know which components are involved in `CreateCollection`.
 
 
 The execution flow of `CreateCollection` is shown in the following figure:
