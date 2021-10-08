@@ -34,6 +34,7 @@ func NewRmqClient(opts rocksmq.ClientOptions) (*rmqClient, error) {
 	return &rmqClient{client: c}, nil
 }
 
+// CreateProducer creates a producer for rocksmq client
 func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	rmqOpts := rocksmq.ProducerOptions{Topic: options.Topic}
 	pp, err := rc.client.CreateProducer(rmqOpts)
