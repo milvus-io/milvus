@@ -415,6 +415,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	default:
 		for _, chanInfo := range in.GetVchannels() {
 			log.Info("DataNode new dataSyncService",
+				zap.Int64("collectionID", chanInfo.GetCollectionID()),
 				zap.String("channel name", chanInfo.ChannelName),
 				zap.Any("channal Info", chanInfo),
 			)
@@ -422,7 +423,9 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 				log.Warn("Failed to new data sync service",
 					zap.Any("channel", chanInfo),
 					zap.Error(err))
+
 				// return error even partial success
+				// TODO Goose: release partial success resources?
 				status.Reason = err.Error()
 				return status, nil
 			}
