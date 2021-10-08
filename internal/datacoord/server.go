@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
@@ -661,6 +662,20 @@ func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool
 					seekPosition = s.DmlPosition
 				} else {
 					seekPosition = s.StartPosition
+				}
+			}
+		}
+
+		if seekPosition == nil {
+			coll := s.meta.GetCollection(vchan.CollectionID)
+			if coll != nil {
+				for _, sp := range coll.GetStartPositions() {
+					if sp.GetKey() == rootcoord.ToPhysicalChannel(vchan.DmlChannel) {
+						seekPosition = &internalpb.MsgPosition{
+							ChannelName: vchan.DmlChannel,
+							MsgID:       sp.GetData(),
+						}
+					}
 				}
 			}
 		}
