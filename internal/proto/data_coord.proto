@@ -158,7 +158,7 @@ message VchannelInfo {
   string channelName = 2;
   internal.MsgPosition seek_position = 3;
   repeated SegmentInfo unflushedSegments = 4;
-  repeated int64 flushedSegments = 5;
+  repeated SegmentInfo flushedSegments = 5;
 }
 
 message WatchDmChannelsRequest {

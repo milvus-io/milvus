@@ -208,7 +208,7 @@ func TestDataNode(t *testing.T) {
 			CollectionID:      1,
 			ChannelName:       dmChannelName,
 			UnflushedSegments: []*datapb.SegmentInfo{},
-			FlushedSegments:   []int64{},
+			FlushedSegments:   []*datapb.SegmentInfo{},
 		}
 		err := node1.NewDataSyncService(vchan)
 		assert.Nil(t, err)

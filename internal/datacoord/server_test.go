@@ -1097,7 +1097,7 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.EqualValues(t, 1, len(pair))
 		assert.EqualValues(t, 0, pair[0].CollectionID)
 		assert.EqualValues(t, 1, len(pair[0].FlushedSegments))
-		assert.EqualValues(t, 1, pair[0].FlushedSegments[0])
+		assert.EqualValues(t, s1, pair[0].FlushedSegments[0])
 		assert.EqualValues(t, 1, len(pair[0].UnflushedSegments))
 		assert.EqualValues(t, 2, pair[0].UnflushedSegments[0].ID)
 		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].UnflushedSegments[0].DmlPosition.MsgID)
@@ -1173,7 +1173,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegments()))
-		assert.ElementsMatch(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
+		assert.ElementsMatch(t, []*datapb.SegmentInfo{seg1, seg2}, resp.GetChannels()[0].GetFlushedSegments())
 		assert.EqualValues(t, 20, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 

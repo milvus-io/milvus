@@ -50,7 +50,7 @@ type ddNode struct {
 	collectionID UniqueID
 
 	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
-	flushedSegments []UniqueID
+	flushedSegments []*datapb.SegmentInfo
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -148,8 +148,8 @@ func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) 
 }
 
 func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
-	for _, id := range ddn.flushedSegments {
-		if id == segmentID {
+	for _, s := range ddn.flushedSegments {
+		if s.ID == segmentID {
 			return true
 		}
 	}
@@ -160,7 +160,7 @@ func newDDNode(clearSignal chan<- UniqueID, collID UniqueID, vchanInfo *datapb.V
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
 
-	fs := make([]UniqueID, 0, len(vchanInfo.GetFlushedSegments()))
+	fs := make([]*datapb.SegmentInfo, 0, len(vchanInfo.GetFlushedSegments()))
 	fs = append(fs, vchanInfo.GetFlushedSegments()...)
 	log.Debug("ddNode add flushed segment",
 		zap.Int64("collectionID", vchanInfo.GetCollectionID()),
