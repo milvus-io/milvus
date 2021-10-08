@@ -339,7 +339,7 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 				SeekPosition: &internalpb.MsgPosition{
 					ChannelName: vChannel,
 				},
-				FlushedSegments: []int64{segmentID},
+				FlushedSegments: []*datapb.SegmentInfo{{ID: segmentID}},
 			}
 			channelInfos = append(channelInfos, channelInfo)
 		}

@@ -637,13 +637,13 @@ func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool
 
 	for _, vchan := range vchans {
 		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
-		flushedSegmentIDs := make([]UniqueID, 0)
+		flushed := make([]*datapb.SegmentInfo, 0)
 		unflushed := make([]*datapb.SegmentInfo, 0)
 		var seekPosition *internalpb.MsgPosition
 		var useUnflushedPosition bool
 		for _, s := range segments {
 			if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
-				flushedSegmentIDs = append(flushedSegmentIDs, s.ID)
+				flushed = append(flushed, s.SegmentInfo)
 				if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
 					seekPosition = s.DmlPosition
 				}
@@ -685,7 +685,7 @@ func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool
 			ChannelName:       vchan.DmlChannel,
 			SeekPosition:      seekPosition,
 			UnflushedSegments: unflushed,
-			FlushedSegments:   flushedSegmentIDs,
+			FlushedSegments:   flushed,
 		})
 	}
 	return pairs, nil

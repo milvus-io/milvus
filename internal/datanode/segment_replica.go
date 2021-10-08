@@ -44,6 +44,7 @@ type Replica interface {
 	addNewSegment(segID, collID, partitionID UniqueID, channelName string, startPos, endPos *internalpb.MsgPosition) error
 	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error
 	filterSegments(channelName string, partitionID UniqueID) []*Segment
+	addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64) error
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
