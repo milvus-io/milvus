@@ -39,6 +39,7 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 	}
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetCacheIndexAndFilterBlocks(true)
+	bbto.SetPinL0FilterAndIndexBlocksInCache(true)
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(LRUCacheSize))
 	opts := gorocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)
