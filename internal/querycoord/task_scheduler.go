@@ -120,6 +120,7 @@ func NewTaskQueue() *TaskQueue {
 	}
 }
 
+// TaskScheduler controls the scheduling of trigger tasks and internal tasks
 type TaskScheduler struct {
 	triggerTaskQueue *TaskQueue
 	activateTaskChan chan task
