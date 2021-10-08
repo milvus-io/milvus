@@ -25,15 +25,24 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
-func getVchanInfo(cp bool, collID, ufCollID, ufSegID UniqueID, chanName, ufchanName string, ufNor int64) *datapb.VchannelInfo {
+func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 	var ufs []*datapb.SegmentInfo
-	if cp {
+	var fs []*datapb.SegmentInfo
+	if info.isValidCase {
 		ufs = []*datapb.SegmentInfo{{
-			CollectionID:  ufCollID,
+			CollectionID:  info.ufCollID,
 			PartitionID:   1,
-			InsertChannel: ufchanName,
-			ID:            ufSegID,
-			NumOfRows:     ufNor,
+			InsertChannel: info.ufchanName,
+			ID:            info.ufSegID,
+			NumOfRows:     info.ufNor,
+			DmlPosition:   &internalpb.MsgPosition{},
+		}}
+		fs = []*datapb.SegmentInfo{{
+			CollectionID:  info.fCollID,
+			PartitionID:   1,
+			InsertChannel: info.fchanName,
+			ID:            info.fSegID,
+			NumOfRows:     info.fNor,
 			DmlPosition:   &internalpb.MsgPosition{},
 		}}
 	} else {
@@ -41,50 +50,70 @@ func getVchanInfo(cp bool, collID, ufCollID, ufSegID UniqueID, chanName, ufchanN
 	}
 
 	vi := &datapb.VchannelInfo{
-		CollectionID:      collID,
-		ChannelName:       chanName,
+		CollectionID:      info.collID,
+		ChannelName:       info.chanName,
 		SeekPosition:      &internalpb.MsgPosition{},
 		UnflushedSegments: ufs,
-		FlushedSegments:   []int64{},
+		FlushedSegments:   fs,
 	}
 	return vi
+}
+
+type testInfo struct {
+	isValidCase  bool
+	replicaNil   bool
+	inMsgFactory msgstream.Factory
+
+	collID   UniqueID
+	chanName string
+
+	ufCollID   UniqueID
+	ufSegID    UniqueID
+	ufchanName string
+	ufNor      int64
+
+	fCollID   UniqueID
+	fSegID    UniqueID
+	fchanName string
+	fNor      int64
+
+	description string
 }
 
 func TestDataSyncService_newDataSyncService(te *testing.T) {
 
 	ctx := context.Background()
 
-	tests := []struct {
-		isValidCase  bool
-		replicaNil   bool
-		inMsgFactory msgstream.Factory
-
-		collID     UniqueID
-		ufCollID   UniqueID
-		ufSegID    UniqueID
-		chanName   string
-		ufchanName string
-		ufNor      int64
-
-		description string
-	}{
+	tests := []*testInfo{
 		{false, false, &mockMsgStreamFactory{false, true},
-			0, 0, 0, "", "", 0,
+			0, "",
+			0, 0, "", 0,
+			0, 0, "", 0,
 			"SetParamsReturnError"},
 		{true, false, &mockMsgStreamFactory{true, true},
-			0, 1, 0, "", "", 0,
+			0, "",
+			1, 0, "", 0,
+			1, 1, "", 0,
 			"CollID 0 mismach with seginfo collID 1"},
 		{true, false, &mockMsgStreamFactory{true, true},
-			1, 1, 0, "c1", "c2", 0,
+			1, "c1",
+			1, 0, "c2", 0,
+			1, 1, "c3", 0,
 			"chanName c1 mismach with seginfo chanName c2"},
 		{true, false, &mockMsgStreamFactory{true, true},
-			1, 1, 0, "c1", "c1", 0,
+			1, "c1",
+			1, 0, "c1", 0,
+			1, 1, "c2", 0,
 			"add normal segments"},
 		{false, false, &mockMsgStreamFactory{true, false},
-			0, 0, 0, "", "", 0,
+			0, "",
+			0, 0, "", 0,
+			0, 0, "", 0,
 			"error when newinsertbufernode"},
 		{false, true, &mockMsgStreamFactory{true, false},
-			0, 0, 0, "", "", 0,
+			0, "",
+			0, 0, "", 0,
+			0, 0, "", 0,
 			"replica nil"},
 	}
 
@@ -102,7 +131,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				replica,
 				NewAllocatorFactory(),
 				test.inMsgFactory,
-				getVchanInfo(test.isValidCase, test.collID, test.ufCollID, test.ufSegID, test.chanName, test.ufchanName, test.ufNor),
+				getVchanInfo(test),
 				make(chan UniqueID),
 				df,
 				newCache(),
@@ -148,7 +177,6 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
-	t.Skip()
 	const ctxTimeInMillisecond = 2000
 
 	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
@@ -179,11 +207,28 @@ func TestDataSyncService_Start(t *testing.T) {
 	ddlChannelName := "data_sync_service_test_ddl"
 	Params.FlushInsertBufferSize = 1
 
+	ufs := []*datapb.SegmentInfo{{
+		CollectionID:  collMeta.ID,
+		InsertChannel: insertChannelName,
+		ID:            0,
+		NumOfRows:     0,
+		DmlPosition:   &internalpb.MsgPosition{},
+	}}
+	fs := []*datapb.SegmentInfo{{
+		CollectionID:  collMeta.ID,
+		PartitionID:   1,
+		InsertChannel: insertChannelName,
+		ID:            1,
+		NumOfRows:     0,
+		DmlPosition:   &internalpb.MsgPosition{},
+	}}
+
 	vchan := &datapb.VchannelInfo{
-		CollectionID:      collMeta.GetID(),
+		CollectionID:      collMeta.ID,
 		ChannelName:       insertChannelName,
-		UnflushedSegments: []*datapb.SegmentInfo{},
-		FlushedSegments:   []int64{},
+		SeekPosition:      &internalpb.MsgPosition{},
+		UnflushedSegments: ufs,
+		FlushedSegments:   fs,
 	}
 
 	signalCh := make(chan UniqueID, 100)

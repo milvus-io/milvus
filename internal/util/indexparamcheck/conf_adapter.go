@@ -93,9 +93,11 @@ var supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2,
 var supportSubQuantizer = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
 
 type ConfAdapter interface {
+	// CheckTrain returns true if the index can be built with the specific index parameters.
 	CheckTrain(map[string]string) bool
 }
 
+// BaseConfAdapter checks if a `FLAT` index can be built.
 type BaseConfAdapter struct {
 }
 

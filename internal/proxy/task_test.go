@@ -211,7 +211,7 @@ func constructSearchRequest(
 	dbName, collectionName string,
 	expr string,
 	floatVecField string,
-	nq, dim, nprobe, topk int,
+	nq, dim, nprobe, topk, roundDecimal int,
 ) *milvuspb.SearchRequest {
 	params := make(map[string]string)
 	params["nprobe"] = strconv.Itoa(nprobe)
@@ -250,6 +250,10 @@ func constructSearchRequest(
 			{
 				Key:   TopKKey,
 				Value: strconv.Itoa(topk),
+			},
+			{
+				Key:   RoundDecimalKey,
+				Value: strconv.Itoa(roundDecimal),
 			},
 		},
 		TravelTimestamp:    0,
@@ -1667,6 +1671,7 @@ func TestSearchTask_all(t *testing.T) {
 	expr := fmt.Sprintf("%s > 0", int64Field)
 	nq := 10
 	topk := 10
+	roundDecimal := 3
 	nprobe := 10
 
 	schema := constructCollectionSchemaWithAllType(
@@ -1725,7 +1730,7 @@ func TestSearchTask_all(t *testing.T) {
 	req := constructSearchRequest(dbName, collectionName,
 		expr,
 		floatVecField,
-		nq, dim, nprobe, topk)
+		nq, dim, nprobe, topk, roundDecimal)
 
 	task := &searchTask{
 		Condition: NewTaskCondition(ctx),
@@ -2006,6 +2011,7 @@ func TestSearchTask_7803_reduce(t *testing.T) {
 	expr := fmt.Sprintf("%s > 0", int64Field)
 	nq := 10
 	topk := 10
+	roundDecimal := 3
 	nprobe := 10
 
 	schema := constructCollectionSchema(
@@ -2066,7 +2072,7 @@ func TestSearchTask_7803_reduce(t *testing.T) {
 	req := constructSearchRequest(dbName, collectionName,
 		expr,
 		floatVecField,
-		nq, dim, nprobe, topk)
+		nq, dim, nprobe, topk, roundDecimal)
 
 	task := &searchTask{
 		Condition: NewTaskCondition(ctx),
@@ -2523,6 +2529,52 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		},
 	}
 
+	// invalid round_decimal
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.SearchParams = []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: int64Field,
+		},
+		{
+			Key:   TopKKey,
+			Value: "10",
+		},
+		{
+			Key:   MetricTypeKey,
+			Value: distance.L2,
+		},
+		{
+			Key:   SearchParamsKey,
+			Value: `{"nprobe": 10}`,
+		},
+		{
+			Key:   RoundDecimalKey,
+			Value: "invalid",
+		},
+	}
+
+	// invalid round_decimal
+	assert.Error(t, task.PreExecute(ctx))
+	task.query.SearchParams = []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: floatVecField,
+		},
+		{
+			Key:   TopKKey,
+			Value: "10",
+		},
+		{
+			Key:   MetricTypeKey,
+			Value: distance.L2,
+		},
+		{
+			Key:   RoundDecimalKey,
+			Value: "-1",
+		},
+	}
+
 	// failed to create query plan
 	assert.Error(t, task.PreExecute(ctx))
 	task.query.SearchParams = []*commonpb.KeyValuePair{
@@ -2541,6 +2593,10 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		{
 			Key:   SearchParamsKey,
 			Value: `{"nprobe": 10}`,
+		},
+		{
+			Key:   RoundDecimalKey,
+			Value: "-1",
 		},
 	}
 

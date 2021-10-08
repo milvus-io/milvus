@@ -105,6 +105,7 @@ Confirm that cmake is available:
 ```shell
 $ cmake --version
 ```
+Note: 3.18 or higher cmake version is required to build Milvus. 
 
 #### Go
 
@@ -115,10 +116,11 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
+Note: go1.15 is required to build Milvus.
 
 #### Docker & Docker Compose
 
-Milvus depends on Etcd, Pulsar and minIO. Using Docker Compose to manage these is an easy way in a local development. To install Docker and Docker Compose in your development environment, follow the instructions from the Docker website below:
+Milvus depends on Etcd, Pulsar and MinIO. Using Docker Compose to manage these is an easy way in a local development. To install Docker and Docker Compose in your development environment, follow the instructions from the Docker website below:
 
 -   Docker: https://docs.docker.com/get-docker/
 -   Docker Compose: https://docs.docker.com/compose/install/
@@ -132,6 +134,13 @@ $ make all
 ```
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
+
+If you want to update proto file before make, we can use the following command:
+```shell
+$ make generated-proto-go
+```
+
+If you want to know more, you can read Makefile.
 
 ## A Quick Start for Testing Milvus
 
@@ -153,6 +162,30 @@ Pull requests need to pass all unit tests. To run every unit test, use this comm
 $ make unittest
 ```
 
+Before using `make unittest` command, we should run a milvus's deployment environment which helps us to do go test. Here we use local docker environment, use the following commands:
+```shell
+# Using cluster environment
+$ cd deployments/docker/dev
+$ docker-compose up -d
+$ cd ../../../
+$ make unittest
+
+# Or using standalone environment
+$ cd deployments/docker/standalone
+$ docker-compose up -d
+$ cd ../../../
+$ make unittest
+```
+To run only cpp test, we can use this command:
+```shell
+make test-cpp
+```
+
+To run only go test, we can use this command:
+```shell
+make test-go
+```
+
 To run single test case, for instance, run TestSearchTask in /internal/proxy directory, use
 ```shell
 $ go test -v ./internal/proxy/ -test.run TestSearchTask
@@ -162,12 +195,12 @@ $ go test -v ./internal/proxy/ -test.run TestSearchTask
 
 Before submitting your Pull Request, make sure your code change is covered by unit test. Use the following commands to check code coverage rate:
 
-Install lcov(cpp code coverage tool)
+Install lcov(cpp code coverage tool):
 ```shell
 $ sudo apt-get install lcov
 ```
 
-Run unit test and generate report for code coverage
+Run unit test and generate code coverage report:
 ```shell
 $ make codecov
 ```
@@ -189,14 +222,17 @@ $ make codecov-cpp
 Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
 
 ```shell
+# Running Milvus cluster
 $ cd deployments/docker/dev
 $ docker-compose up -d
 $ cd ../../../
-# Running Milvus standalone
-$ ./scripts/start_standalone.sh
-
-# or running a Milvus cluster
 $ ./scripts/start_cluster.sh
+
+# Or running Milvus standalone
+$ cd deployments/docker/standalone
+$ docker-compose up -d
+$ cd ../../../
+$ ./scripts/start_standalone.sh
 ```
 
 To run E2E tests, use these command:
@@ -209,7 +245,7 @@ $ pytest --tags=L0 -n auto
 
 ### Test on local branch
 #### On Linux
-start the cluster on your host machine
+After preparing deployment environment, we can start the cluster on your host machine
 
 ```shell
 $ ./scripts/start_cluster.sh

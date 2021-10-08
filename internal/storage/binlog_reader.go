@@ -66,6 +66,8 @@ func (reader *BinlogReader) readDescriptorEvent() (*descriptorEvent, error) {
 	return &reader.descriptorEvent, nil
 }
 
+// Close closes the BinlogReader object.
+// It mainly calls the Close method of the internal events, reclaims resources, and marks itself as closed.
 func (reader *BinlogReader) Close() error {
 	if reader.isClose {
 		return nil

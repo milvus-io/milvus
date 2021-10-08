@@ -484,6 +484,8 @@ func TestProxy(t *testing.T) {
 	nlist := 10
 	nprobe := 10
 	topk := 10
+	// add a test parameter
+	roundDecimal := 6
 	nq := 10
 	expr := fmt.Sprintf("%s > 0", int64Field)
 	var segmentIDs []int64
@@ -640,6 +642,10 @@ func TestProxy(t *testing.T) {
 				{
 					Key:   TopKKey,
 					Value: strconv.Itoa(topk),
+				},
+				{
+					Key:   RoundDecimalKey,
+					Value: strconv.Itoa(roundDecimal),
 				},
 			},
 			TravelTimestamp:    0,

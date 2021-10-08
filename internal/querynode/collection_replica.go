@@ -98,6 +98,7 @@ type collectionReplica struct {
 	etcdKV *etcdkv.EtcdKV
 }
 
+// getSegmentsMemSize get the memory size in bytes of all the Segments
 func (colReplica *collectionReplica) getSegmentsMemSize() int64 {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
@@ -109,6 +110,7 @@ func (colReplica *collectionReplica) getSegmentsMemSize() int64 {
 	return memSize
 }
 
+// printReplica prints the collections, partitions and segments in the collectionReplica
 func (colReplica *collectionReplica) printReplica() {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -120,6 +122,7 @@ func (colReplica *collectionReplica) printReplica() {
 }
 
 //----------------------------------------------------------------------------------------------------- collection
+// getCollectionIDs gets all the collection ids in the collectionReplica
 func (colReplica *collectionReplica) getCollectionIDs() []UniqueID {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()

@@ -12,7 +12,7 @@ ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
 # ignore Minio,S3 unittes
 MILVUS_DIR="${ROOT_DIR}/internal/"
-echo $MILVUS_DIR
+echo "Running go unittest under $MILVUS_DIR"
 
 go test -race -cover "${MILVUS_DIR}/allocator/..." -failfast
 go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
@@ -39,3 +39,5 @@ go test -race -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
 go test -race -cover -v "${MILVUS_DIR}/rootcoord" -failfast
 go test -race -cover -v "${MILVUS_DIR}/datacoord/..." -failfast
 go test -race -cover -v "${MILVUS_DIR}/indexcoord/..." -failfast
+
+echo " Go unittest finished"

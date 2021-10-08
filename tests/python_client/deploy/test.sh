@@ -16,7 +16,7 @@ func() {
 
 echo "check os env"
 platform='unknown'
-unamestr=`uname`
+unamestr=$(uname)
 if [[ "$unamestr" == 'Linux' ]]; then
    platform='Linux'
 elif [[ "$unamestr" == 'Darwin' ]]; then
@@ -46,13 +46,13 @@ ROOT_FOLDER=$(cd "$(dirname "$0")";pwd)
 function error_exit {
     pushd ${ROOT_FOLDER}/${Deploy_Dir}
     echo "test failed"
-    current=`date "+%Y-%m-%d-%H-%M-%S"`
+    current=$(date "+%Y-%m-%d-%H-%M-%S")
     if [ ! -d logs  ];
     then
         mkdir logs
     fi
     docker-compose logs > ./logs/${Deploy_Dir}-${Task}-${current}.log
-    echo "log saved to `pwd`/logs/${Deploy_Dir}-${Task}-${current}.log"
+    echo "log saved to $(pwd)/logs/${Deploy_Dir}-${Task}-${current}.log"
     popd
     exit 1
 }
@@ -73,8 +73,8 @@ function replace_image_tag {
 
 #to check containers all running and minio is healthy
 function check_healthy {
-    cnt=`docker-compose ps | grep -E "running|Running|Up|up" | wc -l`
-    healthy=`docker-compose ps | grep "Healthy" | wc -l`
+    cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
+    healthy=$(docker-compose ps | grep "healthy" | wc -l)
     time_cnt=0
     echo "running num $cnt expect num $Expect"
     echo "healthy num $healthy expect num $Expect_health"
@@ -89,8 +89,8 @@ function check_healthy {
         printf "timeout,there are some issue with deployment!"
         error_exit
     fi
-    cnt=`docker-compose ps | grep -E "running|Running|Up|up" | wc -l`
-    healthy=`docker-compose ps | grep "healthy" | wc -l`
+    cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
+    healthy=$(docker-compose ps | grep "healthy" | wc -l)
     echo "running num $cnt expect num $Expect"
     echo "healthy num $healthy expect num $Expect_health"
     done
@@ -117,16 +117,16 @@ echo "get tag info"
 
 python scripts/get_tag.py
 
-latest_tag=`jq -r ".latest_tag" tag_info.json`
-latest_rc_tag=`jq -r ".latest_rc_tag" tag_info.json`
-release_version=`jq -r ".release_version" tag_info.json`
+latest_tag=$(jq -r ".latest_tag" tag_info.json)
+latest_rc_tag=$(jq -r ".latest_rc_tag" tag_info.json)
+release_version=$(jq -r ".release_version" tag_info.json)
 echo $release_version
 
 pushd ${Deploy_Dir}
 # download docker-compose.yml
 wget https://github.com/milvus-io/milvus/releases/download/${release_version}/milvus-${Deploy_Dir}-docker-compose.yml -O docker-compose.yml
 ls
-# clean env to deoploy a fresh milvus
+# clean env to deploy a fresh milvus
 docker-compose down
 docker-compose ps
 echo "$pw"| sudo -S rm -rf ./volumes
@@ -145,14 +145,14 @@ then
 
 fi
 cat docker-compose.yml|grep milvusdb
-Expect=`grep "container_name" docker-compose.yml | wc -l`
-Expect_health=`grep "healthcheck" docker-compose.yml | wc -l`
+Expect=$(grep "container_name" docker-compose.yml | wc -l)
+Expect_health=$(grep "healthcheck" docker-compose.yml | wc -l)
 docker-compose up -d
 check_healthy
 docker-compose ps
 popd
 
-# test for first deploymnent
+# test for first deployment
 printf "test for first deployment\n"
 if [ "$Task" == "reinstall" ];
 then

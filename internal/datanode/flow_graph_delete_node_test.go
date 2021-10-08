@@ -148,8 +148,7 @@ func Test_GetSegmentsByPKs(t *testing.T) {
 	mockReplica.flushedSegments[segment5.segmentID] = segment5
 	mockReplica.flushedSegments[segment6.segmentID] = segment6
 	dn := newDeleteNode(mockReplica, "test", make(chan *flushMsg))
-	results, err := dn.filterSegmentByPK(0, []int64{0, 1, 2, 3, 4})
-	assert.Nil(t, err)
+	results := dn.filterSegmentByPK(0, []int64{0, 1, 2, 3, 4})
 	expected := map[int64][]int64{
 		0: {1, 2, 3},
 		1: {1, 2, 3},

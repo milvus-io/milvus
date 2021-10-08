@@ -22,8 +22,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is an alias for the Int64 type
 type UniqueID = typeutil.UniqueID
 
+// ParamTable maintains some of the environment variables that are required for the QuryCoord runtime
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -57,14 +59,18 @@ type ParamTable struct {
 	MinioBucketName      string
 }
 
+// Params are variables of the ParamTable type
 var Params ParamTable
 var once sync.Once
 
+// InitOnce guarantees that variables are initialized only once
 func (p *ParamTable) InitOnce() {
 	once.Do(func() {
 		p.Init()
 	})
 }
+
+//Init is used to initialize params
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 	err := p.LoadYaml("advanced/query_node.yaml")

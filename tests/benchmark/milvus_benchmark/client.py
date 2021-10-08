@@ -45,10 +45,15 @@ def time_wrapper(func):
         # logger.debug("Milvus {} start".format(func.__name__))
         log = kwargs.get("log", True)
         kwargs.pop("log", None)
+        rps = kwargs.get("rps", False)
+        kwargs.pop("rps", None)
         result = func(*args, **kwargs)
         end = time.time()
         if log:
-            logger.debug("Milvus {} run in {}s".format(func.__name__, round(end - start, 2)))
+            _rps = round(end - start, 2)
+            logger.debug("Milvus {} run in {}s".format(func.__name__, _rps))
+            if rps is not False:
+                return result, _rps
         return result
 
     return wrapper
@@ -87,6 +92,7 @@ class MilvusClient(object):
         return 'Milvus collection %s' % self._collection_name
 
     def set_collection(self, collection_name):
+        """ seting collection name """
         self._collection_name = collection_name
 
     # TODO: server not support
@@ -157,6 +163,7 @@ class MilvusClient(object):
 
     @time_wrapper
     def insert_flush(self, entities, _async=False, collection_name=None):
+        # the method that included insert and flush
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         try:
             insert_res = self._milvus.insert(tmp_collection_name, entities)
@@ -291,6 +298,7 @@ class MilvusClient(object):
 
     @time_wrapper
     def query(self, vector_query, filter_query=None, collection_name=None, timeout=300):
+        """ This method corresponds to the search method of milvus """
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         must_params = [vector_query]
         if filter_query:
@@ -400,8 +408,13 @@ class MilvusClient(object):
         i = 0
         while i < timeout:
             try:
-                row_count = self.count(collection_name=collection_name)
-                if row_count:
+                # row_count = self.count(collection_name=collection_name)
+                # if row_count:
+                #     time.sleep(1)
+                #     i = i + 1
+                #     continue
+                res = self._milvus.has_collection(collection_name)
+                if res:
                     time.sleep(1)
                     i = i + 1
                     continue
@@ -471,7 +484,7 @@ class MilvusClient(object):
         logger.debug("[scene_test] Start insert : %s" % collection_name)
         self.insert(entities, collection_name=collection_name)
         logger.debug("[scene_test] Start flush : %s" % collection_name)
-        self.flush()
+        self.flush(collection_name=collection_name)
 
         logger.debug("[scene_test] Start create index : %s" % collection_name)
         self.create_index(field_name='float_vector', index_type="ivf_sq8", metric_type='l2',

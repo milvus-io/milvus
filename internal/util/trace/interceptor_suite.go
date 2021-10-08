@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 )
 
+// InterceptorSuite contains client option and server option
 type InterceptorSuite struct {
 	ClientOpts []grpc.DialOption
 	ServerOpts []grpc.ServerOption
@@ -34,6 +35,7 @@ var (
 	}
 )
 
+// GetInterceptorOpts returns the Option of gRPC open-tracing
 func GetInterceptorOpts() []grpc_opentracing.Option {
 	tracer := opentracing.GlobalTracer()
 	opts := []grpc_opentracing.Option{

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
+// rmqID wraps message ID for rocksmq
 type rmqID struct {
 	messageID rocksmq.UniqueID
 }
@@ -48,12 +49,14 @@ func (rid *rmqID) PartitionIdx() int32 {
 	return 0
 }
 
+// SerializeRmqID is used to serialize a message ID to byte array
 func SerializeRmqID(messageID int64) []byte {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, uint64(messageID))
 	return b
 }
 
+// DeserializeRmqID is used to deserialize a message ID from byte array
 func DeserializeRmqID(messageID []byte) (int64, error) {
 	return int64(binary.LittleEndian.Uint64(messageID)), nil
 }

@@ -19,6 +19,7 @@ struct SearchDataset {
     MetricType metric_type;
     int64_t num_queries;
     int64_t topk;
+    int64_t round_decimal;
     int64_t dim;
     const void* query_data;
 };

@@ -32,6 +32,7 @@ type allocator struct {
 	rootCoord types.RootCoord
 }
 
+// check if allocator implements allocatorInterface
 var _ allocatorInterface = &allocator{}
 
 func newAllocator(s types.RootCoord) *allocator {
@@ -40,7 +41,7 @@ func newAllocator(s types.RootCoord) *allocator {
 	}
 }
 
-// allocID allocat one ID from rootCoord
+// allocID allocates one ID from rootCoord
 func (alloc *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
 	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{

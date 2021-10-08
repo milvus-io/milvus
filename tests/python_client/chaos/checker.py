@@ -80,6 +80,7 @@ class SearchChecker(Checker):
 
 
 class InsertFlushChecker(Checker):
+    """check Insert and flush operations in a dependent thread"""
     def __init__(self, flush=False):
         super().__init__()
         self._flush = flush
@@ -97,6 +98,7 @@ class InsertFlushChecker(Checker):
                     self._fail += 1
                 sleep(constants.WAIT_PER_OP / 10)
             else:
+                # call flush in property num_entities
                 if self.c_wrap.num_entities == (self.initial_entities + constants.DELTA_PER_INS):
                     self._succ += 1
                     self.initial_entities += constants.DELTA_PER_INS
@@ -105,6 +107,7 @@ class InsertFlushChecker(Checker):
 
 
 class CreateChecker(Checker):
+    """check create operations in a dependent thread"""
     def __init__(self):
         super().__init__()
 
@@ -124,6 +127,7 @@ class CreateChecker(Checker):
 
 
 class IndexChecker(Checker):
+    """check Insert operations in a dependent thread"""
     def __init__(self):
         super().__init__()
         self.c_wrap.insert(data=cf.gen_default_list_data(nb=5*constants.ENTITIES_FOR_SEARCH),
@@ -144,6 +148,7 @@ class IndexChecker(Checker):
 
 
 class QueryChecker(Checker):
+    """check query operations in a dependent thread"""
     def __init__(self):
         super().__init__()
         self.c_wrap.load()      # load before query

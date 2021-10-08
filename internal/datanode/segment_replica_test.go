@@ -368,7 +368,9 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 					sr.flushedSegments[test.flushedSegID] = &Segment{}
 				}
 				sr.updateSegmentEndPosition(test.inSegID, new(internalpb.MsgPosition))
-				sr.removeSegment(0)
+				err := sr.removeSegment(0)
+				assert.Nil(t, err)
+
 			})
 		}
 	})

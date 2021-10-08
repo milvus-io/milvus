@@ -1,4 +1,4 @@
-#Configuration File for CodeCov
+# Configuration File for CodeCov
 codecov:
   notify:
     require_ci_to_pass: yes

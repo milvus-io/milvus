@@ -81,9 +81,44 @@ type DataCoord interface {
 	// Flushed segments can be check via `GetFlushedSegments` API
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
 
+	// AssignSegmentID applies allocations for specified Coolection/Partition and related Channel Name(Virtial Channel)
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the requester's info(id and role) and the list of Assignment Request,
+	// which coontains the specified collection, partitaion id, the related VChannel Name and row count it needs
+	//
+	// response struct `AssignSegmentIDResponse` contains the the assignment result for each request
+	// error is returned only when some communication issue occurs
+	// if some error occurs in the process of `AssignSegmentID`, it will be recorded and returned in `Status` field of response
+	//
+	// `AssignSegmentID` will applies current configured allocation policies for each request
+	// if the VChannel is newly used, `WatchDmlChannels` will be invoked to notify a `DataNode`(selected by policy) to watch it
+	// if there is anything make the allocation impossible, the response will not contain the corresponding result
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
+
+	// GetSegmentStates requests segment state information
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the list of segment id to query
+	//
+	// response struct `GetSegmentStatesResponse` contains the list of each state query result
+	// 	when the segment is not found, the state entry will has the field `Status`  to identify failure
+	// 	otherwise the Segment State and Start position information will be returned
+	// error is returned only when some communication issue occurs
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
+
+	// GetInsertBinlogPaths requests binlog paths for specified segment
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the segment id to query
+	//
+	// response struct `GetInsertBinlogPathsResponse` contains the fields list
+	// 	and corresponding binlog path list
+	// error is returned only when some communication issue occurs
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
+
+	// GetSegmentInfoChannel DEPRECATED
+	// legacy api to get SegmentInfo Channel name
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
@@ -243,6 +278,8 @@ type RootCoord interface {
 	// The `ErrorCode` of `Status` is `Success` if create index successfully;
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
+	//
+	// RootCoord forwards this request to IndexCoord to create index
 	CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 
 	// DescribeIndex notifies RootCoord to get specified index information for specified field
@@ -263,6 +300,8 @@ type RootCoord interface {
 	// The `ErrorCode` of `Status` is `Success` if drop index successfully;
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
+	//
+	// RootCoord forwards this request to IndexCoord to drop index
 	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	// CreateAlias notifies RootCoord to create an alias for the collection
@@ -344,9 +383,33 @@ type RootCoord interface {
 	// `SegmentIDs` in `ShowSegmentsResponse` records all segment ids.
 	// error is always nil
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
+
+	// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
+	//
+	// ctx is the request to control request deadline and cancellation.
+	// request contains the request params, which are database id(not used) and collection id.
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop index successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	//
+	// RootCoord just forwards this request to Proxy client
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
+
+	// SegmentFlushCompleted notifies RootCoord that specified segment has been flushed
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including SegmentInfo
+	//
+	// The `ErrorCode` of `Status` is `Success` if process successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	//
+	// This interface is only used by DataCoord, when RootCoord receives this request, RootCoord will notify IndexCoord
+	// to build index for this segment.
 	SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error)
 
+	// GetMetrics notifies RootCoord to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
@@ -354,12 +417,23 @@ type RootCoord interface {
 type RootCoordComponent interface {
 	RootCoord
 
+	// UpdateStateCode updates state code for RootCoord
+	// State includes: Initializing, Healthy and Abnormal
 	UpdateStateCode(internalpb.StateCode)
+
+	// SetDataCoord set DataCoord for RootCoord
 	SetDataCoord(context.Context, DataCoord) error
+
+	// SetIndexCoord set IndexCoord for RootCoord
 	SetIndexCoord(IndexCoord) error
+
+	// SetQueryCoord set QueryCoord for RootCoord
 	SetQueryCoord(QueryCoord) error
+
+	// SetNewProxyClient set Proxy client creator func for RootCoord
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
 
+	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 

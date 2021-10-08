@@ -1,14 +1,14 @@
 
 
-## 8. Data Service
+## 9. Data Service
 
 
 
-#### 8.1 Overview
+#### 9.1 Overview
 
 <img src="./figs/data_coord.png" width=700>
 
-#### 8.2 Data Service Interface
+#### 9.2 Data Service Interface
 
 ```go
 type DataCoord interface {
@@ -245,7 +245,7 @@ type SaveBinlogPathsRequest struct {
 
 
 
-#### 8.2 Insert Channel
+#### 9.3 Insert Channel
 
 * *InsertMsg*
 
@@ -273,7 +273,7 @@ type InsertMsg struct {
 
 
 
-#### 8.2 Data Node Interface
+#### 9.4 Data Node Interface
 
 ```go
 type DataNode interface {
@@ -305,7 +305,7 @@ type FlushSegmentsRequest struct {
 ```
 
 
-#### 8.2 SegmentStatistics Update Channel
+#### 9.5 SegmentStatistics Update Channel
 
 * *SegmentStatisticsMsg*
 
@@ -331,7 +331,7 @@ type SegmentStatisticsMsg struct {
 }
 
 ```
-#### 8.3 DataNode Time Tick Channel
+#### 9.6 DataNode Time Tick Channel
 
 * *DataNode Tt Msg*
 

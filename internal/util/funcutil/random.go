@@ -17,22 +17,24 @@ import (
 	"time"
 )
 
-var Rand *rand.Rand = nil
+var r *rand.Rand = nil
 
 func init() {
-	Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	r = rand.New(rand.NewSource(time.Now().UnixNano()))
 }
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
+// RandomString returns a batch of random string
 func RandomString(n int) string {
 	b := make([]rune, n)
 	for i := range b {
-		b[i] = letterRunes[Rand.Intn(len(letterRunes))]
+		b[i] = letterRunes[r.Intn(len(letterRunes))]
 	}
 	return string(b)
 }
 
+// GenRandomStr generates a random string.
 func GenRandomStr() string {
 	l := rand.Uint64()%10 + 1
 	b := make([]byte, l)

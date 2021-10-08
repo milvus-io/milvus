@@ -1,4 +1,4 @@
-## Binlog
+## 8 Binlog
 
 InsertBinlog、DeleteBinlog、DDLBinlog
 
@@ -6,12 +6,11 @@ Binlog is stored in a columnar storage format, every column in schema is stored 
 Timestamp, schema, row id and primary key allocated by system are four special columns.
 Schema column records the DDL of the collection.
 
-
 ## Event format
 
 Binlog file consists of 4 bytes magic number and a series of events. The first event must be descriptor event.
 
-### Event format
+### 8.1 Event format
 
 ```
 +=====================================+=====================================================================+
@@ -29,8 +28,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 +=====================================+=====================================================================+
 ```
 
-
-### Descriptor Event format
+### 8.2 Descriptor Event format
 
 ```
 +=====================================+=====================================================================+
@@ -64,8 +62,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 +=====================================+=====================================================================|
 ```
 
-
-### Type code
+### 8.3 Type code
 
 ```
 DESCRIPTOR_EVENT
@@ -85,8 +82,7 @@ DELETE_EVENT 只能用于 primary key 的 binlog 文件（目前只有按照 pri
 
 CREATE_COLLECTION_EVENT、DROP_COLLECTION_EVENT、CREATE_PARTITION_EVENT、DROP_PARTITION_EVENT 只出现在 DDL binlog 文件
 
-
-### Event data part
+### 8.4 Event data part
 
 ```
 event data part
@@ -106,45 +102,38 @@ INSERT_EVENT:
 other events are similar with INSERT_EVENT
 ```
 
-
-### Example
+### 8.5 Example
 
 Schema
 
-​	string | int | float(optional) | vector(512)
-
-
+​ string | int | float(optional) | vector(512)
 
 Request:
 
-​	InsertRequest  rows(1W)
+​ InsertRequest rows(1W)
 
-​	DeleteRequest pk=1
+​ DeleteRequest pk=1
 
-​	DropPartition partitionTag="abc"
-
-
+​ DropPartition partitionTag="abc"
 
 insert binlogs:
 
-​	rowid, pk, ts, string, int, float, vector 6 files
+​ rowid, pk, ts, string, int, float, vector 6 files
 
-​	all events are INSERT_EVENT
-​	float column file contains some NULL value
+​ all events are INSERT_EVENT
+​ float column file contains some NULL value
 
 delete binlogs:
 
-​	pk, ts 2 files
+​ pk, ts 2 files
 
-​	pk's events are DELETE_EVENT, ts's events are INSERT_EVENT
+​ pk's events are DELETE_EVENT, ts's events are INSERT_EVENT
 
 DDL binlogs:
 
-​	ddl, ts
+​ ddl, ts
 
-​	ddl's event is DROP_PARTITION_EVENT, ts's event is INSERT_EVENT
-
-
+​ ddl's event is DROP_PARTITION_EVENT, ts's event is INSERT_EVENT
 
 C++ interface
 

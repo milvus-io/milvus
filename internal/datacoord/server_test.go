@@ -648,7 +648,8 @@ func TestChannel(t *testing.T) {
 		segInfo := &datapb.SegmentInfo{
 			ID: segID,
 		}
-		svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		assert.Nil(t, err)
 
 		stats := &internalpb.SegmentStatisticsUpdates{
 			SegmentID: segID,
@@ -680,7 +681,7 @@ func TestChannel(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 123))
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 345))
-		err := statsStream.Produce(&msgPack)
+		err = statsStream.Produce(&msgPack)
 		assert.Nil(t, err)
 	})
 }
@@ -870,7 +871,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		ttMsgStream.Produce(&msgPack)
+		err = ttMsgStream.Produce(&msgPack)
+		assert.Nil(t, err)
 
 		flushMsg := <-ch
 		flushReq := flushMsg.(*datapb.FlushSegmentsRequest)
@@ -955,7 +957,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		ttMsgStream.Produce(&msgPack)
+		err = ttMsgStream.Produce(&msgPack)
+		assert.Nil(t, err)
 		flushMsg := <-ch
 		flushReq := flushMsg.(*datapb.FlushSegmentsRequest)
 		assert.EqualValues(t, 1, len(flushReq.SegmentIDs))
@@ -1019,7 +1022,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", resp.SegIDAssignments[0].ExpireTime)
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		ttMsgStream.Produce(&msgPack)
+		err = ttMsgStream.Produce(&msgPack)
+		assert.Nil(t, err)
 
 		<-ch
 		segment = svr.meta.GetSegment(assignedSegmentID)
@@ -1093,7 +1097,7 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.EqualValues(t, 1, len(pair))
 		assert.EqualValues(t, 0, pair[0].CollectionID)
 		assert.EqualValues(t, 1, len(pair[0].FlushedSegments))
-		assert.EqualValues(t, 1, pair[0].FlushedSegments[0])
+		assert.EqualValues(t, s1, pair[0].FlushedSegments[0])
 		assert.EqualValues(t, 1, len(pair[0].UnflushedSegments))
 		assert.EqualValues(t, 2, pair[0].UnflushedSegments[0].ID)
 		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].UnflushedSegments[0].DmlPosition.MsgID)
@@ -1169,7 +1173,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegments()))
-		assert.ElementsMatch(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
+		assert.ElementsMatch(t, []*datapb.SegmentInfo{seg1, seg2}, resp.GetChannels()[0].GetFlushedSegments())
 		assert.EqualValues(t, 20, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 

@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+// Base is an interface that embeds types.RootCoord and contains some other methods.
 type Base interface {
 	types.RootCoord
 

@@ -32,6 +32,7 @@ def positive_int(s):
 
 
 def get_image_tag(image_version):
+    """ Set the image version to the latest version """
     return "%s-latest" % (image_version)
 
 
@@ -45,6 +46,7 @@ def get_image_tag(image_version):
 def run_suite(run_type, suite, env_mode, env_params, timeout=None):
     try:
         start_status = False
+        # Initialize the class of the reported metric
         metric = api.Metric()
         deploy_mode = env_params["deploy_mode"]
         deploy_opology = env_params["deploy_opology"] if "deploy_opology" in env_params else None
@@ -125,6 +127,7 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
 
 
 def main():
+    # Parse the incoming parameters and run the corresponding test cases
     arg_parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # helm mode with scheduler
@@ -139,6 +142,7 @@ def main():
         help="load test schedule from FILE")
 
     # local mode
+    # Use the deployed milvus server, and pass host and port
     arg_parser.add_argument(
         '--local',
         action='store_true',
@@ -151,11 +155,15 @@ def main():
         '--port',
         help='server port param for local mode',
         default='19530')
+
+    # Client configuration file
     arg_parser.add_argument(
         '--suite',
         metavar='FILE',
         help='load test suite from FILE',
         default='')
+
+    # Milvus deploy config file
     arg_parser.add_argument(
         '--server-config',
         metavar='FILE',

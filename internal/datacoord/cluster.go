@@ -46,7 +46,7 @@ type EventType int
 const (
 	// Register EventType const for data node registration
 	Register EventType = 1
-	// UnRegister EventType const for data node unregistration
+	// UnRegister EventType const for data node unRegistration
 	UnRegister EventType = 2
 	// WatchChannel EventType const for a channel needs to be watched
 	WatchChannel EventType = 3
@@ -248,7 +248,7 @@ func (c *Cluster) handleNodeEvent() {
 			case FlushSegments:
 				c.handleFlush(e.Data.([]*datapb.SegmentInfo))
 			default:
-				log.Warn("Unknow node event type")
+				log.Warn("Unknown node event type")
 			}
 		}
 	}
@@ -359,7 +359,7 @@ func createClient(ctx context.Context, addr string) (types.DataNode, error) {
 	return cli, nil
 }
 
-// Startup applies statup policy
+// Startup applies startup policy
 func (c *Cluster) Startup(nodes []*NodeInfo) {
 	c.wg.Add(1)
 	go c.handleNodeEvent()
@@ -402,7 +402,7 @@ func (c *Cluster) updateCluster(nodes []*NodeInfo) (newNodes []*NodeInfo, offlin
 	return
 }
 
-// handleRegister handls register logic
+// handleRegister handle register logic
 // applies register policy and save result into kv store
 func (c *Cluster) handleRegister(n *NodeInfo) {
 	c.mu.Lock()
@@ -469,7 +469,7 @@ func (c *Cluster) handleUnRegister(n *NodeInfo) {
 	}
 }
 
-// handleWatchChannel handls watch channel logic
+// handleWatchChannel handle watch channel logic
 // applies assignPolicy and saves results into kv store
 func (c *Cluster) handleWatchChannel(channel string, collectionID UniqueID) {
 	c.mu.Lock()
@@ -613,7 +613,7 @@ func (c *Cluster) txnSaveNodesAndBuffer(nodes []*NodeInfo, buffer []*datapb.Chan
 		data[key] = string(value)
 	}
 
-	// short cut, reusing datainfo to store array of channel status
+	// short cut, reusing dataInfo to store array of channel status
 	bufNode := &datapb.DataNodeInfo{
 		Channels: buffer,
 	}

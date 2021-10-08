@@ -15,7 +15,7 @@ CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/output"
 UNITTEST_DIRS=("${CORE_INSTALL_PREFIX}/unittest")
 CWRAPPER_UNITTEST="${SCRIPTS_DIR}/../internal/storage/cwrapper/output/wrapper_test"
 
-# Currently core will install target lib to "core/output/lib"
+# currently core will install target lib to "core/output/lib"
 if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
 	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CORE_INSTALL_PREFIX}/lib
 fi
@@ -37,7 +37,7 @@ done
 
 # run cwrapper unittest
 if [ -f ${CWRAPPER_UNITTEST} ];then
-  echo "Running cwrapper unittest ..."
+  echo "Running cwrapper unittest: ${CWRAPPER_UNITTEST}"
   ${CWRAPPER_UNITTEST}
   if [ $? -ne 0 ]; then
       echo ${CWRAPPER_UNITTEST} " run failed"

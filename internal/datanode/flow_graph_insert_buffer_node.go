@@ -204,6 +204,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	displaySize := min(10, len(seg2Upload))
 
+	// Log the segment statistics in mem
 	for k, segID := range seg2Upload[:displaySize] {
 		bd, ok := ibNode.insertBuffer.Load(segID)
 		if !ok {
@@ -274,20 +275,21 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 		if !ok || bd.(*BufferData).size <= 0 { // Buffer empty
 			log.Debug(".. Buffer empty ...")
-			ibNode.dsSaveBinlog(&segmentFlushUnit{
+			err = ibNode.dsSaveBinlog(&segmentFlushUnit{
 				collID:     fmsg.collectionID,
 				segID:      currentSegID,
 				field2Path: map[UniqueID]string{},
 				checkPoint: ibNode.replica.listSegmentsCheckPoints(),
 				flushed:    true,
 			})
+			if err != nil {
+				log.Debug("insert buffer node save binlog failed", zap.Error(err))
+				break
+			}
 			ibNode.replica.segmentFlushed(currentSegID)
 		} else { // Buffer not empty
 			log.Debug(".. Buffer not empty, flushing ..")
 			finishCh := make(chan segmentFlushUnit, 1)
-
-			// Since buffer is not empty, so there must be data for key currentSegID
-			bd, _ := ibNode.insertBuffer.Load(currentSegID)
 
 			ibNode.flushMap.Store(currentSegID, bd.(*BufferData).buffer)
 			clearFn := func() {
@@ -345,6 +347,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	return nil
 }
 
+// updateSegStatesInReplica updates statistics in replica for the segments in insertMsgs.
+//  If the segment doesn't exist, a new segment will be created.
+//  The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
 func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range insertMsgs {
@@ -654,6 +659,9 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	return nil
 }
 
+// readBinary read data in bytes and write it into receiver.
+//  The receiver can be any type in int8, int16, int32, int64, float32, float64 and bool
+//  readBinary uses LittleEndian ByteOrder.
 func readBinary(data []byte, receiver interface{}, dataType schemapb.DataType) {
 	buf := bytes.NewReader(data)
 	err := binary.Read(buf, binary.LittleEndian, receiver)
@@ -768,6 +776,7 @@ func flushSegment(
 	clearFn(true)
 }
 
+// writeHardTimeTick writes timetick once insertBufferNode operates.
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := msgstream.DataNodeTtMsg{
@@ -790,6 +799,10 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	return ibNode.timeTickStream.Produce(&msgPack)
 }
 
+// uploadMemStates2Coord uploads latest changed segments statistics in DataNode memory to DataCoord
+//  through a msgStream channel.
+//
+// Currently, the statistics includes segment ID and its total number of rows in memory.
 func (ibNode *insertBufferNode) uploadMemStates2Coord(segIDs []UniqueID) error {
 	log.Debug("Updating segments statistics...")
 	statsUpdates := make([]*internalpb.SegmentStatisticsUpdates, 0, len(segIDs))

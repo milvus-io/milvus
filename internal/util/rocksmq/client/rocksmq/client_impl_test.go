@@ -155,7 +155,8 @@ func TestClient_consume(t *testing.T) {
 	msg := &ProducerMessage{
 		Payload: make([]byte, 10),
 	}
-	producer.Send(msg)
+	_, err = producer.Send(msg)
+	assert.Nil(t, err)
 
 	<-consumer.Chan()
 

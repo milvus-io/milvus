@@ -45,6 +45,7 @@ func (pt *ParamTable) Init() {
 	})
 }
 
+// initParams initializes params of the configuration items.
 func (pt *ParamTable) initParams() {
 	pt.initServicePort()
 	pt.initServiceAddress()
@@ -53,10 +54,12 @@ func (pt *ParamTable) initParams() {
 	pt.initServerMaxRecvSize()
 }
 
+// initServicePort initializes the port of IndexCoord service.
 func (pt *ParamTable) initServicePort() {
 	pt.ServicePort = pt.ParseInt("indexCoord.port")
 }
 
+// initServiceAddress initializes the address of IndexCoord service.
 func (pt *ParamTable) initServiceAddress() {
 	ret, err := pt.Load("_IndexCoordAddress")
 	if err != nil {
@@ -65,6 +68,7 @@ func (pt *ParamTable) initServiceAddress() {
 	pt.ServiceAddress = ret
 }
 
+// initServerMaxSendSize initializes the max send size of IndexCoord service.
 func (pt *ParamTable) initServerMaxSendSize() {
 	var err error
 
@@ -88,6 +92,7 @@ func (pt *ParamTable) initServerMaxSendSize() {
 		zap.Int("indexCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
 }
 
+// initServerMaxSendSize initializes the max receive size of IndexCoord service.
 func (pt *ParamTable) initServerMaxRecvSize() {
 	var err error
 

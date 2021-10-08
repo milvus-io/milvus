@@ -21,10 +21,28 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 )
 
+// make sure ddNode implements flowgraph.Node
+var _ flowgraph.Node = (*ddNode)(nil)
+
+// ddNode filter messages from message streams.
+//
+// ddNode recives all the messages from message stream dml channels, including insert messages,
+//  delete messages and ddl messages like CreateCollectionMsg.
+//
+// ddNode filters insert messages according to the `flushedSegment` and `FilterThreshold`.
+//  If the timestamp of the insert message is earlier than `FilterThreshold`, ddNode will
+//  filter out the insert message for those who belong to `flushedSegment`
+//
+// When receiving a `DropCollection` message, ddNode will send a signal to DataNode `BackgroundGC`
+//  goroutinue, telling DataNode to release the resources of this perticular flow graph.
+//
+// After the filtering process, ddNode passes all the valid insert messages and delete message
+//  to the following flow graph node, which in DataNode is `insertBufferNode`
 type ddNode struct {
 	BaseNode
 
@@ -32,13 +50,15 @@ type ddNode struct {
 	collectionID UniqueID
 
 	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
-	flushedSegments []UniqueID
+	flushedSegments []*datapb.SegmentInfo
 }
 
+// Name returns node name, implementing flowgraph.Node
 func (ddn *ddNode) Name() string {
 	return "ddNode"
 }
 
+// Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
 	// log.Debug("DDNode Operating")
 
@@ -128,8 +148,8 @@ func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) 
 }
 
 func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
-	for _, id := range ddn.flushedSegments {
-		if id == segmentID {
+	for _, s := range ddn.flushedSegments {
+		if s.ID == segmentID {
 			return true
 		}
 	}
@@ -140,7 +160,7 @@ func newDDNode(clearSignal chan<- UniqueID, collID UniqueID, vchanInfo *datapb.V
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
 
-	fs := make([]UniqueID, 0, len(vchanInfo.GetFlushedSegments()))
+	fs := make([]*datapb.SegmentInfo, 0, len(vchanInfo.GetFlushedSegments()))
 	fs = append(fs, vchanInfo.GetFlushedSegments()...)
 	log.Debug("ddNode add flushed segment",
 		zap.Int64("collectionID", vchanInfo.GetCollectionID()),

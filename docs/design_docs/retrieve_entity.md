@@ -1,7 +1,5 @@
 # Support to retrieve the specified entity from a collection
 
-
-
 ## Background
 
 Milvus supports one entity containing multiple vector fields and multiple scalar fields.
@@ -12,22 +10,16 @@ Milvus currently only supports primary keys of int64 type.
 
 QueryNode subscribes to the insert channel and will determine whether to use the data extracted from insert channel or data processed by DataNode to provide services according to the status of a segment.
 
-
-
 ## Goals
 
 - Support to retrieve one or more entities from a collection through primary keys
 - Support to retrieve only some fields of a entity
 - Consider backward file format compatibility if a new file is defined
 
-
-
 ## Non-Goals
 
 - How to deal with duplicate primary keys
 - How to retrieve entity by non-primary key
-
-
 
 ## Detailed design
 
@@ -79,8 +71,6 @@ BFBinlog Payload: Refer to https://github.com/milvus-io/milvus/blob/1.1/core/src
 
 StatsBinlog Payload: Json format string, currently only contains the keys `max`, `min`.
 
-
-
 ## Impact
 
 ### API
@@ -93,8 +83,6 @@ StatsBinlog Payload: Json format string, currently only contains the keys `max`,
 - The name of the binlog file has been changed from `${log_idx}` to `_${log_idx}`
 - Each binlog adds a stats file
 - Each binlog adds a bloomfilter file
-
-
 
 ## Test Plan
 
