@@ -45,10 +45,15 @@ def time_wrapper(func):
         # logger.debug("Milvus {} start".format(func.__name__))
         log = kwargs.get("log", True)
         kwargs.pop("log", None)
+        rps = kwargs.get("rps", False)
+        kwargs.pop("rps", None)
         result = func(*args, **kwargs)
         end = time.time()
         if log:
-            logger.debug("Milvus {} run in {}s".format(func.__name__, round(end - start, 2)))
+            _rps = round(end - start, 2)
+            logger.debug("Milvus {} run in {}s".format(func.__name__, _rps))
+            if rps is not False:
+                return result, _rps
         return result
 
     return wrapper
