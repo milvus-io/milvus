@@ -740,6 +740,7 @@ class TestCollectionSearch(TestcaseBase):
         # get vectors that inserted into collection
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(nq)]
+        log.info("test_search_with_hit_vectors: searching collection %s" % collection_w.name)
         search_res, _ = collection_w.search(vectors[:nq], default_search_field,
                                             default_search_params, default_limit,
                                             default_search_exp,
@@ -747,6 +748,7 @@ class TestCollectionSearch(TestcaseBase):
                                             check_items={"nq": nq,
                                                          "ids": insert_ids,
                                                          "limit": default_limit})
+        log.info("test_search_with_hit_vectors: checking the distance of top 1")
         for hits in search_res:
             # verify that top 1 hit is itself,so min distance is 0
             assert hits.distances[0] == 0.0
@@ -944,8 +946,11 @@ class TestCollectionSearch(TestcaseBase):
                                                                       1, auto_id=auto_id,
                                                                       dim=dim)
         # 2. release collection
+        log.info("test_search_collection_after_release_load: releasing collection %s" % collection_w.name)
         collection_w.release()
+        log.info("test_search_collection_after_release_load: released collection %s" % collection_w.name)
         # 3. Search the pre-released collection after load
+        log.info("test_search_collection_after_release_load: loading collection %s" % collection_w.name)
         collection_w.load()
         log.info("test_search_collection_after_release_load: searching after load")
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
