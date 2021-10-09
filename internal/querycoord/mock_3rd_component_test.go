@@ -214,7 +214,9 @@ func (rc *rootCoordMock) createCollection(collectionID UniqueID) {
 
 	if _, ok := rc.Col2partition[collectionID]; !ok {
 		rc.CollectionIDs = append(rc.CollectionIDs, collectionID)
-		rc.Col2partition[collectionID] = make([]UniqueID, 0)
+		partitionIDs := make([]UniqueID, 0)
+		partitionIDs = append(partitionIDs, defaultPartitionID+1)
+		rc.Col2partition[collectionID] = partitionIDs
 	}
 }
 
@@ -222,11 +224,28 @@ func (rc *rootCoordMock) createPartition(collectionID UniqueID, partitionID Uniq
 	rc.Lock()
 	defer rc.Unlock()
 
-	if _, ok := rc.Col2partition[collectionID]; ok {
-		rc.Col2partition[collectionID] = append(rc.Col2partition[collectionID], partitionID)
+	if partitionIDs, ok := rc.Col2partition[collectionID]; ok {
+		partitionExist := false
+		for _, id := range partitionIDs {
+			if id == partitionID {
+				partitionExist = true
+				break
+			}
+		}
+		if !partitionExist {
+			rc.Col2partition[collectionID] = append(rc.Col2partition[collectionID], partitionID)
+		}
+		return nil
 	}
 
 	return errors.New("collection not exist")
+}
+
+func (rc *rootCoordMock) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+	rc.createPartition(defaultCollectionID, defaultPartitionID)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
 
 func (rc *rootCoordMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
@@ -244,7 +263,6 @@ func (rc *rootCoordMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowPa
 	}
 
 	rc.createCollection(collectionID)
-	rc.createPartition(collectionID, defaultPartitionID)
 
 	return &milvuspb.ShowPartitionsResponse{
 		Status:       status,
@@ -267,16 +285,17 @@ type dataCoordMock struct {
 	minioKV             kv.BaseKV
 	collections         []UniqueID
 	col2DmChannels      map[UniqueID][]*datapb.VchannelInfo
-	partitionID2Segment map[UniqueID]UniqueID
-	Segment2Binlog      map[UniqueID][]*datapb.SegmentBinlogs
-	assignedSegmentID   UniqueID
+	partitionID2Segment map[UniqueID][]UniqueID
+	Segment2Binlog      map[UniqueID]*datapb.SegmentBinlogs
+	baseSegmentID       UniqueID
+	channelNumPerCol    int
 }
 
 func newDataCoordMock(ctx context.Context) (*dataCoordMock, error) {
 	collectionIDs := make([]UniqueID, 0)
 	col2DmChannels := make(map[UniqueID][]*datapb.VchannelInfo)
-	partitionID2Segment := make(map[UniqueID]UniqueID)
-	segment2Binglog := make(map[UniqueID][]*datapb.SegmentBinlogs)
+	partitionID2Segments := make(map[UniqueID][]UniqueID)
+	segment2Binglog := make(map[UniqueID]*datapb.SegmentBinlogs)
 
 	// create minio client
 	option := &minioKV.Option{
@@ -296,9 +315,10 @@ func newDataCoordMock(ctx context.Context) (*dataCoordMock, error) {
 		minioKV:             kv,
 		collections:         collectionIDs,
 		col2DmChannels:      col2DmChannels,
-		partitionID2Segment: partitionID2Segment,
+		partitionID2Segment: partitionID2Segments,
 		Segment2Binlog:      segment2Binglog,
-		assignedSegmentID:   defaultSegmentID,
+		baseSegmentID:       defaultSegmentID,
+		channelNumPerCol:    2,
 	}, nil
 }
 
@@ -306,28 +326,36 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 	collectionID := req.CollectionID
 	partitionID := req.PartitionID
 
-	if _, ok := data.col2DmChannels[collectionID]; !ok {
-		segmentID := data.assignedSegmentID
-		data.partitionID2Segment[partitionID] = segmentID
-		fieldID2Paths, err := generateInsertBinLog(collectionID, partitionID, segmentID, "queryCoorf-mockDataCoord", data.minioKV)
-		if err != nil {
-			return nil, err
-		}
-		fieldBinlogs := make([]*datapb.FieldBinlog, 0)
-		for fieldID, path := range fieldID2Paths {
-			fieldBinlog := &datapb.FieldBinlog{
-				FieldID: fieldID,
-				Binlogs: []string{path},
+	if _, ok := data.partitionID2Segment[partitionID]; !ok {
+		segmentIDs := make([]UniqueID, 0)
+		for i := 0; i < data.channelNumPerCol; i++ {
+			segmentID := data.baseSegmentID
+			if _, ok := data.Segment2Binlog[segmentID]; !ok {
+				fieldID2Paths, err := generateInsertBinLog(collectionID, partitionID, segmentID, "queryCoorf-mockDataCoord", data.minioKV)
+				if err != nil {
+					return nil, err
+				}
+				fieldBinlogs := make([]*datapb.FieldBinlog, 0)
+				for fieldID, path := range fieldID2Paths {
+					fieldBinlog := &datapb.FieldBinlog{
+						FieldID: fieldID,
+						Binlogs: []string{path},
+					}
+					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+				}
+				segmentBinlog := &datapb.SegmentBinlogs{
+					SegmentID:    segmentID,
+					FieldBinlogs: fieldBinlogs,
+				}
+				data.Segment2Binlog[segmentID] = segmentBinlog
 			}
-			fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+			segmentIDs = append(segmentIDs, segmentID)
+			data.baseSegmentID++
 		}
-		data.Segment2Binlog[segmentID] = make([]*datapb.SegmentBinlogs, 0)
-		segmentBinlog := &datapb.SegmentBinlogs{
-			SegmentID:    segmentID,
-			FieldBinlogs: fieldBinlogs,
-		}
-		data.Segment2Binlog[segmentID] = append(data.Segment2Binlog[segmentID], segmentBinlog)
+		data.partitionID2Segment[partitionID] = segmentIDs
+	}
 
+	if _, ok := data.col2DmChannels[collectionID]; !ok {
 		channelInfos := make([]*datapb.VchannelInfo, 0)
 		data.collections = append(data.collections, collectionID)
 		collectionName := funcutil.RandomString(8)
@@ -339,20 +367,24 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 				SeekPosition: &internalpb.MsgPosition{
 					ChannelName: vChannel,
 				},
-				FlushedSegments: []*datapb.SegmentInfo{{ID: segmentID}},
 			}
 			channelInfos = append(channelInfos, channelInfo)
 		}
 		data.col2DmChannels[collectionID] = channelInfos
 	}
 
-	segmentID := data.partitionID2Segment[partitionID]
+	binlogs := make([]*datapb.SegmentBinlogs, 0)
+	for _, segmentID := range data.partitionID2Segment[partitionID] {
+		if _, ok := data.Segment2Binlog[segmentID]; ok {
+			binlogs = append(binlogs, data.Segment2Binlog[segmentID])
+		}
+	}
 	return &datapb.GetRecoveryInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Channels: data.col2DmChannels[collectionID],
-		Binlogs:  data.Segment2Binlog[segmentID],
+		Binlogs:  binlogs,
 	}, nil
 }
 
