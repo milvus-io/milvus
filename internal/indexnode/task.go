@@ -190,6 +190,7 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 
 }
 
+// PreExecute does some checks before building the index, for example, whether the index has been deleted.
 func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask preExecute...")
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex-PreExecute")
@@ -197,6 +198,8 @@ func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 	return it.checkIndexMeta(ctx, true)
 }
 
+// PostExecute does some checks after building the index, for example, whether the index has been deleted or
+// whether the index task is up to date.
 func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask PostExecute...")
 	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex-PostExecute")
@@ -205,6 +208,7 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	return it.checkIndexMeta(ctx, false)
 }
 
+// Execute actually performs the task of building an index.
 func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask Execute ...")
 	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex-Execute")
