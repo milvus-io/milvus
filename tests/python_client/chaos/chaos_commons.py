@@ -25,6 +25,7 @@ def reset_counting(checkers={}):
 
 
 def gen_experiment_config(yaml):
+    """load the yaml file of chaos experiment"""
     with open(yaml) as f:
         _config = full_load(f)
         f.close()
