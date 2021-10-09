@@ -1045,6 +1045,7 @@ class TestUtilityBase(TestcaseBase):
         method: both left and right vectors are from collection
         expected: distance calculated successfully
         """
+        log.info("Creating connection")
         self._connect()
         nb = 10
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
@@ -1054,10 +1055,12 @@ class TestUtilityBase(TestcaseBase):
         vectors_r = []
         for i in range(middle):
             vectors_r.append(vectors[middle + i])
+        log.info("Creating vectors from collections for distance calculation")
         op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
                 "field": default_field_name}
         op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
                 "field": default_field_name}
+        log.info("Creating vectors for entities")
         params = {metric_field: metric, "sqrt": sqrt}
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.check_distance,
