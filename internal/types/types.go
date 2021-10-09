@@ -142,6 +142,15 @@ type DataCoord interface {
 	// GetSegmentInfoChannel DEPRECATED
 	// legacy api to get SegmentInfo Channel name
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+
+	// GetCollectionStatistics requests collection statistics
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection id to query
+	//
+	// response struct `GetCollectionStatisticsResponse` contains the key-value list fields returning related data
+	// 	only row count for now
+	// error is returned only when some communication issue occurs
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
