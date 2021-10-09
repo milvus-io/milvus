@@ -1353,6 +1353,12 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 }
 
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Delete")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+	log.Info("Delete request begin", zap.String("traceID", traceID))
+	defer log.Info("Delete request end", zap.String("traceID", traceID))
+
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
 			Status: unhealthyStatus(),
@@ -1365,14 +1371,16 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		DeleteRequest: request,
 	}
 
-	log.Debug("Delete enqueue",
+	log.Debug("Delete request enqueue",
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
 		zap.String("expr", request.Expr))
-	err := node.sched.dmQueue.Enqueue(dt)
-	if err != nil {
+
+	// MsgID will be set by Enqueue()
+	if err := node.sched.dmQueue.Enqueue(dt); err != nil {
+		log.Error("Failed to enqueue delete task: "+err.Error(), zap.String("traceID", traceID))
 		return &milvuspb.MutationResult{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1381,7 +1389,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	log.Debug("Delete",
+	log.Debug("Delete request detail",
 		zap.String("role", Params.RoleName),
 		zap.Int64("msgID", dt.Base.MsgID),
 		zap.Uint64("timestamp", dt.Base.Timestamp),
@@ -1389,20 +1397,9 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
 		zap.String("expr", request.Expr))
-	defer func() {
-		log.Debug("Delete Done",
-			zap.Error(err),
-			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", dt.Base.MsgID),
-			zap.Uint64("timestamp", dt.Base.Timestamp),
-			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName),
-			zap.String("partition", request.PartitionName),
-			zap.String("expr", request.Expr))
-	}()
 
-	err = dt.WaitToFinish()
-	if err != nil {
+	if err := dt.WaitToFinish(); err != nil {
+		log.Error("Failed to execute delete task in task scheduler: "+err.Error(), zap.String("traceID", traceID))
 		return &milvuspb.MutationResult{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

@@ -4642,9 +4642,12 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionTag := dt.PartitionName
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
-		return err
+	partitionName := dt.PartitionName
+	// partitionName is accepted, means delete from whole collection
+	if partitionName != "" {
+		if err := ValidatePartitionTag(partitionName, true); err != nil {
+			return err
+		}
 	}
 
 	return nil
