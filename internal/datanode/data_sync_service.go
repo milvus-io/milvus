@@ -213,8 +213,11 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("NumOfRows", us.GetNumOfRows()),
 		)
 
-		dsService.replica.addNormalSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel(),
+		err = dsService.replica.addNormalSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel(),
 			us.GetNumOfRows(), &segmentCheckPoint{us.GetNumOfRows(), *us.GetDmlPosition()})
+		if err != nil {
+			return err
+		}
 	}
 
 	for _, fs := range vchanInfo.GetFlushedSegments() {
