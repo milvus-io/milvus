@@ -22,13 +22,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func genFlowGraphInsertData() (*InsertData, error) {
+func genFlowGraphInsertData() (*insertData, error) {
 	insertMsg, err := genSimpleInsertMsg()
 	if err != nil {
 		return nil, err
 	}
 
-	insertData := &InsertData{
+	iData := &insertData{
 		insertIDs: map[UniqueID][]UniqueID{
 			defaultSegmentID: insertMsg.RowIDs,
 		},
@@ -42,7 +42,7 @@ func genFlowGraphInsertData() (*InsertData, error) {
 			defaultSegmentID: 0,
 		},
 	}
-	return insertData, nil
+	return iData, nil
 }
 
 func TestFlowGraphInsertNode_insert(t *testing.T) {
