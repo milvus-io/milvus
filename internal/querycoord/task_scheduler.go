@@ -422,6 +422,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 	return newTask, nil
 }
 
+// Enqueue pushs a trigger task to triggerTaskQueue and assigns task id
 func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 	for _, t := range tasks {
 		id, err := scheduler.taskIDAllocator()
