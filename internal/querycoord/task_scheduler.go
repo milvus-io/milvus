@@ -96,6 +96,7 @@ func (queue *TaskQueue) addTaskToFront(t task) {
 	}
 }
 
+// PopTask pops a trigger task from task list
 func (queue *TaskQueue) PopTask() task {
 	queue.Lock()
 	defer queue.Unlock()
