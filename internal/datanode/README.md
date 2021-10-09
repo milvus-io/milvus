@@ -1,6 +1,6 @@
 # Data Node
 
-DataNode is the component to write insert and delete messages into persistent blob storage, for example minIO or S3.
+DataNode is the component to write insert and delete messages into persistent blob storage, for example MinIO or S3.
 
 ## Dependency
 
