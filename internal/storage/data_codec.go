@@ -823,6 +823,11 @@ func (codec *IndexFileBinlogCodec) Serialize(
 	for pos := range datas {
 		writer := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, datas[pos].Key)
 
+		// https://github.com/milvus-io/milvus/issues/9449
+		// store index parameters to extra, in bytes format.
+		params, _ := json.Marshal(indexParams)
+		writer.descriptorEvent.AddExtra(IndexParamsFile, params)
+
 		eventWriter, err := writer.NextIndexFileEventWriter()
 		if err != nil {
 			return nil, err
