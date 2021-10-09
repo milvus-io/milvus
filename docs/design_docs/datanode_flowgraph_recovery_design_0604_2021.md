@@ -21,7 +21,7 @@ D. DDL messages are now in DML Vchannels.
 When a flowgraph flushes a segment, we need to save these things:
 - current segment's binlog paths,
 - current segment positions,
-- all other segments' current positions from replica (If a segment hasn't been flushed, save the position when datanode first meet it.)
+- all other segments' current positions from replica (If a segment hasn't been flushed, save the position when datanode first meets it.)
 
 Whether save successfully:
 - If successed, flowgraph updates all segments' positions to replica
