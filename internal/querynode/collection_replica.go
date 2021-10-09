@@ -172,6 +172,7 @@ func (colReplica *collectionReplica) removeCollectionPrivate(collectionID Unique
 	return nil
 }
 
+// getCollectionByID gets the collection which id is collectionID
 func (colReplica *collectionReplica) getCollectionByID(collectionID UniqueID) (*Collection, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
