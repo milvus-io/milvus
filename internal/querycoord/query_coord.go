@@ -163,6 +163,7 @@ func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 	qc.stateCode.Store(code)
 }
 
+// NewQueryCoord creates a QueryCoord object.
 func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	queryChannels := make([]*queryChannelInfo, 0)
