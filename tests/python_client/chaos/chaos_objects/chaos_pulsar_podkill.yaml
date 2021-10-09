@@ -10,8 +10,7 @@ spec:
     namespaces:
       - chaos-testing         # target namespace of milvus deployment
     labelSelectors:
-      app.kubernetes.io/instance: milvus-chaos
-      app.kubernetes.io/name: milvus
-      component: pulsar
+      release: chaos-testing
+      app: pulsar
   scheduler:
     cron: '@every 5s'
