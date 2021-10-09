@@ -137,7 +137,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
-// SetRootCoordInterface sets RootCoord's grpc client, error is returned if repeatedly set.
+// SetRootCoord sets RootCoord's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
 	switch {
 	case rc == nil, node.rootCoord != nil:
@@ -148,7 +148,7 @@ func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
 	}
 }
 
-// SetDataCoordInterface sets data service's grpc client, error is returned if repeatedly set.
+// SetDataCoord sets data service's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 	switch {
 	case ds == nil, node.dataCoord != nil:
