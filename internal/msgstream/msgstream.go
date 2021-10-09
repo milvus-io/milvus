@@ -57,6 +57,7 @@ type MsgStream interface {
 	ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32
 	GetProduceChannels() []string
 	Produce(*MsgPack) error
+	ProduceMark(*MsgPack) (map[string][]MessageID, error)
 	Broadcast(*MsgPack) error
 	BroadcastMark(*MsgPack) (map[string][]MessageID, error)
 	Consume() *MsgPack
