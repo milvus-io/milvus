@@ -443,6 +443,8 @@ func TestIndexNode(t *testing.T) {
 			zap.String("resp", resp.Response),
 			zap.String("name", resp.ComponentName))
 	})
+	err = in.etcdKV.RemoveWithPrefix("session/IndexNode")
+	assert.Nil(t, err)
 
 	err = in.Stop()
 	assert.Nil(t, err)
@@ -718,6 +720,9 @@ func TestCreateIndexFailed(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
 
+	err = in.etcdKV.RemoveWithPrefix("session/IndexNode")
+	assert.Nil(t, err)
+
 	err = in.Stop()
 	assert.Nil(t, err)
 }
@@ -766,6 +771,9 @@ func TestIndexNode_Error(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
+
+	err = in.etcdKV.RemoveWithPrefix("session/IndexNode")
+	assert.Nil(t, err)
 
 	err = in.Stop()
 	assert.Nil(t, err)
