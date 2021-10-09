@@ -31,9 +31,9 @@ import (
 )
 
 const (
-	Ts              = "ts"
-	DDL             = "ddl"
-	IndexParamsFile = "indexParams"
+	Ts             = "ts"
+	DDL            = "ddl"
+	IndexParamsKey = "indexParams"
 )
 
 // when the blob of index file is too large, we can split blob into several rows,
@@ -826,7 +826,7 @@ func (codec *IndexFileBinlogCodec) Serialize(
 		// https://github.com/milvus-io/milvus/issues/9449
 		// store index parameters to extra, in bytes format.
 		params, _ := json.Marshal(indexParams)
-		writer.descriptorEvent.AddExtra(IndexParamsFile, params)
+		writer.descriptorEvent.AddExtra(IndexParamsKey, params)
 
 		eventWriter, err := writer.NextIndexFileEventWriter()
 		if err != nil {
@@ -867,7 +867,7 @@ func (codec *IndexFileBinlogCodec) Serialize(
 	}
 
 	// save index params
-	writer := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, "indexParams")
+	writer := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, IndexParamsKey)
 
 	eventWriter, err := writer.NextIndexFileEventWriter()
 	if err != nil {
@@ -902,7 +902,7 @@ func (codec *IndexFileBinlogCodec) Serialize(
 	}
 
 	blobs = append(blobs, &Blob{
-		Key: "indexParams",
+		Key: IndexParamsKey,
 		//Key:   strconv.Itoa(len(datas)),
 		Value: buffer,
 	})
@@ -1004,7 +1004,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 					content = append(content, []byte(singleString)...)
 				}
 
-				if key == "indexParams" {
+				if key == IndexParamsKey {
 					_ = json.Unmarshal(content, &indexParams)
 				} else {
 					datas = append(datas, &Blob{
@@ -1062,14 +1062,14 @@ func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string,
 	if err != nil {
 		return nil, err
 	}
-	blobs = append(blobs, &Blob{Key: IndexParamsFile, Value: paramsBytes})
+	blobs = append(blobs, &Blob{Key: IndexParamsKey, Value: paramsBytes})
 	return blobs, nil
 }
 
 func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]string, string, UniqueID, error) {
 	var file *Blob
 	for i := 0; i < len(blobs); i++ {
-		if blobs[i].Key != IndexParamsFile {
+		if blobs[i].Key != IndexParamsKey {
 			continue
 		}
 		file = blobs[i]
