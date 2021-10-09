@@ -614,10 +614,13 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	for ; iter.Valid() && offset < n; iter.Next() {
 		key := iter.Key()
 		val := iter.Value()
+		strKey := string(key.Data())
+		key.Free()
 		offset++
-		msgID, err := strconv.ParseInt(string(key.Data())[FixedChannelNameLen+1:], 10, 64)
+		msgID, err := strconv.ParseInt(strKey[FixedChannelNameLen+1:], 10, 64)
 		if err != nil {
-			log.Debug("RocksMQ: parse int " + string(key.Data())[FixedChannelNameLen+1:] + " failed")
+			log.Debug("RocksMQ: parse int " + strKey[FixedChannelNameLen+1:] + " failed")
+			val.Free()
 			return nil, err
 		}
 		msg := ConsumerMessage{
@@ -632,7 +635,6 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 			copy(msg.Payload, origData)
 		}
 		consumerMessage = append(consumerMessage, msg)
-		key.Free()
 		val.Free()
 	}
 
