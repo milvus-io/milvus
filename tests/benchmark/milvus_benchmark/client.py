@@ -224,6 +224,7 @@ class MilvusClient(object):
 
     @time_wrapper
     def delete(self, ids, collection_name=None):
+        # delete entity by id
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         self._milvus.delete_entity_by_id(tmp_collection_name, ids)
 
