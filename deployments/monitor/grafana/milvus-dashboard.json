@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1633679709257,
+  "iteration": 1633747065105,
   "links": [],
   "panels": [
     {
@@ -3159,7 +3159,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total DataNode flush segments operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5815,5 +5815,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 147
+  "version": 149
 }
