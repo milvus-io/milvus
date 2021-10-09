@@ -1311,7 +1311,14 @@ func TestDescribeCollectionTask(t *testing.T) {
 	err = task.PreExecute(ctx)
 	assert.NotNil(t, err)
 
+	// describe collection with id
+	task.CollectionID = 1
+	task.CollectionName = ""
+	err = task.PreExecute(ctx)
+	assert.NoError(t, err)
+
 	rc.Stop()
+	task.CollectionID = 0
 	task.CollectionName = collectionName
 	err = task.PreExecute(ctx)
 	assert.Nil(t, err)

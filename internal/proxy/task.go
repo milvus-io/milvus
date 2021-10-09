@@ -2636,10 +2636,11 @@ func (dct *describeCollectionTask) PreExecute(ctx context.Context) error {
 	dct.Base.MsgType = commonpb.MsgType_DescribeCollection
 	dct.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(dct.CollectionName); err != nil {
-		return err
+	if dct.CollectionID != 0 && len(dct.CollectionName) == 0 {
+		return nil
 	}
-	return nil
+
+	return ValidateCollectionName(dct.CollectionName)
 }
 
 func (dct *describeCollectionTask) Execute(ctx context.Context) error {
