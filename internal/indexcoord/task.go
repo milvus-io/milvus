@@ -23,6 +23,7 @@ import (
 )
 
 const (
+	// IndexAddTaskName is the name of the operation to add index task.
 	IndexAddTaskName = "IndexAddTask"
 )
 
@@ -39,6 +40,7 @@ type task interface {
 	OnEnqueue() error
 }
 
+// BaseTask is an basic instance of task.
 type BaseTask struct {
 	done  chan error
 	ctx   context.Context
@@ -46,6 +48,7 @@ type BaseTask struct {
 	table *metaTable
 }
 
+// ID returns the id of index task.
 func (bt *BaseTask) ID() UniqueID {
 	return bt.id
 }
@@ -54,6 +57,8 @@ func (bt *BaseTask) setID(id UniqueID) {
 	bt.id = id
 }
 
+// WaitToFinish will wait for the task to complete, if the context is done,
+// it means that the execution of the task has timed out.
 func (bt *BaseTask) WaitToFinish() error {
 	select {
 	case <-bt.ctx.Done():
@@ -63,6 +68,7 @@ func (bt *BaseTask) WaitToFinish() error {
 	}
 }
 
+// Notify will notify WaitToFinish that the task is completed or failed.
 func (bt *BaseTask) Notify(err error) {
 	bt.done <- err
 }
