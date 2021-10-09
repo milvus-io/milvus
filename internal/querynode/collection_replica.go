@@ -148,6 +148,7 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 	return nil
 }
 
+// removeCollection removes the collection from collectionReplica
 func (colReplica *collectionReplica) removeCollection(collectionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
