@@ -3381,7 +3381,7 @@ func TestDeleteTask_PreExecute(t *testing.T) {
 	task.DeleteRequest.CollectionName = collectionName
 
 	task.DeleteRequest.PartitionName = "" // empty
-	assert.Error(t, task.PreExecute(ctx))
+	assert.NoError(t, task.PreExecute(ctx))
 	task.DeleteRequest.PartitionName = partitionName
 }
 
