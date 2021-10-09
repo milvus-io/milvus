@@ -76,6 +76,10 @@ func (kv *saveFailKV) Save(key, value string) error {
 	return errors.New("mocked fail")
 }
 
+func (kv *saveFailKV) MultiSave(kvs map[string]string) error {
+	return errors.New("mocked fail")
+}
+
 // a mock kv that always fail when do `Remove`
 type removeFailKV struct{ kv.TxnKV }
 

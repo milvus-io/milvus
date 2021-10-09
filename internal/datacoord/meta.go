@@ -164,15 +164,18 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 		return nil
 	}
 
+	clonedSegment := segment.Clone()
+
 	kv := make(map[string]string)
-	modSegments := make(map[UniqueID]struct{})
+	modSegments := make(map[UniqueID]*SegmentInfo)
 
 	if flushed {
-		m.segments.SetState(segmentID, commonpb.SegmentState_Flushing)
-		modSegments[segmentID] = struct{}{}
+		clonedSegment.State = commonpb.SegmentState_Flushing
+		modSegments[segmentID] = clonedSegment
 	}
 
-	currBinlogs := segment.Clone().SegmentInfo.GetBinlogs()
+	currBinlogs := clonedSegment.GetBinlogs()
+
 	var getFieldBinlogs = func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
 		for _, binlog := range binlogs {
 			if id == binlog.GetFieldID() {
@@ -181,6 +184,7 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 		}
 		return nil
 	}
+
 	for _, tBinlogs := range binlogs {
 		fieldBinlogs := getFieldBinlogs(tBinlogs.GetFieldID(), currBinlogs)
 		if fieldBinlogs == nil {
@@ -189,32 +193,49 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 			fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, tBinlogs.Binlogs...)
 		}
 	}
-	m.segments.SetBinlogs(segmentID, currBinlogs)
-	modSegments[segmentID] = struct{}{}
+
+	clonedSegment.Binlogs = currBinlogs
+	modSegments[segmentID] = clonedSegment
 
 	for _, pos := range startPositions {
 		if len(pos.GetStartPosition().GetMsgID()) == 0 {
 			continue
 		}
-		m.segments.SetStartPosition(pos.GetSegmentID(), pos.GetStartPosition())
-		modSegments[segmentID] = struct{}{}
+		s := modSegments[pos.GetSegmentID()]
+		if s == nil {
+			s = m.segments.GetSegment(pos.GetSegmentID())
+		}
+		if s == nil {
+			continue
+		}
+
+		s.StartPosition = pos.GetStartPosition()
+		modSegments[pos.GetSegmentID()] = s
 	}
 
 	for _, cp := range checkpoints {
-		if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
+		s := modSegments[cp.GetSegmentID()]
+		if s == nil {
+			s = m.segments.GetSegment(cp.GetSegmentID())
+		}
+		if s == nil {
+			continue
+		}
+
+		if s.DmlPosition != nil && s.DmlPosition.Timestamp >= cp.Position.Timestamp {
 			// segment position in etcd is larger than checkpoint, then dont change it
 			continue
 		}
-		m.segments.SetDmlPosition(cp.GetSegmentID(), cp.GetPosition())
-		m.segments.SetRowCount(cp.GetSegmentID(), cp.GetNumOfRows())
-		modSegments[segmentID] = struct{}{}
+
+		s.DmlPosition = cp.GetPosition()
+		s.NumOfRows = cp.GetNumOfRows()
+		modSegments[cp.GetSegmentID()] = s
 	}
 
 	for id := range modSegments {
 		if segment := m.segments.GetSegment(id); segment != nil {
 			segBytes, err := proto.Marshal(segment.SegmentInfo)
 			if err != nil {
-				log.Error("DataCoord UpdateFlushSegmentsInfo marshal failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				return fmt.Errorf("DataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
 			}
 			key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
@@ -222,8 +243,17 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 		}
 	}
 
+	if len(kv) == 0 {
+		return nil
+	}
+
 	if err := m.saveKvTxn(kv); err != nil {
 		return err
+	}
+
+	// update memory status
+	for id, s := range modSegments {
+		m.segments.SetSegment(id, s)
 	}
 	return nil
 }
