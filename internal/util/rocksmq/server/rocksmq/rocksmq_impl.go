@@ -108,6 +108,10 @@ func constructKey(metaName, topic string) (string, error) {
 	return metaName + topic + string(nameBytes), nil
 }
 
+func checkRetention() bool {
+	return RocksmqRetentionTimeInMinutes != -1 && RocksmqRetentionSizeInMB != -1
+}
+
 var topicMu sync.Map = sync.Map{}
 
 type rocksmq struct {
@@ -161,8 +165,10 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	}
 	rmq.retentionInfo = ri
 
-	rmq.retentionInfo.startRetentionInfo()
-	log.Debug("Rocksmq start successfully ", zap.String("name", name))
+	if checkRetention() {
+		rmq.retentionInfo.startRetentionInfo()
+	}
+
 	return rmq, nil
 }
 
@@ -261,15 +267,17 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	if err != nil {
 		return nil
 	}
+	rmq.retentionInfo.mutex.Lock()
+	defer rmq.retentionInfo.mutex.Unlock()
 	rmq.retentionInfo.topics = append(rmq.retentionInfo.topics, topicName)
-	rmq.retentionInfo.pageInfo.Store(topicName, &topicPageInfo{
-		pageEndID:   make([]UniqueID, 0),
-		pageMsgSize: map[UniqueID]int64{},
-	})
-	rmq.retentionInfo.lastRetentionTime.Store(topicName, timeNow)
-	rmq.retentionInfo.ackedInfo.Store(topicName, &topicAckedInfo{
-		ackedTs: map[UniqueID]int64{},
-	})
+	// rmq.retentionInfo.pageInfo.Store(topicName, &topicPageInfo{
+	// 	pageEndID:   make([]UniqueID, 0),
+	// 	pageMsgSize: map[UniqueID]int64{},
+	// })
+	// rmq.retentionInfo.lastRetentionTime.Store(topicName, timeNow)
+	// rmq.retentionInfo.ackedInfo.Store(topicName, &topicAckedInfo{
+	// 	ackedTs: map[UniqueID]int64{},
+	// })
 	log.Debug("Rocksmq create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
@@ -315,9 +323,15 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	}
 
 	topicMu.Delete(topicName)
-	rmq.retentionInfo.ackedInfo.Delete(topicName)
-	rmq.retentionInfo.lastRetentionTime.Delete(topicName)
-	rmq.retentionInfo.pageInfo.Delete(topicName)
+	for i, name := range rmq.retentionInfo.topics {
+		if topicName == name {
+			rmq.retentionInfo.topics = append(rmq.retentionInfo.topics[:i], rmq.retentionInfo.topics[i+1:]...)
+			break
+		}
+	}
+	// rmq.retentionInfo.ackedInfo.Delete(topicName)
+	// rmq.retentionInfo.lastRetentionTime.Delete(topicName)
+	// rmq.retentionInfo.pageInfo.Delete(topicName)
 	log.Debug("Rocksmq destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
@@ -527,11 +541,11 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 				return err
 			}
 
-			if pageInfo, ok := rmq.retentionInfo.pageInfo.Load(topicName); ok {
-				pageInfo.(*topicPageInfo).pageEndID = append(pageInfo.(*topicPageInfo).pageEndID, pageEndID)
-				pageInfo.(*topicPageInfo).pageMsgSize[pageEndID] = newPageSize
-				rmq.retentionInfo.pageInfo.Store(topicName, pageInfo)
-			}
+			// if pageInfo, ok := rmq.retentionInfo.pageInfo.Load(topicName); ok {
+			// 	pageInfo.(*topicPageInfo).pageEndID = append(pageInfo.(*topicPageInfo).pageEndID, pageEndID)
+			// 	pageInfo.(*topicPageInfo).pageMsgSize[pageEndID] = newPageSize
+			// 	rmq.retentionInfo.pageInfo.Store(topicName, pageInfo)
+			// }
 
 			// Update message size to 0
 			err = rmq.kv.Save(msgSizeKey, strconv.FormatInt(0, 10))
@@ -779,11 +793,11 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, newID UniqueID,
 		if err != nil {
 			return err
 		}
-		if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
-			ackedInfo := info.(*topicAckedInfo)
-			ackedInfo.ackedTs[minBeginID] = ts
-			rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
-		}
+		// if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
+		// 	ackedInfo := info.(*topicAckedInfo)
+		// 	ackedInfo.ackedTs[minBeginID] = ts
+		// 	rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
+		// }
 		if minBeginID == newID {
 			// Means the begin_id of topic update to newID, so needs to update acked size
 			ackedSizeKey := AckedSizeTitle + topicName
@@ -800,11 +814,11 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, newID UniqueID,
 			if err != nil {
 				return err
 			}
-			if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
-				ackedInfo := info.(*topicAckedInfo)
-				ackedInfo.ackedSize = ackedSize
-				rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
-			}
+			// if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
+			// 	ackedInfo := info.(*topicAckedInfo)
+			// 	ackedInfo.ackedSize = ackedSize
+			// 	rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
+			// }
 		}
 	}
 	return nil
