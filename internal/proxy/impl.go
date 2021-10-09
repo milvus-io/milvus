@@ -1365,10 +1365,27 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
+	deleteReq := &milvuspb.DeleteRequest{
+		DbName:         request.DbName,
+		CollectionName: request.CollectionName,
+		PartitionName:  request.PartitionName,
+		Expr:           request.Expr,
+	}
+
 	dt := &deleteTask{
-		ctx:           ctx,
-		Condition:     NewTaskCondition(ctx),
-		DeleteRequest: request,
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       deleteReq,
+		DeleteRequest: &internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Delete,
+				SourceID: Params.ProxyID,
+			},
+			CollectionName: request.CollectionName,
+			PartitionName:  request.PartitionName,
+		},
+		chMgr:    node.chMgr,
+		chTicker: node.chTicker,
 	}
 
 	log.Debug("Delete request enqueue",
