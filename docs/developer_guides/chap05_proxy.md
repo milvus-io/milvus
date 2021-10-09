@@ -488,7 +488,7 @@ type baseTaskQueue struct {
 }
 ```
 
-_AddUnissuedTask(task \*task)_ will put a new task into _unissuedTasks_, while maintaining the list by timestamp order.
+_AddUnissuedTask(task \*task)_ will push a new task into _unissuedTasks_, while maintaining the list by timestamp order.
 
 _TaskDoneTest(ts Timestamp)_ will check both _unissuedTasks_ and _unissuedTasks_. If no task found before _ts_, then the function returns _true_, indicates that all the tasks before _ts_ are completed.
 
