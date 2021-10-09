@@ -133,6 +133,7 @@ enum MsgType {
     RemoveDmChannels = 509;
     WatchQueryChannels = 510;
     RemoveQueryChannels = 511;
+    SealedSegmentsChangeInfo = 512;
 
     /* DATA SERVICE */
     SegmentInfo = 600;

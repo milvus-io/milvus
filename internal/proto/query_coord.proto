@@ -303,3 +303,12 @@ message LoadBalanceRequest {
   repeated int64 source_nodeIDs = 2;
   TriggerCondition balance_reason = 3;
 }
+
+//---------------- common query proto -----------------
+message SealedSegmentsChangeInfo {
+  common.MsgBase base = 1;
+  int64 online_nodeID = 2;
+  repeated int64 online_segmentIDs = 3;
+  int64 offline_nodeID = 4;
+  repeated int64 offline_segmentIDs = 5;
+}

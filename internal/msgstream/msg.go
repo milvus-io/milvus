@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 // MsgType is an alias ofo commonpb.MsgType
@@ -980,6 +981,63 @@ func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 
 	return loadMsg, nil
 }
+
+/////////////////////////////////////////SealedSegmentsChangeInfoMsg//////////////////////////////////////////
+
+// SealedSegmentsChangeInfoMsg is a message pack that contains sealed segments change info
+type SealedSegmentsChangeInfoMsg struct {
+	BaseMsg
+	querypb.SealedSegmentsChangeInfo
+}
+
+// interface implementation validation
+var _ TsMsg = &SealedSegmentsChangeInfoMsg{}
+
+// ID returns the ID of this message pack
+func (s *SealedSegmentsChangeInfoMsg) ID() UniqueID {
+	return s.Base.MsgID
+}
+
+// Type returns the type of this message pack
+func (s *SealedSegmentsChangeInfoMsg) Type() MsgType {
+	return s.Base.MsgType
+}
+
+// SourceID indicated which component generated this message
+func (s *SealedSegmentsChangeInfoMsg) SourceID() int64 {
+	return s.Base.SourceID
+}
+
+// Marshal is used to serializing a message pack to byte array
+func (s *SealedSegmentsChangeInfoMsg) Marshal(input TsMsg) (MarshalType, error) {
+	changeInfoMsg := input.(*SealedSegmentsChangeInfoMsg)
+	changeInfo := &changeInfoMsg.SealedSegmentsChangeInfo
+	mb, err := proto.Marshal(changeInfo)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+// Unmarshal is used to deserializing a message pack from byte array
+func (s *SealedSegmentsChangeInfoMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	changeInfo := querypb.SealedSegmentsChangeInfo{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &changeInfo)
+	if err != nil {
+		return nil, err
+	}
+	changeInfoMsg := &SealedSegmentsChangeInfoMsg{SealedSegmentsChangeInfo: changeInfo}
+	changeInfoMsg.BeginTimestamp = changeInfo.Base.Timestamp
+	changeInfoMsg.EndTimestamp = changeInfo.Base.Timestamp
+
+	return changeInfoMsg, nil
+}
+
+/////////////////////////////////////////DataNodeTtMsg//////////////////////////////////////////
 
 // DataNodeTtMsg is a message pack that contains datanode time tick
 type DataNodeTtMsg struct {
