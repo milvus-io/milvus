@@ -569,8 +569,8 @@ class TestInsertBase:
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_disable_auto_flush(self, connect, collection):
         """
-        target: test insert entities, with disable autoflush
-        method: disable autoflush and insert, get entity
+        target: test insert entities, with disable auto-flush
+        method: disable auto-flush and insert, get entity
         expected: the count is equal to 0
         """
         delete_nums = 500
@@ -673,8 +673,8 @@ class TestInsertBinary:
         """
         result = connect.insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
-        query, vecs = ut.gen_query_vectors(binary_field_name, default_binary_entities, ut.default_top_k, 1,
-                                        metric_type="JACCARD")
+        query, vecs = ut.gen_query_vectors(binary_field_name, default_binary_entities,
+                                           ut.default_top_k, 1, metric_type="JACCARD")
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, query)
         logging.getLogger().debug(res)
