@@ -666,6 +666,7 @@ func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool
 			}
 		}
 
+		// use collection start position when segment position is not found
 		if seekPosition == nil {
 			coll := s.meta.GetCollection(vchan.CollectionID)
 			if coll != nil {

@@ -1038,7 +1038,24 @@ func TestGetVChannelPos(t *testing.T) {
 	svr.meta.AddCollection(&datapb.CollectionInfo{
 		ID:     0,
 		Schema: schema,
+		StartPositions: []*commonpb.KeyDataPair{
+			{
+				Key:  "ch1",
+				Data: []byte{8, 9, 10},
+			},
+		},
 	})
+	svr.meta.AddCollection(&datapb.CollectionInfo{
+		ID:     1,
+		Schema: schema,
+		StartPositions: []*commonpb.KeyDataPair{
+			{
+				Key:  "ch0",
+				Data: []byte{8, 9, 10},
+			},
+		},
+	})
+
 	s1 := &datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  0,
@@ -1101,6 +1118,21 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.EqualValues(t, 1, len(pair[0].UnflushedSegments))
 		assert.EqualValues(t, 2, pair[0].UnflushedSegments[0].ID)
 		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].UnflushedSegments[0].DmlPosition.MsgID)
+	})
+
+	t.Run("empty collection", func(t *testing.T) {
+		infos, err := svr.GetVChanPositions([]vchannel{
+			{
+				CollectionID: 1,
+				DmlChannel:   "ch0_suffix",
+			},
+		}, true)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(infos))
+		assert.EqualValues(t, 1, infos[0].CollectionID)
+		assert.EqualValues(t, 0, len(infos[0].FlushedSegments))
+		assert.EqualValues(t, 0, len(infos[0].UnflushedSegments))
+		assert.EqualValues(t, []byte{8, 9, 10}, infos[0].SeekPosition.MsgID)
 	})
 }
 
