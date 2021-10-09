@@ -155,6 +155,7 @@ func (colReplica *collectionReplica) removeCollection(collectionID UniqueID) err
 	return colReplica.removeCollectionPrivate(collectionID)
 }
 
+// removeCollectionPrivate is the private function in collectionReplica, to remove collection from collectionReplica
 func (colReplica *collectionReplica) removeCollectionPrivate(collectionID UniqueID) error {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
