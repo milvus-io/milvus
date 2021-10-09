@@ -73,12 +73,13 @@ func GetUsedMemoryCount() uint64 {
 }
 
 // TODO(dragondriver): not accurate to calculate disk usage when we use distributed storage
+
 // GetDiskCount returns the disk count in bytes.
 func GetDiskCount() uint64 {
 	return 100 * 1024 * 1024
 }
 
-// TODO(dragondriver): not accurate to calculate disk usage when we use distributed storage
+// GetDiskUsage returns the disk usage in bytes.
 func GetDiskUsage() uint64 {
 	return 2 * 1024 * 1024
 }
