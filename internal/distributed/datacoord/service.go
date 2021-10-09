@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 // Package grpcdatacoordclient contains grpc interfaces of datacoord
-package grpcdatacoordclient
+package grpcdatacoord
 
 import (
 	"context"
