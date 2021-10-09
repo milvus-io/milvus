@@ -18,7 +18,7 @@ import (
 type pulsarMessage struct {
 	msg pulsar.ConsumerMessage
 }
-//Gets information about which topic the message came from
+//Topic who generates the message
 func (pm *pulsarMessage) Topic() string {
 	return pm.msg.Topic()
 }
