@@ -63,7 +63,6 @@ pipeline {
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            MILVUS_PR_CI=true \
                                             ./e2e-k8s.sh \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
