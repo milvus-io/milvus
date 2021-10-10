@@ -3020,7 +3020,7 @@ func TestQueryTask_all(t *testing.T) {
 	wg.Wait()
 }
 
-func TestInsertTask_all(t *testing.T) {
+func TestTask_all(t *testing.T) {
 	var err error
 
 	Params.Init()
@@ -3036,7 +3036,7 @@ func TestInsertTask_all(t *testing.T) {
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
-	prefix := "TestQueryTask_all"
+	prefix := "TestTask_all"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	partitionName := prefix + funcutil.GenRandomStr()
@@ -3051,42 +3051,44 @@ func TestInsertTask_all(t *testing.T) {
 	dim := 128
 	nb := 10
 
-	schema := constructCollectionSchemaWithAllType(
-		boolField, int32Field, int64Field, floatField, doubleField,
-		floatVecField, binaryVecField, dim, collectionName)
-	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	t.Run("create collection", func(t *testing.T) {
+		schema := constructCollectionSchemaWithAllType(
+			boolField, int32Field, int64Field, floatField, doubleField,
+			floatVecField, binaryVecField, dim, collectionName)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
 
-	createColT := &createCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
-			Base:           nil,
+		createColT := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+
+		assert.NoError(t, createColT.OnEnqueue())
+		assert.NoError(t, createColT.PreExecute(ctx))
+		assert.NoError(t, createColT.Execute(ctx))
+		assert.NoError(t, createColT.PostExecute(ctx))
+
+		_, _ = rc.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreatePartition,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  Params.ProxyID,
+			},
 			DbName:         dbName,
 			CollectionName: collectionName,
-			Schema:         marshaledSchema,
-			ShardsNum:      shardsNum,
-		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
-		schema:    nil,
-	}
-
-	assert.NoError(t, createColT.OnEnqueue())
-	assert.NoError(t, createColT.PreExecute(ctx))
-	assert.NoError(t, createColT.Execute(ctx))
-	assert.NoError(t, createColT.PostExecute(ctx))
-
-	_, _ = rc.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_CreatePartition,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyID,
-		},
-		DbName:         dbName,
-		CollectionName: collectionName,
-		PartitionName:  partitionName,
+			PartitionName:  partitionName,
+		})
 	})
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
@@ -3122,267 +3124,235 @@ func TestInsertTask_all(t *testing.T) {
 	_ = segAllocator.Start()
 	defer segAllocator.Close()
 
-	hash := generateHashKeys(nb)
-	task := &insertTask{
-		BaseInsertTask: BaseInsertTask{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: hash,
+	t.Run("insert", func(t *testing.T) {
+		hash := generateHashKeys(nb)
+		task := &insertTask{
+			BaseInsertTask: BaseInsertTask{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: hash,
+				},
+				InsertRequest: internalpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						MsgType: commonpb.MsgType_Insert,
+						MsgID:   0,
+					},
+					CollectionName: collectionName,
+					PartitionName:  partitionName,
+				},
 			},
-			InsertRequest: internalpb.InsertRequest{
+			req: &milvuspb.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-					MsgID:   0,
+					MsgType:   commonpb.MsgType_Insert,
+					MsgID:     0,
+					Timestamp: 0,
+					SourceID:  Params.ProxyID,
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				FieldsData:     make([]*schemapb.FieldData, fieldsLen),
+				HashKeys:       hash,
+				NumRows:        uint32(nb),
+			},
+			Condition: NewTaskCondition(ctx),
+			ctx:       ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			rowIDAllocator: idAllocator,
+			segIDAssigner:  segAllocator,
+			chMgr:          chMgr,
+			chTicker:       ticker,
+			vChannels:      nil,
+			pChannels:      nil,
+			schema:         nil,
+		}
+
+		task.req.FieldsData[0] = &schemapb.FieldData{
+			Type:      schemapb.DataType_Bool,
+			FieldName: boolField,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: generateBoolArray(nb),
+						},
+					},
+				},
+			},
+			FieldId: common.StartOfUserFieldID + 0,
+		}
+
+		task.req.FieldsData[1] = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int32,
+			FieldName: int32Field,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: generateInt32Array(nb),
+						},
+					},
+				},
+			},
+			FieldId: common.StartOfUserFieldID + 1,
+		}
+
+		task.req.FieldsData[2] = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: int64Field,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: generateInt64Array(nb),
+						},
+					},
+				},
+			},
+			FieldId: common.StartOfUserFieldID + 2,
+		}
+
+		task.req.FieldsData[3] = &schemapb.FieldData{
+			Type:      schemapb.DataType_Float,
+			FieldName: floatField,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: generateFloat32Array(nb),
+						},
+					},
+				},
+			},
+			FieldId: common.StartOfUserFieldID + 3,
+		}
+
+		task.req.FieldsData[4] = &schemapb.FieldData{
+			Type:      schemapb.DataType_Double,
+			FieldName: doubleField,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: generateFloat64Array(nb),
+						},
+					},
+				},
+			},
+			FieldId: common.StartOfUserFieldID + 4,
+		}
+
+		task.req.FieldsData[5] = &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: doubleField,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: int64(dim),
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: generateFloatVectors(nb, dim),
+						},
+					},
+				},
+			},
+			FieldId: common.StartOfUserFieldID + 5,
+		}
+
+		task.req.FieldsData[6] = &schemapb.FieldData{
+			Type:      schemapb.DataType_BinaryVector,
+			FieldName: doubleField,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: int64(dim),
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: generateBinaryVectors(nb, dim),
+					},
+				},
+			},
+			FieldId: common.StartOfUserFieldID + 6,
+		}
+
+		assert.NoError(t, task.OnEnqueue())
+		assert.NoError(t, task.PreExecute(ctx))
+		assert.NoError(t, task.Execute(ctx))
+		assert.NoError(t, task.PostExecute(ctx))
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		task := &deleteTask{
+			Condition: NewTaskCondition(ctx),
+			DeleteRequest: &internalpb.DeleteRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Delete,
+					MsgID:     0,
+					Timestamp: 0,
+					SourceID:  Params.ProxyID,
 				},
 				CollectionName: collectionName,
 				PartitionName:  partitionName,
 			},
-		},
-		req: &milvuspb.InsertRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Insert,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  Params.ProxyID,
-			},
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
-			FieldsData:     make([]*schemapb.FieldData, fieldsLen),
-			HashKeys:       hash,
-			NumRows:        uint32(nb),
-		},
-		Condition: NewTaskCondition(ctx),
-		ctx:       ctx,
-		result: &milvuspb.MutationResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
-			IDs:          nil,
-			SuccIndex:    nil,
-			ErrIndex:     nil,
-			Acknowledged: false,
-			InsertCnt:    0,
-			DeleteCnt:    0,
-			UpsertCnt:    0,
-			Timestamp:    0,
-		},
-		rowIDAllocator: idAllocator,
-		segIDAssigner:  segAllocator,
-		chMgr:          chMgr,
-		chTicker:       ticker,
-		vChannels:      nil,
-		pChannels:      nil,
-		schema:         nil,
-	}
-
-	task.req.FieldsData[0] = &schemapb.FieldData{
-		Type:      schemapb.DataType_Bool,
-		FieldName: boolField,
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_BoolData{
-					BoolData: &schemapb.BoolArray{
-						Data: generateBoolArray(nb),
-					},
+			req: &milvuspb.DeleteRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Delete,
+					MsgID:     0,
+					Timestamp: 0,
+					SourceID:  Params.ProxyID,
 				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				Expr:           "int64 in [0, 1]",
 			},
-		},
-		FieldId: common.StartOfUserFieldID + 0,
-	}
-
-	task.req.FieldsData[1] = &schemapb.FieldData{
-		Type:      schemapb.DataType_Int32,
-		FieldName: int32Field,
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(nb),
-					},
+			ctx: ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
 				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
 			},
-		},
-		FieldId: common.StartOfUserFieldID + 1,
-	}
+			chMgr:    chMgr,
+			chTicker: ticker,
+		}
 
-	task.req.FieldsData[2] = &schemapb.FieldData{
-		Type:      schemapb.DataType_Int64,
-		FieldName: int64Field,
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_LongData{
-					LongData: &schemapb.LongArray{
-						Data: generateInt64Array(nb),
-					},
-				},
-			},
-		},
-		FieldId: common.StartOfUserFieldID + 2,
-	}
+		assert.NoError(t, task.OnEnqueue())
+		assert.NotNil(t, task.TraceCtx())
 
-	task.req.FieldsData[3] = &schemapb.FieldData{
-		Type:      schemapb.DataType_Float,
-		FieldName: floatField,
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_FloatData{
-					FloatData: &schemapb.FloatArray{
-						Data: generateFloat32Array(nb),
-					},
-				},
-			},
-		},
-		FieldId: common.StartOfUserFieldID + 3,
-	}
+		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+		task.SetID(id)
+		assert.Equal(t, id, task.ID())
 
-	task.req.FieldsData[4] = &schemapb.FieldData{
-		Type:      schemapb.DataType_Double,
-		FieldName: doubleField,
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_DoubleData{
-					DoubleData: &schemapb.DoubleArray{
-						Data: generateFloat64Array(nb),
-					},
-				},
-			},
-		},
-		FieldId: common.StartOfUserFieldID + 4,
-	}
+		task.Base.MsgType = commonpb.MsgType_Delete
+		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
 
-	task.req.FieldsData[5] = &schemapb.FieldData{
-		Type:      schemapb.DataType_FloatVector,
-		FieldName: doubleField,
-		Field: &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_FloatVector{
-					FloatVector: &schemapb.FloatArray{
-						Data: generateFloatVectors(nb, dim),
-					},
-				},
-			},
-		},
-		FieldId: common.StartOfUserFieldID + 5,
-	}
+		ts := Timestamp(time.Now().UnixNano())
+		task.SetTs(ts)
+		assert.Equal(t, ts, task.BeginTs())
+		assert.Equal(t, ts, task.EndTs())
 
-	task.req.FieldsData[6] = &schemapb.FieldData{
-		Type:      schemapb.DataType_BinaryVector,
-		FieldName: doubleField,
-		Field: &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_BinaryVector{
-					BinaryVector: generateBinaryVectors(nb, dim),
-				},
-			},
-		},
-		FieldId: common.StartOfUserFieldID + 6,
-	}
-
-	assert.NoError(t, task.OnEnqueue())
-	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
-	assert.NoError(t, task.PostExecute(ctx))
-}
-
-func TestDeleteTask_all(t *testing.T) {
-	Params.Init()
-
-	ctx := context.Background()
-
-	prefix := "TestDeleteTask_all"
-	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
-	partitionName := prefix + funcutil.GenRandomStr()
-
-	task := &deleteTask{
-		Condition: NewTaskCondition(ctx),
-		DeleteRequest: &milvuspb.DeleteRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Delete,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
-			Expr:           "",
-		},
-		ctx: ctx,
-		result: &milvuspb.MutationResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
-			IDs:          nil,
-			SuccIndex:    nil,
-			ErrIndex:     nil,
-			Acknowledged: false,
-			InsertCnt:    0,
-			DeleteCnt:    0,
-			UpsertCnt:    0,
-			Timestamp:    0,
-		},
-	}
-
-	assert.NoError(t, task.OnEnqueue())
-
-	assert.NotNil(t, task.TraceCtx())
-
-	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	task.SetID(id)
-	assert.Equal(t, id, task.ID())
-
-	task.Base.MsgType = commonpb.MsgType_Delete
-	assert.Equal(t, commonpb.MsgType_Delete, task.Type())
-
-	ts := Timestamp(time.Now().UnixNano())
-	task.SetTs(ts)
-	assert.Equal(t, ts, task.BeginTs())
-	assert.Equal(t, ts, task.EndTs())
-
-	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
-	assert.NoError(t, task.PostExecute(ctx))
-}
-
-func TestDeleteTask_PreExecute(t *testing.T) {
-	Params.Init()
-
-	ctx := context.Background()
-
-	prefix := "TestDeleteTask_all"
-	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
-	partitionName := prefix + funcutil.GenRandomStr()
-
-	task := &deleteTask{
-		DeleteRequest: &milvuspb.DeleteRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Delete,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
-			Expr:           "",
-		},
-	}
-
-	assert.NoError(t, task.PreExecute(ctx))
-
-	task.DeleteRequest.CollectionName = "" // empty
-	assert.Error(t, task.PreExecute(ctx))
-	task.DeleteRequest.CollectionName = collectionName
-
-	task.DeleteRequest.PartitionName = "" // empty
-	assert.NoError(t, task.PreExecute(ctx))
-	task.DeleteRequest.PartitionName = partitionName
+		assert.NoError(t, task.PreExecute(ctx))
+		assert.NoError(t, task.Execute(ctx))
+		assert.NoError(t, task.PostExecute(ctx))
+	})
 }
 
 func TestCreateAlias_all(t *testing.T) {
