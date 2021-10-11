@@ -313,7 +313,7 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 		return fmt.Errorf("Mismatch collection, ID=%d", collID)
 	}
 
-	log.Debug("Add Normal segment",
+	log.Debug("Add Flushed segment",
 		zap.Int64("segment ID", segID),
 		zap.Int64("collection ID", collID),
 		zap.Int64("partition ID", partitionID),
