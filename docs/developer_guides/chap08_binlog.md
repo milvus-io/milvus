@@ -92,8 +92,6 @@ INSERT_EVENT:
 | event  | fixed  |  StartTimestamp      x : 8   | min timestamp in this event                              |
 | data   | part   +------------------------------+----------------------------------------------------------+
 |        |        |  EndTimestamp      x+8 : 8   | max timestamp in this event                              |
-|        |        +------------------------------+----------------------------------------------------------+
-|        |        |  reserved         x+16 : y   | reserved part                                            |
 |        +--------+------------------------------+----------------------------------------------------------+
 |        |variable|  parquet payload             | payload in parquet format                                |
 |        |part    |                              |                                                          |
