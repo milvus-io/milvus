@@ -539,7 +539,7 @@ type QueryNodeComponent interface {
 
 	// UpdateStateCode updates state code for QueryNode
 	//  `stateCode` is current statement of this query node, indicating whether it's healthy.
-	UpdateStateCode(code internalpb.StateCode)
+	UpdateStateCode(stateCode internalpb.StateCode)
 
 	// SetRootCoord set RootCoord for QueryNode
 	// `rootCoord` is a client of root coordinator. Pass to segmentLoader.
@@ -583,12 +583,24 @@ type QueryCoordComponent interface {
 	QueryCoord
 
 	// UpdateStateCode updates state code for QueryCoord
-	// State includes: Initializing, Healthy and Abnormal
-	UpdateStateCode(internalpb.StateCode)
+	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
 
 	// SetDataCoord set DataCoord for QueryCoord
-	SetDataCoord(DataCoord)
+	// `dataCoord` is a client of data coordinator.
+	//
+	// Return a generic error in status:
+	//     If the dataCoord is nil.
+	// Return nil in status:
+	//     The dataCoord is not nil.
+	SetDataCoord(dataCoord DataCoord) error
 
 	// SetRootCoord set RootCoord for QueryCoord
-	SetRootCoord(RootCoord)
+	// `rootCoord` is a client of root coordinator.
+	//
+	// Return a generic error in status:
+	//     If the rootCoord is nil.
+	// Return nil in status:
+	//     The rootCoord is not nil.
+	SetRootCoord(rootCoord RootCoord) error
 }

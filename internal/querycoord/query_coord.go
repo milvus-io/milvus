@@ -13,6 +13,7 @@ package querycoord
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"path/filepath"
 	"strconv"
@@ -194,13 +195,23 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 }
 
 // SetRootCoord sets root coordinator's client
-func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) {
+func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) error {
+	if rootCoord == nil {
+		return errors.New("null root coordinator interface")
+	}
+
 	qc.rootCoordClient = rootCoord
+	return nil
 }
 
 // SetDataCoord sets data coordinator's client
-func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) {
+func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) error {
+	if dataCoord == nil {
+		return errors.New("null data coordinator interface")
+	}
+
 	qc.dataCoordClient = dataCoord
+	return nil
 }
 
 func (qc *QueryCoord) watchNodeLoop() {
