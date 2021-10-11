@@ -52,6 +52,12 @@ func TestDescriptorEvent(t *testing.T) {
 	var buf bytes.Buffer
 
 	err := desc.Write(&buf)
+	assert.NotNil(t, err)
+
+	sizeTotal := 20 // not important
+	desc.AddExtra(originalSizeKey, sizeTotal)
+
+	err = desc.Write(&buf)
 	assert.Nil(t, err)
 
 	buffer := buf.Bytes()
