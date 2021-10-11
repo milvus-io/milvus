@@ -62,6 +62,25 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 +=====================================+=====================================================================|
 ```
 
+`ExtraBytes` is in json format.
+
+`ExtraBytes` stores the extra information of the binlog file.
+
+In binlog file, we have stored many common fields in fixed part, such as `CollectionID`, `PartitionID` and etc.
+
+However, different binlog files have some other different information which differs from each other.
+
+So, `ExtraBytes` was designed to store these different information.
+
+For example, for index binlog file, we will store `indexID`, `indexBuildID`, `indexID` and other index-related
+information to `ExtraBytes`.
+
+In addition, `ExtraBytes` was also designed to extend binlog. Then we can add new features to binlog file without
+breaking the compatibility.
+
+For example, we can store the memory size of original content(before encode) to `ExtraBytes`.
+The key in `ExtraBytes` is `original_size`. For now, `original_size` is required, not optional.
+
 ### 8.3 Type code
 
 ```
