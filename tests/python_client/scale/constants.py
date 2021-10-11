@@ -12,3 +12,6 @@ QUERY_NODE = "queryNode"  # key queryNode
 # my values.yaml path
 MILVUS_CHART_ENV = 'MILVUS_CHART_ENV'  # env of milvus chart path
 MILVUS_LOGS_PATH = '/tmp/milvus'  # path of milvus pod logs
+
+# default scale config
+DEFAULT_RELEASE_PREFIX = "scale"
