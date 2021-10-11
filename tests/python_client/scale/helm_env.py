@@ -10,7 +10,7 @@ class HelmEnv:
     milvus_chart_path = sc.get_milvus_chart_env_var()
 
     def __init__(self, release_name=None, **kwargs):
-        self.release_name = release_name if release_name else cf.gen_unique_str("scale")
+        self.release_name = release_name if release_name else cf.gen_unique_str(constants.DEFAULT_RELEASE_PREFIX)
         self.proxy = kwargs.get(constants.PROXY, 1)
         self.data_node = kwargs.get(constants.DATA_NODE, 1)
         self.index_node = kwargs.get(constants.INDEX_NODE, 1)
