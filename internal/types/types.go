@@ -550,3 +550,18 @@ type QueryCoord interface {
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
+
+// QueryCoordComponent is used by grpc server of QueryCoord
+type QueryCoordComponent interface {
+	QueryCoord
+
+	// UpdateStateCode updates state code for QueryCoord
+	// State includes: Initializing, Healthy and Abnormal
+	UpdateStateCode(internalpb.StateCode)
+
+	// SetDataCoord set DataCoord for QueryCoord
+	SetDataCoord(DataCoord)
+
+	// SetRootCoord set RootCoord for QueryCoord
+	SetRootCoord(RootCoord)
+}
