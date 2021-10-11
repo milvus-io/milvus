@@ -17,13 +17,11 @@ default_nb = ut.default_nb
 row_count = ut.row_count
 default_tag = ut.default_tag
 default_single_query = {
-    "bool": {
-        "must": [
-            {"vector": {field_name: {"topk": 10, "query": ut.gen_vectors(1, ut.default_dim), "metric_type": "L2",
-                                     "params": {"nprobe": 10}}}}
-        ]
-    }
-}
+            "data": ut.gen_vectors(1, ut.default_dim),
+            "anns_field": ut.default_float_vec_field_name,
+            "param": {"metric_type": "L2", "params": {"nprobe": 10}},
+            "limit": 10,
+        }
 
 
 class TestInsertBase:
@@ -173,7 +171,7 @@ class TestInsertBase:
         result = connect.insert(collection, default_entities)
         connect.flush([collection])
         connect.load_collection(collection)
-        res = connect.search(collection, default_single_query)
+        res = connect.search(collection, **default_single_query)
         assert len(res[0]) == ut.default_top_k
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -673,10 +671,10 @@ class TestInsertBinary:
         """
         result = connect.insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
-        query, vecs = ut.gen_query_vectors(binary_field_name, default_binary_entities,
-                                           ut.default_top_k, 1, metric_type="JACCARD")
+        query, _ = ut.gen_search_vectors_params(binary_field_name, default_binary_entities,
+                                                ut.default_top_k, 1, metric_type="JACCARD")
         connect.load_collection(binary_collection)
-        res = connect.search(binary_collection, query)
+        res = connect.search(binary_collection, **query)
         logging.getLogger().debug(res)
         assert len(res[0]) == ut.default_top_k
 
@@ -920,7 +918,7 @@ class TestInsertMultiCollections:
         collection_name = ut.gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         connect.load_collection(collection)
-        res = connect.search(collection, default_single_query)
+        res = connect.search(collection, **default_single_query)
         assert len(res[0]) == 0
         connect.insert(collection_name, default_entity)
         connect.flush([collection_name])
@@ -940,7 +938,7 @@ class TestInsertMultiCollections:
         result = connect.insert(collection, default_entity)
         connect.flush([collection])
         connect.load_collection(collection_name)
-        res = connect.search(collection_name, default_single_query)
+        res = connect.search(collection_name, **default_single_query)
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == 1
 
@@ -957,7 +955,7 @@ class TestInsertMultiCollections:
         result = connect.insert(collection, default_entity)
         connect.flush([collection])
         connect.load_collection(collection_name)
-        res = connect.search(collection_name, default_single_query)
+        res = connect.search(collection_name, **default_single_query)
         assert len(res[0]) == 0
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -1238,3 +1236,4 @@ class TestInsertInvalidBinary(object):
         src_vector[1] = get_field_vectors_value
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entities)
+

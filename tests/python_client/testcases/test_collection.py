@@ -29,14 +29,11 @@ uid_list = "list_collections"
 uid_load = "load_collection"
 field_name = default_float_vec_field_name
 default_single_query = {
-    "bool": {
-        "must": [
-            {"vector": {field_name: {"topk": default_top_k, "query": gen_vectors(1, default_dim), "metric_type": "L2",
-                                     "params": {"nprobe": 10}}}}
-        ]
-    }
-}
-
+            "data": gen_vectors(1, default_dim),
+            "anns_field": default_float_vec_field_name,
+            "param": {"metric_type": "L2", "params": {"nprobe": 10}},
+            "limit": default_top_k,
+        }
 
 class TestCollectionParams(TestcaseBase):
     """ Test case of collection interface """
@@ -2841,8 +2838,8 @@ class TestLoadCollection:
         connect.load_collection(collection)
         connect.release_partitions(collection, [default_tag])
         with pytest.raises(Exception) as e:
-            connect.search(collection, default_single_query, partition_names=[default_tag])
-        res = connect.search(collection, default_single_query, partition_names=[default_partition_name])
+            connect.search(collection, **default_single_query, partition_names=[default_tag])
+        res = connect.search(collection, **default_single_query, partition_names=[default_partition_name])
         assert len(res[0]) == default_top_k
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2860,7 +2857,7 @@ class TestLoadCollection:
         connect.flush([collection])
         connect.load_collection(collection)
         connect.release_partitions(collection, [default_partition_name, default_tag])
-        res = connect.search(collection, default_single_query)
+        res = connect.search(collection, **default_single_query)
         assert len(res[0]) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2877,7 +2874,7 @@ class TestLoadCollection:
         connect.load_partitions(collection, [default_tag])
         connect.release_collection(collection)
         with pytest.raises(Exception):
-            connect.search(collection, default_single_query)
+            connect.search(collection, **default_single_query)
         # assert len(res[0]) == 0
 
 
@@ -2895,11 +2892,11 @@ class TestReleaseAdvanced:
         connect.insert(collection, cons.default_entities)
         connect.flush([collection])
         connect.load_collection(collection)
-        query, _ = gen_query_vectors(field_name, cons.default_entities, top_k, nq)
-        future = connect.search(collection, query, _async=True)
+        params, _ = gen_search_vectors_params(field_name, cons.default_entities, top_k, nq)
+        future = connect.search(collection, **params, _async=True)
         connect.release_collection(collection)
         with pytest.raises(Exception):
-            connect.search(collection, default_single_query)
+            connect.search(collection, **default_single_query)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_release_partition_during_searching(self, connect, collection):
@@ -2911,14 +2908,14 @@ class TestReleaseAdvanced:
         nq = 1000
         top_k = 1
         connect.create_partition(collection, default_tag)
-        query, _ = gen_query_vectors(field_name, cons.default_entities, top_k, nq)
+        query, _ = gen_search_vectors_params(field_name, cons.default_entities, top_k, nq)
         connect.insert(collection, cons.default_entities, partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
-        res = connect.search(collection, query, _async=True)
+        res = connect.search(collection, **query, _async=True)
         connect.release_partitions(collection, [default_tag])
         with pytest.raises(Exception) as e:
-            res = connect.search(collection, default_single_query)
+            res = connect.search(collection, **default_single_query)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_collection_during_searching_A(self, connect, collection):
@@ -2930,14 +2927,14 @@ class TestReleaseAdvanced:
         nq = 1000
         top_k = 1
         connect.create_partition(collection, default_tag)
-        query, _ = gen_query_vectors(field_name, cons.default_entities, top_k, nq)
+        query, _ = gen_search_vectors_params(field_name, cons.default_entities, top_k, nq)
         connect.insert(collection, cons.default_entities, partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
-        res = connect.search(collection, query, _async=True)
+        res = connect.search(collection, **query, _async=True)
         connect.release_collection(collection)
         with pytest.raises(Exception):
-            connect.search(collection, default_single_query)
+            connect.search(collection, **default_single_query)
 
     def _test_release_collection_during_loading(self, connect, collection):
         """
@@ -2955,7 +2952,7 @@ class TestReleaseAdvanced:
         t.start()
         connect.release_collection(collection)
         with pytest.raises(Exception):
-            connect.search(collection, default_single_query)
+            connect.search(collection, **default_single_query)
 
     def _test_release_partition_during_loading(self, connect, collection):
         """
@@ -2973,7 +2970,7 @@ class TestReleaseAdvanced:
         t = threading.Thread(target=load, args=())
         t.start()
         connect.release_partitions(collection, [default_tag])
-        res = connect.search(collection, default_single_query)
+        res = connect.search(collection,**default_single_query)
         assert len(res[0]) == 0
 
     def _test_release_collection_during_inserting(self, connect, collection):
@@ -2993,7 +2990,7 @@ class TestReleaseAdvanced:
         t.start()
         connect.release_collection(collection)
         with pytest.raises(Exception):
-            res = connect.search(collection, default_single_query)
+            res = connect.search(collection, **default_single_query)
         # assert len(res[0]) == 0
 
     def _test_release_collection_during_indexing(self, connect, collection):
@@ -3264,3 +3261,4 @@ class TestLoadPartitionInvalid(object):
         partition_name = get_partition_name
         with pytest.raises(Exception) as e:
             connect.load_partitions(collection, [partition_name])
+
