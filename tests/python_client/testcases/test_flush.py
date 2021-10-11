@@ -1,6 +1,6 @@
 import pytest
 from utils.utils import *
-from common.constants import *
+from common.constants import default_entities
 from common.common_type import CaseLabel
 
 DELETE_TIMEOUT = 60
