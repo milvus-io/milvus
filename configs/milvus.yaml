@@ -57,6 +57,7 @@ rootCoord:
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
+# Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
   port: 19530
 
