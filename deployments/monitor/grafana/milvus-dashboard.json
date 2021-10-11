@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1633760415117,
+  "iteration": 1633941334556,
   "links": [],
   "panels": [
     {
@@ -3283,7 +3283,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "",
+      "description": "Total DataNode Watch dm channel operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5843,5 +5843,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 150
+  "version": 151
 }
