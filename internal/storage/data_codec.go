@@ -243,25 +243,25 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
-			writer.AddExtra(originalSizeKey, singleData.(*BoolFieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BoolFieldData).GetMemorySize()))
 		case schemapb.DataType_Int8:
 			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
-			writer.AddExtra(originalSizeKey, singleData.(*Int8FieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int8FieldData).GetMemorySize()))
 		case schemapb.DataType_Int16:
 			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
-			writer.AddExtra(originalSizeKey, singleData.(*Int16FieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int16FieldData).GetMemorySize()))
 		case schemapb.DataType_Int32:
 			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
-			writer.AddExtra(originalSizeKey, singleData.(*Int32FieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int32FieldData).GetMemorySize()))
 		case schemapb.DataType_Int64:
 			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
-			writer.AddExtra(originalSizeKey, singleData.(*Int64FieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int64FieldData).GetMemorySize()))
 		case schemapb.DataType_Float:
 			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
-			writer.AddExtra(originalSizeKey, singleData.(*FloatFieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatFieldData).GetMemorySize()))
 		case schemapb.DataType_Double:
 			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
-			writer.AddExtra(originalSizeKey, singleData.(*DoubleFieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*DoubleFieldData).GetMemorySize()))
 		case schemapb.DataType_String:
 			for _, singleString := range singleData.(*StringFieldData).Data {
 				err = eventWriter.AddOneStringToPayload(singleString)
@@ -269,13 +269,13 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 					return nil, nil, err
 				}
 			}
-			writer.AddExtra(originalSizeKey, singleData.(*StringFieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*StringFieldData).GetMemorySize()))
 		case schemapb.DataType_BinaryVector:
 			err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
-			writer.AddExtra(originalSizeKey, singleData.(*BinaryVectorFieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BinaryVectorFieldData).GetMemorySize()))
 		case schemapb.DataType_FloatVector:
 			err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
-			writer.AddExtra(originalSizeKey, singleData.(*FloatVectorFieldData).GetMemorySize())
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatVectorFieldData).GetMemorySize()))
 		default:
 			return nil, nil, fmt.Errorf("undefined data type %d", field.DataType)
 		}
@@ -616,7 +616,7 @@ func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID Unique
 	// It's a little complicated to count the memory size of a map.
 	// See: https://stackoverflow.com/questions/31847549/computing-the-memory-footprint-or-byte-length-of-a-map
 	// Since the implementation of golang map may differ from version, so we'd better not to use this magic method.
-	binlogWriter.AddExtra(originalSizeKey, sizeTotal)
+	binlogWriter.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	err = binlogWriter.Close()
 	if err != nil {
@@ -711,7 +711,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	writer.SetEventTimeStamp(ts[0], ts[len(ts)-1])
 
 	// https://github.com/milvus-io/milvus/issues/9620
-	writer.AddExtra(originalSizeKey, binary.Size(int64Ts))
+	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", binary.Size(int64Ts)))
 
 	err = writer.Close()
 
@@ -778,7 +778,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	writer.SetEventTimeStamp(ts[0], ts[len(ts)-1])
 
 	// https://github.com/milvus-io/milvus/issues/9620
-	writer.AddExtra(originalSizeKey, sizeTotal)
+	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	err = writer.Close()
 	if err != nil {
@@ -929,7 +929,7 @@ func (codec *IndexFileBinlogCodec) Serialize(
 		writer.SetEventTimeStamp(ts, ts)
 
 		// https://github.com/milvus-io/milvus/issues/9620
-		writer.AddExtra(originalSizeKey, len(datas[pos].Value))
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", len(datas[pos].Value)))
 
 		err = writer.Close()
 		if err != nil {
@@ -975,7 +975,7 @@ func (codec *IndexFileBinlogCodec) Serialize(
 
 	// https://github.com/milvus-io/milvus/issues/9620
 	// len(params) is also not accurate, indexParams is a map
-	writer.AddExtra(originalSizeKey, len(params))
+	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", len(params)))
 
 	err = writer.Close()
 	if err != nil {
