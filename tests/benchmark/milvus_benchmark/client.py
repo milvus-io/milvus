@@ -401,6 +401,12 @@ class MilvusClient(object):
         return row_count
 
     def drop(self, timeout=120, collection_name=None):
+        """
+        drop steps:
+        1.drop collection
+        2.check collection exist
+        3.Set timeout to exit
+        """
         timeout = int(timeout)
         if collection_name is None:
             collection_name = self._collection_name
