@@ -504,7 +504,7 @@ func (queue *ddTaskQueue) Enqueue(task *task) error
 func newDdTaskQueue() *ddTaskQueue
 ```
 
-Data definition tasks (i.e. _CreateCollectionTask_) will be put into _DdTaskQueue_. If a task is enqueued, _Enqueue(task \*task)_ will set _Ts_, _ReqId_, _ProxyId_, then push it into _queue_. The timestamps of the enqueued tasks should be strictly monotonically increasing. As _Enqueue(task \*task)_ will be called in parallel, setting timestamp and queue insertion need to be done atomically.
+Data definition tasks (i.e. _CreateCollectionTask_) will be pushed into _DdTaskQueue_. If a task is enqueued, _Enqueue(task \*task)_ will set _Ts_, _ReqId_, _ProxyId_, then push it into _queue_. The timestamps of the enqueued tasks should be strictly monotonically increasing. As _Enqueue(task \*task)_ will be called in parallel, setting timestamp and queue insertion need to be done atomically.
 
 - Data Manipulation Task Queue
 
@@ -517,7 +517,7 @@ func (queue *dmTaskQueue) Enqueue(task *task) error
 func newDmTaskQueue() *dmTaskQueue
 ```
 
-Insert tasks and delete tasks will be put into _DmTaskQueue_.
+Insert tasks and delete tasks will be pushed into _DmTaskQueue_.
 
 If a _insertTask_ is enqueued, _Enqueue(task \*task)_ will set _Ts_, _ReqId_, _ProxyId_, _SegIdAssigner_, _RowIdAllocator_, then push it into _queue_. The _SegIdAssigner_ and _RowIdAllocator_ will later be used in the task's execution phase.
 
@@ -532,7 +532,7 @@ func (queue *dqTaskQueue) Enqueue(task *task) error
 func newDqTaskQueue() *dqTaskQueue
 ```
 
-Queries will be put into _DqTaskQueue_.
+Queries will be pushed into _DqTaskQueue_.
 
 - Task Scheduler
 
