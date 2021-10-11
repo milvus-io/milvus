@@ -196,6 +196,7 @@ func (colReplica *collectionReplica) hasCollection(collectionID UniqueID) bool {
 	return colReplica.hasCollectionPrivate(collectionID)
 }
 
+// hasCollectionPrivate is the private function in collectionReplica, to check collection in collectionReplica
 func (colReplica *collectionReplica) hasCollectionPrivate(collectionID UniqueID) bool {
 	_, ok := colReplica.collections[collectionID]
 	return ok
