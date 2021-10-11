@@ -26,7 +26,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
-# ignore Minio,S3 unittes
+# ignore MinIO,S3 unittes
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo "Running go unittest under $MILVUS_DIR"
 
