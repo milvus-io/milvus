@@ -246,6 +246,7 @@ func SetCurrentRows(rows int64) SegmentInfoOption {
 	}
 }
 
+// SetBinlogs is the option to set binlogs for segment info
 func SetBinlogs(binlogs []*datapb.FieldBinlog) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.Binlogs = binlogs
