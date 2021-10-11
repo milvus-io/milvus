@@ -475,6 +475,15 @@ class MilvusClient(object):
 
     @time_wrapper
     def scene_test(self, collection_name=None, vectors=None, ids=None):
+        """
+        Scene test steps：
+        1.create collection with the specified collection name
+        2.insert data
+        3.flush data
+        4.create index
+        5.drop collection
+        """
+
         logger.debug("[scene_test] Start scene test : %s" % collection_name)
         self.create_collection(dimension=128, collection_name=collection_name)
         time.sleep(1)
