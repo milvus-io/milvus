@@ -308,7 +308,7 @@ message LoadBalanceRequest {
 message SealedSegmentsChangeInfo {
   common.MsgBase base = 1;
   int64 online_nodeID = 2;
-  repeated int64 online_segmentIDs = 3;
+  repeated SegmentInfo online_segments = 3;
   int64 offline_nodeID = 4;
-  repeated int64 offline_segmentIDs = 5;
+  repeated SegmentInfo offline_segments = 5;
 }
