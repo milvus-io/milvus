@@ -191,6 +191,7 @@ func (colReplica *collectionReplica) getCollectionByIDPrivate(collectionID Uniqu
 	return collection, nil
 }
 
+// hasCollection checks if collectionReplica has the collection which id is collectionID
 func (colReplica *collectionReplica) hasCollection(collectionID UniqueID) bool {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
