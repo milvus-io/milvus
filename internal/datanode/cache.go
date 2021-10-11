@@ -22,38 +22,30 @@ import (
 //   After the flush procedure, whether the segment successfully flushed or not,
 //   it'll be removed from the cache. So if flush failed, the secondary flush can be triggered.
 type Cache struct {
-	cacheMu  sync.RWMutex
-	cacheMap map[UniqueID]bool // TODO GOOSE: change into sync.map
+	cacheMap sync.Map
 }
 
+// newCache returns a new Cache
 func newCache() *Cache {
 	return &Cache{
-		cacheMap: make(map[UniqueID]bool),
+		cacheMap: sync.Map{},
 	}
 }
 
+// checkIfCached returns whether unique id is in cache
 func (c *Cache) checkIfCached(key UniqueID) bool {
-	c.cacheMu.Lock()
-	defer c.cacheMu.Unlock()
-
-	_, ok := c.cacheMap[key]
+	_, ok := c.cacheMap.Load(key)
 	return ok
 }
 
 // Cache caches a specific segment ID into the cache
 func (c *Cache) Cache(segID UniqueID) {
-	c.cacheMu.Lock()
-	defer c.cacheMu.Unlock()
-
-	c.cacheMap[segID] = true
+	c.cacheMap.Store(segID, struct{}{})
 }
 
 // Remove removes a set of segment IDs from the cache
 func (c *Cache) Remove(segIDs ...UniqueID) {
-	c.cacheMu.Lock()
-	defer c.cacheMu.Unlock()
-
 	for _, id := range segIDs {
-		delete(c.cacheMap, id)
+		c.cacheMap.Delete(id)
 	}
 }
