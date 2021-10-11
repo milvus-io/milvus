@@ -65,7 +65,8 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
 	mockRootCoord := &RootCoordFactory{}
 
-	replica := newReplica(mockRootCoord, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
+	assert.Nil(t, err)
 
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
@@ -160,7 +161,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
 	mockRootCoord := &RootCoordFactory{}
 
-	replica := newReplica(mockRootCoord, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
+	assert.Nil(t, err)
 
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
@@ -218,9 +220,10 @@ func TestFlushSegment(t *testing.T) {
 	flushMap := sync.Map{}
 	mockRootCoord := &RootCoordFactory{}
 
-	replica := newReplica(mockRootCoord, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
+	assert.Nil(t, err)
 
-	err := replica.addNewSegment(segmentID, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	err = replica.addNewSegment(segmentID, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
 	replica.updateSegmentEndPosition(segmentID, &internalpb.MsgPosition{ChannelName: "TestChannel"})
 
@@ -593,7 +596,8 @@ func TestInsertBufferNode_getCollMetaBySegID(t *testing.T) {
 		compactTs: 100,
 	}
 
-	replica := newReplica(mockRootCoord, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
+	assert.Nil(t, err)
 
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
@@ -652,7 +656,8 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		compactTs: 100,
 	}
 
-	replica := newReplica(mockRootCoord, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
+	assert.Nil(t, err)
 
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
@@ -713,8 +718,11 @@ func TestInsertBufferNode_updateSegStatesInReplica(te *testing.T) {
 	}
 
 	for _, test := range invalideTests {
+		replica, err := newReplica(context.Background(), &RootCoordFactory{}, test.replicaCollID)
+		assert.Nil(te, err)
+
 		ibNode := &insertBufferNode{
-			replica: newReplica(&RootCoordFactory{}, test.replicaCollID),
+			replica: replica,
 		}
 
 		im := []*msgstream.InsertMsg{

@@ -16,16 +16,21 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"path"
 	"sync"
 	"sync/atomic"
 
 	"go.uber.org/zap"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/kv"
+	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -90,6 +95,7 @@ type SegmentReplica struct {
 	flushedSegments map[UniqueID]*Segment
 
 	metaService *metaService
+	minIOKV     kv.BaseKV
 }
 
 func (s *Segment) updatePKRange(rowIDs []int64) {
@@ -108,10 +114,25 @@ func (s *Segment) updatePKRange(rowIDs []int64) {
 
 var _ Replica = &SegmentReplica{}
 
-func newReplica(rc types.RootCoord, collID UniqueID) Replica {
+func newReplica(ctx context.Context, rc types.RootCoord, collID UniqueID) (*SegmentReplica, error) {
+	// MinIO
+	option := &miniokv.Option{
+		Address:           Params.MinioAddress,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSL,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
+	}
+
+	minIOKV, err := miniokv.NewMinIOKV(ctx, option)
+	if err != nil {
+		return nil, err
+	}
+
 	metaService := newMetaService(rc, collID)
 
-	var replica Replica = &SegmentReplica{
+	replica := &SegmentReplica{
 		collectionID: collID,
 
 		newSegments:     make(map[UniqueID]*Segment),
@@ -119,8 +140,10 @@ func newReplica(rc types.RootCoord, collID UniqueID) Replica {
 		flushedSegments: make(map[UniqueID]*Segment),
 
 		metaService: metaService,
+		minIOKV:     minIOKV,
 	}
-	return replica
+
+	return replica, nil
 }
 
 // segmentFlushed transfers a segment from *New* or *Normal* into *Flushed*.
@@ -293,6 +316,31 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
+	p := path.Join(Params.StatsBinlogRootPath, JoinIDPath(collID, partitionID, segID, common.RowIDField))
+	keys, values, err := replica.minIOKV.LoadWithPrefix(p)
+	if err != nil {
+		return err
+	}
+	blobs := make([]*Blob, 0)
+	for i := 0; i < len(keys); i++ {
+		blobs = append(blobs, &Blob{Key: keys[i], Value: []byte(values[i])})
+	}
+
+	stats, err := storage.DeserializeStats(blobs)
+	if err != nil {
+		return err
+	}
+	for _, stat := range stats {
+		seg.pkFilter.Merge(stat.BF)
+		if seg.minPK > stat.Min {
+			seg.minPK = stat.Min
+		}
+
+		if seg.maxPK < stat.Max {
+			seg.maxPK = stat.Max
+		}
+	}
+
 	seg.isNew.Store(false)
 	seg.isFlushed.Store(false)
 
@@ -331,6 +379,31 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 		minPK:    math.MaxInt64, // use max value, represents no value
 		maxPK:    math.MinInt64, // use min value represents no value
+	}
+
+	p := path.Join(Params.StatsBinlogRootPath, JoinIDPath(collID, partitionID, segID, common.RowIDField))
+	keys, values, err := replica.minIOKV.LoadWithPrefix(p)
+	if err != nil {
+		return err
+	}
+	blobs := make([]*Blob, 0)
+	for i := 0; i < len(keys); i++ {
+		blobs = append(blobs, &Blob{Key: keys[i], Value: []byte(values[i])})
+	}
+
+	stats, err := storage.DeserializeStats(blobs)
+	if err != nil {
+		return err
+	}
+	for _, stat := range stats {
+		seg.pkFilter.Merge(stat.BF)
+		if seg.minPK > stat.Min {
+			seg.minPK = stat.Min
+		}
+
+		if seg.maxPK < stat.Max {
+			seg.maxPK = stat.Max
+		}
 	}
 
 	seg.isNew.Store(false)

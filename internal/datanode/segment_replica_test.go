@@ -12,7 +12,10 @@
 package datanode
 
 import (
+	"context"
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -21,29 +24,48 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/storage"
 )
-
-func newSegmentReplica(rc types.RootCoord, collID UniqueID) *SegmentReplica {
-	metaService := newMetaService(rc, collID)
-
-	var replica = &SegmentReplica{
-		collectionID: collID,
-
-		newSegments:     make(map[UniqueID]*Segment),
-		normalSegments:  make(map[UniqueID]*Segment),
-		flushedSegments: make(map[UniqueID]*Segment),
-
-		metaService: metaService,
-	}
-	return replica
-}
 
 func TestNewReplica(t *testing.T) {
 	rc := &RootCoordFactory{}
-	replica := newReplica(rc, 0)
+	replica, err := newReplica(context.Background(), rc, 0)
+	assert.Nil(t, err)
 	assert.NotNil(t, replica)
+}
+
+type mockMinioKV struct {
+	kv.BaseKV
+}
+
+func (kv *mockMinioKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
+	stats := &storage.Int64Stats{
+		FieldID: common.RowIDField,
+		Min:     0,
+		Max:     10,
+		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+	}
+	buffer, _ := json.Marshal(stats)
+	return []string{"0"}, []string{string(buffer)}, nil
+}
+
+type mockMinioKVError struct {
+	kv.BaseKV
+}
+
+func (kv *mockMinioKVError) LoadWithPrefix(prefix string) ([]string, []string, error) {
+	return nil, nil, fmt.Errorf("mock error")
+}
+
+type mockMinioKVStatsError struct {
+	kv.BaseKV
+}
+
+func (kv *mockMinioKVStatsError) LoadWithPrefix(prefix string) ([]string, []string, error) {
+	return []string{"0"}, []string{"3123123,error,test"}, nil
 }
 
 func TestSegmentReplica_getCollectionAndPartitionID(te *testing.T) {
@@ -122,9 +144,10 @@ func TestSegmentReplica(t *testing.T) {
 	collID := UniqueID(1)
 
 	t.Run("Test coll mot match", func(t *testing.T) {
-		replica := newSegmentReplica(rc, collID)
+		replica, err := newReplica(context.Background(), rc, collID)
+		assert.Nil(t, err)
 
-		err := replica.addNewSegment(1, collID+1, 0, "", nil, nil)
+		err = replica.addNewSegment(1, collID+1, 0, "", nil, nil)
 		assert.NotNil(t, err)
 	})
 
@@ -220,9 +243,10 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 
 		for _, test := range tests {
 			to.Run(test.description, func(t *testing.T) {
-				sr := newSegmentReplica(rc, test.replicaCollID)
+				sr, err := newReplica(context.Background(), rc, test.replicaCollID)
+				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
-				err := sr.addNewSegment(test.inSegID,
+				err = sr.addNewSegment(test.inSegID,
 					test.inCollID, 1, "", test.instartPos, &internalpb.MsgPosition{})
 				if test.isValidCase {
 					assert.NoError(t, err)
@@ -255,9 +279,11 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 
 		for _, test := range tests {
 			to.Run(test.description, func(t *testing.T) {
-				sr := newSegmentReplica(rc, test.replicaCollID)
+				sr, err := newReplica(context.Background(), rc, test.replicaCollID)
+				sr.minIOKV = &mockMinioKV{}
+				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
-				err := sr.addNormalSegment(test.inSegID, test.inCollID, 1, "", 0, &segmentCheckPoint{})
+				err = sr.addNormalSegment(test.inSegID, test.inCollID, 1, "", 0, &segmentCheckPoint{})
 				if test.isValidCase {
 					assert.NoError(t, err)
 					assert.True(t, sr.hasSegment(test.inSegID, true))
@@ -452,7 +478,8 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 
 		for _, test := range tests {
 			to.Run(test.description, func(t *testing.T) {
-				sr := newSegmentReplica(rc, test.replicaCollID)
+				sr, err := newReplica(context.Background(), rc, test.replicaCollID)
+				assert.Nil(t, err)
 
 				if test.metaServiceErr {
 					rc.setCollectionID(-1)
@@ -473,15 +500,43 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 
 	})
 
+	te.Run("Test_addSegmentMinIOLoadError", func(to *testing.T) {
+		sr, err := newReplica(context.Background(), rc, 1)
+		assert.Nil(to, err)
+		sr.minIOKV = &mockMinioKVError{}
+
+		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
+		cp := &segmentCheckPoint{int64(10), *cpPos}
+		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
+		assert.NotNil(to, err)
+		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
+		assert.NotNil(to, err)
+	})
+
+	te.Run("Test_addNormalSegmentStatsError", func(to *testing.T) {
+		sr, err := newReplica(context.Background(), rc, 1)
+		assert.Nil(to, err)
+		sr.minIOKV = &mockMinioKVStatsError{}
+
+		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
+		cp := &segmentCheckPoint{int64(10), *cpPos}
+		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
+		assert.NotNil(to, err)
+		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
+		assert.NotNil(to, err)
+	})
+
 	te.Run("Test inner function segment", func(t *testing.T) {
 		collID := UniqueID(1)
-		replica := newSegmentReplica(rc, collID)
+		replica, err := newReplica(context.Background(), rc, collID)
+		assert.Nil(t, err)
+		replica.minIOKV = &mockMinioKV{}
 		assert.False(t, replica.hasSegment(0, true))
 		assert.False(t, replica.hasSegment(0, false))
 
 		startPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(100)}
 		endPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(200)}
-		err := replica.addNewSegment(0, 1, 2, "insert-01", startPos, endPos)
+		err = replica.addNewSegment(0, 1, 2, "insert-01", startPos, endPos)
 		assert.NoError(t, err)
 		assert.True(t, replica.hasSegment(0, true))
 		assert.Equal(t, 1, len(replica.newSegments))
@@ -599,9 +654,11 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 	cpPos := &internalpb.MsgPosition{ChannelName: chanName, Timestamp: Timestamp(10)}
 	cp := &segmentCheckPoint{int64(10), *cpPos}
 
-	replica := newSegmentReplica(rc, collID)
+	replica, err := newReplica(context.Background(), rc, collID)
+	assert.Nil(t, err)
+	replica.minIOKV = &mockMinioKV{}
 
-	err := replica.addNewSegment(1, collID, partID, chanName, startPos, endPos)
+	err = replica.addNewSegment(1, collID, partID, chanName, startPos, endPos)
 	assert.Nil(t, err)
 	err = replica.addNormalSegment(2, collID, partID, chanName, 100, cp)
 	assert.Nil(t, err)
