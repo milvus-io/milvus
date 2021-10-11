@@ -2,8 +2,8 @@ import pytest
 from time import sleep
 
 from pymilvus import connections
-from chaos.checker import CreateChecker, InsertFlushChecker, \
-    SearchChecker, QueryChecker, IndexChecker, Op
+from chaos.checker import (CreateChecker, InsertFlushChecker,
+                           SearchChecker, QueryChecker, IndexChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
@@ -111,7 +111,7 @@ class TestChaos(TestChaosBase):
 
         # parse chaos object
         chaos_config = cc.gen_experiment_config(chaos_yaml)
-        self._chaos_config = chaos_config   # cache the chaos config for tear down
+        self._chaos_config = chaos_config  # cache the chaos config for tear down
         log.info(chaos_config)
 
         # parse the test expectations in testcases.yaml
@@ -120,7 +120,7 @@ class TestChaos(TestChaosBase):
             assert False
 
         # wait 20s
-        sleep(constants.WAIT_PER_OP*2)
+        sleep(constants.WAIT_PER_OP * 2)
 
         # assert statistic:all ops 100% succ
         log.info("******1st assert before chaos: ")
@@ -138,7 +138,7 @@ class TestChaos(TestChaosBase):
         cc.reset_counting(self.health_checkers)
 
         # wait 40s
-        sleep(constants.WAIT_PER_OP*4)
+        sleep(constants.WAIT_PER_OP * 4)
 
         for k, t in self.checker_threads.items():
             log.info(f"10s later: Thread {k} is_alive(): {t.is_alive()}")
@@ -163,14 +163,14 @@ class TestChaos(TestChaosBase):
         sleep(2)
 
         # reconnect if needed
-        sleep(constants.WAIT_PER_OP*2)
+        sleep(constants.WAIT_PER_OP * 2)
         cc.reconnect(connections, alias='default')
 
         # reset counting again
         cc.reset_counting(self.health_checkers)
 
         # wait 50s (varies by feature)
-        sleep(constants.WAIT_PER_OP*5)
+        sleep(constants.WAIT_PER_OP * 5)
 
         # assert statistic: all ops success again
         log.info("******3rd assert after chaos deleted: ")
