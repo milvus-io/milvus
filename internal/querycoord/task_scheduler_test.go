@@ -49,6 +49,7 @@ func (tt *testTask) Timestamp() Timestamp {
 }
 
 func (tt *testTask) PreExecute(ctx context.Context) error {
+	tt.SetResultInfo(nil)
 	log.Debug("test task preExecute...")
 	return nil
 }
@@ -59,7 +60,7 @@ func (tt *testTask) Execute(ctx context.Context) error {
 	switch tt.baseMsg.MsgType {
 	case commonpb.MsgType_LoadSegments:
 		childTask := &LoadSegmentTask{
-			BaseTask: BaseTask{
+			BaseTask: &BaseTask{
 				ctx:              tt.ctx,
 				Condition:        NewTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
@@ -70,13 +71,14 @@ func (tt *testTask) Execute(ctx context.Context) error {
 				},
 				NodeID: tt.nodeID,
 			},
-			meta:    tt.meta,
-			cluster: tt.cluster,
+			meta:           tt.meta,
+			cluster:        tt.cluster,
+			excludeNodeIDs: []int64{},
 		}
 		tt.AddChildTask(childTask)
 	case commonpb.MsgType_WatchDmChannels:
 		childTask := &WatchDmChannelTask{
-			BaseTask: BaseTask{
+			BaseTask: &BaseTask{
 				ctx:              tt.ctx,
 				Condition:        NewTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
@@ -87,13 +89,14 @@ func (tt *testTask) Execute(ctx context.Context) error {
 				},
 				NodeID: tt.nodeID,
 			},
-			cluster: tt.cluster,
-			meta:    tt.meta,
+			cluster:        tt.cluster,
+			meta:           tt.meta,
+			excludeNodeIDs: []int64{},
 		}
 		tt.AddChildTask(childTask)
 	case commonpb.MsgType_WatchQueryChannels:
 		childTask := &WatchQueryChannelTask{
-			BaseTask: BaseTask{
+			BaseTask: &BaseTask{
 				ctx:              tt.ctx,
 				Condition:        NewTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
@@ -129,12 +132,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	queryNode.addQueryChannels = returnFailedResult
 
 	nodeID := queryNode.queryNodeID
-	for {
-		_, err = queryCoord.cluster.getNodeByID(nodeID)
-		if err == nil {
-			break
-		}
-	}
+	waitQueryNodeOnline(queryCoord.cluster, nodeID)
 	testTask := &testTask{
 		BaseTask: BaseTask{
 			ctx:              baseCtx,
@@ -148,7 +146,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 		meta:    queryCoord.meta,
 		nodeID:  nodeID,
 	}
-	queryCoord.scheduler.Enqueue([]task{testTask})
+	queryCoord.scheduler.Enqueue(testTask)
 
 	queryNode.stop()
 	err = removeNodeSession(queryNode.queryNodeID)
@@ -169,7 +167,11 @@ func TestUnMarshalTask(t *testing.T) {
 	refreshParams()
 	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	assert.Nil(t, err)
-	taskScheduler := &TaskScheduler{}
+	baseCtx, cancel := context.WithCancel(context.Background())
+	taskScheduler := &TaskScheduler{
+		ctx:    baseCtx,
+		cancel: cancel,
+	}
 
 	t.Run("Test LoadCollectionTask", func(t *testing.T) {
 		loadTask := &LoadCollectionTask{
@@ -187,7 +189,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalLoadCollection")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1000, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_LoadCollection)
 	})
@@ -208,7 +210,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalLoadPartition")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1001, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_LoadPartitions)
 	})
@@ -229,7 +231,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalReleaseCollection")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1002, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_ReleaseCollection)
 	})
@@ -250,7 +252,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalReleasePartition")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1003, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_ReleasePartitions)
 	})
@@ -271,7 +273,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalLoadSegment")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1004, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_LoadSegments)
 	})
@@ -292,7 +294,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalReleaseSegment")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1005, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_ReleaseSegments)
 	})
@@ -313,7 +315,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalWatchDmChannel")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1006, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_WatchDmChannels)
 	})
@@ -334,7 +336,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalWatchQueryChannel")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1007, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_WatchQueryChannels)
 	})
@@ -356,17 +358,22 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalLoadBalanceTask")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(value)
+		task, err := taskScheduler.unmarshalTask(1008, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.Type(), commonpb.MsgType_LoadBalanceSegments)
 	})
+
+	taskScheduler.Close()
 }
 
 func TestReloadTaskFromKV(t *testing.T) {
 	refreshParams()
 	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	assert.Nil(t, err)
+	baseCtx, cancel := context.WithCancel(context.Background())
 	taskScheduler := &TaskScheduler{
+		ctx:              baseCtx,
+		cancel:           cancel,
 		client:           kv,
 		triggerTaskQueue: NewTaskQueue(),
 	}

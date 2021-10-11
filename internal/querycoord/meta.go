@@ -423,25 +423,23 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 	defer m.Unlock()
 
 	delete(m.collectionInfos, collectionID)
+	var err error
 	for id, info := range m.segmentInfos {
 		if info.CollectionID == collectionID {
-			err := removeSegmentInfo(id, m.client)
+			err = removeSegmentInfo(id, m.client)
 			if err != nil {
-				log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", id))
-				return err
+				log.Warn("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", id))
 			}
 			delete(m.segmentInfos, id)
 		}
 	}
 
-	delete(m.queryChannelInfos, collectionID)
-	err := removeGlobalCollectionInfo(collectionID, m.client)
+	err = removeGlobalCollectionInfo(collectionID, m.client)
 	if err != nil {
-		log.Error("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-		return err
+		log.Warn("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 	}
 
-	return nil
+	return err
 }
 
 func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID UniqueID) error {

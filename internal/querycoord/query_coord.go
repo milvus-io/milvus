@@ -87,6 +87,8 @@ func (qc *QueryCoord) Register() error {
 
 // Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
+	log.Debug("query coordinator start init")
+	//connect etcd
 	connectEtcdFn := func() error {
 		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		if err != nil {
@@ -221,19 +223,17 @@ func (qc *QueryCoord) watchNodeLoop() {
 			SourceNodeIDs: offlineNodeIDs,
 		}
 
+		baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_nodeDown)
 		loadBalanceTask := &LoadBalanceTask{
-			BaseTask: BaseTask{
-				ctx:              qc.loopCtx,
-				Condition:        NewTaskCondition(qc.loopCtx),
-				triggerCondition: querypb.TriggerCondition_nodeDown,
-			},
+			BaseTask:           baseTask,
 			LoadBalanceRequest: loadBalanceSegment,
 			rootCoord:          qc.rootCoordClient,
 			dataCoord:          qc.dataCoordClient,
 			cluster:            qc.cluster,
 			meta:               qc.meta,
 		}
-		qc.scheduler.Enqueue([]task{loadBalanceTask})
+		//TODO::deal enqueue error
+		qc.scheduler.Enqueue(loadBalanceTask)
 		log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
 	}
 
@@ -271,21 +271,19 @@ func (qc *QueryCoord) watchNodeLoop() {
 					BalanceReason: querypb.TriggerCondition_nodeDown,
 				}
 
+				baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_nodeDown)
 				loadBalanceTask := &LoadBalanceTask{
-					BaseTask: BaseTask{
-						ctx:              qc.loopCtx,
-						Condition:        NewTaskCondition(qc.loopCtx),
-						triggerCondition: querypb.TriggerCondition_nodeDown,
-					},
+					BaseTask:           baseTask,
 					LoadBalanceRequest: loadBalanceSegment,
 					rootCoord:          qc.rootCoordClient,
 					dataCoord:          qc.dataCoordClient,
 					cluster:            qc.cluster,
 					meta:               qc.meta,
 				}
-				qc.scheduler.Enqueue([]task{loadBalanceTask})
-				log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
+				//TODO:: deal enqueue error
+				qc.scheduler.Enqueue(loadBalanceTask)
+				log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
 			}
 		}
 	}
