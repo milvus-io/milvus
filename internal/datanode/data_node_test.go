@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
@@ -162,6 +163,52 @@ func TestDataNode(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
+	t.Run("Test SetRootCoord", func(t *testing.T) {
+		emptyDN := &DataNode{}
+		tests := []struct {
+			inrc        types.RootCoord
+			isvalid     bool
+			description string
+		}{
+			{nil, false, "nil input"},
+			{&RootCoordFactory{}, true, "valid input"},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				err := emptyDN.SetRootCoord(test.inrc)
+				if test.isvalid {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+			})
+		}
+	})
+
+	t.Run("Test SetDataCoord", func(t *testing.T) {
+		emptyDN := &DataNode{}
+		tests := []struct {
+			inrc        types.DataCoord
+			isvalid     bool
+			description string
+		}{
+			{nil, false, "nil input"},
+			{&DataCoordFactory{}, true, "valid input"},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				err := emptyDN.SetDataCoord(test.inrc)
+				if test.isvalid {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+			})
+		}
 	})
 
 	t.Run("Test GetComponentStates", func(t *testing.T) {
