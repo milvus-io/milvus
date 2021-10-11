@@ -2991,7 +2991,6 @@ class TestReleaseAdvanced:
         connect.release_collection(collection)
         with pytest.raises(Exception):
             res = connect.search(collection, **default_single_query)
-        # assert len(res[0]) == 0
 
     def _test_release_collection_during_indexing(self, connect, collection):
         """
