@@ -36,6 +36,7 @@ minio:
   bucketName: "a-bucket"
   rootPath: files
 
+# Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
   address: localhost
   port: 6650
