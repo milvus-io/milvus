@@ -133,7 +133,7 @@ data:
 
 ## Overview of the benchmark
 
-### Conponents
+### Components
 
 - `main.py`
    
