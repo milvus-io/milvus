@@ -1076,18 +1076,22 @@ class TestUtilityBase(TestcaseBase):
         method: calculated distance between entities from two collections
         expected: distance calculated successfully
         """
+        log.info("Creating connection")
         self._connect()
         nb = 10
         prefix_1 = "utility_distance"
+        log.info("Creating two collections")
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
         collection_w_1, vectors_1, _, insert_ids_1 = self.init_collection_general(prefix_1, True, nb)
         vectors_l = vectors[0].loc[:, default_field_name]
         vectors_r = vectors_1[0].loc[:, default_field_name]
+        log.info("Extracting entities form collections for distance calculating")
         op_l = {"ids": insert_ids, "collection": collection_w.name,
                 "field": default_field_name}
         op_r = {"ids": insert_ids_1, "collection": collection_w_1.name,
                 "field": default_field_name}
         params = {metric_field: metric, "sqrt": sqrt}
+        log.info("Calculating distance for entities from two collections")
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.check_distance,
                                         check_items={"vectors_l": vectors_l,
