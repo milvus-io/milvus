@@ -35,8 +35,8 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 				IP:           node.session.Address,
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
 				CPUCoreUsage: metricsinfo.GetCPUUsage(),
-				Memory:       metricsinfo.GetMemoryCount(),
-				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+				Memory:       uint64(getUsedMemory(node.historical.replica, node.streaming.replica)),
+				MemoryUsage:  uint64(getTotalMemory()),
 				Disk:         metricsinfo.GetDiskCount(),
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
@@ -80,11 +80,19 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	}, nil
 }
 
-func checkSegmentMemory(segmentLoadInfos []*querypb.SegmentLoadInfo, historicalReplica, streamingReplica ReplicaInterface) error {
+func getUsedMemory(historicalReplica, streamingReplica ReplicaInterface) int64 {
 	historicalSegmentsMemSize := historicalReplica.getSegmentsMemSize()
 	streamingSegmentsMemSize := streamingReplica.getSegmentsMemSize()
-	usedRAMInMB := (historicalSegmentsMemSize + streamingSegmentsMemSize) / 1024.0 / 1024.0
-	totalRAMInMB := Params.CacheSize * 1024.0
+	return historicalSegmentsMemSize + streamingSegmentsMemSize
+}
+
+func getTotalMemory() int64 {
+	return Params.CacheSize * 1024 * 1024 * 1024
+}
+
+func checkSegmentMemory(segmentLoadInfos []*querypb.SegmentLoadInfo, historicalReplica, streamingReplica ReplicaInterface) error {
+	usedRAMInMB := getUsedMemory(historicalReplica, streamingReplica) / 1024.0 / 1024.0
+	totalRAMInMB := getTotalMemory() / 1024.0 / 1024.0
 
 	segmentTotalSize := int64(0)
 	for _, segInfo := range segmentLoadInfos {
