@@ -131,7 +131,7 @@ If it is marked as deleted, then there is no need to actually build the index, j
 completed, and then write it to ETCD. When IndexCoordinate perceives that the status corresponding to the index is
 complete, it deletes the index task from the MetaTable. If it is checked that the index is not marked for deletion,
 then the index needs to be built. The original data must be loaded first when building the index. The original data
-is stored in minIO/S3, and the storage path is notified by RootCoordinate in the index build request. After loading the
+is stored in MinIO/S3, and the storage path is notified by RootCoordinate in the index build request. After loading the
 original data, the data is deserialized into data blocks, and then cgo is called to build the index. When the index is
 built, the index data is serialized into data blocks, and then written into the file. The directory organization of the
 index file is "indexBuildID/IndexTaskVersion/partitionID/segmentID/key", where key corresponds to the serialized key
