@@ -533,6 +533,33 @@ type QueryNode interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
+// QueryNodeComponent is used by grpc server of QueryNode
+type QueryNodeComponent interface {
+	QueryNode
+
+	// UpdateStateCode updates state code for QueryNode
+	//  `stateCode` is current statement of this query node, indicating whether it's healthy.
+	UpdateStateCode(code internalpb.StateCode)
+
+	// SetRootCoord set RootCoord for QueryNode
+	// `rootCoord` is a client of root coordinator. Pass to segmentLoader.
+	//
+	// Return a generic error in status:
+	//     If the rootCoord is nil.
+	// Return nil in status:
+	//     The rootCoord is not nil.
+	SetRootCoord(rootCoord RootCoord) error
+
+	// SetIndexCoord set IndexCoord for QueryNode
+	//  `indexCoord` is a client of index coordinator. Pass to segmentLoader.
+	//
+	// Return a generic error in status:
+	//     If the indexCoord is nil.
+	// Return nil in status:
+	//     The indexCoord is not nil.
+	SetIndexCoord(indexCoord IndexCoord) error
+}
+
 // QueryCoord is the interface `querycoord` package implements
 type QueryCoord interface {
 	Component
