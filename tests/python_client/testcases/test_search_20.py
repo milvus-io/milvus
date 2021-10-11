@@ -1083,8 +1083,8 @@ class TestCollectionSearch(TestcaseBase):
     #@pytest.mark.skip(reason="skip temporarily for debug")
     def test_search_max_dim(self, nq, auto_id, _async):
         """
-        target: test search normal case
-        method: create connection, collection, insert and search
+        target: test search with max configuration
+        method: create connection, collection, insert and search with max dim
         expected: search successfully with limit(topK)
         """
         # 1. initialize with data
