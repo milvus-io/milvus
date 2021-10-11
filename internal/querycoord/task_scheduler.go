@@ -45,6 +45,7 @@ type TaskQueue struct {
 	sync.Mutex
 }
 
+// Chan returns the taskChan of taskQueue
 func (queue *TaskQueue) Chan() <-chan int {
 	return queue.taskChan
 }
