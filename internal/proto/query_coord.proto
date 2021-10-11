@@ -175,6 +175,8 @@ message AddQueryChannelRequest {
   int64 collectionID = 3;
   string request_channelID = 4;
   string result_channelID = 5;
+  repeated int64 global_sealed_segmentID = 6;
+  internal.MsgPosition seek_position = 7;
 }
 
 message RemoveQueryChannelRequest {
