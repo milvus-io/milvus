@@ -71,6 +71,8 @@ type queryCollection struct {
 	remoteChunkManager storage.ChunkManager
 	vectorChunkManager storage.ChunkManager
 	localCacheEnabled  bool
+
+	globalSegmentManager *globalSealedSegmentManager
 }
 
 type ResultEntityIds []UniqueID
@@ -110,9 +112,10 @@ func newQueryCollection(releaseCtx context.Context,
 		queryMsgStream:       queryStream,
 		queryResultMsgStream: queryResultStream,
 
-		localChunkManager:  localChunkManager,
-		remoteChunkManager: remoteChunkManager,
-		localCacheEnabled:  localCacheEnabled,
+		localChunkManager:    localChunkManager,
+		remoteChunkManager:   remoteChunkManager,
+		localCacheEnabled:    localCacheEnabled,
+		globalSegmentManager: newGlobalSealedSegmentManager(collectionID),
 	}
 
 	err := qc.registerCollectionTSafe()
@@ -136,6 +139,7 @@ func (q *queryCollection) close() {
 	if q.queryResultMsgStream != nil {
 		q.queryResultMsgStream.Close()
 	}
+	q.globalSegmentManager.close()
 }
 
 // registerCollectionTSafe registers tSafe watcher if vChannels exists
@@ -287,6 +291,12 @@ func (q *queryCollection) consumeQuery() {
 					if err != nil {
 						log.Warn(err.Error())
 					}
+				case *msgstream.SealedSegmentsChangeInfoMsg:
+					err := q.adjustByChangeInfo(sm)
+					if err != nil {
+						// should not happen
+						log.Error(err.Error())
+					}
 				default:
 					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
 				}
@@ -297,6 +307,43 @@ func (q *queryCollection) consumeQuery() {
 
 func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 	//TODO:: get loadBalance info from etcd
+}
+
+func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChangeInfoMsg) error {
+	// for OnlineSegments:
+	for _, segment := range msg.OnlineSegments {
+		// 1. update global sealed segments
+		err := q.globalSegmentManager.addGlobalSegmentInfo(segment)
+		if err != nil {
+			return err
+		}
+		// 2. delete growing segment because these segments are loaded
+		hasGrowingSegment := q.streaming.replica.hasSegment(segment.SegmentID)
+		if hasGrowingSegment {
+			err = q.streaming.replica.removeSegment(segment.SegmentID)
+			if err != nil {
+				return err
+			}
+			log.Debug("remove growing segment in adjustByChangeInfo",
+				zap.Any("collectionID", q.collectionID),
+				zap.Any("segmentID", segment.SegmentID),
+			)
+		}
+	}
+
+	// for OfflineSegments:
+	for _, segment := range msg.OfflineSegments {
+		// 1. update global sealed segments
+		q.globalSegmentManager.removeGlobalSegmentInfo(segment.SegmentID)
+		// 2. load balance, remove old sealed segments
+		if msg.OfflineNodeID == Params.QueryNodeID {
+			err := q.historical.replica.removeSegment(segment.SegmentID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {

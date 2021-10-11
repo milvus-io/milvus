@@ -831,6 +831,12 @@ func TestDataNodeTtMsg_Unmarshal_IllegalParameter(t *testing.T) {
 }
 
 func TestSealedSegmentsChangeInfoMsg(t *testing.T) {
+	genSimpleSegmentInfo := func(segmentID UniqueID) *querypb.SegmentInfo {
+		return &querypb.SegmentInfo{
+			SegmentID: segmentID,
+		}
+	}
+
 	changeInfoMsg := &SealedSegmentsChangeInfoMsg{
 		BaseMsg: generateBaseMsg(),
 		SealedSegmentsChangeInfo: querypb.SealedSegmentsChangeInfo{
@@ -840,10 +846,18 @@ func TestSealedSegmentsChangeInfoMsg(t *testing.T) {
 				Timestamp: 2,
 				SourceID:  3,
 			},
-			OnlineNodeID:      int64(1),
-			OnlineSegmentIDs:  []int64{1, 2, 3},
-			OfflineNodeID:     int64(2),
-			OfflineSegmentIDs: []int64{4, 5, 6},
+			OnlineNodeID: int64(1),
+			OnlineSegments: []*querypb.SegmentInfo{
+				genSimpleSegmentInfo(1),
+				genSimpleSegmentInfo(2),
+				genSimpleSegmentInfo(3),
+			},
+			OfflineNodeID: int64(2),
+			OfflineSegments: []*querypb.SegmentInfo{
+				genSimpleSegmentInfo(4),
+				genSimpleSegmentInfo(5),
+				genSimpleSegmentInfo(6),
+			},
 		},
 	}
 
