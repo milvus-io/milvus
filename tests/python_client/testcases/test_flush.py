@@ -279,7 +279,7 @@ class TestFlushBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_flush_during_search(self, connect, collection, args):
         """
-        method: search at background, call `delete and flush`
+        method: search at background, call `flush`
         expected: no timeout
         """
         ids = []
@@ -289,13 +289,12 @@ class TestFlushBase:
             connect.flush([collection])
             ids.extend(tmp.primary_keys)
         nq = 10000
-        query, query_vecs = gen_search_vectors_params(default_float_vec_field_name, default_entities, default_top_k, nq)
+        query, _ = gen_search_vectors_params(default_float_vec_field_name, default_entities, default_top_k, nq)
         time.sleep(0.1)
         connect.load_collection(collection)
         future = connect.search(collection, **query, _async=True)
         res = future.result()
         assert res
-        delete_ids = [ids[0], ids[-1]]
         connect.flush([collection])
         res_count = connect.get_collection_stats(collection, timeout=120)
         assert res_count["row_count"] == loops * default_nb
