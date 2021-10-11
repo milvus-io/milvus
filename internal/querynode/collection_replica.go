@@ -181,6 +181,7 @@ func (colReplica *collectionReplica) getCollectionByID(collectionID UniqueID) (*
 	return colReplica.getCollectionByIDPrivate(collectionID)
 }
 
+// getCollectionByIDPrivate is the private function in collectionReplica, to get collection from collectionReplica
 func (colReplica *collectionReplica) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
 	collection, ok := colReplica.collections[collectionID]
 	if !ok {
