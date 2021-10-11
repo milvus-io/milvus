@@ -13,10 +13,6 @@ package storage
 
 import (
 	"bytes"
-	"encoding/binary"
-	"fmt"
-	"strconv"
-
 	"errors"
 )
 
@@ -47,14 +43,9 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 }
 
 func (reader *BinlogReader) readMagicNumber() (int32, error) {
-	if err := binary.Read(reader.buffer, binary.LittleEndian, &reader.magicNumber); err != nil {
-		return -1, err
-	}
-	if reader.magicNumber != MagicNumber {
-		return -1, fmt.Errorf("parse magic number failed, expected: %s, actual: %s", strconv.Itoa(int(MagicNumber)), strconv.Itoa(int(reader.magicNumber)))
-	}
-
-	return reader.magicNumber, nil
+	var err error
+	reader.magicNumber, err = readMagicNumber(reader.buffer)
+	return reader.magicNumber, err
 }
 
 func (reader *BinlogReader) readDescriptorEvent() (*descriptorEvent, error) {

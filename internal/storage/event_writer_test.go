@@ -85,3 +85,23 @@ func TestEventWriter(t *testing.T) {
 	err = insertEvent.Close()
 	assert.Nil(t, err)
 }
+
+func TestReadMagicNumber(t *testing.T) {
+	var err error
+	buf := bytes.Buffer{}
+
+	// eof
+	_, err = readMagicNumber(&buf)
+	assert.Error(t, err)
+
+	// not a magic number
+	_ = binary.Write(&buf, binary.LittleEndian, MagicNumber+1)
+	_, err = readMagicNumber(&buf)
+	assert.Error(t, err)
+
+	// normal case
+	_ = binary.Write(&buf, binary.LittleEndian, MagicNumber)
+	num, err := readMagicNumber(&buf)
+	assert.NoError(t, err)
+	assert.Equal(t, MagicNumber, num)
+}
