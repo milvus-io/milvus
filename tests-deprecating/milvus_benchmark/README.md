@@ -137,7 +137,7 @@ data:
 
 - `main.py`
    
-   The entry file: parse the input params and initialize the other conponent: `metric`, `env`, `runner`
+   The entry file: parse the input params and initialize the other components: `metric`, `env`, `runner`
 
 - `metric`
 
