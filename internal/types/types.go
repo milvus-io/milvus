@@ -152,6 +152,15 @@ type DataCoord interface {
 	// 	only row count for now
 	// error is returned only when some communication issue occurs
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
+
+	// GetParititonStatistics requests partition statistics
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection and partition id to query
+	//
+	// response struct `GetPartitionStatisticsResponse` contains the key-value list fields returning related data
+	// 	only row count for now
+	// error is returned only when some communication issue occurs
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
 	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
