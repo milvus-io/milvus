@@ -66,10 +66,12 @@ func (m *MockQueryCoord) Register() error {
 func (m *MockQueryCoord) UpdateStateCode(code internalpb.StateCode) {
 }
 
-func (m *MockQueryCoord) SetRootCoord(types.RootCoord) {
+func (m *MockQueryCoord) SetRootCoord(types.RootCoord) error {
+	return nil
 }
 
-func (m *MockQueryCoord) SetDataCoord(types.DataCoord) {
+func (m *MockQueryCoord) SetDataCoord(types.DataCoord) error {
+	return nil
 }
 
 func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
