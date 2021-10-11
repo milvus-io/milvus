@@ -12,6 +12,7 @@
 package storage
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,7 +84,8 @@ func (b Blob) GetValue() []byte {
 	return b.Value
 }
 
-type FieldData interface{}
+type FieldData interface {
+}
 
 type BoolFieldData struct {
 	NumRows []int64
@@ -126,6 +128,51 @@ type FloatVectorFieldData struct {
 	NumRows []int64
 	Data    []float32
 	Dim     int
+}
+
+// why not binary.Size(data) directly? binary.Size(data) return -1
+// binary.Size returns how many bytes Write would generate to encode the value v, which
+// must be a fixed-size value or a slice of fixed-size values, or a pointer to such data.
+// If v is neither of these, binary.Size returns -1.
+
+func (data *BoolFieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+func (data *Int8FieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+func (data *Int16FieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+func (data *Int32FieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+func (data *Int64FieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+func (data *FloatFieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+func (data *DoubleFieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+func (data *StringFieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+func (data *BinaryVectorFieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data) + binary.Size(data.Dim)
+}
+
+func (data *FloatVectorFieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data) + binary.Size(data.Dim)
 }
 
 // system filed id:
@@ -196,18 +243,25 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
+			writer.AddExtra(originalSizeKey, singleData.(*BoolFieldData).GetMemorySize())
 		case schemapb.DataType_Int8:
 			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
+			writer.AddExtra(originalSizeKey, singleData.(*Int8FieldData).GetMemorySize())
 		case schemapb.DataType_Int16:
 			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
+			writer.AddExtra(originalSizeKey, singleData.(*Int16FieldData).GetMemorySize())
 		case schemapb.DataType_Int32:
 			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
+			writer.AddExtra(originalSizeKey, singleData.(*Int32FieldData).GetMemorySize())
 		case schemapb.DataType_Int64:
 			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
+			writer.AddExtra(originalSizeKey, singleData.(*Int64FieldData).GetMemorySize())
 		case schemapb.DataType_Float:
 			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
+			writer.AddExtra(originalSizeKey, singleData.(*FloatFieldData).GetMemorySize())
 		case schemapb.DataType_Double:
 			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
+			writer.AddExtra(originalSizeKey, singleData.(*DoubleFieldData).GetMemorySize())
 		case schemapb.DataType_String:
 			for _, singleString := range singleData.(*StringFieldData).Data {
 				err = eventWriter.AddOneStringToPayload(singleString)
@@ -215,10 +269,13 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 					return nil, nil, err
 				}
 			}
+			writer.AddExtra(originalSizeKey, singleData.(*StringFieldData).GetMemorySize())
 		case schemapb.DataType_BinaryVector:
 			err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
+			writer.AddExtra(originalSizeKey, singleData.(*BinaryVectorFieldData).GetMemorySize())
 		case schemapb.DataType_FloatVector:
 			err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
+			writer.AddExtra(originalSizeKey, singleData.(*FloatVectorFieldData).GetMemorySize())
 		default:
 			return nil, nil, fmt.Errorf("undefined data type %d", field.DataType)
 		}
@@ -536,6 +593,7 @@ func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID Unique
 	if err != nil {
 		return nil, err
 	}
+	sizeTotal := 0
 	startTs, endTs := math.MaxInt64, math.MinInt64
 	for key, value := range data.Data {
 		if value < int64(startTs) {
@@ -548,9 +606,18 @@ func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if err != nil {
 			return nil, err
 		}
+		sizeTotal += len(key)
+		sizeTotal += binary.Size(value)
 	}
 	eventWriter.SetEventTimestamp(uint64(startTs), uint64(endTs))
 	binlogWriter.SetEventTimeStamp(uint64(startTs), uint64(endTs))
+
+	// https://github.com/milvus-io/milvus/issues/9620
+	// It's a little complicated to count the memory size of a map.
+	// See: https://stackoverflow.com/questions/31847549/computing-the-memory-footprint-or-byte-length-of-a-map
+	// Since the implementation of golang map may differ from version, so we'd better not to use this magic method.
+	binlogWriter.AddExtra(originalSizeKey, sizeTotal)
+
 	err = binlogWriter.Close()
 	if err != nil {
 		return nil, err
@@ -642,7 +709,12 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	}
 	eventWriter.SetEventTimestamp(ts[0], ts[len(ts)-1])
 	writer.SetEventTimeStamp(ts[0], ts[len(ts)-1])
+
+	// https://github.com/milvus-io/milvus/issues/9620
+	writer.AddExtra(originalSizeKey, binary.Size(int64Ts))
+
 	err = writer.Close()
+
 	if err != nil {
 		return nil, err
 	}
@@ -657,7 +729,9 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 
 	writer = NewDDLBinlogWriter(schemapb.DataType_String, dataDefinitionCodec.collectionID)
 
+	sizeTotal := 0
 	for pos, req := range ddRequests {
+		sizeTotal += len(req)
 		switch eventTypes[pos] {
 		case CreateCollectionEventType:
 			eventWriter, err := writer.NextCreateCollectionEventWriter()
@@ -702,6 +776,10 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		}
 	}
 	writer.SetEventTimeStamp(ts[0], ts[len(ts)-1])
+
+	// https://github.com/milvus-io/milvus/issues/9620
+	writer.AddExtra(originalSizeKey, sizeTotal)
+
 	err = writer.Close()
 	if err != nil {
 		return nil, err
@@ -850,6 +928,9 @@ func (codec *IndexFileBinlogCodec) Serialize(
 
 		writer.SetEventTimeStamp(ts, ts)
 
+		// https://github.com/milvus-io/milvus/issues/9620
+		writer.AddExtra(originalSizeKey, len(datas[pos].Value))
+
 		err = writer.Close()
 		if err != nil {
 			return nil, err
@@ -891,6 +972,10 @@ func (codec *IndexFileBinlogCodec) Serialize(
 	eventWriter.SetEventTimestamp(ts, ts)
 
 	writer.SetEventTimeStamp(ts, ts)
+
+	// https://github.com/milvus-io/milvus/issues/9620
+	// len(params) is also not accurate, indexParams is a map
+	writer.AddExtra(originalSizeKey, len(params))
 
 	err = writer.Close()
 	if err != nil {

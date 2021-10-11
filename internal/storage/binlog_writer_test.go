@@ -37,6 +37,8 @@ func TestBinlogWriterReader(t *testing.T) {
 	nums, err := binlogWriter.GetRowNums()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 3, nums)
+	sizeTotal := 20 // not important
+	binlogWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, sizeTotal)
 	err = binlogWriter.Close()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, binlogWriter.GetEventNums())

@@ -15,11 +15,14 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+const originalSizeKey = "original_size"
 
 type descriptorEventData struct {
 	DescriptorEventDataFixPart
@@ -66,6 +69,13 @@ func (data *descriptorEventData) AddExtra(k string, v interface{}) {
 // Call before GetMemoryUsageInBytes to get a accurate length of description event.
 func (data *descriptorEventData) FinishExtra() error {
 	var err error
+
+	// keep all binlog file records the original size
+	_, ok := data.Extras[originalSizeKey]
+	if !ok {
+		return fmt.Errorf("%v not in extra", originalSizeKey)
+	}
+
 	data.ExtraBytes, err = json.Marshal(data.Extras)
 	if err != nil {
 		return err
