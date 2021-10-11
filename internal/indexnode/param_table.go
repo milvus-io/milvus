@@ -51,10 +51,11 @@ type ParamTable struct {
 	UpdatedTime time.Time
 }
 
-// Params is an alias for ParamTable.
+// Params is a package scoped variable of type ParamTable.
 var Params ParamTable
 var once sync.Once
 
+// InitAlias initializes an alias for the IndexNode role.
 func (pt *ParamTable) InitAlias(alias string) {
 	pt.Alias = alias
 }
