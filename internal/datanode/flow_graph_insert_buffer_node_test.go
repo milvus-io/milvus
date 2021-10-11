@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"path"
 	"sync"
 	"testing"
@@ -181,41 +180,9 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		collectionID: UniqueID(1),
 	}
 
-	inMsg := genFlowGraphMsg(insertChannelName)
+	inMsg := GenFlowGraphInsertMsg(insertChannelName)
 	var fgMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{fgMsg})
-}
-
-func genFlowGraphMsg(chanName string) flowGraphMsg {
-
-	timeRange := TimeRange{
-		timestampMin: 0,
-		timestampMax: math.MaxUint64,
-	}
-
-	startPos := []*internalpb.MsgPosition{
-		{
-			ChannelName: chanName,
-			MsgID:       make([]byte, 0),
-			Timestamp:   0,
-		},
-	}
-
-	var fgMsg = &flowGraphMsg{
-		insertMessages: make([]*msgstream.InsertMsg, 0),
-		timeRange: TimeRange{
-			timestampMin: timeRange.timestampMin,
-			timestampMax: timeRange.timestampMax,
-		},
-		startPositions: startPos,
-		endPositions:   startPos,
-	}
-
-	dataFactory := NewDataFactory()
-	fgMsg.insertMessages = append(fgMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
-
-	return *fgMsg
-
 }
 
 func TestFlushSegment(t *testing.T) {
@@ -391,7 +358,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	// Auto flush number of rows set to 2
 
-	inMsg := genFlowGraphMsg("datanode-03-test-autoflush")
+	inMsg := GenFlowGraphInsertMsg("datanode-03-test-autoflush")
 	inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(2)
 	var iMsg flowgraph.Msg = &inMsg
 
@@ -673,7 +640,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
 	require.NoError(t, err)
 
-	inMsg := genFlowGraphMsg(insertChannelName)
+	inMsg := GenFlowGraphInsertMsg(insertChannelName)
 	for _, msg := range inMsg.insertMessages {
 		msg.EndTimestamp = 101 // ts valid
 		err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})

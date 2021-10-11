@@ -190,9 +190,17 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	dn := newDeleteNode(dsService.replica, vchanInfo.GetChannelName(), dsService.flushChs.deleteBufferCh)
-
-	var deleteNode Node = dn
+	var deleteNode Node
+	deleteNode, err = newDeleteNode(
+		dsService.ctx,
+		dsService.replica,
+		dsService.idAllocator,
+		dsService.flushChs.deleteBufferCh,
+		vchanInfo.GetChannelName(),
+	)
+	if err != nil {
+		return err
+	}
 
 	// recover segment checkpoints
 	for _, us := range vchanInfo.GetUnflushedSegments() {

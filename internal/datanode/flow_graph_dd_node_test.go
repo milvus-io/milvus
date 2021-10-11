@@ -207,6 +207,44 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		}
 	})
 
+	to.Run("Test DDNode Operate Delete Msg", func(te *testing.T) {
+		tests := []struct {
+			ddnCollID   UniqueID
+			inMsgCollID UniqueID
+
+			MsgEndTs Timestamp
+
+			expectedRtLen int
+			description   string
+		}{
+			{1, 1, 2000, 1, "normal"},
+			{1, 2, 4000, 0, "inMsgCollID(2) != ddnCollID"},
+		}
+
+		for _, test := range tests {
+			te.Run(test.description, func(t *testing.T) {
+				// Prepare ddNode states
+				ddn := ddNode{
+					collectionID: test.ddnCollID,
+				}
+
+				// Prepare delete messages
+				var dMsg msgstream.TsMsg = &msgstream.DeleteMsg{
+					BaseMsg: msgstream.BaseMsg{EndTimestamp: test.MsgEndTs},
+					DeleteRequest: internalpb.DeleteRequest{
+						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
+						CollectionID: test.inMsgCollID,
+					},
+				}
+				tsMessages := []msgstream.TsMsg{dMsg}
+				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
+
+				// Test
+				rt := ddn.Operate([]Msg{msgStreamMsg})
+				assert.Equal(t, test.expectedRtLen, len(rt[0].(*flowGraphMsg).deleteMessages))
+			})
+		}
+	})
 }
 
 func TestFlowGraph_DDNode_filterMessages(te *testing.T) {

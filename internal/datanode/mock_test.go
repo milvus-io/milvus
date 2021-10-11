@@ -409,12 +409,95 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string) (inMsgs 
 	return
 }
 
-func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.InsertMsg) {
+func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMsg) {
 	for i := 0; i < n; i++ {
 		var msg = df.GenMsgStreamInsertMsg(i, "")
-		inMsgs = append(inMsgs, msg)
+		msgs = append(msgs, msg)
 	}
 	return
+}
+
+func (df *DataFactory) GenMsgStreamDeleteMsg(pks []int64, chanName string) *msgstream.DeleteMsg {
+	idx := 100
+	var msg = &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{uint32(idx)},
+		},
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     0,
+				Timestamp: Timestamp(idx + 1000),
+				SourceID:  0,
+			},
+			CollectionName: "col1",
+			PartitionName:  "default",
+			ShardName:      chanName,
+			PrimaryKeys:    pks,
+			Timestamp:      Timestamp(idx + 1000),
+		},
+	}
+	return msg
+}
+
+func GenFlowGraphInsertMsg(chanName string) flowGraphMsg {
+	timeRange := TimeRange{
+		timestampMin: 0,
+		timestampMax: math.MaxUint64,
+	}
+
+	startPos := []*internalpb.MsgPosition{
+		{
+			ChannelName: chanName,
+			MsgID:       make([]byte, 0),
+			Timestamp:   0,
+		},
+	}
+
+	var fgMsg = &flowGraphMsg{
+		insertMessages: make([]*msgstream.InsertMsg, 0),
+		timeRange: TimeRange{
+			timestampMin: timeRange.timestampMin,
+			timestampMax: timeRange.timestampMax,
+		},
+		startPositions: startPos,
+		endPositions:   startPos,
+	}
+
+	dataFactory := NewDataFactory()
+	fgMsg.insertMessages = append(fgMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
+
+	return *fgMsg
+}
+
+func GenFlowGraphDeleteMsg(pks []int64, chanName string) flowGraphMsg {
+	timeRange := TimeRange{
+		timestampMin: 0,
+		timestampMax: math.MaxUint64,
+	}
+
+	startPos := []*internalpb.MsgPosition{
+		{
+			ChannelName: chanName,
+			MsgID:       make([]byte, 0),
+			Timestamp:   0,
+		},
+	}
+
+	var fgMsg = &flowGraphMsg{
+		insertMessages: make([]*msgstream.InsertMsg, 0),
+		timeRange: TimeRange{
+			timestampMin: timeRange.timestampMin,
+			timestampMax: timeRange.timestampMax,
+		},
+		startPositions: startPos,
+		endPositions:   startPos,
+	}
+
+	dataFactory := NewDataFactory()
+	fgMsg.deleteMessages = append(fgMsg.deleteMessages, dataFactory.GenMsgStreamDeleteMsg(pks, chanName))
+
+	return *fgMsg
 }
 
 type AllocatorFactory struct {

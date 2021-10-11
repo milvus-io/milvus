@@ -4749,40 +4749,40 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	}
 	msgPack.Msgs[0] = tsMsg
 
-	//collID := dt.DeleteRequest.CollectionID
-	//stream, err := dt.chMgr.getDMLStream(collID)
-	//if err != nil {
-	//	err = dt.chMgr.createDMLMsgStream(collID)
-	//	if err != nil {
-	//		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-	//		dt.result.Status.Reason = err.Error()
-	//		return err
-	//	}
-	//	channels, err := dt.chMgr.getChannels(collID)
-	//	if err == nil {
-	//		for _, pchan := range channels {
-	//			err := dt.chTicker.addPChan(pchan)
-	//			if err != nil {
-	//				log.Warn("failed to add pchan to channels time ticker",
-	//					zap.Error(err),
-	//					zap.String("pchan", pchan))
-	//			}
-	//		}
-	//	}
-	//	stream, err = dt.chMgr.getDMLStream(collID)
-	//	if err != nil {
-	//		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-	//		dt.result.Status.Reason = err.Error()
-	//		return err
-	//	}
-	//}
-	//
-	//err = stream.Produce(&msgPack)
-	//if err != nil {
-	//	dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-	//	dt.result.Status.Reason = err.Error()
-	//	return err
-	//}
+	collID := dt.DeleteRequest.CollectionID
+	stream, err := dt.chMgr.getDMLStream(collID)
+	if err != nil {
+		err = dt.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			dt.result.Status.Reason = err.Error()
+			return err
+		}
+		channels, err := dt.chMgr.getChannels(collID)
+		if err == nil {
+			for _, pchan := range channels {
+				err := dt.chTicker.addPChan(pchan)
+				if err != nil {
+					log.Warn("failed to add pchan to channels time ticker",
+						zap.Error(err),
+						zap.String("pchan", pchan))
+				}
+			}
+		}
+		stream, err = dt.chMgr.getDMLStream(collID)
+		if err != nil {
+			dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			dt.result.Status.Reason = err.Error()
+			return err
+		}
+	}
+
+	err = stream.Produce(&msgPack)
+	if err != nil {
+		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		dt.result.Status.Reason = err.Error()
+		return err
+	}
 	return nil
 }
 

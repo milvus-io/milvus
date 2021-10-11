@@ -340,11 +340,19 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
 	}
 
+	res := flowGraphMsg{
+		deleteMessages: fgMsg.deleteMessages,
+		timeRange:      fgMsg.timeRange,
+		startPositions: fgMsg.startPositions,
+		endPositions:   fgMsg.endPositions,
+	}
+
 	for _, sp := range spans {
 		sp.Finish()
 	}
 
-	return nil
+	// send delete msg to DeleteNode
+	return []Msg{&res}
 }
 
 // updateSegStatesInReplica updates statistics in replica for the segments in insertMsgs.

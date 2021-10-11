@@ -99,7 +99,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				return []Msg{}
 			}
 		case commonpb.MsgType_Insert:
-			log.Debug("DDNode with insert messages")
+			log.Debug("DDNode receive insert messages")
 			imsg := msg.(*msgstream.InsertMsg)
 			if imsg.CollectionID != ddn.collectionID {
 				//log.Debug("filter invalid InsertMsg, collection mis-match",
@@ -117,19 +117,27 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				}
 			}
 			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
+		case commonpb.MsgType_Delete:
+			log.Debug("DDNode receive delete messages")
+			dmsg := msg.(*msgstream.DeleteMsg)
+			if dmsg.CollectionID != ddn.collectionID {
+				//log.Debug("filter invalid DeleteMsg, collection mis-match",
+				//	zap.Int64("Get msg collID", dmsg.CollectionID),
+				//	zap.Int64("Expected collID", ddn.collectionID))
+				continue
+			}
+			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
 		}
 	}
 
 	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
 	fgMsg.endPositions = append(fgMsg.endPositions, msMsg.EndPositions()...)
 
-	var res Msg = &fgMsg
-
 	for _, sp := range spans {
 		sp.Finish()
 	}
 
-	return []Msg{res}
+	return []Msg{&fgMsg}
 }
 
 func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) bool {
