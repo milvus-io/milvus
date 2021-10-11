@@ -73,6 +73,9 @@ func (mtm *mockTtMsgStream) GetProduceChannels() []string {
 func (mtm *mockTtMsgStream) Produce(*msgstream.MsgPack) error {
 	return nil
 }
+func (mtm *mockTtMsgStream) ProduceMark(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+	return map[string][]msgstream.MessageID{}, nil
+}
 func (mtm *mockTtMsgStream) Broadcast(*msgstream.MsgPack) error {
 	return nil
 }

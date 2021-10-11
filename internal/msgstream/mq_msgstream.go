@@ -266,6 +266,74 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 	return nil
 }
 
+// ProduceMark send msg pack to all producers and returns corresponding msg id
+// the returned message id serves as marking
+func (ms *mqMsgStream) ProduceMark(msgPack *MsgPack) (map[string][]MessageID, error) {
+	ids := make(map[string][]MessageID)
+	if msgPack == nil || len(msgPack.Msgs) <= 0 {
+		return ids, errors.New("empty msgs")
+	}
+	if len(ms.producers) <= 0 {
+		return ids, errors.New("nil producer in msg stream")
+	}
+	tsMsgs := msgPack.Msgs
+	reBucketValues := ms.ComputeProduceChannelIndexes(msgPack.Msgs)
+	var result map[int32]*MsgPack
+	var err error
+	if ms.repackFunc != nil {
+		result, err = ms.repackFunc(tsMsgs, reBucketValues)
+	} else {
+		msgType := (tsMsgs[0]).Type()
+		switch msgType {
+		case commonpb.MsgType_Insert:
+			result, err = InsertRepackFunc(tsMsgs, reBucketValues)
+		case commonpb.MsgType_Delete:
+			result, err = DeleteRepackFunc(tsMsgs, reBucketValues)
+		default:
+			result, err = DefaultRepackFunc(tsMsgs, reBucketValues)
+		}
+	}
+	if err != nil {
+		return ids, err
+	}
+	for k, v := range result {
+		channel := ms.producerChannels[k]
+		for i, tsMsg := range v.Msgs {
+			sp, spanCtx := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), tsMsg)
+
+			mb, err := tsMsg.Marshal(tsMsg)
+			if err != nil {
+				return ids, err
+			}
+
+			m, err := convertToByteArray(mb)
+			if err != nil {
+				return ids, err
+			}
+
+			msg := &mqclient.ProducerMessage{Payload: m, Properties: map[string]string{}}
+
+			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+
+			ms.producerLock.Lock()
+			id, err := ms.producers[channel].Send(
+				spanCtx,
+				msg,
+			)
+			if err != nil {
+				ms.producerLock.Unlock()
+				trace.LogError(sp, err)
+				sp.Finish()
+				return ids, err
+			}
+			ids[channel] = append(ids[channel], id)
+			sp.Finish()
+			ms.producerLock.Unlock()
+		}
+	}
+	return ids, nil
+}
+
 // Broadcast put msgPack to all producer in current msgstream
 // which ignores repackFunc logic
 func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
