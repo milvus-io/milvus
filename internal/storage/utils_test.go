@@ -135,17 +135,17 @@ func newMockWrongHeaderDataKV() kv.DataKV {
 	return &mockWrongHeaderDataKV{}
 }
 
-func TestEstimateMemorySize(t *testing.T) {
+func TestGetBinlogSize(t *testing.T) {
 	memoryKV := memkv.NewMemoryKV()
 	defer memoryKV.Close()
 
-	key := "TestEstimateMemorySize"
+	key := "TestGetBinlogSize"
 
 	var size int64
 	var err error
 
 	// key not in memoryKV
-	size, err = EstimateMemorySize(memoryKV, key)
+	size, err = GetBinlogSize(memoryKV, key)
 	assert.NoError(t, err)
 	assert.Zero(t, size)
 
@@ -185,28 +185,28 @@ func TestEstimateMemorySize(t *testing.T) {
 		err = memoryKV.Save(blob.Key, string(blob.Value))
 		assert.Nil(t, err)
 
-		size, err = EstimateMemorySize(memoryKV, blob.Key)
+		size, err = GetBinlogSize(memoryKV, blob.Key)
 		assert.Nil(t, err)
 		assert.Equal(t, size+int64(binary.Size(MagicNumber)), int64(len(blob.Value)))
 	}
 }
 
 // cover case that failed to read event header
-func TestEstimateMemorySize_less_header(t *testing.T) {
+func TestGetBinlogSize_less_header(t *testing.T) {
 	mockKV := newMockLessHeaderDataKV()
 
-	key := "TestEstimateMemorySize_less_header"
+	key := "TestGetBinlogSize_less_header"
 
-	_, err := EstimateMemorySize(mockKV, key)
+	_, err := GetBinlogSize(mockKV, key)
 	assert.Error(t, err)
 }
 
 // cover case that file not in binlog format
-func TestEstimateMemorySize_not_in_binlog_format(t *testing.T) {
+func TestGetBinlogSize_not_in_binlog_format(t *testing.T) {
 	mockKV := newMockWrongHeaderDataKV()
 
-	key := "TestEstimateMemorySize_not_in_binlog_format"
+	key := "TestGetBinlogSize_not_in_binlog_format"
 
-	_, err := EstimateMemorySize(mockKV, key)
+	_, err := GetBinlogSize(mockKV, key)
 	assert.Error(t, err)
 }

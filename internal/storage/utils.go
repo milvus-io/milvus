@@ -19,12 +19,12 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 )
 
-// EstimateMemorySize get approximate memory size of a binlog file.
+// GetBinlogSize get size of a binlog file.
 //		normal binlog file, error = nil;
 //		key not exist, size = 0, error = nil;
 //		key not in binlog format, size = (a not accurate number), error != nil;
 //		failed to read event reader, size = (a not accurate number), error != nil;
-func EstimateMemorySize(kv kv.DataKV, key string) (int64, error) {
+func GetBinlogSize(kv kv.DataKV, key string) (int64, error) {
 	total := int64(0)
 
 	header := &baseEventHeader{}
