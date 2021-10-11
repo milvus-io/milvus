@@ -252,6 +252,7 @@ func SetBinlogs(binlogs []*datapb.FieldBinlog) SegmentInfoOption {
 	}
 }
 
+// SetFlushTime is the option to set flush time for segment info
 func SetFlushTime(t time.Time) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.lastFlushTime = t
