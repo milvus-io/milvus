@@ -16,18 +16,17 @@
 #include <chrono>
 #include <google/protobuf/text_format.h>
 
+#include "common/LoadInfo.h"
+#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "index/knowhere/knowhere/index/vector_index/VecIndexFactory.h"
+#include "index/knowhere/knowhere/index/vector_index/IndexIVFPQ.h"
 #include "pb/milvus.pb.h"
+#include "pb/plan.pb.h"
+#include "segcore/Collection.h"
 #include "segcore/reduce_c.h"
-
-#include <index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <index/knowhere/knowhere/index/vector_index/VecIndexFactory.h>
-#include <index/knowhere/knowhere/index/vector_index/IndexIVFPQ.h>
-#include <common/LoadInfo.h>
-#include <utils/Types.h>
-#include <segcore/Collection.h>
-#include <pb/plan.pb.h>
 #include "test_utils/DataGen.h"
+#include "utils/Types.h"
 
 namespace chrono = std::chrono;
 
