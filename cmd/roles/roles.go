@@ -101,11 +101,11 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
-		_ = rc.Run()
 		if !localMsg {
 			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: rc})
 		}
+		wg.Done()
+		_ = rc.Run()
 	}()
 	wg.Wait()
 
@@ -130,11 +130,11 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
-		_ = pn.Run()
 		if !localMsg {
 			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: pn})
 		}
+		wg.Done()
+		_ = pn.Run()
 	}()
 	wg.Wait()
 
@@ -158,11 +158,11 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
-		_ = qs.Run()
 		if !localMsg {
 			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: qs})
 		}
+		wg.Done()
+		_ = qs.Run()
 	}()
 	wg.Wait()
 
@@ -187,11 +187,11 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
-		_ = qn.Run()
 		if !localMsg {
 			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: qn})
 		}
+		wg.Done()
+		_ = qn.Run()
 	}()
 	wg.Wait()
 
@@ -215,11 +215,11 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
-		_ = ds.Run()
 		if !localMsg {
 			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: ds})
 		}
+		wg.Done()
+		_ = ds.Run()
 	}()
 	wg.Wait()
 
@@ -243,11 +243,11 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
-		_ = dn.Run()
 		if !localMsg {
 			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: dn})
 		}
+		wg.Done()
+		_ = dn.Run()
 	}()
 	wg.Wait()
 
@@ -270,11 +270,11 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
-		_ = is.Run()
 		if !localMsg {
 			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: is})
 		}
+		wg.Done()
+		_ = is.Run()
 	}()
 	wg.Wait()
 
@@ -298,11 +298,11 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 		if err != nil {
 			panic(err)
 		}
-		wg.Done()
-		_ = in.Run()
 		if !localMsg {
 			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: in})
 		}
+		wg.Done()
+		_ = in.Run()
 	}()
 	wg.Wait()
 
