@@ -1,0 +1,59 @@
+cluster:
+  enabled: true
+image:
+  all:
+    repository: milvusdb/milvus-dev
+    tag: master-latest
+    pullPolicy: IfNotPresent
+etcd:
+  replicaCount: 1
+minio:
+  resources:
+    requests:
+      memory: 256Mi
+pulsar:
+  enabled: true
+  extra:
+    bastion: no
+    wsproxy: no
+  autoRecovery:
+    resources:
+      requests:
+        cpu: 0.1
+        memory: 256Mi
+  proxy:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 0.2
+        memory: 256Mi
+    wsResources:
+      requests:
+        memory: 256Mi
+        cpu: 0.1
+    configData:
+      PULSAR_MEM: "\"-Xms256m -Xmx256m -XX:MaxDirectMemorySize=256m\""
+  bookkeeper:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 0.2
+        memory: 512Mi
+    configData:
+      BOOKIE_MEM: "\"-Xms512m -Xmx512m -XX:MaxDirectMemorySize=512m -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+UseG1GC -XX:MaxGCPauseMillis=10 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+AggressiveOpts -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintHeapAtGC -verbosegc -XX:G1LogLevel=finest\""
+  zookeeper:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 0.1
+        memory: 256Mi
+    configData:
+      PULSAR_MEM: "\"-Xms256m -Xmx256m -Dcom.sun.management.jmxremote -Djute.maxbuffer=10485760 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+AggressiveOpts -XX:+DoEscapeAnalysis -XX:+DisableExplicitGC -XX:+PerfDisableSharedMem -Dzookeeper.forceSync=no\""
+  broker:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 0.2
+        memory: 512Mi
+    configData:
+      PULSAR_MEM: "\"-Xms512m -Xmx512m -XX:MaxDirectMemorySize=512m -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+AggressiveOpts -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem\""
