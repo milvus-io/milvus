@@ -44,8 +44,9 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
 				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
 			},
-			// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-			Type: typeutil.QueryNodeRole,
+			CreatedTime: Params.CreatedTime.String(),
+			UpdatedTime: Params.UpdatedTime.String(),
+			Type:        typeutil.QueryNodeRole,
 		},
 		SystemConfigurations: metricsinfo.QueryNodeConfiguration{
 			SearchReceiveBufSize:         Params.SearchReceiveBufSize,
