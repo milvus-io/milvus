@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is an alias for type typeutil.UniqueID, used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
 
 // Server is the grpc server of QueryNode.
