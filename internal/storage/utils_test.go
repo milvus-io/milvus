@@ -31,41 +31,7 @@ import (
 )
 
 type mockLessHeaderDataKV struct {
-}
-
-func (kv *mockLessHeaderDataKV) Load(key string) (string, error) {
-	panic("implement me")
-}
-
-func (kv *mockLessHeaderDataKV) MultiLoad(keys []string) ([]string, error) {
-	panic("implement me")
-}
-
-func (kv *mockLessHeaderDataKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	panic("implement me")
-}
-
-func (kv *mockLessHeaderDataKV) Save(key, value string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessHeaderDataKV) MultiSave(kvs map[string]string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessHeaderDataKV) Remove(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessHeaderDataKV) MultiRemove(keys []string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessHeaderDataKV) RemoveWithPrefix(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessHeaderDataKV) Close() {
+	kv.BaseKV
 }
 
 func (kv *mockLessHeaderDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
@@ -84,42 +50,7 @@ func newMockLessHeaderDataKV() *mockLessHeaderDataKV {
 }
 
 type mockWrongHeaderDataKV struct {
-}
-
-func (kv *mockWrongHeaderDataKV) Load(key string) (string, error) {
-	panic("implement me")
-}
-
-func (kv *mockWrongHeaderDataKV) MultiLoad(keys []string) ([]string, error) {
-	panic("implement me")
-}
-
-func (kv *mockWrongHeaderDataKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	panic("implement me")
-}
-
-func (kv *mockWrongHeaderDataKV) Save(key, value string) error {
-	panic("implement me")
-}
-
-func (kv *mockWrongHeaderDataKV) MultiSave(kvs map[string]string) error {
-	panic("implement me")
-}
-
-func (kv *mockWrongHeaderDataKV) Remove(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockWrongHeaderDataKV) MultiRemove(keys []string) error {
-	panic("implement me")
-}
-
-func (kv *mockWrongHeaderDataKV) RemoveWithPrefix(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockWrongHeaderDataKV) Close() {
-	panic("implement me")
+	kv.BaseKV
 }
 
 func (kv *mockWrongHeaderDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
@@ -296,42 +227,7 @@ func TestEstimateMemorySize_not_in_binlog_format(t *testing.T) {
 }
 
 type mockFailedToGetDescDataKV struct {
-}
-
-func (kv *mockFailedToGetDescDataKV) Load(key string) (string, error) {
-	panic("implement me")
-}
-
-func (kv *mockFailedToGetDescDataKV) MultiLoad(keys []string) ([]string, error) {
-	panic("implement me")
-}
-
-func (kv *mockFailedToGetDescDataKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	panic("implement me")
-}
-
-func (kv *mockFailedToGetDescDataKV) Save(key, value string) error {
-	panic("implement me")
-}
-
-func (kv *mockFailedToGetDescDataKV) MultiSave(kvs map[string]string) error {
-	panic("implement me")
-}
-
-func (kv *mockFailedToGetDescDataKV) Remove(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockFailedToGetDescDataKV) MultiRemove(keys []string) error {
-	panic("implement me")
-}
-
-func (kv *mockFailedToGetDescDataKV) RemoveWithPrefix(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockFailedToGetDescDataKV) Close() {
-	panic("implement me")
+	kv.BaseKV
 }
 
 func (kv *mockFailedToGetDescDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
@@ -363,42 +259,7 @@ func TestEstimateMemorySize_failed_to_load_desc(t *testing.T) {
 }
 
 type mockLessDescDataKV struct {
-}
-
-func (kv *mockLessDescDataKV) Load(key string) (string, error) {
-	panic("implement me")
-}
-
-func (kv *mockLessDescDataKV) MultiLoad(keys []string) ([]string, error) {
-	panic("implement me")
-}
-
-func (kv *mockLessDescDataKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	panic("implement me")
-}
-
-func (kv *mockLessDescDataKV) Save(key, value string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessDescDataKV) MultiSave(kvs map[string]string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessDescDataKV) Remove(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessDescDataKV) MultiRemove(keys []string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessDescDataKV) RemoveWithPrefix(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockLessDescDataKV) Close() {
-	panic("implement me")
+	kv.BaseKV
 }
 
 func (kv *mockLessDescDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
@@ -436,43 +297,8 @@ func TestEstimateMemorySize_less_desc_data(t *testing.T) {
 }
 
 type mockOriginalSizeDataKV struct {
+	kv.BaseKV
 	impl func(key string, start, end int64) ([]byte, error)
-}
-
-func (kv *mockOriginalSizeDataKV) Load(key string) (string, error) {
-	panic("implement me")
-}
-
-func (kv *mockOriginalSizeDataKV) MultiLoad(keys []string) ([]string, error) {
-	panic("implement me")
-}
-
-func (kv *mockOriginalSizeDataKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	panic("implement me")
-}
-
-func (kv *mockOriginalSizeDataKV) Save(key, value string) error {
-	panic("implement me")
-}
-
-func (kv *mockOriginalSizeDataKV) MultiSave(kvs map[string]string) error {
-	panic("implement me")
-}
-
-func (kv *mockOriginalSizeDataKV) Remove(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockOriginalSizeDataKV) MultiRemove(keys []string) error {
-	panic("implement me")
-}
-
-func (kv *mockOriginalSizeDataKV) RemoveWithPrefix(key string) error {
-	panic("implement me")
-}
-
-func (kv *mockOriginalSizeDataKV) Close() {
-	panic("implement me")
 }
 
 func (kv *mockOriginalSizeDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
