@@ -46,7 +46,7 @@ type deleteNode struct {
 	minIOKV     kv.BaseKV
 }
 
-// BufferData buffers insert data, monitoring buffer size and limit
+// DelDataBuf buffers insert data, monitoring buffer size and limit
 // size and limit both indicate numOfRows
 type DelDataBuf struct {
 	delData *DeleteData
@@ -254,16 +254,10 @@ func (dn *deleteNode) flushDelData(collID UniqueID, timeRange TimeRange) {
 	}
 }
 
-func newDeleteNode(
-	ctx context.Context,
-	replica Replica,
-	idAllocator allocatorInterface,
-	flushCh <-chan *flushMsg,
-	channelName string,
-) (*deleteNode, error) {
+func newDeleteNode(ctx context.Context, flushCh <-chan *flushMsg, config *nodeConfig) (*deleteNode, error) {
 	baseNode := BaseNode{}
-	baseNode.SetMaxQueueLength(Params.FlowGraphMaxQueueLength)
-	baseNode.SetMaxParallelism(Params.FlowGraphMaxParallelism)
+	baseNode.SetMaxQueueLength(config.maxQueueLength)
+	baseNode.SetMaxParallelism(config.maxParallelism)
 
 	// MinIO
 	option := &miniokv.Option{
@@ -280,12 +274,13 @@ func newDeleteNode(
 	}
 
 	return &deleteNode{
-		BaseNode:    baseNode,
-		channelName: channelName,
-		delBuf:      sync.Map{},
-		replica:     replica,
-		idAllocator: idAllocator,
-		flushCh:     flushCh,
-		minIOKV:     minIOKV,
+		BaseNode: baseNode,
+		delBuf:   sync.Map{},
+		flushCh:  flushCh,
+		minIOKV:  minIOKV,
+
+		replica:     config.replica,
+		idAllocator: config.allocator,
+		channelName: config.vChannelName,
 	}, nil
 }

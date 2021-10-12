@@ -63,18 +63,17 @@ func (replica *mockReplica) getCollectionAndPartitionID(segID UniqueID) (collID,
 
 func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 	tests := []struct {
-		ctx         context.Context
-		replica     Replica
-		idAllocator allocatorInterface
+		ctx    context.Context
+		config *nodeConfig
 
 		description string
 	}{
-		{context.Background(), &SegmentReplica{}, &allocator{}, "pointer of SegmentReplica"},
+		{context.Background(), &nodeConfig{}, "pointer of SegmentReplica"},
 	}
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			dn, err := newDeleteNode(test.ctx, test.replica, test.idAllocator, make(chan *flushMsg), "")
+			dn, err := newDeleteNode(test.ctx, make(chan *flushMsg), test.config)
 			assert.Nil(t, err)
 
 			assert.NotNil(t, dn)
@@ -173,7 +172,13 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 	)
 	replica := genMockReplica(segIDs, pks, chanName)
 	t.Run("Test get segment by primary keys", func(te *testing.T) {
-		dn, err := newDeleteNode(context.Background(), replica, &allocator{}, make(chan *flushMsg), chanName)
+		c := &nodeConfig{
+			replica:      replica,
+			allocator:    &allocator{},
+			vChannelName: chanName,
+		}
+
+		dn, err := newDeleteNode(context.Background(), make(chan *flushMsg), c)
 		assert.Nil(t, err)
 
 		results := dn.filterSegmentByPK(0, pks)
@@ -200,7 +205,12 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		Params.DeleteBinlogRootPath = testPath
 
 		flushChan := make(chan *flushMsg, 100)
-		delNode, err := newDeleteNode(ctx, replica, NewAllocatorFactory(), flushChan, chanName)
+		c := &nodeConfig{
+			replica:      replica,
+			allocator:    NewAllocatorFactory(),
+			vChannelName: chanName,
+		}
+		delNode, err := newDeleteNode(ctx, flushChan, c)
 		assert.Nil(te, err)
 
 		flushChan <- &flushMsg{
