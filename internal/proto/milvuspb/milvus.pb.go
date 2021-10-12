@@ -1713,16 +1713,25 @@ func (m *ShowPartitionsRequest) GetType() ShowType {
 	return ShowType_All
 }
 
+//
+// List all partitions for particular collection response.
+// The returned datas are all rows, we can format to columns by therir index.
 type ShowPartitionsResponse struct {
-	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	PartitionNames       []string         `protobuf:"bytes,2,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
-	PartitionIDs         []int64          `protobuf:"varint,3,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
-	CreatedTimestamps    []uint64         `protobuf:"varint,4,rep,packed,name=created_timestamps,json=createdTimestamps,proto3" json:"created_timestamps,omitempty"`
-	CreatedUtcTimestamps []uint64         `protobuf:"varint,5,rep,packed,name=created_utc_timestamps,json=createdUtcTimestamps,proto3" json:"created_utc_timestamps,omitempty"`
-	InMemoryPercentages  []int64          `protobuf:"varint,6,rep,packed,name=inMemory_percentages,json=inMemoryPercentages,proto3" json:"inMemory_percentages,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
+	// Contain error_code and reason
+	Status *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// All partition names for this collection
+	PartitionNames []string `protobuf:"bytes,2,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
+	// All partition ids for this collection
+	PartitionIDs []int64 `protobuf:"varint,3,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
+	// All hybrid timestamps
+	CreatedTimestamps []uint64 `protobuf:"varint,4,rep,packed,name=created_timestamps,json=createdTimestamps,proto3" json:"created_timestamps,omitempty"`
+	// All utc timestamps calculated by created_timestamps
+	CreatedUtcTimestamps []uint64 `protobuf:"varint,5,rep,packed,name=created_utc_timestamps,json=createdUtcTimestamps,proto3" json:"created_utc_timestamps,omitempty"`
+	// Load percentage on querynode
+	InMemoryPercentages  []int64  `protobuf:"varint,6,rep,packed,name=inMemory_percentages,json=inMemoryPercentages,proto3" json:"inMemory_percentages,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *ShowPartitionsResponse) Reset()         { *m = ShowPartitionsResponse{} }

@@ -349,6 +349,7 @@ message GetPartitionStatisticsResponse {
   common.Status status = 1;
   repeated common.KeyValuePair stats = 2;
 }
+
 /*
 * List all partitions for particular collection
 */
@@ -367,13 +368,23 @@ message ShowPartitionsRequest {
   ShowType type = 6;
 }
 
+/*
+* List all partitions for particular collection response.
+* The returned datas are all rows, we can format to columns by therir index.
+*/
 message ShowPartitionsResponse {
+  // Contain error_code and reason
   common.Status status = 1;
+  // All partition names for this collection
   repeated string partition_names = 2;
+  // All partition ids for this collection
   repeated int64 partitionIDs = 3;
-  repeated uint64 created_timestamps = 4; // hybrid timestamps
-  repeated uint64 created_utc_timestamps = 5; // physical timestamps
-  repeated int64 inMemory_percentages = 6; // load percentage on querynode
+  // All hybrid timestamps
+  repeated uint64 created_timestamps = 4;
+  // All utc timestamps calculated by created_timestamps
+  repeated uint64 created_utc_timestamps = 5;
+  // Load percentage on querynode
+  repeated int64 inMemory_percentages = 6;
 }
 
 message DescribeSegmentRequest {
