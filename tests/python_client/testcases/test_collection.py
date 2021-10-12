@@ -29,11 +29,12 @@ uid_list = "list_collections"
 uid_load = "load_collection"
 field_name = default_float_vec_field_name
 default_single_query = {
-            "data": gen_vectors(1, default_dim),
-            "anns_field": default_float_vec_field_name,
-            "param": {"metric_type": "L2", "params": {"nprobe": 10}},
-            "limit": default_top_k,
-        }
+    "data": gen_vectors(1, default_dim),
+    "anns_field": default_float_vec_field_name,
+    "param": {"metric_type": "L2", "params": {"nprobe": 10}},
+    "limit": default_top_k,
+}
+
 
 class TestCollectionParams(TestcaseBase):
     """ Test case of collection interface """
@@ -2970,7 +2971,7 @@ class TestReleaseAdvanced:
         t = threading.Thread(target=load, args=())
         t.start()
         connect.release_partitions(collection, [default_tag])
-        res = connect.search(collection,**default_single_query)
+        res = connect.search(collection, **default_single_query)
         assert len(res[0]) == 0
 
     def _test_release_collection_during_inserting(self, connect, collection):
@@ -3260,4 +3261,3 @@ class TestLoadPartitionInvalid(object):
         partition_name = get_partition_name
         with pytest.raises(Exception) as e:
             connect.load_partitions(collection, [partition_name])
-
