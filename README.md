@@ -105,9 +105,7 @@ For the full story, see [developer's documentation](https://github.com/milvus-io
 
 See [Milvus 2.0 vs. 1.x](https://github.com/milvus-io/milvus/blob/master/milvus20vs1x.md) for more information.
 
-## Getting Started
-
-### Demos
+## Real world demos
 
 <table>
   <tr>
