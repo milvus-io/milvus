@@ -1206,6 +1206,143 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	return nil
 }
 
+func (q *queryCollection) SearchByID(msg queryMsg) error {
+	searchByIdMsg := msg.(*msgstream.SearchByIdMsg)
+	retrieveMsg := &msgstream.RetrieveMsg{
+		BaseMsg: msgstream.BaseMsg{Ctx: searchByIdMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}}
+		RetrieveRequest: internalpb.RetrieveRequest{
+			Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Retrieve,
+					MsgID:     searchByIdMsg.Base.MsgID,
+					Timestamp: searchTimestamp,
+					SourceID:  searchByIdMsg.Base.SourceID,
+			},
+			ResultChannelID:  searchByIdMsg.ResultChannelID,
+			DBID: searchByIdMsg.DBID,
+			ConnectionID: searchByIdMsg.ConnectionID,
+			PartitionIDs: searchByIdMsg.PartitionIDs,
+			SerializedExprPlan: searchByIdMsg.SerializedExprPlan,
+			OutputFieldsId: searchByIdMsg.OutputField,
+			TravelTimestamp: searchByIdMsg.TravelTimestamp,
+			GuaranteeTimestamp: searchByIdMsg.GuaranteeTimestamp,
+		},
+	}
+	retrieveMsg := msg.(*msgstream.RetrieveMsg)
+	sp, ctx := trace.StartSpanFromContext(retrieveMsg.TraceCtx())
+	defer sp.Finish()
+	retrieveMsg.SetTraceCtx(ctx)
+	timestamp := retrieveMsg.RetrieveRequest.TravelTimestamp
+
+	collectionID := retrieveMsg.CollectionID
+	collection, err := q.streaming.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+
+	expr := retrieveMsg.SerializedExprPlan
+	plan, err := createRetrievePlanByExpr(collection, expr, timestamp)
+	if err != nil {
+		return err
+	}
+	defer plan.delete()
+
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", retrieveMsg.CollectionID))
+
+	var globalSealedSegments []UniqueID
+	if len(retrieveMsg.PartitionIDs) > 0 {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(retrieveMsg.PartitionIDs)
+	} else {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
+	}
+
+	var mergeList []*segcorepb.RetrieveResults
+
+	if q.vectorChunkManager == nil {
+		if q.localChunkManager == nil {
+			return fmt.Errorf("can not create vector chunk manager for local chunk manager is nil")
+		}
+		if q.remoteChunkManager == nil {
+			return fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil")
+		}
+		q.vectorChunkManager = storage.NewVectorChunkManager(q.localChunkManager, q.remoteChunkManager,
+			&etcdpb.CollectionMeta{
+				ID:     collection.id,
+				Schema: collection.schema,
+			}, q.localCacheEnabled)
+	}
+	// historical retrieve
+	hisRetrieveResults, sealedSegmentRetrieved, err1 := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vectorChunkManager, plan)
+	if err1 != nil {
+		log.Warn(err1.Error())
+		return err1
+	}
+	mergeList = append(mergeList, hisRetrieveResults...)
+	tr.Record("historical retrieve done")
+
+	// streaming retrieve
+	strRetrieveResults, _, err2 := q.streaming.retrieve(collectionID, retrieveMsg.PartitionIDs, plan)
+	if err2 != nil {
+		log.Warn(err2.Error())
+		return err2
+	}
+	mergeList = append(mergeList, strRetrieveResults...)
+	tr.Record("streaming retrieve done")
+
+	result, err := mergeRetrieveResults(mergeList)
+	if err != nil {
+		return err
+	}
+	tr.Record("merge result done")
+	// get the vector corresponding to the ID
+	var vec = make([]float32, DIM)
+	vec = result.Field.Vectors.Data.FloatVector.Data
+	// generate placeholder
+	var searchVector []byte
+	for i, ele := range vec {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
+		searchVector = append(searchVector, buf...)
+	}
+	placeholderValue := milvuspb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   milvuspb.PlaceholderType_FloatVector,
+		Values: [][]byte{searchVector},
+	}
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
+	}
+	placeGroupByte, err := proto.Marshal(&placeholderGroup)
+	if err != nil {
+		return err
+	}
+
+	// generate searchMsg
+	searchMsg := &msgstream.SearchMsg{
+		BaseMsg: msgstream.BaseMsg{Ctx: searchByIdMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}}
+		SearchRequest: internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Search,
+					MsgID:     searchByIdMsg.Base.MsgID,
+					Timestamp: searchTimestamp,
+					SourceID:  searchByIdMsg.Base.SourceID,
+			},
+			ResultChannelID:  searchByIdMsg.ResultChannelID,
+			DBID: searchByIdMsg.DBID,
+			ConnectionID: searchByIdMsg.ConnectionID,
+			PartitionIDs: searchByIdMsg.PartitionIDs,
+			Dsl:              dslString,
+			PlaceholderGroup: placeGroupByte,
+			DslType:          commonpb.DslType_Dsl,
+			SerializedExprPlan: searchByIdMsg.SerializedExprPlan,
+			OutputFieldsId: searchByIdMsg.OutputField,
+			TravelTimestamp: searchByIdMsg.TravelTimestamp,
+			GuaranteeTimestamp: searchByIdMsg.GuaranteeTimestamp,
+		},
+	}
+	err = q.search(searchMsg)
+	return err
+}
+
 func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, error) {
 	if pks == nil {
 		return nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
