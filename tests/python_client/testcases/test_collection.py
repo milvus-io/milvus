@@ -2652,9 +2652,9 @@ class TestLoadCollection:
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_empty_collection(self, connect, collection):
         """
-        target: test load collection
-        method: no entities in collection, load collection with correct params
-        expected: load success
+        target: test load an empty collection with no data inserted
+        method: no entities in collection, load and release the collection
+        expected: load and release successfully
         """
         connect.load_collection(collection)
         connect.release_collection(collection)
