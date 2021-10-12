@@ -204,6 +204,7 @@ func (colReplica *collectionReplica) hasCollectionPrivate(collectionID UniqueID)
 	return ok
 }
 
+// getCollectionNum returns num of collections in collectionReplica
 func (colReplica *collectionReplica) getCollectionNum() int {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
