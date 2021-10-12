@@ -1110,9 +1110,9 @@ class TestCollectionSearch(TestcaseBase):
                                  ct.default_index_params[:9]))
     def test_search_after_different_index_with_params(self, dim, index, params, auto_id, _async):
         """
-        target: test search with invalid search params
-        method: test search with invalid params type
-        expected: raise exception and report the error
+        target: test search after different index
+        method: test search after different index and corresponding search params
+        expected: search successfully with limit(topK)
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
