@@ -26,6 +26,7 @@ import (
 	"unsafe"
 )
 
+// SearchPlan is a wrapper of the underlying C-structure C.CSearchPlan
 type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
@@ -112,6 +113,7 @@ func (pg *searchRequest) delete() {
 	C.DeletePlaceholderGroup(pg.cPlaceholderGroup)
 }
 
+// RetrievePlan is a wrapper of the underlying C-structure C.CRetrievePlan
 type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
 	Timestamp     Timestamp
