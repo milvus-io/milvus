@@ -151,7 +151,7 @@ def main():
     arg_parser.add_argument(
         '--port',
         help='server port param for local mode',
-        default='19530')
+        default=config.SERVER_PORT_DEFAULT)
     arg_parser.add_argument(
         '--suite',
         metavar='FILE',
