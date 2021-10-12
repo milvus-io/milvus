@@ -116,6 +116,7 @@ func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
+// NewClient creates a new client instance
 func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
