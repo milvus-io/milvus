@@ -18,6 +18,7 @@ import (
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -203,4 +204,75 @@ func TestGetUnFlushedSegments(t *testing.T) {
 	assert.EqualValues(t, 1, len(segments))
 	assert.EqualValues(t, 0, segments[0].ID)
 	assert.NotEqualValues(t, commonpb.SegmentState_Flushed, segments[0].State)
+}
+
+func TestUpdateFlushSegmentsInfo(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		meta, err := newMeta(memkv.NewMemoryKV())
+		assert.Nil(t, err)
+
+		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0"}}}}}
+		err = meta.AddSegment(segment1)
+		assert.Nil(t, err)
+
+		err = meta.UpdateFlushSegmentsInfo(1, true, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog1"}}},
+			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
+		assert.Nil(t, err)
+
+		updated := meta.GetSegment(1)
+		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, State: commonpb.SegmentState_Flushing, NumOfRows: 10,
+			StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}},
+			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0", "binlog1"}}},
+		}}
+		assert.EqualValues(t, expected, updated)
+	})
+
+	t.Run("update non-existed segment", func(t *testing.T) {
+		meta, err := newMeta(memkv.NewMemoryKV())
+		assert.Nil(t, err)
+
+		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("update checkpoints and start position of non existed segment", func(t *testing.T) {
+		meta, err := newMeta(memkv.NewMemoryKV())
+		assert.Nil(t, err)
+
+		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing}}
+		err = meta.AddSegment(segment1)
+		assert.Nil(t, err)
+
+		err = meta.UpdateFlushSegmentsInfo(1, false, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
+			[]*datapb.SegmentStartPosition{{SegmentID: 2, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
+		assert.Nil(t, err)
+		assert.Nil(t, meta.GetSegment(2))
+	})
+
+	t.Run("test save etcd failed", func(t *testing.T) {
+		kv := memkv.NewMemoryKV()
+		failedKv := &saveFailKV{kv}
+		meta, err := newMeta(failedKv)
+		assert.Nil(t, err)
+
+		segmentInfo := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        1,
+				NumOfRows: 0,
+				State:     commonpb.SegmentState_Growing,
+			},
+		}
+		meta.segments.SetSegment(1, segmentInfo)
+
+		err = meta.UpdateFlushSegmentsInfo(1, true, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog"}}},
+			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
+		assert.NotNil(t, err)
+		assert.Equal(t, "mocked fail", err.Error())
+		segmentInfo = meta.GetSegment(1)
+		assert.EqualValues(t, 0, segmentInfo.NumOfRows)
+		assert.Equal(t, commonpb.SegmentState_Growing, segmentInfo.State)
+		assert.Nil(t, segmentInfo.Binlogs)
+		assert.Nil(t, segmentInfo.StartPosition)
+	})
 }
