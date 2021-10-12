@@ -903,7 +903,9 @@ class TestQueryOperation(TestcaseBase):
     def test_query_after_index(self):
         """
         target: test query after creating index
-        method: query after index
+        method: 1. indexing
+                2. load
+                3. query
         expected: query result is correct
         """
         collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
@@ -922,7 +924,8 @@ class TestQueryOperation(TestcaseBase):
     def test_query_after_search(self):
         """
         target: test query after search
-        method: query after search
+        method: 1. search
+                2. query without load again
         expected: query result is correct
         """
 
