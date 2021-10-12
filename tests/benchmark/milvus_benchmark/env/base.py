@@ -13,7 +13,7 @@ class BaseEnv(object):
         self._hostname = None
         self._port = config.SERVER_PORT_DEFAULT
 
-    def start_up(self):
+    def start_up(self, **kwargs):
         logger.debug("IN ENV CLASS")
         pass
 
