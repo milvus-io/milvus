@@ -50,8 +50,9 @@ func getSystemInfoMetrics(
 					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
 					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
 				},
-				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-				Type: typeutil.QueryCoordRole,
+				CreatedTime: Params.CreatedTime.String(),
+				UpdatedTime: Params.UpdatedTime.String(),
+				Type:        typeutil.QueryCoordRole,
 			},
 			SystemConfigurations: metricsinfo.QueryCoordConfiguration{
 				SearchChannelPrefix:       Params.SearchChannelPrefix,
