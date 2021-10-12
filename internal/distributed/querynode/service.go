@@ -44,6 +44,7 @@ import (
 
 type UniqueID = typeutil.UniqueID
 
+// Server is the grpc server of QueryNode.
 type Server struct {
 	querynode   types.QueryNodeComponent
 	wg          sync.WaitGroup
@@ -59,6 +60,7 @@ type Server struct {
 	closer io.Closer
 }
 
+// NewServer create a new QueryNode grpc server.
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 
