@@ -46,7 +46,7 @@ func newDmInputNode(ctx context.Context, factory msgstream.Factory, collID Uniqu
 
 	if seekPos != nil {
 		seekPos.ChannelName = pchannelName
-		log.Debug("datanode Seek: " + seekPos.GetChannelName())
+		log.Debug("datanode Seek", zap.String("channelName", seekPos.GetChannelName()))
 		err = insertStream.Seek([]*internalpb.MsgPosition{seekPos})
 		if err != nil {
 			return nil, err
