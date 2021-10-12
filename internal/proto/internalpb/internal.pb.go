@@ -2403,6 +2403,111 @@ func (m *ChannelTimeTickMsg) GetDefaultTimestamp() uint64 {
 	return 0
 }
 
+type SearchByIdRequest struct {
+	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	ResultChannelID      string            `protobuf:"bytes,2,opt,name=result_channelID,json=resultChannelID,proto3" json:"result_channelID,omitempty"`
+	DbID                 int64             `protobuf:"varint,3,opt,name=dbID,proto3" json:"dbID,omitempty"`
+	CollectionID         int64             `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	PartitionIDs         []int64           `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
+	Dsl             	 string        `protobuf:"bytes,6,opt,name=dsl,proto3" json:"dsl,omitempty"`
+	DslType              commonpb.DslType  `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
+	SerializedExprPlan   []byte            `protobuf:"bytes,8,opt,name=serialized_expr_plan,json=serializedExprPlan,proto3" json:"serialized_expr_plan,omitempty"`
+	OutputFieldsId       []int64           `protobuf:"varint,9,rep,packed,name=output_fields_id,json=outputFieldsId,proto3" json:"output_fields_id,omitempty"`
+	TravelTimestamp      uint64            `protobuf:"varint,10,opt,name=travel_timestamp,json=travelTimestamp,proto3" json:"travel_timestamp,omitempty"`
+	GuaranteeTimestamp   uint64            `protobuf:"varint,11,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
+}
+
+func (m *SearchByIdRequest) Reset()         { *m = SearchByIdRequest{} }
+func (m *SearchByIdRequest) String() string { return proto.CompactTextString(m) }
+func (*SearchByIdRequest) ProtoMessage()    {}
+func (*SearchByIdRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_41f4a519b878ee3b, []int{21}
+}
+
+func (m *SearchByIdRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_SearchByIdRequest.Unmarshal(m, b)
+}
+func (m *SearchByIdRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_SearchByIdRequest.Marshal(b, m, deterministic)
+}
+func (m *SearchByIdRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_SearchByIdRequest.Merge(m, src)
+}
+func (m *SearchByIdRequest) XXX_Size() int {
+	return xxx_messageInfo_SearchByIdRequest.Size(m)
+}
+func (m *SearchByIdRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_SearchByIdRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_SearchByIdRequest proto.InternalMessageInfo
+
+func (m *SearchByIdRequest) GetBase() *commonpb.MsgBase {
+	if m != nil {
+		return m.Base
+	}
+	return nil
+}
+
+func (m *SearchByIdRequest) GetResultChannelID() string {
+	if m != nil {
+		return m.ResultChannelID
+	}
+	return ""
+}
+
+func (m *SearchByIdRequest) GetDbID() int64 {
+	if m != nil {
+		return m.DbID
+	}
+	return 0
+}
+
+func (m *SearchByIdRequest) GetCollectionID() int64 {
+	if m != nil {
+		return m.CollectionID
+	}
+	return 0
+}
+
+func (m *SearchByIdRequest) GetPartitionIDs() []int64 {
+	if m != nil {
+		return m.PartitionIDs
+	}
+	return nil
+}
+
+func (m *SearchByIdRequest) GetSerializedExprPlan() []byte {
+	if m != nil {
+		return m.SerializedExprPlan
+	}
+	return nil
+}
+
+func (m *SearchByIdRequest) GetOutputFieldsId() []int64 {
+	if m != nil {
+		return m.OutputFieldsId
+	}
+	return nil
+}
+
+func (m *SearchByIdRequest) GetTravelTimestamp() uint64 {
+	if m != nil {
+		return m.TravelTimestamp
+	}
+	return 0
+}
+
+func (m *SearchByIdRequest) GetGuaranteeTimestamp() uint64 {
+	if m != nil {
+		return m.GuaranteeTimestamp
+	}
+	return 0
+}
+
 func init() {
 	proto.RegisterEnum("milvus.proto.internal.StateCode", StateCode_name, StateCode_value)
 	proto.RegisterType((*ComponentInfo)(nil), "milvus.proto.internal.ComponentInfo")
@@ -2439,6 +2544,7 @@ func init() {
 	proto.RegisterType((*QueryNodeStats)(nil), "milvus.proto.internal.QueryNodeStats")
 	proto.RegisterType((*MsgPosition)(nil), "milvus.proto.internal.MsgPosition")
 	proto.RegisterType((*ChannelTimeTickMsg)(nil), "milvus.proto.internal.ChannelTimeTickMsg")
+	proto.RegisterType((*SearchByIdRequest)(nil), "milvus.proto.internal.SearchByIdRequest")
 }
 
 func init() { proto.RegisterFile("internal.proto", fileDescriptor_41f4a519b878ee3b) }
