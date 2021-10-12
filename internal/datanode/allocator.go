@@ -79,6 +79,7 @@ func (alloc *allocator) genKey(isalloc bool, ids ...UniqueID) (string, error) {
 	return JoinIDPath(ids...), nil
 }
 
+// JoinIDPath joins ids to path format.
 func JoinIDPath(ids ...UniqueID) string {
 	idStr := make([]string, len(ids))
 	for _, id := range ids {
