@@ -141,11 +141,11 @@ func (i *IndexNode) Init() error {
 		}
 		err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
-			log.Error("IndexNode try connect etcd failed", zap.Error(err))
+			log.Error("IndexNode failed to connect to etcd", zap.Error(err))
 			initErr = err
 			return
 		}
-		log.Debug("IndexNode connect to etcd successfully")
+		log.Debug("IndexNode connected to etcd successfully")
 
 		option := &miniokv.Option{
 			Address:           Params.MinIOAddress,
@@ -164,7 +164,7 @@ func (i *IndexNode) Init() error {
 
 		i.kv = kv
 
-		log.Debug("IndexNode NewMinIOKV successfully")
+		log.Debug("IndexNode NewMinIOKV succeeded")
 		i.closer = trace.InitTracing("index_node")
 
 		i.initKnowhere()
@@ -269,7 +269,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Info("IndexNode successfully schedule", zap.Int64("indexBuildID", request.IndexBuildID))
+	log.Info("IndexNode successfully scheduled", zap.Int64("indexBuildID", request.IndexBuildID))
 
 	return ret, nil
 }

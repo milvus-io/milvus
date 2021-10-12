@@ -114,7 +114,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Debug("IndexNode task already in activate task list", zap.Any("TaskID", tID))
+		log.Debug("IndexNode task already in active task list", zap.Any("TaskID", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -130,7 +130,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 		delete(queue.activeTasks, tID)
 		return t
 	}
-	log.Debug("IndexNode the task was not found in the active task list", zap.Any("TaskID", tID))
+	log.Debug("IndexNode task was not found in the active task list", zap.Any("TaskID", tID))
 	return nil
 }
 
