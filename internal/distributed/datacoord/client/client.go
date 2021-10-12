@@ -46,6 +46,7 @@ type Base interface {
 	Register() error
 }
 
+// Client is the datacoord grpc client
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
