@@ -68,7 +68,7 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 // genKey gives a valid key string for lists of UniqueIDs:
 //  if alloc is true, the returned keys will have a generated-unique ID at the end.
 //  if alloc is false, the returned keys will only consist of provided ids.
-func (alloc *allocator) genKey(isalloc bool, ids ...UniqueID) (key string, err error) {
+func (alloc *allocator) genKey(isalloc bool, ids ...UniqueID) (string, error) {
 	if isalloc {
 		idx, err := alloc.allocID()
 		if err != nil {
@@ -76,12 +76,13 @@ func (alloc *allocator) genKey(isalloc bool, ids ...UniqueID) (key string, err e
 		}
 		ids = append(ids, idx)
 	}
+	return JoinIDPath(ids...), nil
+}
 
+func JoinIDPath(ids ...UniqueID) string {
 	idStr := make([]string, len(ids))
 	for _, id := range ids {
 		idStr = append(idStr, strconv.FormatInt(id, 10))
 	}
-
-	key = path.Join(idStr...)
-	return
+	return path.Join(idStr...)
 }
