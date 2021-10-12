@@ -211,6 +211,7 @@ func (colReplica *collectionReplica) getCollectionNum() int {
 	return len(colReplica.collections)
 }
 
+// getPartitionIDs returns partition ids of collection
 func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]UniqueID, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
