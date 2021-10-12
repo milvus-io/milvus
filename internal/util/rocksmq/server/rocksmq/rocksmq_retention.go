@@ -30,11 +30,11 @@ import (
 // RocksmqRetentionTimeInMinutes is the time of retention
 var RocksmqRetentionTimeInMinutes int64
 
-// RocksmqRetentionSizeInMB is the size of retention
+// RocksmqRetentionSizeInMB is the size of retentionflow_graph_dmstream_input_node_test
 var RocksmqRetentionSizeInMB int64
 
 // TickerTimeInSeconds is the time of expired check
-var TickerTimeInSeconds int64 = 6
+var TickerTimeInSeconds int64 = 60
 
 // Const value that used to convert unit
 const (
@@ -282,7 +282,7 @@ func (ri *retentionInfo) retention() error {
 	for {
 		select {
 		case <-ri.ctx.Done():
-			log.Debug("Rocksmq retention finish!")
+			log.Debug("Rocksmq retention routine exit!")
 			return nil
 		case t := <-ticker.C:
 			timeNow := t.Unix()
@@ -302,9 +302,9 @@ func (ri *retentionInfo) retention() error {
 					continue
 				}
 				if lastRetentionTs+checkTime < timeNow {
-					err := ri.newExpiredCleanUp(topic)
+					err := ri.expiredCleanUp(topic)
 					if err != nil {
-						log.Warn("Retention expired clean failed", zap.Any("error", err))
+						log.Warn("Retention expired clean failed", zap.Any("topic", topic), zap.Any("error", err))
 					}
 				}
 			}
@@ -322,8 +322,9 @@ func (ri *retentionInfo) retention() error {
 	}
 }
 
-func (ri *retentionInfo) newExpiredCleanUp(topic string) error {
-	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
+// Delete expired messages in specific topic
+func (ri *retentionInfo) expiredCleanUp(topic string) error {
+	// TODO remove topic lock in retention sicne we don't want to affect Produce
 	ll, ok := topicMu.Load(topic)
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topic)

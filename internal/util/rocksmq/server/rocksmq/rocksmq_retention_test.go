@@ -313,7 +313,7 @@ func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 	pageMsgPrefix, _ := constructKey(PageMsgSizeTitle, topicName)
 	pageMsgKey := pageMsgPrefix + "/dummy"
 	rmq.kv.Save(pageMsgKey, "0")
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 
 	//////////////////////////////////////////////////
 	rmq.retentionInfo.kv.DB = nil
@@ -329,15 +329,15 @@ func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 	//////////////////////////////////////////////////
 	topicMu.Delete(topicName)
 	topicMu.Store(topicName, topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 
 	//////////////////////////////////////////////////
 	topicMu.Delete(topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 
 	//////////////////////////////////////////////////
 	rmq.retentionInfo.ackedInfo.Delete(topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 }
 
 func TestRmqRetention_Complex(t *testing.T) {
