@@ -135,6 +135,10 @@ func (qc *QueryCoord) Init() error {
 func (qc *QueryCoord) Start() error {
 	qc.scheduler.Start()
 	log.Debug("start scheduler ...")
+
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
+
 	qc.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	qc.loopWg.Add(1)
