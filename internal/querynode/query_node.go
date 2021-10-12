@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -213,6 +214,9 @@ func (node *QueryNode) Start() error {
 	go node.session.LivenessCheck(node.queryNodeLoopCtx, node.liveCh, func() {
 		node.Stop()
 	})
+
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil

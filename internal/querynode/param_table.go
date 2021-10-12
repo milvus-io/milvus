@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -76,6 +77,9 @@ type ParamTable struct {
 	// segcore
 	ChunkRows int64
 	SimdType  string
+
+	CreatedTime time.Time
+	UpdatedTime time.Time
 }
 
 var Params ParamTable
