@@ -283,6 +283,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	return nil
 }
 
+// DestroyTopic removes messages for topic in rocksdb
 func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	start := time.Now()
 	beginKey := topicName + "/begin_id"
