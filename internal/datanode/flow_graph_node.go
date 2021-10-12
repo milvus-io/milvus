@@ -14,7 +14,12 @@ package datanode
 import "github.com/milvus-io/milvus/internal/util/flowgraph"
 
 type (
-	Node      = flowgraph.Node
-	BaseNode  = flowgraph.BaseNode
+	// Node is flowgraph.Node
+	Node = flowgraph.Node
+
+	// BaseNode is flowgraph.BaseNode
+	BaseNode = flowgraph.BaseNode
+
+	// InputNode is flowgraph.InputNode
 	InputNode = flowgraph.InputNode
 )

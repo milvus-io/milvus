@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSetContain(t *testing.T) {
+func Test_SetContain(t *testing.T) {
 	key1 := "key1"
 	key2 := "key2"
 	key3 := "key3"

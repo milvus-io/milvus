@@ -22,7 +22,7 @@ uid = "test_index"
 BUILD_TIMEOUT = 300
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
-query, query_vecs = gen_query_vectors(field_name, default_entities, default_top_k, 1)
+# query = gen_search_vectors_params(field_name, default_entities, default_top_k, 1)
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
@@ -53,12 +53,11 @@ class TestIndexParams(TestcaseBase):
 
         collection_w = self.init_collection_wrap(name=collection_name)
 
-        log.error(iem.WrongFieldName % (str(field_name), type(field_name)))
+        log.error(iem.WrongFieldName % str(field_name))
         self.index_wrap.init_index(collection_w.collection, field_name, default_index_params,
                                    check_task=CheckTasks.err_res,
                                    check_items={ct.err_code: 1,
-                                                ct.err_msg: iem.WrongFieldName % (str(field_name),
-                                                                                  type(field_name).__name__)})
+                                                ct.err_msg: iem.WrongFieldName % str(field_name)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_not_existed(self):
@@ -71,9 +70,10 @@ class TestIndexParams(TestcaseBase):
         f_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"})
+                                   check_items={ct.err_code: 1,
+                                                ct.err_msg: f"cannot create index on non-existed field: {f_name}"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     # TODO (reason="pymilvus issue #677", raises=TypeError)
     @pytest.mark.parametrize("index_type", ct.get_invalid_strs)
     def test_index_type_invalid(self, index_type):
@@ -263,6 +263,7 @@ class TestIndexOperation(TestcaseBase):
         pass
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_index_drop_index(self):
         """
         target: test index.drop
@@ -349,7 +350,7 @@ class TestIndexAdvanced(TestcaseBase):
         """
         target: index can still build if not finished before server restart
         method: create index by `index`, and then restart server, assert server is indexing
-        expected: index build finished after server resstart
+        expected: index build finished after server restart
         """
         pass
 
@@ -484,7 +485,7 @@ class TestIndexBase:
         expected: raise exception
         """
         with pytest.raises(Exception) as e:
-            dis_connect.create_index(collection, field_name, get_simple_index)
+            dis_connect.create_index(collection, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -501,9 +502,9 @@ class TestIndexBase:
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq, search_params=search_param)
+        params, _ = gen_search_vectors_params(field_name, default_entities, default_top_k, nq, search_params=search_param)
         connect.load_collection(collection)
-        res = connect.search(collection, query)
+        res = connect.search(collection, **params)
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -595,7 +596,6 @@ class TestIndexBase:
             connect.release_collection(collection)
             connect.load_collection(collection)
         index = connect.describe_index(collection, "")
-        # assert index == indexs[-1]
         assert not index    # FLAT is the last index_type, drop all indexes in server
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -702,8 +702,9 @@ class TestIndexBase:
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq, metric_type=metric_type, search_params=search_param)
-        res = connect.search(collection, query)
+        params, _ = gen_search_vectors_params(field_name, default_entities, default_top_k, nq,
+                                              metric_type=metric_type, search_params=search_param)
+        res = connect.search(collection, **params)
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -944,6 +945,11 @@ class TestIndexBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_PQ_without_nbits(self, connect, collection):
+        """
+        target: test create PQ index
+        method: create PQ index without nbits
+        expected: create successfully
+        """
         PQ_index = {"index_type": "IVF_PQ", "params": {"nlist": 128, "m": 16}, "metric_type": "L2"}
         result = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, PQ_index)
@@ -1040,10 +1046,11 @@ class TestIndexBinary:
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         connect.load_collection(binary_collection)
-        query, vecs = gen_query_vectors(binary_field_name, default_binary_entities, default_top_k, nq, metric_type="JACCARD")
         search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
-        logging.getLogger().info(search_param)
-        res = connect.search(binary_collection, query, search_params=search_param)
+        params, _ = gen_search_vectors_params(binary_field_name, default_binary_entities, default_top_k, nq,
+                                              search_params=search_param, metric_type="JACCARD")
+        logging.getLogger().info(params)
+        res = connect.search(binary_collection, **params)
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -1051,7 +1058,7 @@ class TestIndexBinary:
     def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
         """
         target: test create index interface with invalid metric type
-        method: add entitys into binary connection, flash, create index with L2 metric type.
+        method: add entities into binary collection, flush, create index with L2 metric type.
         expected: return create_index failure
         """
         # insert 6000 vectors
@@ -1157,12 +1164,22 @@ class TestIndexInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_index_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test create index interface for invalid scenario
+        method: create index with invalid collection name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test drop index interface for invalid scenario
+        method: drop index with invalid collection name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.drop_index(collection_name)
@@ -1176,6 +1193,11 @@ class TestIndexInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_with_invalid_index_params(self, connect, collection, get_index):
+        """
+        target: test create index interface for invalid scenario
+        method: create index with invalid index params
+        expected: raise exception
+        """
         logging.getLogger().info(get_index)
         with pytest.raises(Exception) as e:
             connect.create_index(collection, field_name, get_index)

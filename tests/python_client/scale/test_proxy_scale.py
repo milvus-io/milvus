@@ -1,12 +1,9 @@
 import pytest
-from pymilvus import connections
 
 from scale.helm_env import HelmEnv
 from common import common_func as cf
-from common import common_type as ct
 from common.common_type import CaseLabel
 from scale import scale_common as sc
-from scale import constants
 
 prefix = "proxy_scale"
 

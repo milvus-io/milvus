@@ -44,9 +44,10 @@ func TestMetaTable(t *testing.T) {
 		Version:        10,
 		Recycled:       false,
 	}
-	value := proto.MarshalTextString(indexMeta1)
+	value, err := proto.Marshal(indexMeta1)
+	assert.Nil(t, err)
 	key := "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-	err = etcdKV.Save(key, value)
+	err = etcdKV.Save(key, string(value))
 	assert.Nil(t, err)
 	metaTable, err := NewMetaTable(etcdKV)
 	assert.Nil(t, err)
@@ -76,14 +77,23 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
+	t.Run("GetIndexMetaByIndexBuildID", func(t *testing.T) {
+		indexMeta := metaTable.GetIndexMetaByIndexBuildID(1)
+		assert.NotNil(t, indexMeta)
+
+		indexMeta2 := metaTable.GetIndexMetaByIndexBuildID(20)
+		assert.Nil(t, indexMeta2)
+	})
+
 	t.Run("BuildIndex", func(t *testing.T) {
 		err = metaTable.BuildIndex(UniqueID(4), 1)
 		assert.NotNil(t, err)
 
 		indexMeta1.NodeID = 2
-		value = proto.MarshalTextString(indexMeta1)
+		value, err = proto.Marshal(indexMeta1)
+		assert.Nil(t, err)
 		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-		err = etcdKV.Save(key, value)
+		err = etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
 		err = metaTable.BuildIndex(indexMeta1.IndexBuildID, 1)
 		assert.Nil(t, err)
@@ -94,9 +104,10 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 
 		indexMeta1.Version = indexMeta1.Version + 1
-		value = proto.MarshalTextString(indexMeta1)
+		value, err = proto.Marshal(indexMeta1)
+		assert.Nil(t, err)
 		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-		err = etcdKV.Save(key, value)
+		err = etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
 		err = metaTable.UpdateVersion(indexMeta1.IndexBuildID)
 		assert.Nil(t, err)
@@ -104,9 +115,10 @@ func TestMetaTable(t *testing.T) {
 
 	t.Run("MarkIndexAsDeleted", func(t *testing.T) {
 		indexMeta1.Version = indexMeta1.Version + 1
-		value = proto.MarshalTextString(indexMeta1)
+		value, err = proto.Marshal(indexMeta1)
+		assert.Nil(t, err)
 		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-		err = etcdKV.Save(key, value)
+		err = etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
 		err = metaTable.MarkIndexAsDeleted(indexMeta1.Req.IndexID)
 		assert.Nil(t, err)
@@ -131,9 +143,10 @@ func TestMetaTable(t *testing.T) {
 
 	t.Run("UpdateRecycleState", func(t *testing.T) {
 		indexMeta1.Version = indexMeta1.Version + 1
-		value = proto.MarshalTextString(indexMeta1)
+		value, err = proto.Marshal(indexMeta1)
+		assert.Nil(t, err)
 		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-		err = etcdKV.Save(key, value)
+		err = etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
 
 		err = metaTable.UpdateRecycleState(indexMeta1.IndexBuildID)

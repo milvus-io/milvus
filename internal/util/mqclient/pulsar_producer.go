@@ -17,6 +17,9 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 )
 
+// implementation assertion
+var _ Producer = (*pulsarProducer)(nil)
+
 type pulsarProducer struct {
 	p pulsar.Producer
 }
@@ -25,10 +28,10 @@ func (pp *pulsarProducer) Topic() string {
 	return pp.p.Topic()
 }
 
-func (pp *pulsarProducer) Send(ctx context.Context, message *ProducerMessage) error {
+func (pp *pulsarProducer) Send(ctx context.Context, message *ProducerMessage) (MessageID, error) {
 	ppm := &pulsar.ProducerMessage{Payload: message.Payload, Properties: message.Properties}
-	_, err := pp.p.Send(ctx, ppm)
-	return err
+	pmID, err := pp.p.Send(ctx, ppm)
+	return &pulsarID{messageID: pmID}, err
 }
 
 func (pp *pulsarProducer) Close() {

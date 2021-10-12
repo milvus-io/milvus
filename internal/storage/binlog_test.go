@@ -14,16 +14,22 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 )
 
+/* #nosec G103 */
 func TestInsertBinlog(t *testing.T) {
 	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 
@@ -48,6 +54,10 @@ func TestInsertBinlog(t *testing.T) {
 	e2.SetEventTimestamp(300, 400)
 
 	w.SetEventTimeStamp(1000, 2000)
+
+	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
+	sizeTotal := 2000000
+	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -76,11 +86,6 @@ func TestInsertBinlog(t *testing.T) {
 	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
 	pos += int(unsafe.Sizeof(tc))
 
-	//descriptor header, server id
-	svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(svrID))
-
 	//descriptor header, event length
 	descEventLen := UnsafeReadInt32(buf, pos)
 	pos += int(unsafe.Sizeof(descEventLen))
@@ -89,26 +94,6 @@ func TestInsertBinlog(t *testing.T) {
 	descNxtPos := UnsafeReadInt32(buf, pos)
 	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
 	pos += int(unsafe.Sizeof(descNxtPos))
-
-	//descriptor data fix, binlog version
-	binLogVer := UnsafeReadInt16(buf, pos)
-	assert.Equal(t, binLogVer, int16(BinlogVersion))
-	pos += int(unsafe.Sizeof(binLogVer))
-
-	//descriptor data fix, server version
-	svrVer := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, svrVer, int64(ServerVersion))
-	pos += int(unsafe.Sizeof(svrVer))
-
-	//descriptor data fix, commit id
-	cmitID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, cmitID, int64(CommitID))
-	pos += int(unsafe.Sizeof(cmitID))
-
-	//descriptor data fix, header length
-	headLen := UnsafeReadInt8(buf, pos)
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	pos += int(unsafe.Sizeof(headLen))
 
 	//descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
@@ -152,6 +137,27 @@ func TestInsertBinlog(t *testing.T) {
 		pos++
 	}
 
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	var extra map[string]interface{}
+	err = json.Unmarshal(multiBytes, &extra)
+	assert.NoError(t, err)
+	testExtra, ok := extra["test"]
+	assert.True(t, ok)
+	assert.Equal(t, "testExtra", fmt.Sprintf("%v", testExtra))
+	size, ok := extra[originalSizeKey]
+	assert.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", size))
+
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
 
@@ -165,11 +171,6 @@ func TestInsertBinlog(t *testing.T) {
 	e1tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e1tc), InsertEventType)
 	pos += int(unsafe.Sizeof(e1tc))
-
-	//insert e1 header, Server id
-	e1svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e1svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e1svrID))
 
 	//insert e1 header, event length
 	e1EventLen := UnsafeReadInt32(buf, pos)
@@ -213,11 +214,6 @@ func TestInsertBinlog(t *testing.T) {
 	e2tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e2tc), InsertEventType)
 	pos += int(unsafe.Sizeof(e2tc))
-
-	//insert e2 header, Server id
-	e2svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e2svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e2svrID))
 
 	//insert e2 header, event length
 	e2EventLen := UnsafeReadInt32(buf, pos)
@@ -280,8 +276,9 @@ func TestInsertBinlog(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDeleteBinlog(t *testing.T) {
-	w := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50)
+	w := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50, 1, 1)
 
 	e1, err := w.NextDeleteEventWriter()
 	assert.Nil(t, err)
@@ -304,6 +301,10 @@ func TestDeleteBinlog(t *testing.T) {
 	e2.SetEventTimestamp(300, 400)
 
 	w.SetEventTimeStamp(1000, 2000)
+
+	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
+	sizeTotal := 2000000
+	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -332,11 +333,6 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
 	pos += int(unsafe.Sizeof(tc))
 
-	//descriptor header, server id
-	svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(svrID))
-
 	//descriptor header, event length
 	descEventLen := UnsafeReadInt32(buf, pos)
 	pos += int(unsafe.Sizeof(descEventLen))
@@ -346,26 +342,6 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
 	pos += int(unsafe.Sizeof(descNxtPos))
 
-	//descriptor data fix, binlog version
-	binLogVer := UnsafeReadInt16(buf, pos)
-	assert.Equal(t, binLogVer, int16(BinlogVersion))
-	pos += int(unsafe.Sizeof(binLogVer))
-
-	//descriptor data fix, server version
-	svrVer := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, svrVer, int64(ServerVersion))
-	pos += int(unsafe.Sizeof(svrVer))
-
-	//descriptor data fix, commit id
-	cmitID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, cmitID, int64(CommitID))
-	pos += int(unsafe.Sizeof(cmitID))
-
-	//descriptor data fix, header length
-	headLen := UnsafeReadInt8(buf, pos)
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	pos += int(unsafe.Sizeof(headLen))
-
 	//descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, collID, int64(50))
@@ -373,12 +349,12 @@ func TestDeleteBinlog(t *testing.T) {
 
 	//descriptor data fix, partition id
 	partID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, partID, int64(-1))
+	assert.Equal(t, partID, int64(1))
 	pos += int(unsafe.Sizeof(partID))
 
 	//descriptor data fix, segment id
 	segID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, segID, int64(-1))
+	assert.Equal(t, segID, int64(1))
 	pos += int(unsafe.Sizeof(segID))
 
 	//descriptor data fix, field id
@@ -408,6 +384,27 @@ func TestDeleteBinlog(t *testing.T) {
 		pos++
 	}
 
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	var extra map[string]interface{}
+	err = json.Unmarshal(multiBytes, &extra)
+	assert.NoError(t, err)
+	testExtra, ok := extra["test"]
+	assert.True(t, ok)
+	assert.Equal(t, "testExtra", fmt.Sprintf("%v", testExtra))
+	size, ok := extra[originalSizeKey]
+	assert.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", size))
+
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
 
@@ -421,11 +418,6 @@ func TestDeleteBinlog(t *testing.T) {
 	e1tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e1tc), DeleteEventType)
 	pos += int(unsafe.Sizeof(e1tc))
-
-	//insert e1 header, Server id
-	e1svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e1svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e1svrID))
 
 	//insert e1 header, event length
 	e1EventLen := UnsafeReadInt32(buf, pos)
@@ -469,11 +461,6 @@ func TestDeleteBinlog(t *testing.T) {
 	e2tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e2tc), DeleteEventType)
 	pos += int(unsafe.Sizeof(e2tc))
-
-	//insert e2 header, Server id
-	e2svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e2svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e2svrID))
 
 	//insert e2 header, event length
 	e2EventLen := UnsafeReadInt32(buf, pos)
@@ -536,6 +523,7 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDDLBinlog1(t *testing.T) {
 	w := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 
@@ -560,6 +548,10 @@ func TestDDLBinlog1(t *testing.T) {
 	e2.SetEventTimestamp(300, 400)
 
 	w.SetEventTimeStamp(1000, 2000)
+
+	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
+	sizeTotal := 2000000
+	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -588,11 +580,6 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
 	pos += int(unsafe.Sizeof(tc))
 
-	//descriptor header, server id
-	svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(svrID))
-
 	//descriptor header, event length
 	descEventLen := UnsafeReadInt32(buf, pos)
 	pos += int(unsafe.Sizeof(descEventLen))
@@ -601,26 +588,6 @@ func TestDDLBinlog1(t *testing.T) {
 	descNxtPos := UnsafeReadInt32(buf, pos)
 	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
 	pos += int(unsafe.Sizeof(descNxtPos))
-
-	//descriptor data fix, binlog version
-	binLogVer := UnsafeReadInt16(buf, pos)
-	assert.Equal(t, binLogVer, int16(BinlogVersion))
-	pos += int(unsafe.Sizeof(binLogVer))
-
-	//descriptor data fix, server version
-	svrVer := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, svrVer, int64(ServerVersion))
-	pos += int(unsafe.Sizeof(svrVer))
-
-	//descriptor data fix, commit id
-	cmitID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, cmitID, int64(CommitID))
-	pos += int(unsafe.Sizeof(cmitID))
-
-	//descriptor data fix, header length
-	headLen := UnsafeReadInt8(buf, pos)
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	pos += int(unsafe.Sizeof(headLen))
 
 	//descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
@@ -664,6 +631,27 @@ func TestDDLBinlog1(t *testing.T) {
 		pos++
 	}
 
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	var extra map[string]interface{}
+	err = json.Unmarshal(multiBytes, &extra)
+	assert.NoError(t, err)
+	testExtra, ok := extra["test"]
+	assert.True(t, ok)
+	assert.Equal(t, "testExtra", fmt.Sprintf("%v", testExtra))
+	size, ok := extra[originalSizeKey]
+	assert.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", size))
+
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
 
@@ -677,11 +665,6 @@ func TestDDLBinlog1(t *testing.T) {
 	e1tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e1tc), CreateCollectionEventType)
 	pos += int(unsafe.Sizeof(e1tc))
-
-	//insert e1 header, Server id
-	e1svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e1svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e1svrID))
 
 	//insert e1 header, event length
 	e1EventLen := UnsafeReadInt32(buf, pos)
@@ -725,11 +708,6 @@ func TestDDLBinlog1(t *testing.T) {
 	e2tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e2tc), DropCollectionEventType)
 	pos += int(unsafe.Sizeof(e2tc))
-
-	//insert e2 header, Server id
-	e2svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e2svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e2svrID))
 
 	//insert e2 header, event length
 	e2EventLen := UnsafeReadInt32(buf, pos)
@@ -792,6 +770,7 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
 func TestDDLBinlog2(t *testing.T) {
 	w := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 
@@ -816,6 +795,10 @@ func TestDDLBinlog2(t *testing.T) {
 	e2.SetEventTimestamp(300, 400)
 
 	w.SetEventTimeStamp(1000, 2000)
+
+	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
+	sizeTotal := 2000000
+	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -844,11 +827,6 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
 	pos += int(unsafe.Sizeof(tc))
 
-	//descriptor header, server id
-	svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(svrID))
-
 	//descriptor header, event length
 	descEventLen := UnsafeReadInt32(buf, pos)
 	pos += int(unsafe.Sizeof(descEventLen))
@@ -857,26 +835,6 @@ func TestDDLBinlog2(t *testing.T) {
 	descNxtPos := UnsafeReadInt32(buf, pos)
 	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
 	pos += int(unsafe.Sizeof(descNxtPos))
-
-	//descriptor data fix, binlog version
-	binLogVer := UnsafeReadInt16(buf, pos)
-	assert.Equal(t, binLogVer, int16(BinlogVersion))
-	pos += int(unsafe.Sizeof(binLogVer))
-
-	//descriptor data fix, server version
-	svrVer := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, svrVer, int64(ServerVersion))
-	pos += int(unsafe.Sizeof(svrVer))
-
-	//descriptor data fix, commit id
-	cmitID := UnsafeReadInt64(buf, pos)
-	assert.Equal(t, cmitID, int64(CommitID))
-	pos += int(unsafe.Sizeof(cmitID))
-
-	//descriptor data fix, header length
-	headLen := UnsafeReadInt8(buf, pos)
-	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
-	pos += int(unsafe.Sizeof(headLen))
 
 	//descriptor data fix, collection id
 	collID := UnsafeReadInt64(buf, pos)
@@ -920,6 +878,27 @@ func TestDDLBinlog2(t *testing.T) {
 		pos++
 	}
 
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	var extra map[string]interface{}
+	err = json.Unmarshal(multiBytes, &extra)
+	assert.NoError(t, err)
+	testExtra, ok := extra["test"]
+	assert.True(t, ok)
+	assert.Equal(t, "testExtra", fmt.Sprintf("%v", testExtra))
+	size, ok := extra[originalSizeKey]
+	assert.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", size))
+
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
 
@@ -933,11 +912,6 @@ func TestDDLBinlog2(t *testing.T) {
 	e1tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e1tc), CreatePartitionEventType)
 	pos += int(unsafe.Sizeof(e1tc))
-
-	//insert e1 header, Server id
-	e1svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e1svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e1svrID))
 
 	//insert e1 header, event length
 	e1EventLen := UnsafeReadInt32(buf, pos)
@@ -981,11 +955,6 @@ func TestDDLBinlog2(t *testing.T) {
 	e2tc := UnsafeReadInt8(buf, pos)
 	assert.Equal(t, EventTypeCode(e2tc), DropPartitionEventType)
 	pos += int(unsafe.Sizeof(e2tc))
-
-	//insert e2 header, Server id
-	e2svrID := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, e2svrID, int32(ServerID))
-	pos += int(unsafe.Sizeof(e2svrID))
 
 	//insert e2 header, event length
 	e2EventLen := UnsafeReadInt32(buf, pos)
@@ -1048,6 +1017,133 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
 }
 
+/* #nosec G103 */
+func TestIndexFileBinlog(t *testing.T) {
+	indexBuildID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	version := int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	collectionID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	partitionID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	segmentID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	fieldID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	indexName := funcutil.GenRandomStr()
+	indexID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	key := funcutil.GenRandomStr()
+
+	timestamp := Timestamp(time.Now().UnixNano())
+	payload := funcutil.GenRandomStr()
+
+	w := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, key)
+
+	e, err := w.NextIndexFileEventWriter()
+	assert.Nil(t, err)
+	err = e.AddOneStringToPayload(payload)
+	assert.Nil(t, err)
+	e.SetEventTimestamp(timestamp, timestamp)
+
+	w.SetEventTimeStamp(timestamp, timestamp)
+
+	sizeTotal := 2000000
+	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+
+	_, err = w.GetBuffer()
+	assert.NotNil(t, err)
+	err = w.Close()
+	assert.Nil(t, err)
+	buf, err := w.GetBuffer()
+	assert.Nil(t, err)
+
+	//magic number
+	magicNum := UnsafeReadInt32(buf, 0)
+	assert.Equal(t, magicNum, MagicNumber)
+	pos := int(unsafe.Sizeof(MagicNumber))
+
+	//descriptor header, timestamp
+	ts := UnsafeReadInt64(buf, pos)
+	assert.Greater(t, ts, int64(0))
+	pos += int(unsafe.Sizeof(ts))
+
+	//descriptor header, type code
+	tc := UnsafeReadInt8(buf, pos)
+	assert.Equal(t, EventTypeCode(tc), DescriptorEventType)
+	pos += int(unsafe.Sizeof(tc))
+
+	//descriptor header, event length
+	descEventLen := UnsafeReadInt32(buf, pos)
+	pos += int(unsafe.Sizeof(descEventLen))
+
+	//descriptor header, next position
+	descNxtPos := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, descEventLen+int32(unsafe.Sizeof(MagicNumber)), descNxtPos)
+	pos += int(unsafe.Sizeof(descNxtPos))
+
+	//descriptor data fix, collection id
+	collID := UnsafeReadInt64(buf, pos)
+	assert.Equal(t, collID, collectionID)
+	pos += int(unsafe.Sizeof(collID))
+
+	//descriptor data fix, partition id
+	partID := UnsafeReadInt64(buf, pos)
+	assert.Equal(t, partID, partitionID)
+	pos += int(unsafe.Sizeof(partID))
+
+	//descriptor data fix, segment id
+	segID := UnsafeReadInt64(buf, pos)
+	assert.Equal(t, segID, segmentID)
+	pos += int(unsafe.Sizeof(segID))
+
+	//descriptor data fix, field id
+	fID := UnsafeReadInt64(buf, pos)
+	assert.Equal(t, fieldID, fieldID)
+	pos += int(unsafe.Sizeof(fID))
+
+	//descriptor data fix, start time stamp
+	startts := UnsafeReadInt64(buf, pos)
+	assert.Equal(t, startts, int64(timestamp))
+	pos += int(unsafe.Sizeof(startts))
+
+	//descriptor data fix, end time stamp
+	endts := UnsafeReadInt64(buf, pos)
+	assert.Equal(t, endts, int64(timestamp))
+	pos += int(unsafe.Sizeof(endts))
+
+	//descriptor data fix, payload type
+	colType := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_String)
+	pos += int(unsafe.Sizeof(colType))
+
+	//descriptor data, post header lengths
+	for i := DescriptorEventType; i < EventTypeEnd; i++ {
+		size := getEventFixPartSize(i)
+		assert.Equal(t, uint8(size), buf[pos])
+		pos++
+	}
+
+	//descriptor data, extra length
+	extraLength := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	pos += int(unsafe.Sizeof(extraLength))
+
+	multiBytes := make([]byte, extraLength)
+	for i := 0; i < int(extraLength); i++ {
+		singleByte := UnsafeReadByte(buf, pos)
+		multiBytes[i] = singleByte
+		pos++
+	}
+	j := make(map[string]interface{})
+	err = json.Unmarshal(multiBytes, &j)
+	assert.Nil(t, err)
+	assert.Equal(t, fmt.Sprintf("%v", indexBuildID), fmt.Sprintf("%v", j["indexBuildID"]))
+	assert.Equal(t, fmt.Sprintf("%v", version), fmt.Sprintf("%v", j["version"]))
+	assert.Equal(t, fmt.Sprintf("%v", indexName), fmt.Sprintf("%v", j["indexName"]))
+	assert.Equal(t, fmt.Sprintf("%v", indexID), fmt.Sprintf("%v", j["indexID"]))
+	assert.Equal(t, fmt.Sprintf("%v", key), fmt.Sprintf("%v", j["key"]))
+	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", j[originalSizeKey]))
+
+	// NextIndexFileBinlogWriter after close
+	_, err = w.NextIndexFileEventWriter()
+	assert.NotNil(t, err)
+}
+
 func TestNewBinlogReaderError(t *testing.T) {
 	data := []byte{}
 	reader, err := NewBinlogReader(data)
@@ -1092,6 +1188,10 @@ func TestNewBinlogReaderError(t *testing.T) {
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
+
+	sizeTotal := 2000000
+	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+
 	err = w.Close()
 	assert.Nil(t, err)
 
@@ -1118,6 +1218,9 @@ func TestNewBinlogWriterTsError(t *testing.T) {
 	err = w.Close()
 	assert.NotNil(t, err)
 
+	sizeTotal := 2000000
+	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+
 	w.SetEventTimeStamp(1000, 0)
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -1138,6 +1241,10 @@ func TestInsertBinlogWriterCloseError(t *testing.T) {
 	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 	e1, err := insertWriter.NextInsertEventWriter()
 	assert.Nil(t, err)
+
+	sizeTotal := 2000000
+	insertWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
 	e1.SetEventTimestamp(100, 200)
@@ -1151,9 +1258,11 @@ func TestInsertBinlogWriterCloseError(t *testing.T) {
 }
 
 func TestDeleteBinlogWriteCloseError(t *testing.T) {
-	deleteWriter := NewDeleteBinlogWriter(schemapb.DataType_Int64, 10)
+	deleteWriter := NewDeleteBinlogWriter(schemapb.DataType_Int64, 10, 1, 1)
 	e1, err := deleteWriter.NextDeleteEventWriter()
 	assert.Nil(t, err)
+	sizeTotal := 2000000
+	deleteWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
 	e1.SetEventTimestamp(100, 200)
@@ -1170,6 +1279,10 @@ func TestDDBinlogWriteCloseError(t *testing.T) {
 	ddBinlogWriter := NewDDLBinlogWriter(schemapb.DataType_Int64, 10)
 	e1, err := ddBinlogWriter.NextCreateCollectionEventWriter()
 	assert.Nil(t, err)
+
+	sizeTotal := 2000000
+	ddBinlogWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
 	e1.SetEventTimestamp(100, 200)
@@ -1251,6 +1364,8 @@ var _ EventWriter = (*testEvent)(nil)
 
 func TestWriterListError(t *testing.T) {
 	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	sizeTotal := 2000000
+	insertWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	errorEvent := &testEvent{}
 	insertWriter.eventWriters = append(insertWriter.eventWriters, errorEvent)
 	insertWriter.SetEventTimeStamp(1000, 2000)

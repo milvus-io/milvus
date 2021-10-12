@@ -9,18 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <tuple>
-#include <map>
-#include <gtest/gtest.h>
 #include <google/protobuf/text_format.h>
+#include <gtest/gtest.h>
+#include <map>
+#include <tuple>
 
-#include "pb/index_cgo_msg.pb.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
-#include "test_utils/DataGen.h"
 #include "indexbuilder/utils.h"
+#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int64_t NB = 1000;
@@ -278,7 +278,7 @@ TEST(IVFFLATNMWrapper, Build) {
 }
 
 TEST(IVFFLATNMWrapper, Codec) {
-    int64_t flat_nb = 1000000;
+    int64_t flat_nb = 100000;
     auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     auto metric_type = milvus::knowhere::Metric::L2;
     indexcgo::TypeParams type_params;

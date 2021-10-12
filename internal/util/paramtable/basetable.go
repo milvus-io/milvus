@@ -12,16 +12,18 @@
 package paramtable
 
 import (
-	"log"
 	"os"
 	"path"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"go.uber.org/zap"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
@@ -39,27 +41,32 @@ type Base interface {
 }
 
 type BaseTable struct {
-	params *memkv.MemoryKV
+	params    *memkv.MemoryKV
+	configDir string
+
+	RoleName          string
+	Log               log.Config
+	LogConfigFunction func(log.Config)
 }
 
 func (gp *BaseTable) Init() {
 	gp.params = memkv.NewMemoryKV()
 
-	err := gp.LoadYaml("milvus.yaml")
-	if err != nil {
-		panic(err)
-	}
+	gp.configDir = gp.initConfPath()
+	log.Debug("config directory", zap.String("configDir", gp.configDir))
 
-	err = gp.LoadYaml("advanced/common.yaml")
-	if err != nil {
-		panic(err)
-	}
+	gp.loadFromMilvusYaml()
 
-	err = gp.LoadYaml("advanced/channel.yaml")
-	if err != nil {
-		panic(err)
-	}
+	// TODO remove once we change helm deployment
+	gp.loadFromCommonYaml()
+
 	gp.tryloadFromEnv()
+
+	gp.InitLogCfg()
+}
+
+func (gp *BaseTable) GetConfigDir() string {
+	return gp.configDir
 }
 
 func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error {
@@ -70,6 +77,42 @@ func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error {
 		}
 	}
 	return nil
+}
+
+func (gp *BaseTable) initConfPath() string {
+	// check if user set conf dir through env
+	configDir, find := syscall.Getenv("MILVUSCONF")
+	if !find {
+		runPath, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+		configDir = runPath + "/configs/"
+		if _, err := os.Stat(configDir); err != nil {
+			_, fpath, _, _ := runtime.Caller(0)
+			// TODO, this is a hack, need to find better solution for relative path
+			configDir = path.Dir(fpath) + "/../../../configs/"
+		}
+	}
+	return configDir
+}
+
+func (gp *BaseTable) loadFromMilvusYaml() {
+	if err := gp.LoadYaml("milvus.yaml"); err != nil {
+		panic(err)
+	}
+}
+
+func (gp *BaseTable) loadFromCommonYaml() bool {
+	configFile := gp.configDir + "advanced/common.yaml"
+	if _, err := os.Stat(configFile); err == nil {
+		if err := gp.LoadYaml("advanced/common.yaml"); err != nil {
+			panic(err)
+		}
+		return true
+	}
+	log.Debug("failed to find common.yaml in config, skip..")
+	return false
 }
 
 func (gp *BaseTable) tryloadFromEnv() {
@@ -199,6 +242,22 @@ func (gp *BaseTable) tryloadFromEnv() {
 	if err != nil {
 		panic(err)
 	}
+
+	insertBufferFlushSize := os.Getenv("DATA_NODE_IBUFSIZE")
+	if insertBufferFlushSize == "" {
+		//var err error
+		insertBufferFlushSize, err = gp.Load("datanode.flush.insertBufSize")
+		if err != nil {
+			panic(err)
+		}
+	}
+	if insertBufferFlushSize == "" {
+		insertBufferFlushSize = "16777216" //use default
+	}
+	err = gp.Save("_DATANODE_INSERTBUFSIZE", insertBufferFlushSize)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (gp *BaseTable) Load(key string) (string, error) {
@@ -215,15 +274,9 @@ func (gp *BaseTable) LoadRange(key, endKey string, limit int) ([]string, []strin
 
 func (gp *BaseTable) LoadYaml(fileName string) error {
 	config := viper.New()
-	_, fpath, _, _ := runtime.Caller(0)
-	configFile := path.Dir(fpath) + "/../../../configs/" + fileName
-	_, err := os.Stat(configFile)
-	if os.IsNotExist(err) {
-		runPath, err := os.Getwd()
-		if err != nil {
-			panic(err)
-		}
-		configFile = runPath + "/configs/" + fileName
+	configFile := gp.configDir + fileName
+	if _, err := os.Stat(configFile); err != nil {
+		panic("cannot access config file: " + configFile)
 	}
 
 	config.SetConfigFile(configFile)
@@ -241,7 +294,7 @@ func (gp *BaseTable) LoadYaml(fileName string) error {
 				for _, v := range val {
 					ss, err := cast.ToStringE(v)
 					if err != nil {
-						log.Panic(err)
+						panic(err)
 					}
 					if len(str) == 0 {
 						str = ss
@@ -251,7 +304,7 @@ func (gp *BaseTable) LoadYaml(fileName string) error {
 				}
 
 			default:
-				log.Panicf("undefine config type, key=%s", key)
+				panic("undefined config type, key=" + key)
 			}
 		}
 		err = gp.params.Save(strings.ToLower(key), str)
@@ -301,11 +354,11 @@ func (gp *BaseTable) ParseInt64(key string) int64 {
 	if err != nil {
 		panic(err)
 	}
-	value, err := strconv.Atoi(valueStr)
+	value, err := strconv.ParseInt(valueStr, 10, 64)
 	if err != nil {
 		panic(err)
 	}
-	return int64(value)
+	return value
 }
 
 func (gp *BaseTable) ParseInt32(key string) int32 {
@@ -313,7 +366,7 @@ func (gp *BaseTable) ParseInt32(key string) int32 {
 	if err != nil {
 		panic(err)
 	}
-	value, err := strconv.Atoi(valueStr)
+	value, err := strconv.ParseInt(valueStr, 10, 32)
 	if err != nil {
 		panic(err)
 	}
@@ -368,4 +421,46 @@ func ConvertRangeToIntSlice(rangeStr, sep string) []int {
 		ret = append(ret, i)
 	}
 	return ret
+}
+
+func (gp *BaseTable) InitLogCfg() {
+	gp.Log = log.Config{}
+	format, err := gp.Load("log.format")
+	if err != nil {
+		panic(err)
+	}
+	gp.Log.Format = format
+	level, err := gp.Load("log.level")
+	if err != nil {
+		panic(err)
+	}
+	gp.Log.Level = level
+	gp.Log.File.MaxSize = gp.ParseInt("log.file.maxSize")
+	gp.Log.File.MaxBackups = gp.ParseInt("log.file.maxBackups")
+	gp.Log.File.MaxDays = gp.ParseInt("log.file.maxAge")
+}
+
+func (gp *BaseTable) SetLogConfig(f func(log.Config)) {
+	gp.LogConfigFunction = f
+}
+
+func (gp *BaseTable) SetLogger(id UniqueID) {
+	rootPath, err := gp.Load("log.file.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	if len(rootPath) != 0 {
+		log.Debug("Set logger ", zap.Int64("id", id), zap.String("role", gp.RoleName))
+		if id < 0 {
+			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+".log")
+		} else {
+			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+"-"+strconv.FormatInt(id, 10)+".log")
+		}
+	} else {
+		gp.Log.File.Filename = ""
+	}
+
+	if gp.LogConfigFunction != nil {
+		gp.LogConfigFunction(gp.Log)
+	}
 }

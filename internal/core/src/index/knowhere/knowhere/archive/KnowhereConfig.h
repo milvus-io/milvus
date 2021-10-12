@@ -12,6 +12,7 @@
 #pragma once
 
 #include <vector>
+#include <string>
 
 #include "utils/Status.h"
 
@@ -24,13 +25,13 @@ class KnowhereConfig {
      * set SIMD type
      */
     enum SimdType {
-        AUTO = 1,  // enable all and depend on the system
+        AUTO = 0,  // enable all and depend on the system
         SSE,       // only enable SSE
         AVX2,      // only enable AVX2
         AVX512,    // only enable AVX512
     };
 
-    static Status
+    static std::string
     SetSimdType(const SimdType simd_type);
 
     /**

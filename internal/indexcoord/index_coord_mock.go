@@ -25,12 +25,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// Mock is an alternative to IndexCoord, it will return specific results based on specific parameters.
 type Mock struct {
 	etcdKV *etcdkv.EtcdKV
 
 	Failure bool
 }
 
+// Init initializes the Mock of IndexCoord. When param `Failure` is true, it will return an error.
 func (icm *Mock) Init() error {
 	if icm.Failure {
 		return errors.New("IndexCoordinate init failed")
@@ -38,6 +40,7 @@ func (icm *Mock) Init() error {
 	return nil
 }
 
+// Start starts the Mock of IndexCoord. When param `Failure` is true, it will return an error.
 func (icm *Mock) Start() error {
 	if icm.Failure {
 		return errors.New("IndexCoordinate start failed")
@@ -45,6 +48,7 @@ func (icm *Mock) Start() error {
 	return nil
 }
 
+// Stop stops the Mock of IndexCoord. When param `Failure` is true, it will return an error.
 func (icm *Mock) Stop() error {
 	if icm.Failure {
 		return errors.New("IndexCoordinate stop failed")
@@ -53,6 +57,7 @@ func (icm *Mock) Stop() error {
 	return err
 }
 
+// Register registers an IndexCoord role in ETCD, if Param `Failure` is true, it will return an error.
 func (icm *Mock) Register() error {
 	if icm.Failure {
 		return errors.New("IndexCoordinate register failed")
@@ -64,6 +69,8 @@ func (icm *Mock) Register() error {
 	return err
 }
 
+// GetComponentStates gets the component states of the mocked IndexCoord, if Param `Failure` is true, it will return an error,
+// and the state is `StateCode_Abnormal`. Under normal circumstances the state is `StateCode_Healthy`.
 func (icm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	if icm.Failure {
 		return &internalpb.ComponentStates{
@@ -85,6 +92,7 @@ func (icm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	}, nil
 }
 
+// GetStatisticsChannel gets the statistics channel of the mocked IndexCoord, if Param `Failure` is true, it will return an error.
 func (icm *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	if icm.Failure {
 		return &milvuspb.StringResponse{
@@ -101,6 +109,7 @@ func (icm *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	}, nil
 }
 
+// GetTimeTickChannel gets the time tick channel of the mocked IndexCoord, if Param `Failure` is true, it will return an error.
 func (icm *Mock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	if icm.Failure {
 		return &milvuspb.StringResponse{
@@ -117,6 +126,7 @@ func (icm *Mock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 	}, nil
 }
 
+// BuildIndex receives a building index request, and return success, if Param `Failure` is true, it will return an error.
 func (icm *Mock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	if icm.Failure {
 		return &indexpb.BuildIndexResponse{
@@ -134,6 +144,7 @@ func (icm *Mock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest)
 	}, nil
 }
 
+// DropIndex receives a dropping index request, and return success, if Param `Failure` is true, it will return an error.
 func (icm *Mock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	if icm.Failure {
 		return &commonpb.Status{
@@ -145,6 +156,8 @@ func (icm *Mock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	}, nil
 }
 
+// GetIndexStates gets the indexes states, if Param `Failure` is true, it will return an error.
+// Under normal circumstances the state of each index is `IndexState_Finished`.
 func (icm *Mock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
 	if icm.Failure {
 		return &indexpb.GetIndexStatesResponse{
@@ -169,6 +182,7 @@ func (icm *Mock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStates
 	}, nil
 }
 
+// GetIndexFilePaths gets the index file paths, if Param `Failure` is true, it will return an error.
 func (icm *Mock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	if icm.Failure {
 		return &indexpb.GetIndexFilePathsResponse{
@@ -195,6 +209,7 @@ func (icm *Mock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 	}, nil
 }
 
+// GetMetrics gets the metrics of mocked IndexCoord, if Param `Failure` is true, it will return an error.
 func (icm *Mock) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if icm.Failure {
 		return &milvuspb.GetMetricsResponse{

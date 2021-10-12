@@ -1,4 +1,4 @@
-## Binlog
+## 8 Binlog
 
 InsertBinlog、DeleteBinlog、DDLBinlog
 
@@ -6,12 +6,11 @@ Binlog is stored in a columnar storage format, every column in schema is stored 
 Timestamp, schema, row id and primary key allocated by system are four special columns.
 Schema column records the DDL of the collection.
 
-
 ## Event format
 
 Binlog file consists of 4 bytes magic number and a series of events. The first event must be descriptor event.
 
-### Event format
+### 8.1 Event format
 
 ```
 +=====================================+=====================================================================+
@@ -19,20 +18,17 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 | header +----------------------------+---------------------------------------------------------------------+
 |        | TypeCode          8 : 1    | event type code                                                     |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | ServerID          9 : 4    | write node id                                                       |
+|        | EventLength       9 : 4    | length of event, including header and data                          |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | EventLength      13 : 4    | length of event, including header and data                          |
-|        +----------------------------+---------------------------------------------------------------------+
-|        | NextPosition     17 : 4    | offset of next event from the start of file                         |
+|        | NextPosition     13 : 4    | offset of next event from the start of file                         |
 +=====================================+=====================================================================+
-| event  | fixed part       21 : x    |                                                                     |
+| event  | fixed part       17 : x    |                                                                     |
 | data   +----------------------------+---------------------------------------------------------------------+
 |        | variable part              |                                                                     |
 +=====================================+=====================================================================+
 ```
 
-
-### Descriptor Event format
+### 8.2 Descriptor Event format
 
 ```
 +=====================================+=====================================================================+
@@ -40,38 +36,52 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 | header +----------------------------+---------------------------------------------------------------------+
 |        | TypeCode          8 : 1    | event type code                                                     |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | ServerID          9 : 4    | write node id                                                       |
+|        | EventLength       9 : 4    | length of event, including header and data                          |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | EventLength      13 : 4    | length of event, including header and data                          |
-|        +----------------------------+---------------------------------------------------------------------+
-|        | NextPosition     17 : 4    | offset of next event from the start of file                         |
+|        | NextPosition     13 : 4    | offset of next event from the start of file                         |
 +=====================================+=====================================================================+
-| event  | BinlogVersion    21 : 2    | binlog version                                                      |
+| event  | CollectionID     17 : 8    | collection id                                                       |
 | data   +----------------------------+---------------------------------------------------------------------+
-|        | ServerVersion    23 : 8    | write node version                                                  |
+|        | PartitionID      25 : 8    | partition id (schema column does not need)                          |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | CommitID         31 : 8    | commit id of the programe in git                                    |
+|        | SegmentID        33 : 8    | segment id (schema column does not need)                            |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | HeaderLength     39 : 1    | header length of other event                                        |
+|        | FieldID          41 : 8    | field id (schema column does not need)                              |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | CollectionID     40 : 8    | collection id                                                       |
+|        | StartTimestamp   49 : 8    | minimum timestamp allocated by master of all events in this file    |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | PartitionID      48 : 8    | partition id (schema column does not need)                          |
+|        | EndTimestamp     57 : 8    | maximum timestamp allocated by master of all events in this file    |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | SegmentID        56 : 8    | segment id (schema column does not need)                            |
+|        | PayloadDataType  65 : 4    | data type of payload                                                |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | StartTimestamp   64 : 1    | minimum timestamp allocated by master of all events in this file    |
+|        | ExtraLength      69 : 4    | length of extra information                                         |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | EndTimestamp     65 : 1    | maximum timestamp allocated by master of all events in this file    |
+|        | ExtraBytes       73 : n    | extra information in json format                                    |
 |        +----------------------------+---------------------------------------------------------------------+
-|        | PayloadDataType  66 : 1    | data type of payload                                                |
-|        +----------------------------+---------------------------------------------------------------------+
-|        | PostHeaderLength 67 : n    | header lengths for all event types                                  |
+|        | PostHeaderLengths n : n    | header lengths for all event types                                  |
 +=====================================+=====================================================================|
 ```
 
+`ExtraBytes` is in json format.
 
-### Type code
+`ExtraBytes` stores the extra information of the binlog file.
+
+In binlog file, we have stored many common fields in fixed part, such as `CollectionID`, `PartitionID` and etc.
+
+However, different binlog files have some other different information which differs from each other.
+
+So, `ExtraBytes` was designed to store these different information.
+
+For example, for index binlog file, we will store `indexID`, `indexBuildID`, `indexID` and other index-related
+information to `ExtraBytes`.
+
+In addition, `ExtraBytes` was also designed to extend binlog. Then we can add new features to binlog file without
+breaking the compatibility.
+
+For example, we can store the memory size of original content(before encode) to `ExtraBytes`.
+The key in `ExtraBytes` is `original_size`. For now, `original_size` is required, not optional.
+
+### 8.3 Type code
 
 ```
 DESCRIPTOR_EVENT
@@ -91,8 +101,7 @@ DELETE_EVENT 只能用于 primary key 的 binlog 文件（目前只有按照 pri
 
 CREATE_COLLECTION_EVENT、DROP_COLLECTION_EVENT、CREATE_PARTITION_EVENT、DROP_PARTITION_EVENT 只出现在 DDL binlog 文件
 
-
-### Event data part
+### 8.4 Event data part
 
 ```
 event data part
@@ -102,8 +111,6 @@ INSERT_EVENT:
 | event  | fixed  |  StartTimestamp      x : 8   | min timestamp in this event                              |
 | data   | part   +------------------------------+----------------------------------------------------------+
 |        |        |  EndTimestamp      x+8 : 8   | max timestamp in this event                              |
-|        |        +------------------------------+----------------------------------------------------------+
-|        |        |  reserved         x+16 : y   | reserved part                                            |
 |        +--------+------------------------------+----------------------------------------------------------+
 |        |variable|  parquet payload             | payload in parquet format                                |
 |        |part    |                              |                                                          |
@@ -112,45 +119,38 @@ INSERT_EVENT:
 other events are similar with INSERT_EVENT
 ```
 
-
-### Example
+### 8.5 Example
 
 Schema
 
-​	string | int | float(optional) | vector(512)
-
-
+​ string | int | float(optional) | vector(512)
 
 Request:
 
-​	InsertRequest  rows(1W)
+​ InsertRequest rows(1W)
 
-​	DeleteRequest pk=1
+​ DeleteRequest pk=1
 
-​	DropPartition partitionTag="abc"
-
-
+​ DropPartition partitionTag="abc"
 
 insert binlogs:
 
-​	rowid, pk, ts, string, int, float, vector 6 files
+​ rowid, pk, ts, string, int, float, vector 6 files
 
-​	all events are INSERT_EVENT
-​	float column file contains some NULL value
+​ all events are INSERT_EVENT
+​ float column file contains some NULL value
 
 delete binlogs:
 
-​	pk, ts 2 files
+​ pk, ts 2 files
 
-​	pk's events are DELETE_EVENT, ts's events are INSERT_EVENT
+​ pk's events are DELETE_EVENT, ts's events are INSERT_EVENT
 
 DDL binlogs:
 
-​	ddl, ts
+​ ddl, ts
 
-​	ddl's event is DROP_PARTITION_EVENT, ts's event is INSERT_EVENT
-
-
+​ ddl's event is DROP_PARTITION_EVENT, ts's event is INSERT_EVENT
 
 C++ interface
 

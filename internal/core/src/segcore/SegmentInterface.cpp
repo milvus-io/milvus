@@ -19,7 +19,8 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult&
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.result_distances_.size();
-    Assert(results.internal_seg_offsets_.size() == size);
+    AssertInfo(results.internal_seg_offsets_.size() == size,
+               "Size of result distances is not equal to size of segment offsets");
     // Assert(results.result_offsets_.size() == size);
     Assert(results.row_data_.size() == 0);
 
@@ -34,9 +35,10 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult&
             bulk_subscript(SystemFieldType::RowId, results.internal_seg_offsets_.data(), size, blob.data());
         } else {
             auto key_offset_opt = get_schema().get_primary_key_offset();
-            Assert(key_offset_opt.has_value());
+            AssertInfo(key_offset_opt.has_value(), "Cannot get primary key offset from schema");
             auto key_offset = key_offset_opt.value();
-            Assert(get_schema()[key_offset].get_data_type() == DataType::INT64);
+            AssertInfo(get_schema()[key_offset].get_data_type() == DataType::INT64,
+                       "Primary key field is not INT64 type");
             bulk_subscript(key_offset, results.internal_seg_offsets_.data(), size, blob.data());
         }
         blobs.emplace_back(std::move(blob));
@@ -161,7 +163,7 @@ CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_
                 break;
             }
             case DataType::VECTOR_BINARY: {
-                Assert(dim % 8 == 0);
+                AssertInfo(dim % 8 == 0, "Binary vector field dimension is not a multiple of 8");
                 auto num_bytes = count * dim / 8;
                 auto data = reinterpret_cast<const char*>(data_raw);
                 auto obj = vector_array->mutable_binary_vector();

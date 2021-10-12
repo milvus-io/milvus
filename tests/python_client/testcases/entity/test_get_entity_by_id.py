@@ -1,23 +1,23 @@
-import time
-import random
-import pdb
-import copy
-import logging
-from multiprocessing import Pool, Process
-import concurrent.futures
-from threading import current_thread
-import pytest
-from utils.utils import *
-from common.constants import *
+# import time
+# import random
+# import pdb
+# import copy
+# import logging
+# from multiprocessing import Pool, Process
+# import concurrent.futures
+# from threading import current_thread
+# import pytest
+# from utils.utils import *
+# from common.constants import *
 
-default_single_query = {
-    "bool": {
-        "must": [
-            {"vector": {
-                default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, default_dim), "params": {"nprobe": 10}}}}
-        ]
-    }
-}
+# default_single_query = {
+#     "bool": {
+#         "must": [
+#             {"vector": {
+#                 default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, default_dim), "params": {"nprobe": 10}}}}
+#         ]
+#     }
+# }
 
 # class TestGetBase:
 #     """

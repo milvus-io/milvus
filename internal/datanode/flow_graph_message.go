@@ -13,31 +13,34 @@ package datanode
 
 import (
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
 type (
-	Msg          = flowgraph.Msg
+	// Msg is flowgraph.Msg
+	Msg = flowgraph.Msg
+
+	// MsgStreamMsg is flowgraph.MsgStreamMsg
 	MsgStreamMsg = flowgraph.MsgStreamMsg
 )
 
-type insertMsg struct {
+type flowGraphMsg struct {
 	insertMessages []*msgstream.InsertMsg
+	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
 	startPositions []*internalpb.MsgPosition
 	endPositions   []*internalpb.MsgPosition
 }
 
+func (fgMsg *flowGraphMsg) TimeTick() Timestamp {
+	return fgMsg.timeRange.timestampMax
+}
+
+// flush Msg is used in flowgraph insertBufferNode to flush the given segment
 type flushMsg struct {
 	msgID        UniqueID
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
-	dmlFlushedCh chan<- []*datapb.FieldBinlog
-}
-
-func (iMsg *insertMsg) TimeTick() Timestamp {
-	return iMsg.timeRange.timestampMax
 }

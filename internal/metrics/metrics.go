@@ -18,32 +18,20 @@ const (
 	subSystemProxy     = "proxy"
 )
 
-/*
 var (
-	PanicCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "server",
-			Name:      "panic_total",
-			Help:      "Counter of panic.",
-		}, []string{"type"})
-)
-*/
-
-var (
-	// RootCoordProxyLister used to count the num of registered proxy nodes
+	// RootCoordProxyLister counts the num of registered proxy nodes
 	RootCoordProxyLister = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: subSystemRootCoord,
 			Name:      "list_of_proxy",
-			Help:      "List of proxy nodes which has register with etcd",
+			Help:      "List of proxy nodes which have registered with etcd",
 		}, []string{"client_id"})
 
 	////////////////////////////////////////////////////////////////////////////
 	// for grpc
 
-	// RootCoordCreateCollectionCounter used to count the num of calls of CreateCollection
+	// RootCoordCreateCollectionCounter counts the num of calls of CreateCollection
 	RootCoordCreateCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -607,7 +595,7 @@ var (
 
 //RegisterDataCoord register DataCoord metrics
 func RegisterDataCoord() {
-	prometheus.Register(DataCoordDataNodeList)
+	prometheus.MustRegister(DataCoordDataNodeList)
 }
 
 var (
@@ -620,7 +608,7 @@ var (
 			Help:      "Counter of flush segments",
 		}, []string{"type"})
 
-	// DataNodeWatchDmChannelCounter used to count the num of calls of WatchDmChannels
+	// DataNodeWatchDmChannelsCounter used to count the num of calls of WatchDmChannels
 	DataNodeWatchDmChannelsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -632,8 +620,8 @@ var (
 
 //RegisterDataNode register DataNode metrics
 func RegisterDataNode() {
-	prometheus.Register(DataNodeFlushSegmentsCounter)
-	prometheus.Register(DataNodeWatchDmChannelsCounter)
+	prometheus.MustRegister(DataNodeFlushSegmentsCounter)
+	prometheus.MustRegister(DataNodeWatchDmChannelsCounter)
 }
 
 //RegisterIndexCoord register IndexCoord metrics

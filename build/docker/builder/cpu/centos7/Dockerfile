@@ -12,7 +12,7 @@
 FROM milvusdb/openblas:centos7-20210706
 
 RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget curl which && \
-    wget -qO- "https://cmake.org/files/v3.14/cmake-3.14.3-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
+    wget -qO- "https://cmake.org/files/v3.18/cmake-3.18.6-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     yum install -y git make automake openssl-devel zlib-devel \
       libcurl-devel python3-devel \
       devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \

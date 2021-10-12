@@ -71,7 +71,7 @@ TEST_P(PlanProtoTest, Range) {
     string value_tag = "bool_val";
     if (datatype_is_floating((DataType)data_type)) {
         value_tag = "float_val";
-    } else if (datatype_is_interger((DataType)data_type)) {
+    } else if (datatype_is_integer((DataType)data_type)) {
         value_tag = "int64_val";
     }
 
@@ -92,6 +92,7 @@ vector_anns: <
   >
   query_info: <
     topk: 10
+    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -130,7 +131,8 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -152,7 +154,7 @@ TEST_P(PlanProtoTest, TermExpr) {
     string value_tag = "bool_val";
     if (datatype_is_floating((DataType)data_type)) {
         value_tag = "float_val";
-    } else if (datatype_is_interger((DataType)data_type)) {
+    } else if (datatype_is_integer((DataType)data_type)) {
         value_tag = "int64_val";
     }
 
@@ -178,6 +180,7 @@ vector_anns: <
   >
   query_info: <
     topk: 10
+    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -216,7 +219,8 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -239,7 +243,7 @@ TEST(PlanProtoTest, NotExpr) {
     string value_tag = "bool_val";
     if (datatype_is_floating((DataType)data_type)) {
         value_tag = "float_val";
-    } else if (datatype_is_interger((DataType)data_type)) {
+    } else if (datatype_is_integer((DataType)data_type)) {
         value_tag = "int64_val";
     }
 
@@ -265,6 +269,7 @@ vector_anns: <
   >
   query_info: <
     topk: 10
+    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -305,7 +310,8 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -330,7 +336,7 @@ TEST(PlanProtoTest, AndOrExpr) {
     string value_tag = "bool_val";
     if (datatype_is_floating((DataType)data_type)) {
         value_tag = "float_val";
-    } else if (datatype_is_interger((DataType)data_type)) {
+    } else if (datatype_is_integer((DataType)data_type)) {
         value_tag = "int64_val";
     }
 
@@ -385,6 +391,7 @@ vector_anns: <
   >
   query_info: <
     topk: 10
+    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -441,7 +448,8 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -483,6 +491,7 @@ vector_anns: <
   >
   query_info: <
     topk: 10
+    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -521,7 +530,8 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }

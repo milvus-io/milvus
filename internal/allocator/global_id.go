@@ -17,17 +17,22 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// GIDAllocator is interface for GlobalIDAllocator.
+// Alloc allocates the id of the count number.
+// AllocOne allocates one id.
+// UpdateID update timestamp of allocator.
 type GIDAllocator interface {
 	Alloc(count uint32) (UniqueID, UniqueID, error)
 	AllocOne() (UniqueID, error)
 	UpdateID() error
 }
 
-// GlobalTSOAllocator is the global single point TSO allocator.
+// GlobalIDAllocator is the global single point TSO allocator.
 type GlobalIDAllocator struct {
 	allocator tso.Allocator
 }
 
+// NewGlobalIDAllocator creates GlobalIDAllocator for allocates ID.
 func NewGlobalIDAllocator(key string, base kv.TxnKV) *GlobalIDAllocator {
 	allocator := tso.NewGlobalTSOAllocator(key, base)
 	allocator.SetLimitMaxLogic(false)
@@ -41,6 +46,7 @@ func (gia *GlobalIDAllocator) Initialize() error {
 	return gia.allocator.Initialize()
 }
 
+// Alloc allocates the id of the count number.
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (gia *GlobalIDAllocator) Alloc(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
@@ -53,6 +59,7 @@ func (gia *GlobalIDAllocator) Alloc(count uint32) (typeutil.UniqueID, typeutil.U
 	return idStart, idEnd, nil
 }
 
+// AllocOne allocates one id.
 func (gia *GlobalIDAllocator) AllocOne() (typeutil.UniqueID, error) {
 	timestamp, err := gia.allocator.GenerateTSO(1)
 	if err != nil {
@@ -62,6 +69,7 @@ func (gia *GlobalIDAllocator) AllocOne() (typeutil.UniqueID, error) {
 	return idStart, nil
 }
 
+// UpdateID update timestamp of allocator.
 func (gia *GlobalIDAllocator) UpdateID() error {
 	return gia.allocator.UpdateTSO()
 }

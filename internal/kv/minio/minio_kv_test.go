@@ -189,6 +189,61 @@ func TestMinIOKV_Remove(t *testing.T) {
 	assert.Empty(t, val)
 }
 
+func TestMinIOKV_LoadPartial(t *testing.T) {
+	Params.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bucketName := "fantastic-tech-test"
+	minIOKV, err := newMinIOKVClient(ctx, bucketName)
+	assert.Nil(t, err)
+
+	defer minIOKV.RemoveWithPrefix("")
+
+	key := "TestMinIOKV_LoadPartial_key"
+	value := "TestMinIOKV_LoadPartial_value"
+
+	err = minIOKV.Save(key, value)
+	assert.NoError(t, err)
+
+	var start, end int64
+	var partial []byte
+
+	start, end = 1, 2
+	partial, err = minIOKV.LoadPartial(key, start, end)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, partial, []byte(value[start:end]))
+
+	start, end = 0, int64(len(value))
+	partial, err = minIOKV.LoadPartial(key, start, end)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, partial, []byte(value[start:end]))
+
+	// error case
+	start, end = 5, 3
+	_, err = minIOKV.LoadPartial(key, start, end)
+	assert.Error(t, err)
+
+	start, end = 1, 1
+	_, err = minIOKV.LoadPartial(key, start, end)
+	assert.Error(t, err)
+
+	start, end = -1, 1
+	_, err = minIOKV.LoadPartial(key, start, end)
+	assert.Error(t, err)
+
+	start, end = 1, -1
+	_, err = minIOKV.LoadPartial(key, start, end)
+	assert.Error(t, err)
+
+	err = minIOKV.Remove(key)
+	assert.NoError(t, err)
+	start, end = 1, 2
+	_, err = minIOKV.LoadPartial(key, start, end)
+	assert.Error(t, err)
+}
+
 func TestMinIOKV_FGetObject(t *testing.T) {
 	Params.Init()
 	path := "/tmp/milvus/data"

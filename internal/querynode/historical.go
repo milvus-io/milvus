@@ -36,6 +36,7 @@ const (
 	segmentMetaPrefix = "queryCoord-segmentMeta"
 )
 
+// historical is in charge of historical data in query node
 type historical struct {
 	ctx context.Context
 
@@ -49,6 +50,7 @@ type historical struct {
 	etcdKV *etcdkv.EtcdKV
 }
 
+// newHistorical returns a new historical
 func newHistorical(ctx context.Context,
 	rootCoord types.RootCoord,
 	indexCoord types.IndexCoord,
@@ -102,7 +104,7 @@ func (h *historical) watchGlobalSegmentMeta() {
 						zap.Any("segmentID", segmentID),
 					)
 					segmentInfo := &querypb.SegmentInfo{}
-					err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
+					err = proto.Unmarshal(event.Kv.Value, segmentInfo)
 					if err != nil {
 						log.Warn("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
 						continue
@@ -227,6 +229,7 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 	return retrieveResults, retrieveSegmentIDs, nil
 }
 
+// search will search all the target segments in historical
 func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []UniqueID, error) {
 

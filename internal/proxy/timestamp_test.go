@@ -16,13 +16,15 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
+
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewTimestampAllocator(t *testing.T) {
 	ctx := context.Background()
 	tso := newMockTimestampAllocatorInterface()
-	peerID := UniqueID(getUniqueIntGeneratorIns().get())
+	peerID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
 	tsAllocator, err := NewTimestampAllocator(ctx, tso, peerID)
 	assert.Nil(t, err)
@@ -32,7 +34,7 @@ func TestNewTimestampAllocator(t *testing.T) {
 func TestTimestampAllocator_Alloc(t *testing.T) {
 	ctx := context.Background()
 	tso := newMockTimestampAllocatorInterface()
-	peerID := UniqueID(getUniqueIntGeneratorIns().get())
+	peerID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
 	tsAllocator, err := NewTimestampAllocator(ctx, tso, peerID)
 	assert.Nil(t, err)
@@ -47,7 +49,7 @@ func TestTimestampAllocator_Alloc(t *testing.T) {
 func TestTimestampAllocator_AllocOne(t *testing.T) {
 	ctx := context.Background()
 	tso := newMockTimestampAllocatorInterface()
-	peerID := UniqueID(getUniqueIntGeneratorIns().get())
+	peerID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
 	tsAllocator, err := NewTimestampAllocator(ctx, tso, peerID)
 	assert.Nil(t, err)

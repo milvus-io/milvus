@@ -13,19 +13,23 @@ package rocksmq
 
 import "fmt"
 
+// Result is the type of int and represent error result
 type Result int
 
+// constant value used in error struct
 const (
 	Ok Result = iota
 	UnknownError
 	InvalidConfiguration
 )
 
+// Error is a struct contains error msg and result
 type Error struct {
 	msg    string
 	result Result
 }
 
+// Result returns the error result
 func (e *Error) Result() Result {
 	return e.result
 }

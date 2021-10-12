@@ -12,7 +12,6 @@
 package querycoord
 
 import (
-	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -23,8 +22,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is an alias for the Int64 type
 type UniqueID = typeutil.UniqueID
 
+// ParamTable maintains some of the environment variables that are required for the QuryCoord runtime
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -40,10 +41,8 @@ type ParamTable struct {
 	// timetick
 	TimeTickChannelName string
 
-	Log      log.Config
-	RoleName string
-
-	// search
+	// channels
+	ClusterChannelPrefix      string
 	SearchChannelPrefix       string
 	SearchResultChannelPrefix string
 
@@ -60,86 +59,51 @@ type ParamTable struct {
 	MinioBucketName      string
 }
 
+// Params are variables of the ParamTable type
 var Params ParamTable
 var once sync.Once
 
-func (p *ParamTable) Init() {
+// InitOnce guarantees that variables are initialized only once
+func (p *ParamTable) InitOnce() {
 	once.Do(func() {
-		p.BaseTable.Init()
-		err := p.LoadYaml("advanced/query_node.yaml")
-		if err != nil {
-			panic(err)
-		}
-
-		err = p.LoadYaml("milvus.yaml")
-		if err != nil {
-			panic(err)
-		}
-
-		p.initLogCfg()
-
-		p.initStatsChannelName()
-		p.initTimeTickChannelName()
-		p.initQueryCoordAddress()
-		p.initRoleName()
-		p.initSearchChannelPrefix()
-		p.initSearchResultChannelPrefix()
-
-		// --- ETCD ---
-		p.initEtcdEndpoints()
-		p.initMetaRootPath()
-		p.initKvRootPath()
-
-		//--- Minio ----
-		p.initMinioEndPoint()
-		p.initMinioAccessKeyID()
-		p.initMinioSecretAccessKey()
-		p.initMinioUseSSLStr()
-		p.initMinioBucketName()
+		p.Init()
 	})
 }
 
-func (p *ParamTable) initLogCfg() {
-	p.Log = log.Config{}
-	format, err := p.Load("log.format")
+//Init is used to initialize params
+func (p *ParamTable) Init() {
+	p.BaseTable.Init()
+	err := p.LoadYaml("advanced/query_node.yaml")
 	if err != nil {
 		panic(err)
 	}
-	p.Log.Format = format
-	level, err := p.Load("log.level")
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Level = level
-	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
-	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
-	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
-	rootPath, err := p.Load("log.file.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("queryCoord-%d.log", p.NodeID))
-	} else {
-		p.Log.File.Filename = ""
-	}
-}
 
-func (p *ParamTable) initStatsChannelName() {
-	channels, err := p.Load("msgChannel.chanNamePrefix.queryNodeStats")
+	err = p.LoadYaml("milvus.yaml")
 	if err != nil {
 		panic(err)
 	}
-	p.StatsChannelName = channels
-}
 
-func (p *ParamTable) initTimeTickChannelName() {
-	timeTickChannelName, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
-	if err != nil {
-		panic(err)
-	}
-	p.TimeTickChannelName = timeTickChannelName
+	p.initQueryCoordAddress()
+	p.initRoleName()
 
+	// --- Channels ---
+	p.initClusterMsgChannelPrefix()
+	p.initSearchChannelPrefix()
+	p.initSearchResultChannelPrefix()
+	p.initStatsChannelName()
+	p.initTimeTickChannelName()
+
+	// --- ETCD ---
+	p.initEtcdEndpoints()
+	p.initMetaRootPath()
+	p.initKvRootPath()
+
+	//--- Minio ----
+	p.initMinioEndPoint()
+	p.initMinioAccessKeyID()
+	p.initMinioSecretAccessKey()
+	p.initMinioUseSSLStr()
+	p.initMinioBucketName()
 }
 
 func (p *ParamTable) initQueryCoordAddress() {
@@ -150,26 +114,49 @@ func (p *ParamTable) initQueryCoordAddress() {
 	p.Address = url
 }
 
-func (p *ParamTable) initRoleName() {
-	p.RoleName = fmt.Sprintf("%s-%d", "QueryCoord", p.NodeID)
+func (p *ParamTable) initClusterMsgChannelPrefix() {
+	config, err := p.Load("msgChannel.chanNamePrefix.cluster")
+	if err != nil {
+		panic(err)
+	}
+	p.ClusterChannelPrefix = config
 }
 
 func (p *ParamTable) initSearchChannelPrefix() {
-	channelName, err := p.Load("msgChannel.chanNamePrefix.search")
+	config, err := p.Load("msgChannel.chanNamePrefix.search")
 	if err != nil {
 		log.Error(err.Error())
 	}
 
-	p.SearchChannelPrefix = channelName
+	s := []string{p.ClusterChannelPrefix, config}
+	p.SearchChannelPrefix = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initSearchResultChannelPrefix() {
-	channelName, err := p.Load("msgChannel.chanNamePrefix.searchResult")
+	config, err := p.Load("msgChannel.chanNamePrefix.searchResult")
 	if err != nil {
 		log.Error(err.Error())
 	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.SearchResultChannelPrefix = strings.Join(s, "-")
+}
 
-	p.SearchResultChannelPrefix = channelName
+func (p *ParamTable) initStatsChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.queryNodeStats")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.StatsChannelName = strings.Join(s, "-")
+}
+
+func (p *ParamTable) initTimeTickChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.TimeTickChannelName = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initEtcdEndpoints() {
@@ -246,4 +233,8 @@ func (p *ParamTable) initMinioBucketName() {
 		panic(err)
 	}
 	p.MinioBucketName = bucketName
+}
+
+func (p *ParamTable) initRoleName() {
+	p.RoleName = "querycoord"
 }

@@ -20,6 +20,8 @@ import (
 	"errors"
 )
 
+// BinlogReader is an object to read binlog file. Binlog file's format can be
+// found in design docs.
 type BinlogReader struct {
 	magicNumber int32
 	descriptorEvent
@@ -28,6 +30,7 @@ type BinlogReader struct {
 	isClose   bool
 }
 
+// NextEventReader iters all events reader to read the binlog file.
 func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.isClose {
 		return nil, errors.New("bin log reader is closed")
@@ -63,6 +66,8 @@ func (reader *BinlogReader) readDescriptorEvent() (*descriptorEvent, error) {
 	return &reader.descriptorEvent, nil
 }
 
+// Close closes the BinlogReader object.
+// It mainly calls the Close method of the internal events, reclaims resources, and marks itself as closed.
 func (reader *BinlogReader) Close() error {
 	if reader.isClose {
 		return nil
@@ -76,6 +81,7 @@ func (reader *BinlogReader) Close() error {
 	return nil
 }
 
+// NewBinlogReader creates binlogReader to read binlog file.
 func NewBinlogReader(data []byte) (*BinlogReader, error) {
 	reader := &BinlogReader{
 		buffer:    bytes.NewBuffer(data),

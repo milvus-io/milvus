@@ -1,4 +1,4 @@
-# This configs KinD to spin up a k8s cluster with trustworthy jwt (Service Account Token Volume Projection) feature.
+# This configures KinD to spin up a k8s cluster with trustworthy jwt (Service Account Token Volume Projection) feature.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:

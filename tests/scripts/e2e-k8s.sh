@@ -138,7 +138,7 @@ Usage:
                                 Refer: https://helm.sh/docs/helm/helm_install/#helm-install
 
     --test-extra-arg            Run e2e test extra configuration
-                                For example, \"--tag=smoke\"
+                                For example, \"--tags=L0\"
 
     --test-timeout              To specify timeout period of e2e test. Timeout time is specified in seconds.
 
@@ -200,7 +200,7 @@ fi
 export PULL_POLICY=IfNotPresent
 
 # We run a local-registry in a docker container that KinD nodes pull from
-# These values are must match what is in config/trustworthy-jwt.yaml
+# These values must match what are in config/trustworthy-jwt.yaml
 export KIND_REGISTRY_NAME="kind-registry"
 export KIND_REGISTRY_PORT="5000"
 export KIND_REGISTRY="localhost:${KIND_REGISTRY_PORT}"

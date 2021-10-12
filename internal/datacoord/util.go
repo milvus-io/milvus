@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package datacoord
 
 import (
@@ -24,10 +25,6 @@ import (
 type Response interface {
 	GetStatus() *commonpb.Status
 }
-
-var errNilResponse = errors.New("response is nil")
-var errNilStatusResponse = errors.New("response has nil status")
-var errUnknownResponseType = errors.New("unknown response type")
 
 // VerifyResponse verify grpc Response 1. check error is nil 2. check response.GetStatus() with status success
 func VerifyResponse(response interface{}, err error) error {
@@ -64,7 +61,7 @@ func VerifyResponse(response interface{}, err error) error {
 type LongTermChecker struct {
 	d    time.Duration
 	t    *time.Ticker
-	ctx  context.Context
+	ch   chan struct{}
 	warn string
 	name string
 }
@@ -73,9 +70,9 @@ type LongTermChecker struct {
 func NewLongTermChecker(ctx context.Context, name string, d time.Duration, warn string) *LongTermChecker {
 	c := &LongTermChecker{
 		name: name,
-		ctx:  ctx,
 		d:    d,
 		warn: warn,
+		ch:   make(chan struct{}),
 	}
 	return c
 }
@@ -86,7 +83,7 @@ func (c *LongTermChecker) Start() {
 	go func() {
 		for {
 			select {
-			case <-c.ctx.Done():
+			case <-c.ch:
 				log.Warn(fmt.Sprintf("long term checker [%s] shutdown", c.name))
 				return
 			case <-c.t.C:
@@ -99,4 +96,10 @@ func (c *LongTermChecker) Start() {
 // Check reset the time ticker
 func (c *LongTermChecker) Check() {
 	c.t.Reset(c.d)
+}
+
+// Stop stop the checker
+func (c *LongTermChecker) Stop() {
+	c.t.Stop()
+	close(c.ch)
 }

@@ -147,7 +147,7 @@ class TestInsertParams(TestcaseBase):
         """
         target: test insert None
         method: data is None
-        expected: raise exception
+        expected: return successfully with zero results
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
@@ -216,7 +216,7 @@ class TestInsertParams(TestcaseBase):
         assert collection_w.num_entities == 1
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_insert_dim_not_match(self):
         """
         target: test insert with not match dim
@@ -232,7 +232,7 @@ class TestInsertParams(TestcaseBase):
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_insert_binary_dim_not_match(self):
         """
         target: test insert binary with dim not match
@@ -299,7 +299,7 @@ class TestInsertParams(TestcaseBase):
         """
         target: test insert vector value less than other
         method: vec field value less than int field
-        expected: todo
+        expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
@@ -316,7 +316,7 @@ class TestInsertParams(TestcaseBase):
         """
         target: test insert with fields more
         method: field more than schema fields
-        expected: todo
+        expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
@@ -692,7 +692,6 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #7513")
     def test_insert_all_datatype_collection(self):
         """
         target: test insert into collection that contains all datatype fields
@@ -700,12 +699,11 @@ class TestInsertOperation(TestcaseBase):
         expected: verify num entities
         """
         self._connect()
-        # need to add string field
-        df = cf.gen_dataframe_all_data_type()
-        log.debug(df.head(3))
+        nb = 100
+        df = cf.gen_dataframe_all_data_type(nb=nb)
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name)
-        assert self.collection_wrap.num_entities == ct.default_nb
+        assert self.collection_wrap.num_entities == nb
 
 
 class TestInsertAsync(TestcaseBase):
@@ -723,7 +721,7 @@ class TestInsertAsync(TestcaseBase):
         expected: verify num entities
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         future, _ = collection_w.insert(data=df, _async=True)
         future.done()
         mutation_res = future.result()
@@ -739,7 +737,7 @@ class TestInsertAsync(TestcaseBase):
         expected: verify num entities
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         mutation_res, _ = collection_w.insert(data=df, _async=False)
         assert mutation_res.insert_count == ct.default_nb
         assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
@@ -753,7 +751,7 @@ class TestInsertAsync(TestcaseBase):
         expected: verify num entities
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         future, _ = collection_w.insert(data=df, _async=True, _callback=assert_mutation_result)
         future.done()
         mutation_res = future.result()

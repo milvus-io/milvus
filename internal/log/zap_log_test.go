@@ -153,10 +153,10 @@ func TestTimeEncoder(t *testing.T) {
 // See [logger-header]https://github.com/tikv/rfcs/blob/master/text/2018-12-19-unified-log-format.md#log-header-section.
 func TestZapCaller(t *testing.T) {
 	data := []zapcore.EntryCaller{
-		{Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: "server.go", Line: 132},
-		{Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: "server/coordinator.go", Line: 20},
-		{Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: `z\test_coordinator1.go`, Line: 20},
-		{Defined: false, PC: uintptr(unsafe.Pointer(nil)), File: "", Line: 0},
+		/* #nosec G103 */ {Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: "server.go", Line: 132},
+		/* #nosec G103 */ {Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: "server/coordinator.go", Line: 20},
+		/* #nosec G103 */ {Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: `z\test_coordinator1.go`, Line: 20},
+		/* #nosec G103 */ {Defined: false, PC: uintptr(unsafe.Pointer(nil)), File: "", Line: 0},
 	}
 	expect := []string{
 		"server.go:132",

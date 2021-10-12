@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -26,11 +27,17 @@ func TestParamTable_PulsarAddress(t *testing.T) {
 	assert.Equal(t, "6650", split[len(split)-1])
 }
 
-func TestParamTable_QueryNode(t *testing.T) {
-	t.Run("Test time tick channel", func(t *testing.T) {
-		ch := Params.QueryTimeTickChannelName
-		assert.Equal(t, ch, "queryTimeTick")
-	})
+func TestParamTable_cacheSize(t *testing.T) {
+	cacheSize := Params.CacheSize
+	assert.Equal(t, int64(32), cacheSize)
+	err := os.Setenv("CACHE_SIZE", "2")
+	assert.NoError(t, err)
+	Params.initCacheSize()
+	assert.Equal(t, int64(2), Params.CacheSize)
+	err = os.Setenv("CACHE_SIZE", "32")
+	assert.NoError(t, err)
+	Params.initCacheSize()
+	assert.Equal(t, int64(32), Params.CacheSize)
 }
 
 func TestParamTable_minio(t *testing.T) {
@@ -87,16 +94,22 @@ func TestParamTable_flowGraphMaxParallelism(t *testing.T) {
 }
 
 func TestParamTable_msgChannelSubName(t *testing.T) {
+	Params.QueryNodeID = 3
 	Params.initMsgChannelSubName()
 	name := Params.MsgChannelSubName
-	expectName := "queryNode-0"
-	assert.Equal(t, expectName, name)
+	assert.Equal(t, name, "by-dev-queryNode-3")
 }
 
 func TestParamTable_statsChannelName(t *testing.T) {
+	Params.Init()
 	name := Params.StatsChannelName
-	contains := strings.Contains(name, "query-node-stats")
-	assert.Equal(t, contains, true)
+	assert.Equal(t, name, "by-dev-query-node-stats")
+}
+
+func TestParamTable_QueryTimeTickChannel(t *testing.T) {
+	Params.Init()
+	ch := Params.QueryTimeTickChannelName
+	assert.Equal(t, ch, "by-dev-queryTimeTick")
 }
 
 func TestParamTable_metaRootPath(t *testing.T) {

@@ -11,6 +11,7 @@
 
 package mqclient
 
+// Client is the interface that provides operations of message queues
 type Client interface {
 	// Create a producer instance
 	CreateProducer(options ProducerOptions) (Producer, error)

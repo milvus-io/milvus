@@ -29,6 +29,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
+// Meta is used to record the state of the index.
+// revision: The number of times IndexMeta has been changed in ETCD. It's the same as Event.Kv.Version in ETCD.
+// indexMeta:A structure that records the state of the index defined by proto.
 type Meta struct {
 	indexMeta *indexpb.IndexMeta
 	revision  int64
@@ -41,6 +44,7 @@ type metaTable struct {
 	lock sync.RWMutex
 }
 
+// NewMetaTable is used to create a new meta table.
 func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 	mt := &metaTable{
 		client: kv,
@@ -66,7 +70,7 @@ func (mt *metaTable) reloadFromKV() error {
 
 	for i := 0; i < len(values); i++ {
 		indexMeta := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(values[i], &indexMeta)
+		err = proto.Unmarshal([]byte(values[i]), &indexMeta)
 		if err != nil {
 			return fmt.Errorf("IndexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
@@ -82,10 +86,12 @@ func (mt *metaTable) reloadFromKV() error {
 
 // metaTable.lock.Lock() before call this function
 func (mt *metaTable) saveIndexMeta(meta *Meta) error {
-	value := proto.MarshalTextString(meta.indexMeta)
-
+	value, err := proto.Marshal(meta.indexMeta)
+	if err != nil {
+		return err
+	}
 	key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
-	err := mt.client.CompareVersionAndSwap(key, meta.revision, value)
+	err = mt.client.CompareVersionAndSwap(key, meta.revision, string(value))
 	log.Debug("IndexCoord metaTable saveIndexMeta ", zap.String("key", key), zap.Error(err))
 	if err != nil {
 		return err
@@ -111,7 +117,7 @@ func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
 		return nil, errors.New("meta doesn't exist in KV")
 	}
 	im := &indexpb.IndexMeta{}
-	err = proto.UnmarshalText(values[0], im)
+	err = proto.Unmarshal([]byte(values[0]), im)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +160,7 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		log.Debug("IndexCoord metaTable BuildIndex index not exists", zap.Any("indexBuildID", indexBuildID))
+		log.Error("IndexCoord metaTable BuildIndex index not exists", zap.Any("indexBuildID", indexBuildID))
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
@@ -190,7 +196,7 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	log.Debug("IndexCoord metaTable update UpdateVersion", zap.Any("IndexBuildId", indexBuildID))
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		log.Debug("IndexCoord metaTable update UpdateVersion indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
+		log.Warn("IndexCoord metaTable update UpdateVersion indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
@@ -229,8 +235,10 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.Req.IndexID == indexID && !meta.indexMeta.MarkDeleted {
 			meta.indexMeta.MarkDeleted = true
+			// marshal inside
+			/* #nosec G601 */
 			if err := mt.saveIndexMeta(&meta); err != nil {
-				log.Debug("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
+				log.Error("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
 				fn := func() error {
 					m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
 					if m == nil {
@@ -332,7 +340,7 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 		err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
 		if err2 != nil {
 			meta.indexMeta.Recycled = false
-			log.Debug("IndexCoord metaTable UpdateRecycleState failed", zap.Error(err2))
+			log.Error("IndexCoord metaTable UpdateRecycleState failed", zap.Error(err2))
 			return err2
 		}
 	}
@@ -465,13 +473,13 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 			return false
 		}
 	} else {
-		log.Debug("Index not exist", zap.Int64("IndexBuildID", indexBuildID))
+		log.Error("Index not exist", zap.Int64("IndexBuildID", indexBuildID))
 		return false
 	}
 
 	m, err := mt.reloadMeta(indexBuildID)
 	if m == nil {
-		log.Debug("IndexCoord metaTable reloadMeta failed", zap.Error(err))
+		log.Error("IndexCoord metaTable reloadMeta failed", zap.Error(err))
 		return false
 	}
 
@@ -493,4 +501,17 @@ func (mt *metaTable) GetNodeTaskStats() map[UniqueID]int {
 		}
 	}
 	return nodePriority
+}
+
+func (mt *metaTable) GetIndexMetaByIndexBuildID(indexBuildID UniqueID) *indexpb.IndexMeta {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
+
+	log.Debug("IndexCoord MetaTable GetIndexMeta", zap.Int64("IndexBuildID", indexBuildID))
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if !ok {
+		log.Error("IndexCoord MetaTable GetIndexMeta not exist", zap.Int64("IndexBuildID", indexBuildID))
+		return nil
+	}
+	return meta.indexMeta
 }

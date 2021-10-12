@@ -39,8 +39,9 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
 				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
 			},
-			// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-			Type: typeutil.DataNodeRole,
+			CreatedTime: Params.CreatedTime.String(),
+			UpdatedTime: Params.UpdatedTime.String(),
+			Type:        typeutil.DataNodeRole,
 		},
 		SystemConfigurations: metricsinfo.DataNodeConfiguration{
 			FlushInsertBufferSize: Params.FlushInsertBufferSize,

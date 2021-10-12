@@ -19,7 +19,28 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPatchEarliestMessageID(t *testing.T) {
+func TestPulsarConsumer_Subscription(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+	defer pc.Close()
+
+	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
+	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       "Topic",
+		SubscriptionName:            "SubName",
+		Type:                        pulsar.SubscriptionType(Exclusive),
+		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(SubscriptionPositionEarliest),
+		MessageChannel:              receiveChannel,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+
+	str := consumer.Subscription()
+	assert.NotNil(t, str)
+}
+
+func Test_PatchEarliestMessageID(t *testing.T) {
 	mid := pulsar.EarliestMessageID()
 
 	// String() -> ledgerID:entryID:partitionIdx

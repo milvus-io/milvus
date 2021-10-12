@@ -12,16 +12,17 @@
 #include "exceptions/EasyAssert.h"
 #include "query/SubSearchResult.h"
 #include "segcore/Reduce.h"
+#include <cmath>
 
 namespace milvus::query {
 
 template <bool is_desc>
 void
 SubSearchResult::merge_impl(const SubSearchResult& right) {
-    Assert(num_queries_ == right.num_queries_);
-    Assert(topk_ == right.topk_);
-    Assert(metric_type_ == right.metric_type_);
-    Assert(is_desc == is_descending(metric_type_));
+    AssertInfo(num_queries_ == right.num_queries_, "[SubSearchResult]Nq check failed");
+    AssertInfo(topk_ == right.topk_, "[SubSearchResult]Topk check failed");
+    AssertInfo(metric_type_ == right.metric_type_, "[SubSearchResult]Metric type check failed");
+    AssertInfo(is_desc == is_descending(metric_type_), "[SubSearchResult]Metric type isn't desc");
 
     for (int64_t qn = 0; qn < num_queries_; ++qn) {
         auto offset = qn * topk_;
@@ -59,7 +60,7 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
 
 void
 SubSearchResult::merge(const SubSearchResult& sub_result) {
-    Assert(metric_type_ == sub_result.metric_type_);
+    AssertInfo(metric_type_ == sub_result.metric_type_, "[SubSearchResult]Metric type check failed when merge");
     if (is_descending(metric_type_)) {
         this->merge_impl<true>(sub_result);
     } else {
@@ -72,6 +73,16 @@ SubSearchResult::merge(const SubSearchResult& left, const SubSearchResult& right
     auto left_copy = left;
     left_copy.merge(right);
     return left_copy;
+}
+
+void
+SubSearchResult::round_values() {
+    if (round_decimal_ == -1)
+        return;
+    const float multiplier = pow(10.0, round_decimal_);
+    for (auto it = this->values_.begin(); it != this->values_.end(); it++) {
+        *it = round(*it * multiplier) / multiplier;
+    }
 }
 
 }  // namespace milvus::query

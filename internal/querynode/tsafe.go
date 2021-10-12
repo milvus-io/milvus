@@ -13,8 +13,11 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 )
@@ -32,13 +35,7 @@ func newTSafeWatcher() *tSafeWatcher {
 func (watcher *tSafeWatcher) notify() {
 	if len(watcher.notifyChan) == 0 {
 		watcher.notifyChan <- true
-		//log.Debug("tSafe watcher notify done")
 	}
-}
-
-// deprecated
-func (watcher *tSafeWatcher) hasUpdate() {
-	<-watcher.notifyChan
 }
 
 func (watcher *tSafeWatcher) watcherChan() <-chan bool {
@@ -48,9 +45,10 @@ func (watcher *tSafeWatcher) watcherChan() <-chan bool {
 type tSafer interface {
 	get() Timestamp
 	set(id UniqueID, t Timestamp)
-	registerTSafeWatcher(t *tSafeWatcher)
+	registerTSafeWatcher(t *tSafeWatcher) error
 	start()
 	close()
+	removeRecord(partitionID UniqueID)
 }
 
 type tSafeMsg struct {
@@ -67,6 +65,7 @@ type tSafe struct {
 	watcherList []*tSafeWatcher
 	tSafeChan   chan tSafeMsg
 	tSafeRecord map[UniqueID]Timestamp
+	isClose     bool
 }
 
 func newTSafe(ctx context.Context, channel Channel) tSafer {
@@ -89,9 +88,23 @@ func (ts *tSafe) start() {
 		for {
 			select {
 			case <-ts.ctx.Done():
-				log.Debug("tSafe context done")
+				ts.tSafeMu.Lock()
+				ts.isClose = true
+				log.Debug("tSafe context done",
+					zap.Any("channel", ts.channel),
+				)
+				for _, watcher := range ts.watcherList {
+					close(watcher.notifyChan)
+				}
+				ts.watcherList = nil
+				close(ts.tSafeChan)
+				ts.tSafeMu.Unlock()
 				return
-			case m := <-ts.tSafeChan:
+			case m, ok := <-ts.tSafeChan:
+				if !ok {
+					// should not happen!!
+					return
+				}
 				ts.tSafeMu.Lock()
 				ts.tSafeRecord[m.id] = m.t
 				var tmpT Timestamp = math.MaxUint64
@@ -116,10 +129,45 @@ func (ts *tSafe) start() {
 	}()
 }
 
-func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) {
+// removeRecord for deleting the old partition which has been released,
+// if we don't delete this, tSafe would always be the old partition's timestamp
+// (because we set tSafe to the minimum timestamp) from old partition
+// flow graph which has been closed and would not update tSafe any more.
+// removeRecord should be called when flow graph is been removed.
+func (ts *tSafe) removeRecord(partitionID UniqueID) {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
+	if ts.isClose {
+		// should not happen if tsafe_replica guard correctly
+		log.Warn("Try to remove record with tsafe close ",
+			zap.Any("channel", ts.channel),
+			zap.Any("id", partitionID))
+		return
+	}
+	log.Debug("remove tSafeRecord",
+		zap.Any("partitionID", partitionID),
+	)
+	delete(ts.tSafeRecord, partitionID)
+	var tmpT Timestamp = math.MaxUint64
+	for _, t := range ts.tSafeRecord {
+		if t <= tmpT {
+			tmpT = t
+		}
+	}
+	ts.tSafe = tmpT
+	for _, watcher := range ts.watcherList {
+		watcher.notify()
+	}
+}
+
+func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) error {
+	ts.tSafeMu.Lock()
+	if ts.isClose {
+		return errors.New("Failed to register tsafe watcher because tsafe is closed " + ts.channel)
+	}
+	defer ts.tSafeMu.Unlock()
 	ts.watcherList = append(ts.watcherList, t)
+	return nil
 }
 
 func (ts *tSafe) get() Timestamp {
@@ -131,7 +179,13 @@ func (ts *tSafe) get() Timestamp {
 func (ts *tSafe) set(id UniqueID, t Timestamp) {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
-
+	if ts.isClose {
+		// should not happen if tsafe_replica guard correctly
+		log.Warn("Try to set id with tsafe close ",
+			zap.Any("channel", ts.channel),
+			zap.Any("id", id))
+		return
+	}
 	msg := tSafeMsg{
 		t:  t,
 		id: id,
@@ -140,11 +194,5 @@ func (ts *tSafe) set(id UniqueID, t Timestamp) {
 }
 
 func (ts *tSafe) close() {
-	ts.tSafeMu.Lock()
-	defer ts.tSafeMu.Unlock()
-
 	ts.cancel()
-	for _, watcher := range ts.watcherList {
-		close(watcher.notifyChan)
-	}
 }

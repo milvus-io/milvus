@@ -34,7 +34,7 @@ import (
 
 func newMemoryMeta(allocator allocator) (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
-	return NewMeta(memoryKV)
+	return newMeta(memoryKV)
 }
 
 var _ allocator = (*MockAllocator)(nil)
@@ -153,7 +153,7 @@ func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.Flush
 
 func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): change the id, though it's not important in ut
-	nodeID := UniqueID(20210819)
+	nodeID := UniqueID(c.id)
 
 	nodeInfos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
@@ -190,6 +190,18 @@ func (c *mockDataNodeClient) Stop() error {
 type mockRootCoordService struct {
 	state internalpb.StateCode
 	cnt   int64
+}
+
+func (m *mockRootCoordService) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
 }
 
 func newMockRootCoordService() *mockRootCoordService {

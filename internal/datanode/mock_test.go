@@ -43,7 +43,6 @@ const ctxTimeInMillisecond = 5000
 const debug = false
 
 func newIDLEDataNodeMock(ctx context.Context) *DataNode {
-
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
 
@@ -52,11 +51,10 @@ func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
-
-	node.SetRootCoordInterface(rc)
+	node.rootCoord = rc
 
 	ds := &DataCoordFactory{}
-	node.SetDataCoordInterface(ds)
+	node.dataCoord = ds
 
 	return node
 }
@@ -84,21 +82,10 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
-
-	node.SetRootCoordInterface(ms)
+	node.rootCoord = ms
 
 	ds := &DataCoordFactory{}
-	node.SetDataCoordInterface(ds)
-
-	vchan := &datapb.VchannelInfo{
-		CollectionID:      1,
-		ChannelName:       dmChannelName,
-		UnflushedSegments: []*datapb.SegmentInfo{},
-		FlushedSegments:   []int64{},
-	}
-	node.Start()
-
-	_ = node.NewDataSyncService(vchan)
+	node.dataCoord = ds
 
 	return node
 }
@@ -109,11 +96,6 @@ func makeNewChannelNames(names []string, suffix string) []string {
 		ret = append(ret, name+suffix)
 	}
 	return ret
-}
-
-func refreshChannelNames() {
-	Params.SegmentStatisticsChannelName = "datanode-refresh-segment-statistics"
-	Params.TimeTickChannelName = "datanode-refresh-hard-timetick"
 }
 
 func clearEtcd(rootPath string) error {
@@ -161,9 +143,19 @@ type RootCoordFactory struct {
 
 type DataCoordFactory struct {
 	types.DataCoord
+
+	SaveBinlogPathError     bool
+	SaveBinlogPathNotSucess bool
 }
 
 func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	if ds.SaveBinlogPathError {
+		return nil, errors.New("Error")
+	}
+	if ds.SaveBinlogPathNotSucess {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+	}
+
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
@@ -399,7 +391,7 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 			CollectionName: "col1",
 			PartitionName:  "default",
 			SegmentID:      1,
-			ChannelID:      chanName,
+			ShardName:      chanName,
 			Timestamps:     []Timestamp{Timestamp(idx + 1000)},
 			RowIDs:         []UniqueID{UniqueID(idx)},
 			RowData:        []*commonpb.Blob{{Value: df.rawData}},
@@ -417,12 +409,95 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string) (inMsgs 
 	return
 }
 
-func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.InsertMsg) {
+func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMsg) {
 	for i := 0; i < n; i++ {
 		var msg = df.GenMsgStreamInsertMsg(i, "")
-		inMsgs = append(inMsgs, msg)
+		msgs = append(msgs, msg)
 	}
 	return
+}
+
+func (df *DataFactory) GenMsgStreamDeleteMsg(pks []int64, chanName string) *msgstream.DeleteMsg {
+	idx := 100
+	var msg = &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{uint32(idx)},
+		},
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     0,
+				Timestamp: Timestamp(idx + 1000),
+				SourceID:  0,
+			},
+			CollectionName: "col1",
+			PartitionName:  "default",
+			ShardName:      chanName,
+			PrimaryKeys:    pks,
+			Timestamp:      Timestamp(idx + 1000),
+		},
+	}
+	return msg
+}
+
+func GenFlowGraphInsertMsg(chanName string) flowGraphMsg {
+	timeRange := TimeRange{
+		timestampMin: 0,
+		timestampMax: math.MaxUint64,
+	}
+
+	startPos := []*internalpb.MsgPosition{
+		{
+			ChannelName: chanName,
+			MsgID:       make([]byte, 0),
+			Timestamp:   0,
+		},
+	}
+
+	var fgMsg = &flowGraphMsg{
+		insertMessages: make([]*msgstream.InsertMsg, 0),
+		timeRange: TimeRange{
+			timestampMin: timeRange.timestampMin,
+			timestampMax: timeRange.timestampMax,
+		},
+		startPositions: startPos,
+		endPositions:   startPos,
+	}
+
+	dataFactory := NewDataFactory()
+	fgMsg.insertMessages = append(fgMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
+
+	return *fgMsg
+}
+
+func GenFlowGraphDeleteMsg(pks []int64, chanName string) flowGraphMsg {
+	timeRange := TimeRange{
+		timestampMin: 0,
+		timestampMax: math.MaxUint64,
+	}
+
+	startPos := []*internalpb.MsgPosition{
+		{
+			ChannelName: chanName,
+			MsgID:       make([]byte, 0),
+			Timestamp:   0,
+		},
+	}
+
+	var fgMsg = &flowGraphMsg{
+		insertMessages: make([]*msgstream.InsertMsg, 0),
+		timeRange: TimeRange{
+			timestampMin: timeRange.timestampMin,
+			timestampMax: timeRange.timestampMax,
+		},
+		startPositions: startPos,
+		endPositions:   startPos,
+	}
+
+	dataFactory := NewDataFactory()
+	fgMsg.deleteMessages = append(fgMsg.deleteMessages, dataFactory.GenMsgStreamDeleteMsg(pks, chanName))
+
+	return *fgMsg
 }
 
 type AllocatorFactory struct {
@@ -520,10 +595,24 @@ func (m *RootCoordFactory) DescribeCollection(ctx context.Context, in *milvuspb.
 	f := MetaFactory{}
 	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
 	resp := &milvuspb.DescribeCollectionResponse{
-		Status:       &commonpb.Status{},
-		CollectionID: m.collectionID,
-		Schema:       meta.Schema,
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
 	}
+
+	if m.collectionID == -2 {
+		resp.Status.Reason = "Status not success"
+		return resp, nil
+	}
+
+	if m.collectionID == -1 {
+		resp.Status.ErrorCode = commonpb.ErrorCode_Success
+		return resp, errors.New(resp.Status.GetReason())
+	}
+
+	resp.CollectionID = m.collectionID
+	resp.Schema = meta.Schema
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
 
@@ -535,4 +624,17 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}, nil
+}
+
+// FailMessageStreamFactory mock MessageStreamFactory failure
+type FailMessageStreamFactory struct {
+	msgstream.Factory
+}
+
+func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, errors.New("mocked failure")
+}
+
+func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, errors.New("mocked failure")
 }

@@ -268,7 +268,8 @@ func TestExpireAllocation(t *testing.T) {
 	segment := meta.GetSegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 100, len(segment.allocations))
-	segmentManager.ExpireAllocations("ch1", maxts)
+	err = segmentManager.ExpireAllocations("ch1", maxts)
+	assert.Nil(t, err)
 	segment = meta.GetSegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 0, len(segment.allocations))
@@ -396,7 +397,7 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := NewMeta(memoryKV)
+		meta, err := newMeta(memoryKV)
 
 		assert.Nil(t, err)
 
@@ -422,7 +423,7 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := NewMeta(memoryKV)
+		meta, err := newMeta(memoryKV)
 
 		assert.Nil(t, err)
 

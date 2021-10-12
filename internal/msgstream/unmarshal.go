@@ -17,23 +17,25 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
+// UnmarshalFunc is an interface that has been implemented by each Msg
 type UnmarshalFunc func(interface{}) (TsMsg, error)
 
+// UnmarshalDispatcher is an interface contains method Unmarshal
 type UnmarshalDispatcher interface {
 	Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error)
-	AddMsgTemplate(msgType commonpb.MsgType, unmarshalFunc UnmarshalFunc)
 }
 
+// UnmarshalDispatcherFactory is a factory to generate an object which implement interface UnmarshalDispatcher
 type UnmarshalDispatcherFactory interface {
 	NewUnmarshalDispatcher() *UnmarshalDispatcher
 }
 
-// ProtoUnmarshalDispatcher ant its factory
-
+// ProtoUnmarshalDispatcher is Unmarshal Dispatcher which used for data of proto type
 type ProtoUnmarshalDispatcher struct {
 	TempMap map[commonpb.MsgType]UnmarshalFunc
 }
 
+// Unmarshal will forward unmarshal request to msg type specified unmarshal function
 func (p *ProtoUnmarshalDispatcher) Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error) {
 	unmarshalFunc, ok := p.TempMap[msgType]
 	if !ok {
@@ -42,12 +44,10 @@ func (p *ProtoUnmarshalDispatcher) Unmarshal(input interface{}, msgType commonpb
 	return unmarshalFunc(input)
 }
 
-func (p *ProtoUnmarshalDispatcher) AddMsgTemplate(msgType commonpb.MsgType, unmarshalFunc UnmarshalFunc) {
-	p.TempMap[msgType] = unmarshalFunc
-}
-
+// ProtoUDFactory is a factory to generate ProtoUnmarshalDispatcher object
 type ProtoUDFactory struct{}
 
+// NewUnmarshalDispatcher returns an new UnmarshalDispatcher
 func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	insertMsg := InsertMsg{}
 	deleteMsg := DeleteMsg{}
@@ -60,13 +60,11 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	dropCollectionMsg := DropCollectionMsg{}
 	createPartitionMsg := CreatePartitionMsg{}
 	dropPartitionMsg := DropPartitionMsg{}
-	loadIndexMsg := LoadIndexMsg{}
-	segmentInfoMsg := SegmentInfoMsg{}
-	flushCompletedMsg := FlushCompletedMsg{}
 	queryNodeSegStatsMsg := QueryNodeStatsMsg{}
 	segmentStatisticsMsg := SegmentStatisticsMsg{}
 	loadBalanceSegmentsMsg := LoadBalanceSegmentsMsg{}
 	dataNodeTtMsg := DataNodeTtMsg{}
+	sealedSegmentsChangeInfoMsg := SealedSegmentsChangeInfoMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -82,12 +80,10 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_DropCollection] = dropCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreatePartition] = createPartitionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropPartition] = dropPartitionMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_LoadIndex] = loadIndexMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_SegmentInfo] = segmentInfoMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_SegmentFlushDone] = flushCompletedMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_SegmentStatistics] = segmentStatisticsMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_LoadBalanceSegments] = loadBalanceSegmentsMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DataNodeTt] = dataNodeTtMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_SealedSegmentsChangeInfo] = sealedSegmentsChangeInfoMsg.Unmarshal
 
 	return p
 }

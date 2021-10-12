@@ -25,12 +25,12 @@ import (
 func dummyFunc() {
 }
 
-func TestGetFunctionName(t *testing.T) {
+func Test_GetFunctionName(t *testing.T) {
 	name := GetFunctionName(dummyFunc)
 	assert.True(t, strings.Contains(name, "dummyFunc"))
 }
 
-func TestProcessFuncParallel(t *testing.T) {
+func Test_ProcessFuncParallel(t *testing.T) {
 	total := 64
 	s := make([]int, total)
 
@@ -104,9 +104,12 @@ func TestProcessFuncParallel(t *testing.T) {
 		return nil
 	}
 
-	ProcessFuncParallel(total, 1, randomErrorF, "randomErrorF") // serial
+	err = ProcessFuncParallel(total, 1, randomErrorF, "randomErrorF") // serial
+	assert.NotNil(t, err)
 
-	ProcessFuncParallel(total, total, randomErrorF, "randomErrorF") // Totally Parallel
+	err = ProcessFuncParallel(total, total, randomErrorF, "randomErrorF") // Totally Parallel
+	assert.NotNil(t, err)
 
-	ProcessFuncParallel(total, runtime.NumCPU(), randomErrorF, "randomErrorF") // Parallel by CPU
+	err = ProcessFuncParallel(total, runtime.NumCPU(), randomErrorF, "randomErrorF") // Parallel by CPU
+	assert.NotNil(t, err)
 }

@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-//return
+// EqualKeyPairArray check whether 2 KeyValuePairs are equal
 func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair) bool {
 	if len(p1) != len(p2) {
 		return false
@@ -44,6 +44,7 @@ func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair)
 	return true
 }
 
+// GetFieldSchemaByID return field schema by id
 func GetFieldSchemaByID(coll *etcdpb.CollectionInfo, fieldID typeutil.UniqueID) (*schemapb.FieldSchema, error) {
 	for _, f := range coll.Schema.Fields {
 		if f.FieldID == fieldID {
@@ -53,7 +54,7 @@ func GetFieldSchemaByID(coll *etcdpb.CollectionInfo, fieldID typeutil.UniqueID) 
 	return nil, fmt.Errorf("field id = %d not found", fieldID)
 }
 
-//GetFieldSchemaByIndexID return the field schema by it's index id
+// GetFieldSchemaByIndexID return field schema by it's index id
 func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueID) (*schemapb.FieldSchema, error) {
 	var fieldID typeutil.UniqueID
 	exist := false
@@ -72,9 +73,12 @@ func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueI
 
 // EncodeDdOperation serialize DdOperation into string
 func EncodeDdOperation(m proto.Message, ddType string) (string, error) {
-	mStr := proto.MarshalTextString(m)
+	mByte, err := proto.Marshal(m)
+	if err != nil {
+		return "", err
+	}
 	ddOp := DdOperation{
-		Body: mStr,
+		Body: mByte,
 		Type: ddType,
 	}
 	ddOpByte, err := json.Marshal(ddOp)
@@ -119,7 +123,7 @@ func DecodeMsgPositions(str string, msgPositions *[]*msgstream.MsgPosition) erro
 	return json.Unmarshal([]byte(str), msgPositions)
 }
 
-//ToPhysicalChannel virtual channel -> physical channel
+// ToPhysicalChannel get physical channel name from virtual channel name
 func ToPhysicalChannel(vchannel string) string {
 	var idx int
 	for idx = len(vchannel) - 1; idx >= 0; idx-- {

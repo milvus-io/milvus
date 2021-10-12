@@ -31,4 +31,4 @@ class PartitionErrorMessage(ExceptionsMessage):
 
 
 class IndexErrorMessage(ExceptionsMessage):
-    WrongFieldName = "%s has type %s, but expected one of: bytes, unicode"
+    WrongFieldName = "cannot create index on non-vector field: %s"

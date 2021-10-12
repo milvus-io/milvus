@@ -24,6 +24,7 @@ type rmqClient struct {
 	client rocksmq.Client
 }
 
+// NewRmqClient returns a new rmqClient object
 func NewRmqClient(opts rocksmq.ClientOptions) (*rmqClient, error) {
 	c, err := rocksmq.NewClient(opts)
 	if err != nil {
@@ -33,6 +34,7 @@ func NewRmqClient(opts rocksmq.ClientOptions) (*rmqClient, error) {
 	return &rmqClient{client: c}, nil
 }
 
+// CreateProducer creates a producer for rocksmq client
 func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	rmqOpts := rocksmq.ProducerOptions{Topic: options.Topic}
 	pp, err := rc.client.CreateProducer(rmqOpts)
@@ -43,28 +45,32 @@ func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	return &rp, nil
 }
 
+// Subscribe subscribes a consumer in rmq client
 func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	receiveChannel := make(chan rocksmq.ConsumerMessage, options.BufSize)
 
 	cli, err := rc.client.Subscribe(rocksmq.ConsumerOptions{
-		Topic:            options.Topic,
-		SubscriptionName: options.SubscriptionName,
-		MessageChannel:   receiveChannel,
+		Topic:                       options.Topic,
+		SubscriptionName:            options.SubscriptionName,
+		MessageChannel:              receiveChannel,
+		SubscriptionInitialPosition: rocksmq.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	rConsumer := &RmqConsumer{c: cli}
+	rConsumer := &RmqConsumer{c: cli, closeCh: make(chan struct{})}
 
 	return rConsumer, nil
 }
 
+// EarliestMessageID returns the earliest message ID for rmq client
 func (rc *rmqClient) EarliestMessageID() MessageID {
 	rID := rocksmq.EarliestMessageID()
 	return &rmqID{messageID: rID}
 }
 
+// StringToMsgID converts string id to MessageID
 func (rc *rmqClient) StringToMsgID(id string) (MessageID, error) {
 	rID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
@@ -82,5 +88,6 @@ func (rc *rmqClient) BytesToMsgID(id []byte) (MessageID, error) {
 }
 
 func (rc *rmqClient) Close() {
-	rc.client.Close()
+	// TODO(yukun): What to do here?
+	// rc.client.Close()
 }

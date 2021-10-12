@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 )
 
 func TestPlan_Plan(t *testing.T) {
@@ -28,7 +30,7 @@ func TestPlan_Plan(t *testing.T) {
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
@@ -41,14 +43,45 @@ func TestPlan_Plan(t *testing.T) {
 	deleteCollection(collection)
 }
 
+func TestPlan_createSearchPlanByExpr(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	historical, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
+
+	col, err := historical.replica.getCollectionByID(defaultCollectionID)
+	assert.NoError(t, err)
+
+	planNode := &planpb.PlanNode{
+		OutputFieldIds: []FieldID{rowIDFieldID},
+	}
+	expr, err := proto.Marshal(planNode)
+	assert.NoError(t, err)
+
+	_, err = createSearchPlanByExpr(col, expr)
+	assert.Error(t, err)
+}
+
+func TestPlan_NilCollection(t *testing.T) {
+	collection := &Collection{
+		id: defaultCollectionID,
+	}
+
+	_, err := createSearchPlan(collection, "")
+	assert.Error(t, err)
+
+	_, err = createSearchPlanByExpr(collection, nil)
+	assert.Error(t, err)
+}
+
 func TestPlan_PlaceholderGroup(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
-
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
 	assert.NotNil(t, plan)

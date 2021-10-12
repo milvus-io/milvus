@@ -9,25 +9,25 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/format.hpp>
 #include <gtest/gtest.h>
-#include "query/deprecated/ParserDeprecated.h"
+#include <regex>
+
 #include "query/Expr.h"
+#include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "query/generated/ExprVisitor.h"
 #include "query/generated/PlanNodeVisitor.h"
-#include "test_utils/DataGen.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
 #include "query/generated/ExecExprVisitor.h"
-#include "query/Plan.h"
-#include "utils/tools.h"
-#include <regex>
-#include <boost/format.hpp>
 #include "segcore/SegmentGrowingImpl.h"
+#include "test_utils/DataGen.h"
+#include "utils/tools.h"
+
 using namespace milvus;
 
 TEST(Expr, Naive) {
     SUCCEED();
-    using namespace milvus::wtf;
     std::string dsl_string = R"(
 {
     "bool": {
@@ -71,33 +71,33 @@ TEST(Expr, Range) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
-    std::string dsl_string = R"(
-{
-    "bool": {
-        "must": [
-            {
-                "range": {
-                    "age": {
-                        "GT": 1,
-                        "LT": 100
+    std::string dsl_string = R"({
+        "bool": {
+            "must": [
+                {
+                    "range": {
+                        "age": {
+                            "GT": 1,
+                            "LT": 100
+                        }
+                    }
+                },
+                {
+                    "vector": {
+                        "fakevec": {
+                            "metric_type": "L2",
+                            "params": {
+                                "nprobe": 10
+                            },
+                            "query": "$0",
+                            "topk": 10,
+                            "round_decimal": 3
+                        }
                     }
                 }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 10
-                    }
-                }
-            }
-        ]
-    }
-})";
+            ]
+        }
+    })";
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
@@ -113,33 +113,33 @@ TEST(Expr, RangeBinary) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
-    std::string dsl_string = R"(
-{
-    "bool": {
-        "must": [
-            {
-                "range": {
-                    "age": {
-                        "GT": 1,
-                        "LT": 100
+    std::string dsl_string = R"({
+        "bool": {
+            "must": [
+                {
+                    "range": {
+                        "age": {
+                            "GT": 1,
+                            "LT": 100
+                        }
+                    }
+                },
+                {
+                    "vector": {
+                        "fakevec": {
+                            "metric_type": "Jaccard",
+                            "params": {
+                                "nprobe": 10
+                            },
+                            "query": "$0",
+                            "topk": 10,
+                            "round_decimal": 3
+                        }
                     }
                 }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "Jaccard",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 10
-                    }
-                }
-            }
-        ]
-    }
-})";
+            ]
+        }
+    })";
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
     schema->AddDebugField("age", DataType::INT32);
@@ -193,33 +193,32 @@ TEST(Expr, InvalidDSL) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
-    std::string dsl_string = R"(
-{
-    "float": {
-        "must": [
-            {
-                "range": {
-                    "age": {
-                        "GT": 1,
-                        "LT": 100
+    std::string dsl_string = R"({
+        "float": {
+            "must": [
+                {
+                    "range": {
+                        "age": {
+                            "GT": 1,
+                            "LT": 100
+                        }
+                    }
+                },
+                {
+                    "vector": {
+                        "fakevec": {
+                            "metric_type": "L2",
+                            "params": {
+                                "nprobe": 10
+                            },
+                            "query": "$0",
+                            "topk": 10
+                        }
                     }
                 }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 10
-                    }
-                }
-            }
-        ]
-    }
-})";
+            ]
+        }
+    })";
 
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
@@ -265,38 +264,38 @@ TEST(Expr, TestRange) {
         {R"("NE": 2000)", [](int v) { return v != 2000; }},
     };
 
-    std::string dsl_string_tmp = R"(
-{
-    "bool": {
-        "must": [
-            {
-                "range": {
-                    "age": {
-                        @@@@
+    std::string dsl_string_tmp = R"({
+        "bool": {
+            "must": [
+                {
+                    "range": {
+                        "age": {
+                            @@@@
+                        }
+                    }
+                },
+                {
+                    "vector": {
+                        "fakevec": {
+                            "metric_type": "L2",
+                            "params": {
+                                "nprobe": 10
+                            },
+                            "query": "$0",
+                            "topk": 10,
+                            "round_decimal": 3
+                        }
                     }
                 }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 10
-                    }
-                }
-            }
-        ]
-    }
-})";
+            ]
+        }
+    })";
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
 
     auto seg = CreateGrowingSegment(schema);
-    int N = 10000;
+    int N = 1000;
     std::vector<int> age_col;
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
@@ -347,38 +346,38 @@ TEST(Expr, TestTerm) {
         {vec_2k_3k, [](int v) { return 2000 <= v && v < 3000; }},
     };
 
-    std::string dsl_string_tmp = R"(
-{
-    "bool": {
-        "must": [
-            {
-                "term": {
-                    "age": {
-                        "values": @@@@
+    std::string dsl_string_tmp = R"({
+        "bool": {
+            "must": [
+                {
+                    "term": {
+                        "age": {
+                            "values": @@@@
+                        }
+                    }
+                },
+                {
+                    "vector": {
+                        "fakevec": {
+                            "metric_type": "L2",
+                            "params": {
+                                "nprobe": 10
+                            },
+                            "query": "$0",
+                            "topk": 10,
+                            "round_decimal": 3
+                        }
                     }
                 }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 10
-                    }
-                }
-            }
-        ]
-    }
-})";
+            ]
+        }
+    })";
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
 
     auto seg = CreateGrowingSegment(schema);
-    int N = 10000;
+    int N = 1000;
     std::vector<int> age_col;
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
@@ -413,8 +412,7 @@ TEST(Expr, TestSimpleDsl) {
     using namespace milvus::query;
     using namespace milvus::segcore;
 
-    auto vec_dsl = Json::parse(R"(
-            {
+    auto vec_dsl = Json::parse(R"({
                 "vector": {
                     "fakevec": {
                         "metric_type": "L2",
@@ -422,11 +420,11 @@ TEST(Expr, TestSimpleDsl) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
-            }
-)");
+            })");
 
     int N = 32;
     auto get_item = [&](int base, int bit = 1) {
@@ -517,40 +515,40 @@ TEST(Expr, TestCompare) {
         {R"("EQ")", [](int a, int64_t b) { return a == b; }}, {R"("NE")", [](int a, int64_t b) { return a != b; }},
     };
 
-    std::string dsl_string_tpl = R"(
-{
-    "bool": {
-        "must": [
-            {
-                "compare": {
-                    %1%: [
-                        "age1",
-                        "age2"
-                    ]
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 10
+    std::string dsl_string_tpl = R"({
+        "bool": {
+            "must": [
+                {
+                    "compare": {
+                        %1%: [
+                            "age1",
+                            "age2"
+                        ]
+                    }
+                },
+                {
+                    "vector": {
+                        "fakevec": {
+                            "metric_type": "L2",
+                            "params": {
+                                "nprobe": 10
+                            },
+                            "query": "$0",
+                            "topk": 10,
+                            "round_decimal": 3
+                        }
                     }
                 }
-            }
-        ]
-    }
-})";
+            ]
+        }
+    })";
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age1", DataType::INT32);
     schema->AddDebugField("age2", DataType::INT64);
 
     auto seg = CreateGrowingSegment(schema);
-    int N = 10000;
+    int N = 1000;
     std::vector<int> age1_col;
     std::vector<int64_t> age2_col;
     int num_iters = 100;

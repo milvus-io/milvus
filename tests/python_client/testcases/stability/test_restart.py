@@ -6,7 +6,8 @@ import logging
 import json
 from multiprocessing import Pool, Process
 import pytest
-from utils.utils import *
+from utils.utils import get_milvus, restart_server, gen_entities, gen_unique_str, default_nb
+from common.constants import default_fields, default_entities
 from common.common_type import CaseLabel
 
 
@@ -39,18 +40,18 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_flush(self, connect, collection, args):
-        '''
+        """
         target: return the same row count after server restart
         method: call function: create collection, then insert/flush, restart server and assert row count
         expected: row count keep the same
-        '''
+        """
         ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        assert res_count == 2 * nb
+        assert res_count == 2 * default_nb
         # restart server
         logging.getLogger().info("Start restart server")
         assert restart_server(args["service_name"])
@@ -58,15 +59,15 @@ class TestRestartBase:
         new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count = new_connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        assert res_count == 2 * nb
+        assert res_count == 2 * default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection, then insert/flushing, restart server and assert row count
         expected: row count equals 0
-        '''
+        """
         # disable_autoflush()
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection], _async=True)
@@ -90,11 +91,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_delete_during_flushing(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection, then delete/flushing, restart server and assert row count
         expected: row count equals (nb - delete_length)
-        '''
+        """
         # disable_autoflush()
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
@@ -123,11 +124,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_during_indexed(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection, then indexed, restart server and assert row count
         expected: row count equals nb
-        '''
+        """
         # disable_autoflush()
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
@@ -153,11 +154,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_during_indexing(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection, then indexing, restart server and assert row count
         expected: row count equals nb, server contitue to build index after restart
-        '''
+        """
         # disable_autoflush()
         loop = 5
         for i in range(loop):
@@ -200,12 +201,12 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_delete_flush_during_compacting(self, connect, collection, args):
-        '''
+        """
         target: verify server work after restart during compaction
         method: call function: create collection, then delete/flush/compacting, restart server and assert row count
             call `compact` again, compact pass
         expected: row count equals (nb - delete_length)
-        '''
+        """
         # disable_autoflush()
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
@@ -240,11 +241,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing_multi_collections(self, connect, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collections, then insert/flushing, restart server and assert row count
         expected: row count equals 0
-        '''
+        """
         # disable_autoflush()
         collection_num = 2
         collection_list = []
@@ -283,11 +284,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing_multi_partitions(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection/partition, then insert/flushing, restart server and assert row count
         expected: row count equals 0
-        '''
+        """
         # disable_autoflush()
         partitions_num = 2
         partitions = []

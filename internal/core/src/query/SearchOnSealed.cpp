@@ -20,6 +20,7 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include <boost_ext/dynamic_bitset_ext.hpp>
+#include <cmath>
 
 namespace milvus::query {
 
@@ -43,7 +44,7 @@ AssembleNegBitset(const BitsetSimple& bitset_simple) {
         auto acc_byte_count = 0;
         for (auto& bitset : bitset_simple) {
             auto size = bitset.size();
-            Assert(size % 8 == 0);
+            AssertInfo(size % 8 == 0, "[AssembleNegBitset]Bitset size isn't times of 8");
             auto byte_count = size / 8;
             auto src_ptr = boost_ext::get_data(bitset);
             memcpy(result.data() + acc_byte_count, src_ptr, byte_count);
@@ -67,15 +68,17 @@ SearchOnSealed(const Schema& schema,
                const faiss::BitsetView& bitset,
                SearchResult& result) {
     auto topk = search_info.topk_;
+    auto round_decimal = search_info.round_decimal_;
 
     auto field_offset = search_info.field_offset_;
     auto& field = schema[field_offset];
     // Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
 
-    Assert(record.is_ready(field_offset));
+    AssertInfo(record.is_ready(field_offset), "[SearchOnSealed]Record isn't ready");
     auto field_indexing = record.get_field_indexing(field_offset);
-    Assert(field_indexing->metric_type_ == search_info.metric_type_);
+    AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
+               "Metric type of field index isn't the same with search info");
 
     auto final = [&] {
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);
@@ -85,7 +88,8 @@ SearchOnSealed(const Schema& schema,
         conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
         auto index_type = field_indexing->indexing_->index_type();
         auto adapter = milvus::knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-        Assert(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()));
+        AssertInfo(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()),
+                   "[SearchOnSealed]Search params check failed");
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
 
@@ -93,6 +97,14 @@ SearchOnSealed(const Schema& schema,
     auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
 
     auto total_num = num_queries * topk;
+
+    const float multiplier = pow(10.0, round_decimal);
+    if (round_decimal != -1) {
+        const float multiplier = pow(10.0, round_decimal);
+        for (int i = 0; i < total_num; i++) {
+            distances[i] = round(distances[i] * multiplier) / multiplier;
+        }
+    }
     result.internal_seg_offsets_.resize(total_num);
     result.result_distances_.resize(total_num);
     result.num_queries_ = num_queries;

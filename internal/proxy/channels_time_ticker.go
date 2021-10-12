@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
@@ -24,6 +26,7 @@ import (
 // ticker can update ts only when the minTs greater than the ts of ticker, we can use maxTs to update current later
 type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
 
+// channelsTimeTicker manages the timestamp statistics
 type channelsTimeTicker interface {
 	start() error
 	close() error
@@ -31,6 +34,7 @@ type channelsTimeTicker interface {
 	removePChan(pchan pChan) error
 	getLastTick(pchan pChan) (Timestamp, error)
 	getMinTsStatistics() (map[pChan]Timestamp, error)
+	getMinTick() Timestamp
 }
 
 type channelsTimeTickerImpl struct {
@@ -208,6 +212,21 @@ func (ticker *channelsTimeTickerImpl) getLastTick(pchan pChan) (Timestamp, error
 	}
 
 	return ts, nil
+}
+
+func (ticker *channelsTimeTickerImpl) getMinTick() Timestamp {
+	ticker.statisticsMtx.RLock()
+	defer ticker.statisticsMtx.RUnlock()
+
+	minTs := typeutil.ZeroTimestamp
+
+	for _, ts := range ticker.minTsStatistics {
+		if ts < minTs {
+			minTs = ts
+		}
+	}
+
+	return minTs
 }
 
 func newChannelsTimeTicker(

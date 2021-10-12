@@ -14,7 +14,6 @@ package proxy
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -31,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -44,6 +42,9 @@ type Timestamp = typeutil.Timestamp
 
 const sendTimeTickMsgInterval = 200 * time.Millisecond
 const channelMgrTickerInterval = 100 * time.Millisecond
+
+// make sure Proxy implements types.Proxy
+var _ types.Proxy = (*Proxy)(nil)
 
 type Proxy struct {
 	ctx    context.Context
@@ -64,13 +65,12 @@ type Proxy struct {
 	chMgr channelsMgr
 
 	sched *taskScheduler
-	tick  *timeTick
 
 	chTicker channelsTimeTicker
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *TimestampAllocator
-	segAssigner  *SegIDAssigner
+	segAssigner  *segIDAssigner
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -83,6 +83,7 @@ type Proxy struct {
 	closeCallbacks []func()
 }
 
+// NewProxy returns a Proxy struct.
 func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
@@ -102,7 +103,10 @@ func (node *Proxy) Register() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.ProxyRole, Params.NetworkAddress, false)
 	Params.ProxyID = node.session.ServerID
+	Params.SetLogger(Params.ProxyID)
 	Params.initProxySubName()
+	// TODO Reset the logger
+	//Params.initLogCfg()
 	return nil
 }
 
@@ -153,6 +157,8 @@ func (node *Proxy) Init() error {
 		}
 		log.Debug("Proxy CreateQueryChannel success")
 
+		// TODO SearchResultChannelNames and RetrieveResultChannelNames should not be part in the Param table
+		// we should maintain a separate map for search result
 		Params.SearchResultChannelNames = []string{resp.ResultChannel}
 		Params.RetrieveResultChannelNames = []string{resp.ResultChannel}
 		log.Debug("Proxy CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
@@ -180,88 +186,22 @@ func (node *Proxy) Init() error {
 	}
 	node.tsoAllocator = tsoAllocator
 
-	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
+	segAssigner, err := newSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
 	if err != nil {
 		panic(err)
 	}
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
-	getDmlChannelsFunc := func(collectionID UniqueID) (map[vChan]pChan, error) {
-		req := &milvuspb.DescribeCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DescribeCollection,
-				MsgID:     0, // todo
-				Timestamp: 0, // todo
-				SourceID:  0, // todo
-			},
-			DbName:         "", // todo
-			CollectionName: "", // todo
-			CollectionID:   collectionID,
-			TimeStamp:      0, // todo
-		}
-		resp, err := node.rootCoord.DescribeCollection(node.ctx, req)
-		if err != nil {
-			log.Warn("DescribeCollection", zap.Error(err))
-			return nil, err
-		}
-		if resp.Status.ErrorCode != 0 {
-			log.Warn("DescribeCollection",
-				zap.Any("ErrorCode", resp.Status.ErrorCode),
-				zap.Any("Reason", resp.Status.Reason))
-			return nil, err
-		}
-		if len(resp.VirtualChannelNames) != len(resp.PhysicalChannelNames) {
-			err := fmt.Errorf(
-				"len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v",
-				len(resp.VirtualChannelNames),
-				len(resp.PhysicalChannelNames))
-			log.Warn("GetDmlChannels", zap.Error(err))
-			return nil, err
-		}
-
-		ret := make(map[vChan]pChan)
-		for idx, name := range resp.VirtualChannelNames {
-			if _, ok := ret[name]; ok {
-				err := fmt.Errorf(
-					"duplicated virtual channel found, vchan: %v, pchan: %v",
-					name,
-					resp.PhysicalChannelNames[idx])
-				return nil, err
-			}
-			ret[name] = resp.PhysicalChannelNames[idx]
-		}
-
-		return ret, nil
-	}
-	getDqlChannelsFunc := func(collectionID UniqueID) (map[vChan]pChan, error) {
-		req := &querypb.CreateQueryChannelRequest{
-			CollectionID: collectionID,
-			ProxyID:      node.session.ServerID,
-		}
-		resp, err := node.queryCoord.CreateQueryChannel(node.ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return nil, errors.New(resp.Status.Reason)
-		}
-
-		m := make(map[vChan]pChan)
-		m[resp.RequestChannel] = resp.RequestChannel
-
-		return m, nil
-	}
-
-	chMgr := newChannelsMgrImpl(getDmlChannelsFunc, defaultInsertRepackFunc, getDqlChannelsFunc, nil, node.msFactory)
+	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
+	dqlChannelsFunc := getDqlChannelsFunc(node.ctx, node.session.ServerID, node.queryCoord)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, dqlChannelsFunc, nil, node.msFactory)
 	node.chMgr = chMgr
 
 	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
 	if err != nil {
 		return err
 	}
-
-	node.tick = newTimeTick(node.ctx, node.tsoAllocator, time.Millisecond*200, node.sched.TaskDoneTest, node.msFactory)
 
 	node.chTicker = newChannelsTimeTicker(node.ctx, channelMgrTickerInterval, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 
@@ -348,17 +288,20 @@ func (node *Proxy) Start() error {
 	}
 	log.Debug("init global meta cache ...")
 
-	node.sched.Start()
+	if err := node.sched.Start(); err != nil {
+		return err
+	}
 	log.Debug("start scheduler ...")
 
-	node.idAllocator.Start()
+	if err := node.idAllocator.Start(); err != nil {
+		return err
+	}
 	log.Debug("start id allocator ...")
 
-	node.segAssigner.Start()
+	if err := node.segAssigner.Start(); err != nil {
+		return err
+	}
 	log.Debug("start seg assigner ...")
-
-	node.tick.Start()
-	log.Debug("start time tick ...")
 
 	err = node.chTicker.start()
 	if err != nil {
@@ -391,9 +334,6 @@ func (node *Proxy) Stop() error {
 	if node.sched != nil {
 		node.sched.Close()
 	}
-	if node.tick != nil {
-		node.tick.Close()
-	}
 	if node.chTicker != nil {
 		err := node.chTicker.close()
 		if err != nil {
@@ -416,7 +356,7 @@ func (node *Proxy) AddStartCallback(callbacks ...func()) {
 }
 
 func (node *Proxy) lastTick() Timestamp {
-	return node.tick.LastTick()
+	return node.chTicker.getMinTick()
 }
 
 // AddCloseCallback adds a callback in the Close phase.

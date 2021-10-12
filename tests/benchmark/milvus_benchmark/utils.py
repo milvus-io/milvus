@@ -13,6 +13,7 @@ logger = logging.getLogger("milvus_benchmark.utils")
 
 
 def timestr_to_int(time_str):
+    """ Parse the test time set in the yaml configuration file and convert it to int type """
     time_int = 0
     if isinstance(time_str, int) or time_str.isdigit():
         time_int = int(time_str)
@@ -111,6 +112,10 @@ def print_table(headers, columns, data):
 
 
 def get_deploy_mode(deploy_params):
+    """
+    Get the server deployment mode set in the yaml configuration file
+    single, cluster, cluster_3rd
+    """
     deploy_mode = None
     if deploy_params:
         milvus_params = None
@@ -126,6 +131,12 @@ def get_deploy_mode(deploy_params):
 
 
 def get_server_tag(deploy_params):
+    """
+    Get service deployment configuration
+    e.g.:
+        server:
+          server_tag: "8c16m"
+    """
     server_tag = ""
     if deploy_params and "server" in deploy_params:
         server = deploy_params["server"]

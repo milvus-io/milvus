@@ -13,6 +13,7 @@ package rootcoord
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -32,14 +33,17 @@ func TestParamTable(t *testing.T) {
 	assert.NotEqual(t, Params.KvRootPath, "")
 	t.Logf("kv root path = %s", Params.KvRootPath)
 
-	assert.NotEqual(t, Params.MsgChannelSubName, "")
+	assert.Equal(t, Params.MsgChannelSubName, "by-dev-rootCoord")
 	t.Logf("msg channel sub name = %s", Params.MsgChannelSubName)
 
-	assert.NotEqual(t, Params.TimeTickChannel, "")
+	assert.Equal(t, Params.TimeTickChannel, "by-dev-rootcoord-timetick")
 	t.Logf("master time tick channel = %s", Params.TimeTickChannel)
 
-	assert.NotEqual(t, Params.StatisticsChannel, "")
+	assert.Equal(t, Params.StatisticsChannel, "by-dev-rootcoord-statistics")
 	t.Logf("master statistics channel = %s", Params.StatisticsChannel)
+
+	assert.Equal(t, Params.DmlChannelName, "by-dev-rootcoord-dml")
+	t.Logf("dml channel = %s", Params.DmlChannelName)
 
 	assert.NotEqual(t, Params.MaxPartitionNum, 0)
 	t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum)
@@ -58,4 +62,9 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotZero(t, Params.TimeTickInterval)
 	t.Logf("master timetickerInterval = %d", Params.TimeTickInterval)
+
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
+	t.Logf("created time: %v", Params.CreatedTime)
+	t.Logf("updated time: %v", Params.UpdatedTime)
 }

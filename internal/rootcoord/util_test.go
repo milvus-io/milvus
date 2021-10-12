@@ -14,13 +14,14 @@ package rootcoord
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestEqualKeyPairArray(t *testing.T) {
+func Test_EqualKeyPairArray(t *testing.T) {
 	p1 := []*commonpb.KeyValuePair{
 		{
 			Key:   "k1",
@@ -97,4 +98,40 @@ func Test_ToPhysicalChannel(t *testing.T) {
 	assert.Equal(t, "abc", ToPhysicalChannel("abc_defgsg"))
 	assert.Equal(t, "abc__", ToPhysicalChannel("abc___defgsg"))
 	assert.Equal(t, "abcdef", ToPhysicalChannel("abcdef"))
+}
+
+func Test_EncodeMsgPositions(t *testing.T) {
+	mp := &msgstream.MsgPosition{
+		ChannelName: "test",
+		MsgID:       []byte{1, 2, 3},
+	}
+
+	str, err := EncodeMsgPositions([]*msgstream.MsgPosition{})
+	assert.Empty(t, str)
+	assert.Nil(t, err)
+
+	mps := []*msgstream.MsgPosition{mp}
+	str, err = EncodeMsgPositions(mps)
+	assert.NotEmpty(t, str)
+	assert.Nil(t, err)
+}
+
+func Test_DecodeMsgPositions(t *testing.T) {
+	mp := &msgstream.MsgPosition{
+		ChannelName: "test",
+		MsgID:       []byte{1, 2, 3},
+	}
+
+	str, err := EncodeMsgPositions([]*msgstream.MsgPosition{mp})
+	assert.Nil(t, err)
+
+	mpOut := make([]*msgstream.MsgPosition, 1)
+	err = DecodeMsgPositions(str, &mpOut)
+	assert.Nil(t, err)
+
+	err = DecodeMsgPositions("", &mpOut)
+	assert.Nil(t, err)
+
+	err = DecodeMsgPositions("null", &mpOut)
+	assert.Nil(t, err)
 }

@@ -1,14 +1,12 @@
-import threading
-import time
 import pytest
-import random
-import numpy as np
 
 from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from utils.utils import *
+from common.constants import *
 
 prefix = "search_collection"
 search_num = 10
@@ -25,7 +23,21 @@ default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
+default_bool_field_name = ct.default_bool_field_name
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+
+uid = "test_search"
+nq = 1
+epsilon = 0.001
+field_name = default_float_vec_field_name
+binary_field_name = default_binary_vec_field_name
+search_param = {"nprobe": 1}
+entity = gen_entities(1, is_normal=True)
+entities = gen_entities(default_nb, is_normal=True)
+raw_vectors, binary_entities = gen_binary_entities(default_nb)
+default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
+# default_binary_query, _ = gen_search_vectors_params(binary_field_name, binary_entities, default_top_k, nq)
+
 
 class TestCollectionSearchInvalid(TestcaseBase):
     """ Test case of search interface """
@@ -62,7 +74,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_expr_type(self, request):
         if isinstance(request.param, str):
             pytest.skip("string is valid type for expr")
-        if request.param == None:
+        if request.param is None:
             pytest.skip("None is valid for expr")
         yield request.param
 
@@ -78,7 +90,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_partition(self, request):
         if request.param == []:
             pytest.skip("empty is valid for partition")
-        if request.param == None:
+        if request.param is None:
             pytest.skip("None is valid for partition")
         yield request.param
 
@@ -86,16 +98,16 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_output_fields(self, request):
         if request.param == []:
             pytest.skip("empty is valid for output_fields")
-        if request.param == None:
+        if request.param is None:
             pytest.skip("None is valid for output_fields")
         yield request.param
-
 
     """
     ******************************************************************
     #  The followings are invalid cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_no_connection(self):
         """
@@ -212,9 +224,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items=
-                            {"err_code": 1,
-                             "err_msg": "`anns_field` value {} is illegal".format(invalid_search_field)})
+                            check_items={"err_code": 1,
+                                         "err_msg": "`anns_field` value {} is illegal".format(invalid_search_field)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_field_value(self, get_invalid_fields_value):
@@ -318,7 +329,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid limit (topK)
         log.info("test_search_param_invalid_limit: searching with "
-                 "invalid limit (topK) = %s" % limit)        
+                 "invalid limit (topK) = %s" % limit)
         err_msg = "limit %d is too large!" % limit
         if limit == 0:
             err_msg = "`limit` value 0 is illegal"
@@ -341,13 +352,14 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_expr = get_invalid_expr_type
         log.info("test_search_param_invalid_expr_type: searching with "
                  "invalid expr: {}".format(invalid_search_expr))
-        
+
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": "The type of expr must be string ,"
                                                     "but {} is given".format(type(invalid_search_expr))})
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_expr_value(self, get_invalid_expr_value):
         """
@@ -528,7 +540,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. create different index
         if params.get("m"):
             if (default_dim % params["m"]) != 0:
-                params["m"] = default_dim//4
+                params["m"] = default_dim // 4
         log.info("test_search_different_index_invalid_params: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -641,6 +653,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "Search doesn't support "
                                                     "vector field as output_fields"})
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
     def test_search_output_field_invalid_wildcard(self, output_fields):
@@ -659,6 +672,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": f"Field {output_fields[-1]} not exist"})
+
 
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
@@ -689,6 +703,7 @@ class TestCollectionSearch(TestcaseBase):
     #  The following are valid base cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_normal(self, nq, dim, auto_id):
         """
@@ -708,8 +723,8 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit}) 
-                                    
+                                         "limit": default_limit})
+
     @pytest.mark.tag(CaseLabel.L0)
     def test_search_with_hit_vectors(self, nq, dim, auto_id):
         """
@@ -722,6 +737,7 @@ class TestCollectionSearch(TestcaseBase):
         # get vectors that inserted into collection
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(nq)]
+        log.info("test_search_with_hit_vectors: searching collection %s" % collection_w.name)
         search_res, _ = collection_w.search(vectors[:nq], default_search_field,
                                             default_search_params, default_limit,
                                             default_search_exp,
@@ -729,10 +745,11 @@ class TestCollectionSearch(TestcaseBase):
                                             check_items={"nq": nq,
                                                          "ids": insert_ids,
                                                          "limit": default_limit})
+        log.info("test_search_with_hit_vectors: checking the distance of top 1")
         for hits in search_res:
             # verify that top 1 hit is itself,so min distance is 0
             assert hits.distances[0] == 0.0
-        
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self, dim, auto_id, _async):
         """
@@ -819,7 +836,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids[:entity_num],
-                                         "limit": limit-deleted_entity_num,
+                                         "limit": limit - deleted_entity_num,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -926,8 +943,11 @@ class TestCollectionSearch(TestcaseBase):
                                                                       1, auto_id=auto_id,
                                                                       dim=dim)
         # 2. release collection
+        log.info("test_search_collection_after_release_load: releasing collection %s" % collection_w.name)
         collection_w.release()
+        log.info("test_search_collection_after_release_load: released collection %s" % collection_w.name)
         # 3. Search the pre-released collection after load
+        log.info("test_search_collection_after_release_load: loading collection %s" % collection_w.name)
         collection_w.load()
         log.info("test_search_collection_after_release_load: searching after load")
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -1056,14 +1076,15 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": nb_old+nb_new,
+                                         "limit": nb_old + nb_new,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    #@pytest.mark.skip(reason="skip temporarily for debug")
     def test_search_max_dim(self, nq, auto_id, _async):
         """
-        target: test search normal case
-        method: create connection, collection, insert and search
+        target: test search with max configuration
+        method: create connection, collection, insert and search with max dim
         expected: search successfully with limit(topK)
         """
         # 1. initialize with data
@@ -1100,10 +1121,10 @@ class TestCollectionSearch(TestcaseBase):
         # 2. create index and load
         if params.get("m"):
             if (dim % params["m"]) != 0:
-                params["m"] = dim//4
+                params["m"] = dim // 4
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
-                params["PQM"] = dim//4
+                params["PQM"] = dim // 4
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
@@ -1139,10 +1160,10 @@ class TestCollectionSearch(TestcaseBase):
         # 2. create different index
         if params.get("m"):
             if (dim % params["m"]) != 0:
-                params["m"] = dim//4
+                params["m"] = dim // 4
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
-                params["PQM"] = dim//4
+                params["PQM"] = dim // 4
         log.info("test_search_after_index_different_metric_type: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
@@ -1176,7 +1197,7 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search for multiple times
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         for i in range(search_num):
-            log.info("test_search_collection_multiple_times: searching round %d" % (i+1))
+            log.info("test_search_collection_multiple_times: searching round %d" % (i + 1))
             collection_w.search(vectors[:nq], default_search_field,
                                 default_search_params, default_limit,
                                 default_search_exp, _async=_async,
@@ -1273,7 +1294,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       is_index=True)
-        
+
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -1433,7 +1454,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
@@ -1470,7 +1491,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 6843")
@@ -1509,7 +1530,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
@@ -1534,7 +1555,7 @@ class TestCollectionSearch(TestcaseBase):
             float = _vectors.float[i]
             if not expression or eval(expression):
                 filter_ids.append(_id)
-        
+
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
@@ -1554,7 +1575,61 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             search_res.done()
             search_res = search_res.result()
-        
+
+        filter_ids_set = set(filter_ids)
+        for hits in search_res:
+            ids = hits.ids
+            assert set(ids).issubset(filter_ids_set)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7910")
+    @pytest.mark.parametrize("bool_type", [True, False, "true", "false", 1, 0, 2])
+    def test_search_with_expression_bool(self, dim, auto_id, _async, bool_type):
+        """
+        target: test search with different bool expressions
+        method: search with different bool expressions
+        expected: searched successfully with correct limit(topK)
+        """
+        # 1. initialize with data
+        nb = 1000
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                             is_all_data_type=True,
+                                                                             auto_id=auto_id,
+                                                                             dim=dim)
+
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+        # 3. filter result with expression in collection
+        filter_ids = []
+        bool_type_cmp = bool_type
+        if bool_type == "true":
+            bool_type_cmp = True
+        if bool_type == "false":
+            bool_type_cmp = False
+        for i, _id in enumerate(insert_ids):
+            if _vectors[0][f"{default_bool_field_name}"][i] == bool_type_cmp:
+                filter_ids.append(_id)
+
+        # 4. search with different expressions
+        expression = f"{default_bool_field_name} == {bool_type}"
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            default_search_params, nb, expression,
+                                            _async=_async,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "ids": insert_ids,
+                                                         "limit": min(nb, len(filter_ids)),
+                                                         "_async": _async})
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+
         filter_ids_set = set(filter_ids)
         for hits in search_res:
             ids = hits.ids
@@ -1574,8 +1649,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                              auto_id=True,
                                                                              dim=dim,
                                                                              is_index=True)
-        
-        
+
         # filter result with expression in collection
         _vectors = _vectors[0]
         expression = expression.replace("&&", "and").replace("||", "or")
@@ -1584,12 +1658,11 @@ class TestCollectionSearch(TestcaseBase):
             exec(f"{default_float_field_name} = _vectors.{default_float_field_name}[i]")
             if not expression or eval(expression):
                 filter_ids.append(_id)
-        
+
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
-
 
         # 3. search with different expressions
         log.info("test_search_with_expression: searching with expression: %s" % expression)
@@ -1605,11 +1678,11 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             search_res.done()
             search_res = search_res.result()
-        
+
         filter_ids_set = set(filter_ids)
         for hits in search_res:
             ids = hits.ids
-            assert set(ids).issubset(filter_ids_set)        
+            assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async):
@@ -1684,7 +1757,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)
         # 2. search
         log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
-        
+
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   default_search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -1744,7 +1817,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
-        
+
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   default_search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -1824,5 +1897,759 @@ class TestCollectionSearch(TestcaseBase):
             t.join()
 
 
+"""
+******************************************************************
+#  The following cases are copied from test_search.py
+******************************************************************
+"""
 
+
+def init_data(connect, collection, nb=3000, partition_names=None, auto_id=True):
+    """
+    Generate entities and add it in collection
+    """
+    global entities
+    if nb == 3000:
+        insert_entities = entities
+    else:
+        insert_entities = gen_entities(nb, is_normal=True)
+    if partition_names is None:
+        res = connect.insert(collection, insert_entities)
+    else:
+        res = connect.insert(collection, insert_entities, partition_name=partition_names)
+    connect.flush([collection])
+    ids = res.primary_keys
+    return insert_entities, ids
+
+
+def init_binary_data(connect, collection, nb=3000, insert=True, partition_names=None):
+    """
+    Generate entities and add it in collection
+    """
+    ids = []
+    global binary_entities
+    global raw_vectors
+    if nb == 3000:
+        insert_entities = binary_entities
+        insert_raw_vectors = raw_vectors
+    else:
+        insert_raw_vectors, insert_entities = gen_binary_entities(nb)
+    if insert is True:
+        if partition_names is None:
+            res = connect.insert(collection, insert_entities)
+        else:
+            res = connect.insert(collection, insert_entities, partition_name=partition_names)
+        connect.flush([collection])
+        ids = res.primary_keys
+    return insert_raw_vectors, insert_entities, ids
+
+
+def check_id_result(result, id):
+    limit_in = 5
+    ids = [entity.id for entity in result]
+    if len(result) >= limit_in:
+        return id in ids[:limit_in]
+    else:
+        return id in ids
+
+
+class TestSearchBase:
+    """
+    generate valid create_index params
+    """
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_index()
+    )
+    def get_index(self, request, connect):
+        # if str(connect._cmd("mode")) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("sq8h not support in CPU mode")
+        return request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_simple_index(self, request, connect):
+        # if str(connect._cmd("mode")) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("sq8h not support in CPU mode")
+        return copy.deepcopy(request.param)
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_binary_index()
+    )
+    def get_jaccard_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] in binary_support():
+            return request.param
+        # else:
+        #     pytest.skip("Skip index Temporary")
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_binary_index()
+    )
+    def get_hamming_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] in binary_support():
+            return request.param
+        # else:
+        #     pytest.skip("Skip index Temporary")
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_binary_index()
+    )
+    def get_structure_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == "FLAT":
+            return request.param
+        # else:
+        #     pytest.skip("Skip index Temporary")
+
+    """
+    generate top-k params
+    """
+
+    @pytest.fixture(
+        scope="function",
+        params=[1, 10]
+    )
+    def get_top_k(self, request):
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=[1, 10, 1100]
+    )
+    def get_nq(self, request):
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_flat_top_k(self, connect, collection, get_nq):
+        """
+        target: test basic search function, all the search params is correct, change top-k value
+        method: search with the given vectors, check the result
+        expected: the length of the result is top_k
+        """
+        top_k = 16385 # max top k is 16384
+        nq = get_nq
+        entities, ids = init_data(connect, collection)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq)
+        if top_k <= max_top_k:
+            connect.load_collection(collection)
+            res = connect.search(collection, **query)
+            assert len(res[0]) == top_k
+            assert res[0]._distances[0] <= epsilon
+            assert check_id_result(res[0], ids[0])
+        else:
+            with pytest.raises(Exception) as e:
+                res = connect.search(collection, **query)
+
+    @pytest.mark.skip("r0.3-test")
+    def _test_search_field(self, connect, collection, get_top_k, get_nq):
+        """
+        target: test basic search function, all the search params is correct, change top-k value
+        method: search with the given vectors, check the result
+        expected: the length of the result is top_k
+        """
+        top_k = get_top_k
+        nq = get_nq
+        entities, ids = init_data(connect, collection)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq)
+        if top_k <= max_top_k:
+            connect.load_collection(collection)
+            res = connect.search(collection, **query, fields=["float_vector"])
+            assert len(res[0]) == top_k
+            assert res[0]._distances[0] <= epsilon
+            assert check_id_result(res[0], ids[0])
+            res = connect.search(collection, **query, fields=["float"])
+            for i in range(nq):
+                assert entities[1]["values"][:nq][i] in [r.entity.get('float') for r in res[i]]
+        else:
+            with pytest.raises(Exception):
+                connect.search(collection, **query)
+
+    def _test_search_after_delete(self, connect, collection, get_top_k, get_nq):
+        """
+        target: test basic search function before and after deletion, all the search params is
+                correct, change top-k value.
+                check issue <a href="https://github.com/milvus-io/milvus/issues/4200">#4200</a>
+        method: search with the given vectors, check the result
+        expected: the deleted entities do not exist in the result.
+        """
+        top_k = get_top_k
+        nq = get_nq
+
+        entities, ids = init_data(connect, collection, nb=10000)
+        first_int64_value = entities[0]["values"][0]
+        first_vector = entities[2]["values"][0]
+
+        search_param = get_search_param("FLAT")
+        query, vecs = gen_search_vectors_params(field_name, entities, top_k, nq, search_params=search_param)
+        vecs[:] = []
+        vecs.append(first_vector)
+
+        res = None
+        if top_k > max_top_k:
+            with pytest.raises(Exception):
+                connect.search(collection, **query, fields=['int64'])
+            # pytest.skip("top_k value is larger than max_topp_k")
+            pass
+        else:
+            res = connect.search(collection, **query, fields=['int64'])
+            assert len(res) == 1
+            assert len(res[0]) >= top_k
+            assert res[0][0].id == ids[0]
+            assert res[0][0].entity.get("int64") == first_int64_value
+            assert res[0]._distances[0] < epsilon
+            assert check_id_result(res[0], ids[0])
+
+        connect.delete_entity_by_id(collection, ids[:1])
+        connect.flush([collection])
+
+        res2 = connect.search(collection, **query, fields=['int64'])
+        assert len(res2) == 1
+        assert len(res2[0]) >= top_k
+        assert res2[0][0].id != ids[0]
+        if top_k > 1:
+            assert res2[0][0].id == res[0][1].id
+            assert res2[0][0].entity.get("int64") == res[0][1].entity.get("int64")
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_index_empty_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
+        """
+        target: test basic search function, all the search params is correct, test all index params, and build
+        method: add vectors into collection, search with the given vectors, check the result
+        expected: the length of the result is top_k, search collection with partition tag return empty
+        """
+        top_k = get_top_k
+        nq = get_nq
+
+        index_type = get_simple_index["index_type"]
+        if index_type in skip_pq():
+            pytest.skip("Skip PQ")
+        connect.create_partition(collection, default_tag)
+        entities, ids = init_data(connect, collection)
+        connect.create_index(collection, field_name, get_simple_index)
+        search_param = get_search_param(index_type)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, search_params=search_param)
+        if top_k > max_top_k:
+            with pytest.raises(Exception) as e:
+                res = connect.search(collection, **query)
+        else:
+            connect.load_collection(collection)
+            res = connect.search(collection, **query)
+            assert len(res) == nq
+            assert len(res[0]) >= top_k
+            assert res[0]._distances[0] < epsilon
+            assert check_id_result(res[0], ids[0])
+            connect.release_collection(collection)
+            connect.load_partitions(collection, [default_tag])
+            res = connect.search(collection, **query, partition_names=[default_tag])
+            assert len(res[0]) == 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_index_partitions(self, connect, collection, get_simple_index, get_top_k):
+        """
+        target: test basic search function, all the search params is correct, test all index params, and build
+        method: search collection with the given vectors and tags, check the result
+        expected: the length of the result is top_k
+        """
+        top_k = get_top_k
+        nq = 2
+        new_tag = "new_tag"
+        index_type = get_simple_index["index_type"]
+        if index_type in skip_pq():
+            pytest.skip("Skip PQ")
+        connect.create_partition(collection, default_tag)
+        connect.create_partition(collection, new_tag)
+        entities, ids = init_data(connect, collection, partition_names=default_tag)
+        new_entities, new_ids = init_data(connect, collection, nb=6001, partition_names=new_tag)
+        connect.create_index(collection, field_name, get_simple_index)
+        search_param = get_search_param(index_type)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, search_params=search_param)
+        if top_k > max_top_k:
+            with pytest.raises(Exception) as e:
+                res = connect.search(collection, **query)
+        else:
+            connect.load_collection(collection)
+            res = connect.search(collection, **query)
+            assert check_id_result(res[0], ids[0])
+            assert not check_id_result(res[1], new_ids[0])
+            assert res[0]._distances[0] < epsilon
+            assert res[1]._distances[0] < epsilon
+            res = connect.search(collection, **query, partition_names=[new_tag])
+            assert res[0]._distances[0] > epsilon
+            assert res[1]._distances[0] > epsilon
+            connect.release_collection(collection)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_ip_flat(self, connect, collection, get_simple_index, get_top_k, get_nq):
+        """
+        target: test basic search function, all the search params is correct, change top-k value
+        method: search with the given vectors, check the result
+        expected: the length of the result is top_k
+        """
+        top_k = get_top_k
+        nq = get_nq
+        entities, ids = init_data(connect, collection)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type="IP")
+        connect.load_collection(collection)
+        res = connect.search(collection, **query)
+        assert len(res[0]) == top_k
+        assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
+        assert check_id_result(res[0], ids[0])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_ip_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
+        """
+        target: test basic search function, all the search params is correct, test all index params, and build
+        method: search with the given vectors, check the result
+        expected: the length of the result is top_k
+        """
+        top_k = get_top_k
+        nq = get_nq
+
+        index_type = get_simple_index["index_type"]
+        if index_type in skip_pq():
+            pytest.skip("Skip PQ")
+        entities, ids = init_data(connect, collection)
+        get_simple_index["metric_type"] = "IP"
+        connect.create_index(collection, field_name, get_simple_index)
+        search_param = get_search_param(index_type)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type="IP", search_params=search_param)
+        connect.load_collection(collection)
+        res = connect.search(collection, **query)
+        assert len(res) == nq
+        assert len(res[0]) >= top_k
+        assert check_id_result(res[0], ids[0])
+        assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_ip_index_empty_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
+        """
+        target: test basic search function, all the search params is correct, test all index params, and build
+        method: add vectors into collection, search with the given vectors, check the result
+        expected: the length of the result is top_k, search collection with partition tag return empty
+        """
+        top_k = get_top_k
+        nq = get_nq
+        metric_type = "IP"
+        index_type = get_simple_index["index_type"]
+        if index_type in skip_pq():
+            pytest.skip("Skip PQ")
+        connect.create_partition(collection, default_tag)
+        entities, ids = init_data(connect, collection)
+        get_simple_index["metric_type"] = metric_type
+        connect.create_index(collection, field_name, get_simple_index)
+        search_param = get_search_param(index_type)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type=metric_type,
+                                          search_params=search_param)
+        if top_k > max_top_k:
+            with pytest.raises(Exception) as e:
+                res = connect.search(collection, **query)
+        else:
+            connect.load_collection(collection)
+            res = connect.search(collection, **query)
+            assert len(res) == nq
+            assert len(res[0]) >= top_k
+            assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
+            assert check_id_result(res[0], ids[0])
+            res = connect.search(collection, **query, partition_names=[default_tag])
+            assert len(res[0]) == 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
+        """
+        target: test basic search function, all the search params is correct, test all index params, and build
+        method: search collection with the given vectors and tags, check the result
+        expected: the length of the result is top_k
+        """
+        top_k = get_top_k
+        nq = 2
+        metric_type = "IP"
+        new_tag = "new_tag"
+        index_type = get_simple_index["index_type"]
+        if index_type in skip_pq():
+            pytest.skip("Skip PQ")
+        connect.create_partition(collection, default_tag)
+        connect.create_partition(collection, new_tag)
+        entities, ids = init_data(connect, collection, partition_names=default_tag)
+        new_entities, new_ids = init_data(connect, collection, nb=6001, partition_names=new_tag)
+        get_simple_index["metric_type"] = metric_type
+        connect.create_index(collection, field_name, get_simple_index)
+        search_param = get_search_param(index_type)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type="IP", search_params=search_param)
+        connect.load_collection(collection)
+        res = connect.search(collection, **query)
+        assert check_id_result(res[0], ids[0])
+        assert not check_id_result(res[1], new_ids[0])
+        assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
+        assert res[1]._distances[0] >= 1 - gen_inaccuracy(res[1]._distances[0])
+        res = connect.search(collection, **query, partition_names=["new_tag"])
+        assert res[0]._distances[0] < 1 - gen_inaccuracy(res[0]._distances[0])
+        # TODO:
+        # assert res[1]._distances[0] >= 1 - gen_inaccuracy(res[1]._distances[0])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_without_connect(self, dis_connect, collection):
+        """
+        target: test search vectors without connection
+        method: use dis connected instance, call search method and check if search successfully
+        expected: raise exception
+        """
+        with pytest.raises(Exception) as e:
+            res = dis_connect.search(collection, **default_query)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_collection_not_existed(self, connect):
+        """
+        target: search collection not existed
+        method: search with the random collection_name, which is not in db
+        expected: status not ok
+        """
+        collection_name = gen_unique_str(uid)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection_name, **default_query)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_distance_l2(self, connect, collection):
+        """
+        target: search collection, and check the result: distance
+        method: compare the return distance value with value computed with Euclidean
+        expected: the return distance equals to the computed value
+        """
+        nq = 2
+        search_param = {"nprobe": 1}
+        entities, ids = init_data(connect, collection, nb=nq)
+        query, vecs = gen_search_vectors_params(field_name, entities, default_top_k, nq, rand_vector=True,
+                                                search_params=search_param)
+        inside_query, inside_vecs = gen_search_vectors_params(field_name, entities, default_top_k, nq,
+                                                              search_params=search_param)
+        distance_0 = l2(vecs[0], inside_vecs[0])
+        distance_1 = l2(vecs[0], inside_vecs[1])
+        connect.load_collection(collection)
+        res = connect.search(collection, **query)
+        assert abs(np.sqrt(res[0]._distances[0]) - min(distance_0, distance_1)) <= gen_inaccuracy(res[0]._distances[0])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_l2_after_index(self, connect, id_collection, get_simple_index):
+        """
+        target: search collection, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        """
+        index_type = get_simple_index["index_type"]
+        nq = 2
+        entities, ids = init_data(connect, id_collection, auto_id=False)
+        connect.create_index(id_collection, field_name, get_simple_index)
+        search_param = get_search_param(index_type)
+        query, vecs = gen_search_vectors_params(field_name, entities, default_top_k, nq, rand_vector=True,
+                                                search_params=search_param)
+        inside_vecs = entities[-1]["values"]
+        min_distance = 1.0
+        min_id = None
+        for i in range(default_nb):
+            tmp_dis = l2(vecs[0], inside_vecs[i])
+            if min_distance > tmp_dis:
+                min_distance = tmp_dis
+                min_id = ids[i]
+        connect.load_collection(id_collection)
+        res = connect.search(id_collection, **query)
+        tmp_epsilon = epsilon
+        check_id_result(res[0], min_id)
+        # if index_type in ["ANNOY", "IVF_PQ"]:
+        #     tmp_epsilon = 0.1
+        # TODO:
+        # assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= tmp_epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_ip(self, connect, collection):
+        """
+        target: search collection, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        """
+        nq = 2
+        metirc_type = "IP"
+        search_param = {"nprobe": 1}
+        entities, ids = init_data(connect, collection, nb=nq)
+        query, vecs = gen_search_vectors_params(field_name, entities, default_top_k, nq, rand_vector=True,
+                                                metric_type=metirc_type,
+                                                search_params=search_param)
+        inside_query, inside_vecs = gen_search_vectors_params(field_name, entities, default_top_k, nq,
+                                                              search_params=search_param)
+        distance_0 = ip(vecs[0], inside_vecs[0])
+        distance_1 = ip(vecs[0], inside_vecs[1])
+        connect.load_collection(collection)
+        res = connect.search(collection, **query)
+        assert abs(res[0]._distances[0] - max(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_ip_after_index(self, connect, id_collection, get_simple_index):
+        """
+        target: search collection, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        """
+        index_type = get_simple_index["index_type"]
+        nq = 2
+        metirc_type = "IP"
+        entities, ids = init_data(connect, id_collection, auto_id=False)
+        get_simple_index["metric_type"] = metirc_type
+        connect.create_index(id_collection, field_name, get_simple_index)
+        search_param = get_search_param(index_type)
+        query, vecs = gen_search_vectors_params(field_name, entities, default_top_k, nq, rand_vector=True,
+                                                metric_type=metirc_type,
+                                                search_params=search_param)
+        inside_vecs = entities[-1]["values"]
+        max_distance = 0
+        max_id = None
+        for i in range(default_nb):
+            tmp_dis = ip(vecs[0], inside_vecs[i])
+            if max_distance < tmp_dis:
+                max_distance = tmp_dis
+                max_id = ids[i]
+        connect.load_collection(id_collection)
+        res = connect.search(id_collection, **query)
+        tmp_epsilon = epsilon
+        check_id_result(res[0], max_id)
+        # if index_type in ["ANNOY", "IVF_PQ"]:
+        #     tmp_epsilon = 0.1
+        # TODO:
+        # assert abs(res[0]._distances[0] - max_distance) <= tmp_epsilon
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_distance_jaccard_flat_index(self, connect, binary_collection):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with L2
+        expected: the return distance equals to the computed value
+        """
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
+        distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
+        distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="JACCARD")
+        connect.load_collection(binary_collection)
+        res = connect.search(binary_collection, **query)
+        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_binary_flat_with_L2(self, connect, binary_collection):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with L2
+        expected: the return distance equals to the computed value
+        """
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="L2")
+        with pytest.raises(Exception) as e:
+            connect.search(binary_collection, **query)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_hamming_flat_index(self, connect, binary_collection):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        """
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
+        distance_0 = hamming(query_int_vectors[0], int_vectors[0])
+        distance_1 = hamming(query_int_vectors[0], int_vectors[1])
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="HAMMING")
+        connect.load_collection(binary_collection)
+        res = connect.search(binary_collection, **query)
+        assert abs(res[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_substructure_flat_index(self, connect, binary_collection):
+        """
+        target: search binary_collection, and check the result: distance
+        method: search with new random binary entities and SUBSTRUCTURE metric type
+        expected: the return distance equals to the computed value
+        """
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
+        distance_0 = substructure(query_int_vectors[0], int_vectors[0])
+        distance_1 = substructure(query_int_vectors[0], int_vectors[1])
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq,
+                                                metric_type="SUBSTRUCTURE")
+        connect.load_collection(binary_collection)
+        res = connect.search(binary_collection, **query)
+        assert len(res[0]) == 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_substructure_flat_index_B(self, connect, binary_collection):
+        """
+        target: search binary_collection, and check the result: distance
+        method: search with entities that related to inserted entities
+        expected: the return distance equals to the computed value
+        """
+        top_k = 3
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_vecs = gen_binary_sub_vectors(int_vectors, 2)
+        query, vecs = gen_search_vectors_params(binary_field_name, entities, top_k, nq, metric_type="SUBSTRUCTURE",
+                                                replace_vecs=query_vecs)
+        connect.load_collection(binary_collection)
+        res = connect.search(binary_collection, **query)
+        assert res[0][0].distance <= epsilon
+        assert res[0][0].id == ids[0]
+        assert res[1][0].distance <= epsilon
+        assert res[1][0].id == ids[1]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_superstructure_flat_index(self, connect, binary_collection):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        """
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
+        distance_0 = superstructure(query_int_vectors[0], int_vectors[0])
+        distance_1 = superstructure(query_int_vectors[0], int_vectors[1])
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq,
+                                                metric_type="SUPERSTRUCTURE")
+        connect.load_collection(binary_collection)
+        res = connect.search(binary_collection, **query)
+        assert len(res[0]) == 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_superstructure_flat_index_B(self, connect, binary_collection):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with SUPER
+        expected: the return distance equals to the computed value
+        """
+        top_k = 3
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_vecs = gen_binary_super_vectors(int_vectors, 2)
+        query, vecs = gen_search_vectors_params(binary_field_name, entities, top_k, nq, metric_type="SUPERSTRUCTURE",
+                                                replace_vecs=query_vecs)
+        connect.load_collection(binary_collection)
+        res = connect.search(binary_collection, **query)
+        assert len(res[0]) == 2
+        assert len(res[1]) == 2
+        assert res[0][0].id in ids
+        assert res[0][0].distance <= epsilon
+        assert res[1][0].id in ids
+        assert res[1][0].distance <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_distance_tanimoto_flat_index(self, connect, binary_collection):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with Inner product
+        expected: the return distance equals to the computed value
+        """
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
+        distance_0 = tanimoto(query_int_vectors[0], int_vectors[0])
+        distance_1 = tanimoto(query_int_vectors[0], int_vectors[1])
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="TANIMOTO")
+        connect.load_collection(binary_collection)
+        res = connect.search(binary_collection, **query)
+        assert abs(res[0][0].distance - min(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.timeout(300)
+    def test_search_concurrent_multithreads_single_connection(self, connect, args):
+        """
+        target: test concurrent search with multiprocessess
+        method: search with 10 processes, each process uses dependent connection
+        expected: status ok and the returned vectors should be query_records
+        """
+        nb = 100
+        top_k = 10
+        threads_num = 4
+        threads = []
+        collection = gen_unique_str(uid)
+        uri = "tcp://%s:%s" % (args["ip"], args["port"])
+        # create collection
+        milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        milvus.create_collection(collection, default_fields)
+        entities, ids = init_data(milvus, collection)
+        connect.load_collection(collection)
+
+        def search(milvus):
+            res = milvus.search(collection, **default_query)
+            assert len(res) == 1
+            assert res[0]._entities[0].id in ids
+            assert res[0]._distances[0] < epsilon
+
+        for i in range(threads_num):
+            t = MyThread(target=search, args=(milvus,))
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_multi_collections(self, connect, args):
+        """
+        target: test search multi collections of L2
+        method: add vectors into 10 collections, and search
+        expected: search status ok, the length of result
+        """
+        num = 10
+        top_k = 10
+        nq = 20
+        collection_names = []
+        for i in range(num):
+            collection = gen_unique_str(uid + str(i))
+            connect.create_collection(collection, default_fields)
+            collection_names.append(collection)
+            entities, ids = init_data(connect, collection)
+            assert len(ids) == default_nb
+            query, vecs = gen_search_vectors_params(field_name, entities, top_k, nq, search_params=search_param)
+            connect.load_collection(collection)
+            res = connect.search(collection, **query)
+            assert len(res) == nq
+            for i in range(nq):
+                assert check_id_result(res[i], ids[i])
+                assert res[i]._distances[0] < epsilon
+                assert res[i]._distances[1] > epsilon
+        for i in range(num):
+            connect.drop_collection(collection_names[i])
+
+
+class TestSearchDSL(object):
+    """
+    ******************************************************************
+    #  The following cases are used to build invalid query expr
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_vector_only(self, connect, collection):
+        entities, ids = init_data(connect, collection)
+        connect.load_collection(collection)
+        res = connect.search(collection, **default_query)
+        assert len(res) == nq
+        assert len(res[0]) == default_top_k
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_empty(self, connect, collection):
+        """
+        method: search with empty query
+        expected: error raised
+        """
+        query = {}
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
 

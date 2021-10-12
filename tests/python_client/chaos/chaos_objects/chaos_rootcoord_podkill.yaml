@@ -14,4 +14,4 @@ spec:
       app.kubernetes.io/name: milvus
       component: rootcoord
   scheduler:
-    cron: '@every 2s'
+    cron: '@every 5s'

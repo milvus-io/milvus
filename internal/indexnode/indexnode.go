@@ -11,14 +11,29 @@
 
 package indexnode
 
+/*
+
+#cgo CFLAGS: -I${SRCDIR}/../core/output/include
+
+#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
+
+#include <stdlib.h>
+#include "indexbuilder/init_c.h"
+
+*/
+import "C"
 import (
 	"context"
+	"errors"
 	"io"
 	"math/rand"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"go.uber.org/zap"
@@ -37,9 +52,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is an alias of int64, is used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
-type Timestamp = typeutil.Timestamp
 
+// make sure IndexNode implements types.IndexNode
+var _ types.IndexNode = (*IndexNode)(nil)
+
+// IndexNode is a component that executes the task of building indexes.
 type IndexNode struct {
 	stateCode atomic.Value
 
@@ -48,8 +67,11 @@ type IndexNode struct {
 
 	sched *TaskScheduler
 
+	once sync.Once
+
 	kv      kv.BaseKV
 	session *sessionutil.Session
+	liveCh  <-chan bool
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -59,8 +81,11 @@ type IndexNode struct {
 	finishedTasks map[UniqueID]commonpb.IndexState
 
 	closer io.Closer
+
+	initOnce sync.Once
 }
 
+// NewIndexNode creates a new IndexNode component.
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 	log.Debug("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
@@ -70,68 +95,113 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 		loopCancel: cancel,
 	}
 	b.UpdateStateCode(internalpb.StateCode_Abnormal)
-	var err error
-	b.sched, err = NewTaskScheduler(b.loopCtx, b.kv)
+	sc, err := NewTaskScheduler(b.loopCtx, b.kv)
 	if err != nil {
 		return nil, err
 	}
+
+	b.sched = sc
 	return b, nil
 }
 
-// Register register index node at etcd
+// Register register index node at etcd.
 func (i *IndexNode) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	if i.session == nil {
+		return errors.New("failed to initialize session")
+	}
+	i.liveCh = i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = i.session.ServerID
+	Params.SetLogger(Params.NodeID)
 	return nil
 }
 
+func (i *IndexNode) initKnowhere() {
+	C.IndexBuilderInit()
+
+	// override index builder SIMD type
+	cSimdType := C.CString(Params.SimdType)
+	cRealSimdType := C.IndexBuilderSetSimdType(cSimdType)
+	Params.SimdType = C.GoString(cRealSimdType)
+	C.free(unsafe.Pointer(cRealSimdType))
+	C.free(unsafe.Pointer(cSimdType))
+}
+
+// Init initializes the IndexNode component.
 func (i *IndexNode) Init() error {
-	i.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
-	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-		i.etcdKV = etcdKV
-		return err
-	}
-	err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
-	if err != nil {
-		log.Debug("IndexNode try connect etcd failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexNode try connect etcd success")
+	var initErr error = nil
+	i.initOnce.Do(func() {
+		Params.Init()
+		i.UpdateStateCode(internalpb.StateCode_Initializing)
+		log.Debug("IndexNode init", zap.Any("State", internalpb.StateCode_Initializing))
+		connectEtcdFn := func() error {
+			etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+			i.etcdKV = etcdKV
+			return err
+		}
+		err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
+		if err != nil {
+			log.Error("IndexNode try connect etcd failed", zap.Error(err))
+			initErr = err
+			return
+		}
+		log.Debug("IndexNode connect to etcd successfully")
 
-	option := &miniokv.Option{
-		Address:           Params.MinIOAddress,
-		AccessKeyID:       Params.MinIOAccessKeyID,
-		SecretAccessKeyID: Params.MinIOSecretAccessKey,
-		UseSSL:            Params.MinIOUseSSL,
-		BucketName:        Params.MinioBucketName,
-		CreateBucket:      true,
-	}
-	i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
-	if err != nil {
-		log.Debug("IndexNode NewMinIOKV failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexNode NewMinIOKV success")
-	i.closer = trace.InitTracing("index_node")
-	return nil
+		option := &miniokv.Option{
+			Address:           Params.MinIOAddress,
+			AccessKeyID:       Params.MinIOAccessKeyID,
+			SecretAccessKeyID: Params.MinIOSecretAccessKey,
+			UseSSL:            Params.MinIOUseSSL,
+			BucketName:        Params.MinioBucketName,
+			CreateBucket:      true,
+		}
+		kv, err := miniokv.NewMinIOKV(i.loopCtx, option)
+		if err != nil {
+			log.Error("IndexNode NewMinIOKV failed", zap.Error(err))
+			initErr = err
+			return
+		}
+
+		i.kv = kv
+
+		log.Debug("IndexNode NewMinIOKV successfully")
+		i.closer = trace.InitTracing("index_node")
+
+		i.initKnowhere()
+	})
+
+	log.Debug("Init IndexNode finished", zap.Error(initErr))
+
+	return initErr
 }
 
+// Start starts the IndexNode component.
 func (i *IndexNode) Start() error {
-	i.sched.Start()
+	var startErr error = nil
+	i.once.Do(func() {
+		startErr = i.sched.Start()
 
-	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
+		Params.CreatedTime = time.Now()
+		Params.UpdatedTime = time.Now()
+
+		//start liveness check
+		go i.session.LivenessCheck(i.loopCtx, i.liveCh, func() {
+			i.Stop()
+		})
+
+		i.UpdateStateCode(internalpb.StateCode_Healthy)
+		log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
+	})
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	return nil
+
+	log.Debug("IndexNode start finished", zap.Error(startErr))
+	return startErr
 }
 
-// Stop Close closes the server.
+// Stop closes the server.
 func (i *IndexNode) Stop() error {
 	i.loopCancel()
 	if i.sched != nil {
@@ -140,10 +210,11 @@ func (i *IndexNode) Stop() error {
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
-	log.Debug("NodeImpl  closed.")
+	log.Debug("Index node stopped.")
 	return nil
 }
 
+// UpdateStateCode updates the component state of IndexNode.
 func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
 }
@@ -153,6 +224,8 @@ func (i *IndexNode) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
+// CreateIndex receives request from IndexCoordinator to build an index.
+// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -160,7 +233,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 			Reason:    "state code is not healthy",
 		}, nil
 	}
-	log.Debug("IndexNode building index ...",
+	log.Info("IndexNode building index ...",
 		zap.Int64("IndexBuildID", request.IndexBuildID),
 		zap.String("IndexName", request.IndexName),
 		zap.Int64("IndexID", request.IndexID),
@@ -170,8 +243,9 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
 	defer sp.Finish()
+	sp.SetTag("IndexBuildID", strconv.FormatInt(request.IndexBuildID, 10))
 
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
@@ -190,25 +264,17 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 
 	err := i.sched.IndexBuildQueue.Enqueue(t)
 	if err != nil {
+		log.Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", request.IndexBuildID), zap.Error(err))
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Debug("IndexNode", zap.Int64("IndexNode successfully schedule with indexBuildID", request.IndexBuildID))
+	log.Info("IndexNode successfully schedule", zap.Int64("indexBuildID", request.IndexBuildID))
 
 	return ret, nil
 }
 
-// AddStartCallback adds a callback in the startServer phase.
-//func (i *IndexNode) AddStartCallback(callbacks ...func()) {
-//	i.startCallbacks = append(i.startCallbacks, callbacks...)
-//}
-
-// AddCloseCallback adds a callback in the Close phase.
-//func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
-//	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
-//}
-
+// GetComponentStates gets the component states of IndexNode.
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexNode components states ...")
 	stateInfo := &internalpb.ComponentInfo{
@@ -232,6 +298,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 	return ret, nil
 }
 
+// GetTimeTickChannel gets the time tick channel of IndexNode.
 func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	log.Debug("get IndexNode time tick channel ...")
 
@@ -242,6 +309,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 	}, nil
 }
 
+// GetStatisticsChannel gets the statistics channel of IndexNode.
 func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	log.Debug("get IndexNode statistics channel ...")
 	return &milvuspb.StringResponse{
@@ -251,6 +319,7 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
+// GetMetrics gets the metrics info of IndexNode.
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("IndexNode.GetMetrics",
@@ -288,9 +357,6 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		}, nil
 	}
 
-	log.Debug("IndexNode.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
@@ -304,7 +370,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		return metrics, err
 	}
 
-	log.Debug("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))

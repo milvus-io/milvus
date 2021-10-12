@@ -12,7 +12,7 @@
 package mqclient
 
 import (
-	"reflect"
+	"sync"
 	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -24,6 +24,7 @@ type pulsarConsumer struct {
 	msgChannel chan ConsumerMessage
 	hasSeek    bool
 	closeCh    chan struct{}
+	once       sync.Once
 }
 
 func (pc *pulsarConsumer) Subscription() string {
@@ -32,35 +33,37 @@ func (pc *pulsarConsumer) Subscription() string {
 
 func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
 	if pc.msgChannel == nil {
-		pc.msgChannel = make(chan ConsumerMessage)
-		// this part handles msgstream expectation when the consumer is not seeked
-		// pulsar's default behavior is setting postition to the earliest pointer when client of the same subscription pointer is not acked
-		// yet, our message stream is to setting to the very start point of the topic
-		if !pc.hasSeek {
-			// the concrete value of the MessageID is pulsar.messageID{-1,-1,-1,-1}
-			// but Seek function logic does not allow partitionID -1, See line 618-620 of github.com/apache/pulsar-client-go@v0.5.0 pulsar/consumer_impl.go
-			mid := pulsar.EarliestMessageID()
-			// the patch function use unsafe pointer to set partitionIdx to 0, which is the valid default partition index of current use case
-			// NOTE: when pulsar client version check, do check this logic is fixed or offset is changed!!!
-			// NOTE: unsafe solution, check implementation asap
-			patchEarliestMessageID(&mid)
-			pc.c.Seek(mid)
-		}
-		go func() {
-			for { //nolint:gosimple
-				select {
-				case msg, ok := <-pc.c.Chan():
-					if !ok {
-						log.Debug("pulsar consumer channel closed")
+		pc.once.Do(func() {
+			pc.msgChannel = make(chan ConsumerMessage)
+			// this part handles msgstream expectation when the consumer is not seeked
+			// pulsar's default behavior is setting postition to the earliest pointer when client of the same subscription pointer is not acked
+			// yet, our message stream is to setting to the very start point of the topic
+			if !pc.hasSeek {
+				// the concrete value of the MessageID is pulsar.messageID{-1,-1,-1,-1}
+				// but Seek function logic does not allow partitionID -1, See line 618-620 of github.com/apache/pulsar-client-go@v0.5.0 pulsar/consumer_impl.go
+				mid := pulsar.EarliestMessageID()
+				// the patch function use unsafe pointer to set partitionIdx to 0, which is the valid default partition index of current use case
+				// NOTE: when pulsar client version check, do check this logic is fixed or offset is changed!!!
+				// NOTE: unsafe solution, check implementation asap
+				patchEarliestMessageID(&mid)
+				pc.c.Seek(mid)
+			}
+			go func() {
+				for { //nolint:gosimple
+					select {
+					case msg, ok := <-pc.c.Chan():
+						if !ok {
+							log.Debug("pulsar consumer channel closed")
+							return
+						}
+						pc.msgChannel <- &pulsarMessage{msg: msg}
+					case <-pc.closeCh: // workaround for pulsar consumer.receiveCh not closed
+						close(pc.msgChannel)
 						return
 					}
-					pc.msgChannel <- &pulsarMessage{msg: msg}
-				case <-pc.closeCh: // workaround for pulsar consumer.receiveCh not closed
-					close(pc.msgChannel)
-					return
 				}
-			}
-		}()
+			}()
+		})
 	}
 	return pc.msgChannel
 }
@@ -88,8 +91,6 @@ func (pc *pulsarConsumer) Close() {
 // ONLY used in Chan() function
 // DON'T use elsewhere
 func patchEarliestMessageID(mid *pulsar.MessageID) {
-	v := reflect.ValueOf(mid)
-	v = v.Elem()
 	// cannot use field.SetInt(), since partitionIdx is not exported
 
 	// this reflect+ unsafe solution is disable by go vet
@@ -101,6 +102,7 @@ func patchEarliestMessageID(mid *pulsar.MessageID) {
 	//*(*int32)(unsafe.Pointer(v.InterfaceData()[1] + 20)) = 0
 
 	// use direct unsafe conversion
+	/* #nosec G103 */
 	r := (*iface)(unsafe.Pointer(mid))
 	id := (*messageID)(r.Data)
 	id.partitionIdx = 0

@@ -10,21 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
-#include <iostream>
-#include <string>
-
-// #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-// #include "segment/SegmentReader.h"
-// #include "segment/SegmentWriter.h"
-#include "segcore/SegmentGrowing.h"
-// #include "utils/Json.h"
-#include "test_utils/DataGen.h"
 #include <random>
-#include <optional>
-using std::cin;
-using std::cout;
-using std::endl;
+#include <string>
+#include "segcore/SegmentGrowing.h"
+#include "test_utils/DataGen.h"
+
 using namespace milvus;
 
 namespace {
@@ -66,7 +56,7 @@ TEST(SegmentCoreTest, NormalDistributionTest) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
-    int N = 1000 * 1000;
+    int N = 100 * 1000;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -118,6 +108,4 @@ TEST(SegmentCoreTest, SmallIndex) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
-    int N = 1024 * 1024;
-    auto data = DataGen(schema, N);
 }

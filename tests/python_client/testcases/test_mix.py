@@ -36,9 +36,9 @@ class TestMixBase:
         index = connect.describe_index(collection, "")
         create_target_index(default_index, default_float_vec_field_name)
         assert index == default_index
-        query, vecs = gen_query_vectors(default_float_vec_field_name, entities, default_top_k, nq)
+        query, vecs = gen_search_vectors_params(default_float_vec_field_name, entities, default_top_k, nq)
         connect.load_collection(collection)
-        res = connect.search(collection, query)
+        res = connect.search(collection, **query)
         assert len(res) == nq
         assert len(res[0]) == default_top_k
         assert res[0]._distances[0] <= epsilon
@@ -51,7 +51,7 @@ class TestMixBase:
         collection = gen_unique_str()
         query_vecs = [vectors[0], vectors[1]]
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
-        id_0 = 0;
+        id_0 = 0
         id_1 = 0
         milvus_instance = get_milvus(args["handler"])
         # milvus_instance.connect(uri=uri)
@@ -63,7 +63,7 @@ class TestMixBase:
             status, ids = milvus_instance.bulk_insert(collection, vectors)
             # logging.getLogger().info(ids)
             if i == 0:
-                id_0 = ids[0];
+                id_0 = ids[0]
                 id_1 = ids[1]
 
         # def create_index(milvus_instance):
@@ -198,3 +198,4 @@ def check_id_result(result, id):
         return id in ids[:limit_in]
     else:
         return id in ids
+

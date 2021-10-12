@@ -12,12 +12,9 @@
 #pragma once
 
 #include <string>
-
 #include <sys/types.h>
 #include <unistd.h>
 #include "easyloggingpp/easylogging++.h"
-
-#include "log/DeprecatedLog.h"
 
 namespace milvus {
 
@@ -61,6 +58,68 @@ namespace milvus {
                << " | " << VAR_THREAD_ID << " | " << VAR_THREAD_START_TIMESTAMP << " | " \
                << ""                                                                     \
                << " | " << #module << " | " << error_code << " | "
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+#define SEGCORE_MODULE_NAME "SEGCORE"
+#define SEGCORE_MODULE_CLASS_FUNCTION \
+    LogOut("[%s][%s::%s][%s] ", SEGCORE_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
+#define SEGCORE_MODULE_FUNCTION LogOut("[%s][%s][%s] ", SEGCORE_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
+
+#define LOG_SEGCORE_TRACE_C LOG(TRACE) << SEGCORE_MODULE_CLASS_FUNCTION
+#define LOG_SEGCORE_DEBUG_C LOG(DEBUG) << SEGCORE_MODULE_CLASS_FUNCTION
+#define LOG_SEGCORE_INFO_C LOG(INFO) << SEGCORE_MODULE_CLASS_FUNCTION
+#define LOG_SEGCORE_WARNING_C LOG(WARNING) << SEGCORE_MODULE_CLASS_FUNCTION
+#define LOG_SEGCORE_ERROR_C LOG(ERROR) << SEGCORE_MODULE_CLASS_FUNCTION
+#define LOG_SEGCORE_FATAL_C LOG(FATAL) << SEGCORE_MODULE_CLASS_FUNCTION
+
+#define LOG_SEGCORE_TRACE_ LOG(TRACE) << SEGCORE_MODULE_FUNCTION
+#define LOG_SEGCORE_DEBUG_ LOG(DEBUG) << SEGCORE_MODULE_FUNCTION
+#define LOG_SEGCORE_INFO_ LOG(INFO) << SEGCORE_MODULE_FUNCTION
+#define LOG_SEGCORE_WARNING_ LOG(WARNING) << SEGCORE_MODULE_FUNCTION
+#define LOG_SEGCORE_ERROR_ LOG(ERROR) << SEGCORE_MODULE_FUNCTION
+#define LOG_SEGCORE_FATAL_ LOG(FATAL) << SEGCORE_MODULE_FUNCTION
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+#define KNOWHERE_MODULE_NAME "KNOWHERE"
+#define KNOWHERE_MODULE_CLASS_FUNCTION \
+    LogOut("[%s][%s::%s][%s] ", KNOWHERE_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
+#define KNOWHERE_MODULE_FUNCTION LogOut("[%s][%s][%s] ", KNOWHERE_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
+
+#define LOG_KNOWHERE_TRACE_C LOG(TRACE) << KNOWHERE_MODULE_CLASS_FUNCTION
+#define LOG_KNOWHERE_DEBUG_C LOG(DEBUG) << KNOWHERE_MODULE_CLASS_FUNCTION
+#define LOG_KNOWHERE_INFO_C LOG(INFO) << KNOWHERE_MODULE_CLASS_FUNCTION
+#define LOG_KNOWHERE_WARNING_C LOG(WARNING) << KNOWHERE_MODULE_CLASS_FUNCTION
+#define LOG_KNOWHERE_ERROR_C LOG(ERROR) << KNOWHERE_MODULE_CLASS_FUNCTION
+#define LOG_KNOWHERE_FATAL_C LOG(FATAL) << KNOWHERE_MODULE_CLASS_FUNCTION
+
+#define LOG_KNOWHERE_TRACE_ LOG(TRACE) << KNOWHERE_MODULE_FUNCTION
+#define LOG_KNOWHERE_DEBUG_ LOG(DEBUG) << KNOWHERE_MODULE_FUNCTION
+#define LOG_KNOWHERE_INFO_ LOG(INFO) << KNOWHERE_MODULE_FUNCTION
+#define LOG_KNOWHERE_WARNING_ LOG(WARNING) << KNOWHERE_MODULE_FUNCTION
+#define LOG_KNOWHERE_ERROR_ LOG(ERROR) << KNOWHERE_MODULE_FUNCTION
+#define LOG_KNOWHERE_FATAL_ LOG(FATAL) << KNOWHERE_MODULE_FUNCTION
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+#define SERVER_MODULE_NAME "SERVER"
+#define SERVER_MODULE_CLASS_FUNCTION \
+    LogOut("[%s][%s::%s][%s] ", SERVER_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
+#define SERVER_MODULE_FUNCTION LogOut("[%s][%s][%s] ", SERVER_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
+
+#define LOG_SERVER_TRACE_C LOG(TRACE) << SERVER_MODULE_CLASS_FUNCTION
+#define LOG_SERVER_DEBUG_C LOG(DEBUG) << SERVER_MODULE_CLASS_FUNCTION
+#define LOG_SERVER_INFO_C LOG(INFO) << SERVER_MODULE_CLASS_FUNCTION
+#define LOG_SERVER_WARNING_C LOG(WARNING) << SERVER_MODULE_CLASS_FUNCTION
+#define LOG_SERVER_ERROR_C LOG(ERROR) << SERVER_MODULE_CLASS_FUNCTION
+#define LOG_SERVER_FATAL_C LOG(FATAL) << SERVER_MODULE_CLASS_FUNCTION
+
+#define LOG_SERVER_TRACE_ LOG(TRACE) << SERVER_MODULE_FUNCTION
+#define LOG_SERVER_DEBUG_ LOG(DEBUG) << SERVER_MODULE_FUNCTION
+#define LOG_SERVER_INFO_ LOG(INFO) << SERVER_MODULE_FUNCTION
+#define LOG_SERVER_WARNING_ LOG(WARNING) << SERVER_MODULE_FUNCTION
+#define LOG_SERVER_ERROR_ LOG(ERROR) << SERVER_MODULE_FUNCTION
+#define LOG_SERVER_FATAL_ LOG(FATAL) << SERVER_MODULE_FUNCTION
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::string
 LogOut(const char* pattern, ...);

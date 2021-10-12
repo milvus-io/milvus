@@ -138,11 +138,11 @@ class TestcaseBase(Base):
                                 auto_id=False, dim=ct.default_dim, is_index=False):
         """
         target: create specified collections
-        method: 1. create collections (binary/non-binary)
+        method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
                 2. create partitions if specified
-                3. insert specified binary/non-binary data
+                3. insert specified (binary/non-binary, default/all data type) data
                    into each partition if any
-        expected: return collection and raw data
+        expected: return collection and raw data, insert ids
         """
         log.info("Test case of search interface: initialize before test case")
         self._connect()

@@ -18,14 +18,14 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestMsgQueryNodeIsUnhealthy(t *testing.T) {
+func TestErrors_MsgQueryNodeIsUnhealthy(t *testing.T) {
 	nodeIDList := []UniqueID{1, 2, 3}
 	for _, nodeID := range nodeIDList {
 		log.Info("TestMsgQueryNodeIsUnhealthy", zap.String("msg", msgQueryNodeIsUnhealthy(nodeID)))
 	}
 }
 
-func TestErrQueryNodeIsUnhealthy(t *testing.T) {
+func TestErrors_ErrQueryNodeIsUnhealthy(t *testing.T) {
 	nodeIDList := []UniqueID{1, 2, 3}
 	for _, nodeID := range nodeIDList {
 		log.Info("TestErrQueryNodeIsUnhealthy", zap.Error(errQueryNodeIsUnhealthy(nodeID)))

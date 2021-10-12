@@ -4,7 +4,6 @@ import time
 import argparse
 import logging
 import traceback
-# from queue import Queue
 from yaml import full_load, dump
 from milvus_benchmark.metrics.models.server import Server
 from milvus_benchmark.metrics.models.hardware import Hardware
@@ -21,9 +20,6 @@ from logs import log
 log.setup_logging()
 logger = logging.getLogger("milvus_benchmark.main")
 
-# q = Queue()
-
-
 def positive_int(s):
     i = None
     try:
@@ -36,6 +32,7 @@ def positive_int(s):
 
 
 def get_image_tag(image_version):
+    """ Set the image version to the latest version """
     return "%s-latest" % (image_version)
 
 
@@ -49,6 +46,7 @@ def get_image_tag(image_version):
 def run_suite(run_type, suite, env_mode, env_params, timeout=None):
     try:
         start_status = False
+        # Initialize the class of the reported metric
         metric = api.Metric()
         deploy_mode = env_params["deploy_mode"]
         deploy_opology = env_params["deploy_opology"] if "deploy_opology" in env_params else None
@@ -94,9 +92,11 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
                     logger.error(traceback.format_exc())
                 logger.info(result)
                 if result:
+                    # Save the result of this test as true, and save the related test value results
                     case_metric.update_status(status="RUN_SUCC")
                     case_metric.update_result(result)
                 else:
+                    # The test run fails, save the related errors of the run method
                     case_metric.update_status(status="RUN_FAILED")
                     case_metric.update_message(err_message)
                     suite_status = False
@@ -116,6 +116,7 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
         metric.update_status(status="RUN_FAILED")
     finally:
         if deploy_mode:
+            # Save all reported data to the database
             api.save(metric)
         # time.sleep(10)
         env.tear_down()
@@ -126,6 +127,7 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
 
 
 def main():
+    # Parse the incoming parameters and run the corresponding test cases
     arg_parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # helm mode with scheduler
@@ -140,6 +142,7 @@ def main():
         help="load test schedule from FILE")
 
     # local mode
+    # Use the deployed milvus server, and pass host and port
     arg_parser.add_argument(
         '--local',
         action='store_true',
@@ -152,11 +155,15 @@ def main():
         '--port',
         help='server port param for local mode',
         default='19530')
+
+    # Client configuration file
     arg_parser.add_argument(
         '--suite',
         metavar='FILE',
         help='load test suite from FILE',
         default='')
+
+    # Milvus deploy config file
     arg_parser.add_argument(
         '--server-config',
         metavar='FILE',

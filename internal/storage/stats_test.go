@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestStatsInt64(t *testing.T) {
+func TestStatsWriter_StatsInt64(t *testing.T) {
 	data := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9}
 	sw := &StatsWriter{}
 	err := sw.StatsInt64(data)
@@ -34,4 +34,8 @@ func TestStatsInt64(t *testing.T) {
 		Min: 1,
 	}
 	assert.Equal(t, stats, expectedStats)
+
+	msgs := []int64{}
+	err = sw.StatsInt64(msgs)
+	assert.Nil(t, err)
 }

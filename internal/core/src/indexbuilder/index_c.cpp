@@ -90,8 +90,6 @@ SerializeToSlicedBuffer(CIndex index, CBinary* c_binary) {
     try {
         auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
         auto binary = cIndex->Serialize();
-        std::cout << "[SerializeToSlicedBuffer] binary data size: " << binary->data.size() << std::endl;
-        std::cout << "[SerializeToSlicedBuffer] binary data[0]: " << binary->data[0] << std::endl;
         *c_binary = binary.release();
         status.error_code = Success;
         status.error_msg = "";
@@ -105,8 +103,6 @@ SerializeToSlicedBuffer(CIndex index, CBinary* c_binary) {
 int64_t
 GetCBinarySize(CBinary c_binary) {
     auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
-    std::cout << "[GetCBinarySize] binary data size: " << cBinary->data.size() << std::endl;
-    std::cout << "[GetCBinarySize] binary data[0]: " << cBinary->data[0] << std::endl;
     return cBinary->data.size();
 }
 
@@ -114,18 +110,12 @@ GetCBinarySize(CBinary c_binary) {
 void
 GetCBinaryData(CBinary c_binary, void* data) {
     auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
-    std::cout << "[GetCBinaryData] binary data size: " << cBinary->data.size() << std::endl;
-    std::cout << "[GetCBinaryData] binary data[0]: " << cBinary->data[0] << std::endl;
     memcpy(data, cBinary->data.data(), cBinary->data.size());
 }
 
 void
 DeleteCBinary(CBinary c_binary) {
-    std::cout << "[DeleteCBinary] enter here ......" << std::endl;
     auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
-    std::cout << "[DeleteCBinary] pointer cast done ........" << std::endl;
-    std::cout << "[DeleteCBinary] binary data size: " << cBinary->data.size() << std::endl;
-    std::cout << "[DeleteCBinary] binary data[0]: " << cBinary->data[0] << std::endl;
     delete cBinary;
 }
 

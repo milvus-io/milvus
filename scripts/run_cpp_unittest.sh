@@ -1,5 +1,21 @@
 #!/usr/bin/env bash
 
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 set -e
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -15,15 +31,15 @@ CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/output"
 UNITTEST_DIRS=("${CORE_INSTALL_PREFIX}/unittest")
 CWRAPPER_UNITTEST="${SCRIPTS_DIR}/../internal/storage/cwrapper/output/wrapper_test"
 
-# Currently core will install target lib to "core/output/lib"
+# currently core will install target lib to "internal/core/output/lib"
 if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
-	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CORE_INSTALL_PREFIX}/lib
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CORE_INSTALL_PREFIX}/lib
 fi
 
 # run unittest
 for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
   if [ ! -d "${UNITTEST_DIR}" ]; then
-	echo "The unittest folder does not exist!"
+    echo "The unittest folder does not exist!"
     exit 1
   fi
 
@@ -33,21 +49,11 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
       echo ${UNITTEST_DIR}/all_tests "run failed"
       exit 1
   fi
-   
-  #for test in `ls ${UNITTEST_DIR}`; do
-  #  echo $test " running..."
-  #  # run unittest
-  #  ${UNITTEST_DIR}/${test}
-  #  if [ $? -ne 0 ]; then
-  #      echo ${UNITTEST_DIR}/${test} "run failed"
-  #      exit 1
-  #  fi
-  #done
 done
 
 # run cwrapper unittest
 if [ -f ${CWRAPPER_UNITTEST} ];then
-  echo "Running cwrapper unittest ..."
+  echo "Running cwrapper unittest: ${CWRAPPER_UNITTEST}"
   ${CWRAPPER_UNITTEST}
   if [ $? -ne 0 ]; then
       echo ${CWRAPPER_UNITTEST} " run failed"

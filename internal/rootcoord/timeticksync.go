@@ -131,8 +131,8 @@ func (t *timetickSync) RemoveDdlTimeTick(ts typeutil.Timestamp, reason string) {
 				minTs = tt
 			}
 		}
-		t.ddlMinTs = ts
-		log.Debug("update ddl minTs", zap.Any("minTs", ts))
+		t.ddlMinTs = minTs
+		log.Debug("update ddl minTs", zap.Any("minTs", minTs))
 	}
 }
 
@@ -217,7 +217,8 @@ func (t *timetickSync) GetProxy(sess []*sessionutil.Session) {
 }
 
 // StartWatch watch proxy node change and process all channels' timetick msg
-func (t *timetickSync) StartWatch() {
+func (t *timetickSync) StartWatch(wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
 		select {
 		case <-t.core.ctx.Done():

@@ -12,8 +12,11 @@
 package paramtable
 
 import (
+	"fmt"
 	"os"
 	"testing"
+
+	"path/filepath"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/stretchr/testify/assert"
@@ -124,14 +127,41 @@ func TestBaseTable_Remove(t *testing.T) {
 func TestBaseTable_LoadYaml(t *testing.T) {
 	err := baseParams.LoadYaml("milvus.yaml")
 	assert.Nil(t, err)
-	err = baseParams.LoadYaml("advanced/channel.yaml")
-	assert.Nil(t, err)
 	assert.Panics(t, func() { baseParams.LoadYaml("advanced/not_exist.yaml") })
 
 	_, err = baseParams.Load("etcd.address")
 	assert.Nil(t, err)
 	_, err = baseParams.Load("pulsar.port")
 	assert.Nil(t, err)
+}
+
+func TestBaseTable_ConfDir(t *testing.T) {
+	rightConfig := baseParams.configDir
+	// fake dir
+	baseParams.configDir = "./"
+
+	assert.Panics(t, func() { baseParams.loadFromMilvusYaml() })
+	assert.False(t, baseParams.loadFromCommonYaml())
+
+	baseParams.configDir = rightConfig
+	assert.True(t, baseParams.loadFromCommonYaml())
+}
+
+func TestBateTable_ConfPath(t *testing.T) {
+	os.Setenv("MILVUSCONF", "test")
+	config := baseParams.initConfPath()
+	assert.Equal(t, config, "test")
+
+	os.Unsetenv("MILVUSCONF")
+	dir, _ := os.Getwd()
+	config = baseParams.initConfPath()
+	assert.Equal(t, filepath.Clean(config), filepath.Clean(dir+"/../../../configs/"))
+
+	// test use get dir
+	os.Chdir(dir + "/../../../")
+	defer os.Chdir(dir)
+	config = baseParams.initConfPath()
+	assert.Equal(t, filepath.Clean(config), filepath.Clean(dir+"/../../../configs/"))
 }
 
 func TestBaseTable_Parse(t *testing.T) {
@@ -192,5 +222,23 @@ func Test_ConvertRangeToIntSlice(t *testing.T) {
 		assert.Panics(t, func() { ConvertRangeToIntSlice("0,abc", ",") })
 		assert.Panics(t, func() { ConvertRangeToIntSlice("-1,9", ",") })
 		assert.Panics(t, func() { ConvertRangeToIntSlice("9,0", ",") })
+	})
+}
+
+func Test_SetLogger(t *testing.T) {
+	t.Run("TestSetLooger", func(t *testing.T) {
+		baseParams.RoleName = "rootcoord"
+		baseParams.Save("log.file.rootPath", ".")
+		baseParams.SetLogger(UniqueID(-1))
+		fmt.Println(baseParams.Log.File.Filename)
+		assert.Equal(t, "rootcoord.log", baseParams.Log.File.Filename)
+
+		baseParams.RoleName = "datanode"
+		baseParams.SetLogger(UniqueID(1))
+		assert.Equal(t, "datanode-1.log", baseParams.Log.File.Filename)
+
+		baseParams.RoleName = "datanode"
+		baseParams.SetLogger(UniqueID(0))
+		assert.Equal(t, "datanode-0.log", baseParams.Log.File.Filename)
 	})
 }

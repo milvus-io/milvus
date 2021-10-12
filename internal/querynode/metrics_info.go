@@ -13,10 +13,16 @@ package querynode
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -29,8 +35,8 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 				IP:           node.session.Address,
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
 				CPUCoreUsage: metricsinfo.GetCPUUsage(),
-				Memory:       metricsinfo.GetMemoryCount(),
-				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+				Memory:       uint64(getUsedMemory(node.historical.replica, node.streaming.replica)),
+				MemoryUsage:  uint64(getTotalMemory()),
 				Disk:         metricsinfo.GetDiskCount(),
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
@@ -46,8 +52,10 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			SearchPulsarBufSize:          Params.SearchPulsarBufSize,
 			SearchResultReceiveBufSize:   Params.SearchResultReceiveBufSize,
 			RetrieveReceiveBufSize:       Params.RetrieveReceiveBufSize,
-			RetrievePulsarBufSize:        Params.retrievePulsarBufSize,
+			RetrievePulsarBufSize:        Params.RetrievePulsarBufSize,
 			RetrieveResultReceiveBufSize: Params.RetrieveResultReceiveBufSize,
+
+			SimdType: Params.SimdType,
 		},
 	}
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
@@ -70,4 +78,59 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
 	}, nil
+}
+
+func getUsedMemory(historicalReplica, streamingReplica ReplicaInterface) int64 {
+	historicalSegmentsMemSize := historicalReplica.getSegmentsMemSize()
+	streamingSegmentsMemSize := streamingReplica.getSegmentsMemSize()
+	return historicalSegmentsMemSize + streamingSegmentsMemSize
+}
+
+func getTotalMemory() int64 {
+	return Params.CacheSize * 1024 * 1024 * 1024
+}
+
+func checkSegmentMemory(segmentLoadInfos []*querypb.SegmentLoadInfo, historicalReplica, streamingReplica ReplicaInterface) error {
+	usedRAMInMB := getUsedMemory(historicalReplica, streamingReplica) / 1024.0 / 1024.0
+	totalRAMInMB := getTotalMemory() / 1024.0 / 1024.0
+
+	segmentTotalSize := int64(0)
+	for _, segInfo := range segmentLoadInfos {
+		collectionID := segInfo.CollectionID
+		segmentID := segInfo.SegmentID
+
+		col, err := historicalReplica.getCollectionByID(collectionID)
+		if err != nil {
+			return err
+		}
+
+		sizePerRecord, err := typeutil.EstimateSizePerRecord(col.schema)
+		if err != nil {
+			return err
+		}
+
+		segmentSize := int64(sizePerRecord) * segInfo.NumOfRows
+		segmentTotalSize += segmentSize / 1024.0 / 1024.0
+		// TODO: get threshold factor from param table
+		thresholdMemSize := float64(totalRAMInMB) * 0.7
+
+		log.Debug("memory stats when load segment",
+			zap.Any("collectionIDs", collectionID),
+			zap.Any("segmentID", segmentID),
+			zap.Any("numOfRows", segInfo.NumOfRows),
+			zap.Any("totalRAM(MB)", totalRAMInMB),
+			zap.Any("usedRAM(MB)", usedRAMInMB),
+			zap.Any("segmentTotalSize(MB)", segmentTotalSize),
+			zap.Any("thresholdMemSize(MB)", thresholdMemSize),
+		)
+		if usedRAMInMB+segmentTotalSize > int64(thresholdMemSize) {
+			return errors.New(fmt.Sprintln("load segment failed, OOM if load, "+
+				"collectionID = ", collectionID, ", ",
+				"usedRAM(MB) = ", usedRAMInMB, ", ",
+				"segmentTotalSize(MB) = ", segmentTotalSize, ", ",
+				"thresholdMemSize(MB) = ", thresholdMemSize))
+		}
+	}
+
+	return nil
 }

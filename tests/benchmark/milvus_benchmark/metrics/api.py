@@ -9,6 +9,8 @@ from .models.server import Server
 from .config import DB, UNIQUE_ID_COLLECTION, DOC_COLLECTION
 from milvus_benchmark import config
 
+
+# Initialize the mongoDB client
 _client = MongoClient(config.MONGO_SERVER)
 logger = logging.getLogger("milvus_benchmark.metric.api")
 

@@ -23,7 +23,7 @@ func TestConsumer_newConsumer(t *testing.T) {
 	consumer, err := newConsumer(nil, ConsumerOptions{
 		Topic:                       newTopicName(),
 		SubscriptionName:            newConsumerName(),
-		SubscriptionInitialPosition: SubscriptionPositionLatest,
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	})
 	assert.Nil(t, consumer)
 	assert.NotNil(t, err)
@@ -34,7 +34,7 @@ func TestConsumer_newConsumer(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
 
-	consumer, err = newConsumer1(newMockClient(), ConsumerOptions{}, nil)
+	consumer, err = getExistedConsumer(newMockClient(), ConsumerOptions{}, nil)
 	assert.Nil(t, consumer)
 	assert.NotNil(t, err)
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
@@ -58,8 +58,9 @@ func TestConsumer_newConsumer(t *testing.T) {
 	defer client.Close()
 	consumerName := newConsumerName()
 	consumer1, err := newConsumer(client, ConsumerOptions{
-		Topic:            newTopicName(),
-		SubscriptionName: consumerName,
+		Topic:                       newTopicName(),
+		SubscriptionName:            consumerName,
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer1)
@@ -79,22 +80,24 @@ func TestConsumer_newConsumer(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, consumer3)
 
-	consumer4, err := newConsumer1(client, ConsumerOptions{
-		Topic:            newTopicName(),
-		SubscriptionName: newConsumerName(),
+	consumer4, err := getExistedConsumer(client, ConsumerOptions{
+		Topic:                       newTopicName(),
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	}, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer4)
 
-	consumer5, err := newConsumer1(client, ConsumerOptions{
+	consumer5, err := getExistedConsumer(client, ConsumerOptions{
 		Topic: "",
 	}, nil)
 	assert.Error(t, err)
 	assert.Nil(t, consumer5)
 
-	consumer6, err := newConsumer1(client, ConsumerOptions{
-		Topic:            newTopicName(),
-		SubscriptionName: "",
+	consumer6, err := getExistedConsumer(client, ConsumerOptions{
+		Topic:                       newTopicName(),
+		SubscriptionName:            "",
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	}, nil)
 	assert.Error(t, err)
 	assert.Nil(t, consumer6)
@@ -104,8 +107,9 @@ func TestConsumer_Subscription(t *testing.T) {
 	topicName := newTopicName()
 	consumerName := newConsumerName()
 	consumer, err := newConsumer(newMockClient(), ConsumerOptions{
-		Topic:            topicName,
-		SubscriptionName: consumerName,
+		Topic:                       topicName,
+		SubscriptionName:            consumerName,
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	})
 	assert.Nil(t, consumer)
 	assert.NotNil(t, err)
@@ -126,11 +130,13 @@ func TestConsumer_Seek(t *testing.T) {
 	topicName := newTopicName()
 	consumerName := newConsumerName()
 	consumer, err := newConsumer(client, ConsumerOptions{
-		Topic:            topicName,
-		SubscriptionName: consumerName,
+		Topic:                       topicName,
+		SubscriptionName:            consumerName,
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 
-	consumer.Seek(0)
+	err = consumer.Seek(0)
+	assert.NotNil(t, err)
 }

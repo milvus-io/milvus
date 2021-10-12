@@ -63,6 +63,18 @@ type Server struct {
 	closer io.Closer
 }
 
+func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	return s.rootCoord.CreateAlias(ctx, request)
+}
+
+func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	return s.rootCoord.DropAlias(ctx, request)
+}
+
+func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AlterAlias(ctx, request)
+}
+
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &Server{
@@ -116,7 +128,7 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.Init()
 
-	rootcoord.Params.Init()
+	rootcoord.Params.InitOnce()
 	rootcoord.Params.Address = Params.Address
 	rootcoord.Params.Port = Params.Port
 	log.Debug("grpc init done ...")
@@ -274,27 +286,32 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.rootCoord.GetStatisticsChannel(ctx)
 }
 
-//DDL request
+// CreateCollection creates a collection
 func (s *Server) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreateCollection(ctx, in)
 }
 
+// DropCollection drops a collection
 func (s *Server) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.DropCollection(ctx, in)
 }
 
+// HasCollection checks whether a collection is created
 func (s *Server) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return s.rootCoord.HasCollection(ctx, in)
 }
 
+// DescribeCollection gets meta info of a collection
 func (s *Server) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.rootCoord.DescribeCollection(ctx, in)
 }
 
+// ShowCollections gets all collections
 func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return s.rootCoord.ShowCollections(ctx, in)
 }
 
+// CreatePartition creates a partition in a collection
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreatePartition(ctx, in)
 }

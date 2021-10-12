@@ -88,7 +88,7 @@ func TestProxyManager(t *testing.T) {
 
 	_, err = cli.Delete(ctx, k1)
 	assert.Nil(t, err)
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 	pm.Stop()
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }

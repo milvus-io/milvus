@@ -78,10 +78,10 @@ endif
 
 verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
 
-# Builds various components locally.
+# Build various components locally.
 binlog:
 	@echo "Building binlog ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/binlog/main.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/tools/binlog/main.go 1>/dev/null
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TIME = $(shell date --utc)
@@ -105,10 +105,10 @@ build-cpp:
 
 build-cpp-with-unittest:
 	@echo "Building Milvus cpp library with unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -u -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-# Runs the tests.
+# Run the tests.
 unittest: test-cpp test-go
 
 test-go: build-cpp-with-unittest
@@ -120,15 +120,25 @@ test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
-# Run go-codecov
-go-codecov:
-	@echo "Running go unittests..."
+# Run code coverage.
+codecov: codecov-go codecov-cpp
+
+# Run codecov-go
+codecov-go: build-cpp-with-unittest
+	@echo "Running go coverage..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 
-#TODO: build each component to docker
-docker: verifiers
+# Run codecov-cpp
+codecov-cpp: build-cpp-with-unittest
+	@echo "Running cpp coverage..."
+	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
-# Builds each component and installs it to $GOPATH/bin.
+# Package docker image locally.
+# TODO: fix error occur at starting up
+docker: install
+	./build/build_image.sh
+
+# Build each component and install binary to $GOPATH/bin.
 install: all
 	@echo "Installing binary to './bin'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus

@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	collectionID0   = UniqueID(0)
+	collectionID0   = UniqueID(2)
 	collectionID1   = UniqueID(1)
 	collectionName0 = "collection_0"
 	collectionName1 = "collection_1"

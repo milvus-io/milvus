@@ -43,7 +43,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
         milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_GPU0, MB * 200, MB * 600, 1);
 #endif
         int nsg_dim = 256;
-        Generate(nsg_dim, 20000, nq);
+        Generate(nsg_dim, nb, nq);
         index_ = std::make_shared<milvus::knowhere::NSG_NM>();
 
         train_conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, 256},

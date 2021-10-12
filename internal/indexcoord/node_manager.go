@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// NodeManager is used by IndexCoord to manage the client of IndexNode.
 type NodeManager struct {
 	nodeClients map[UniqueID]types.IndexNode
 	pq          *PriorityQueue
@@ -30,6 +31,7 @@ type NodeManager struct {
 	lock sync.RWMutex
 }
 
+// NewNodeManager is used to create a new NodeManager.
 func NewNodeManager() *NodeManager {
 	return &NodeManager{
 		nodeClients: make(map[UniqueID]types.IndexNode),
@@ -52,6 +54,7 @@ func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
 	nm.pq.Push(item)
 }
 
+// RemoveNode removes the unused client of IndexNode.
 func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
@@ -61,10 +64,11 @@ func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 	nm.pq.Remove(nodeID)
 }
 
+// AddNode adds the client of IndexNode.
 func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 	log.Debug("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
 	if nm.pq.CheckExist(nodeID) {
-		log.Debug("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
+		log.Warn("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
 		return nil
 	}
 
@@ -82,6 +86,7 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 	return nil
 }
 
+// PeekClient peeks the client with the least load.
 func (nm *NodeManager) PeekClient() (UniqueID, types.IndexNode) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()

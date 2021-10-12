@@ -21,7 +21,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -33,6 +33,7 @@ const (
 	queryChannelMetaPrefix = "queryCoord-queryChannel"
 )
 
+// Meta contains information about all loaded collections and partitions, including segment information and vchannel information
 type Meta interface {
 	reloadFromKV() error
 
@@ -62,16 +63,17 @@ type Meta interface {
 	removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
 
 	getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error)
-	GetQueryChannel(collectionID UniqueID) (string, string)
+	GetQueryChannel(collectionID UniqueID) (string, string, error)
 
 	setLoadType(collectionID UniqueID, loadType querypb.LoadType) error
 	getLoadType(collectionID UniqueID) (querypb.LoadType, error)
 	setLoadPercentage(collectionID UniqueID, partitionID UniqueID, percentage int64, loadType querypb.LoadType) error
-	printMeta()
+	//printMeta()
 }
 
+// MetaReplica records the current load information on all querynodes
 type MetaReplica struct {
-	client *etcdkv.EtcdKV // client of a reliable kv service, i.e. etcd client
+	client kv.MetaKv // client of a reliable kv service, i.e. etcd client
 
 	sync.RWMutex
 	collectionInfos   map[UniqueID]*querypb.CollectionInfo
@@ -81,7 +83,7 @@ type MetaReplica struct {
 	//partitionStates map[UniqueID]*querypb.PartitionStates
 }
 
-func newMeta(kv *etcdkv.EtcdKV) (Meta, error) {
+func newMeta(kv kv.MetaKv) (Meta, error) {
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
@@ -112,7 +114,7 @@ func (m *MetaReplica) reloadFromKV() error {
 			return err
 		}
 		collectionInfo := &querypb.CollectionInfo{}
-		err = proto.UnmarshalText(collectionValues[index], collectionInfo)
+		err = proto.Unmarshal([]byte(collectionValues[index]), collectionInfo)
 		if err != nil {
 			return err
 		}
@@ -129,7 +131,7 @@ func (m *MetaReplica) reloadFromKV() error {
 			return err
 		}
 		segmentInfo := &querypb.SegmentInfo{}
-		err = proto.UnmarshalText(segmentValues[index], segmentInfo)
+		err = proto.Unmarshal([]byte(segmentValues[index]), segmentInfo)
 		if err != nil {
 			return err
 		}
@@ -146,7 +148,7 @@ func (m *MetaReplica) reloadFromKV() error {
 			return err
 		}
 		queryChannelInfo := &querypb.QueryChannelInfo{}
-		err = proto.UnmarshalText(queryChannelValues[index], queryChannelInfo)
+		err = proto.Unmarshal([]byte(queryChannelValues[index]), queryChannelInfo)
 		if err != nil {
 			return err
 		}
@@ -421,25 +423,23 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 	defer m.Unlock()
 
 	delete(m.collectionInfos, collectionID)
+	var err error
 	for id, info := range m.segmentInfos {
 		if info.CollectionID == collectionID {
-			err := removeSegmentInfo(id, m.client)
+			err = removeSegmentInfo(id, m.client)
 			if err != nil {
-				log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", id))
-				return err
+				log.Warn("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", id))
 			}
 			delete(m.segmentInfos, id)
 		}
 	}
 
-	delete(m.queryChannelInfos, collectionID)
-	err := removeGlobalCollectionInfo(collectionID, m.client)
+	err = removeGlobalCollectionInfo(collectionID, m.client)
 	if err != nil {
-		log.Error("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-		return err
+		log.Warn("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 	}
 
-	return nil
+	return err
 }
 
 func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID UniqueID) error {
@@ -578,14 +578,14 @@ func (m *MetaReplica) removeDmChannel(collectionID UniqueID, nodeID int64, chann
 	return errors.New("addDmChannels: can't find collection in collectionInfos")
 }
 
-func (m *MetaReplica) GetQueryChannel(collectionID UniqueID) (string, string) {
+func (m *MetaReplica) GetQueryChannel(collectionID UniqueID) (string, string, error) {
 	m.Lock()
 	defer m.Unlock()
 
 	//TODO::to remove
 	collectionID = 0
 	if info, ok := m.queryChannelInfos[collectionID]; ok {
-		return info.QueryChannelID, info.QueryResultChannelID
+		return info.QueryChannelID, info.QueryResultChannelID, nil
 	}
 
 	searchPrefix := Params.SearchChannelPrefix
@@ -599,9 +599,14 @@ func (m *MetaReplica) GetQueryChannel(collectionID UniqueID) (string, string) {
 		QueryChannelID:       allocatedQueryChannel,
 		QueryResultChannelID: allocatedQueryResultChannel,
 	}
+	err := saveQueryChannelInfo(collectionID, queryChannelInfo, m.client)
+	if err != nil {
+		log.Error("GetQueryChannel: save channel to etcd error", zap.Error(err))
+		return "", "", err
+	}
 	m.queryChannelInfos[collectionID] = queryChannelInfo
 	//TODO::return channel according collectionID
-	return allocatedQueryChannel, allocatedQueryResultChannel
+	return allocatedQueryChannel, allocatedQueryResultChannel, nil
 }
 
 func (m *MetaReplica) setLoadType(collectionID UniqueID, loadType querypb.LoadType) error {
@@ -679,54 +684,58 @@ func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID Uniqu
 	return nil
 }
 
-func (m *MetaReplica) printMeta() {
-	m.RLock()
-	defer m.RUnlock()
-	for id, info := range m.collectionInfos {
-		log.Debug("query coordinator MetaReplica: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
-	}
+//func (m *MetaReplica) printMeta() {
+//	m.RLock()
+//	defer m.RUnlock()
+//	for id, info := range m.collectionInfos {
+//		log.Debug("query coordinator MetaReplica: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+//	}
+//
+//	for id, info := range m.segmentInfos {
+//		log.Debug("query coordinator MetaReplica: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
+//	}
+//
+//	for id, info := range m.queryChannelInfos {
+//		log.Debug("query coordinator MetaReplica: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+//	}
+//}
 
-	for id, info := range m.segmentInfos {
-		log.Debug("query coordinator MetaReplica: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
+func saveGlobalCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, kv kv.MetaKv) error {
+	infoBytes, err := proto.Marshal(info)
+	if err != nil {
+		return err
 	}
-
-	for id, info := range m.queryChannelInfos {
-		log.Debug("query coordinator MetaReplica: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
-	}
-}
-
-func saveGlobalCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, kv *etcdkv.EtcdKV) error {
-	infoBytes := proto.MarshalTextString(info)
 
 	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
-	return kv.Save(key, infoBytes)
+	return kv.Save(key, string(infoBytes))
 }
 
-func removeGlobalCollectionInfo(collectionID UniqueID, kv *etcdkv.EtcdKV) error {
+func removeGlobalCollectionInfo(collectionID UniqueID, kv kv.MetaKv) error {
 	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
 	return kv.Remove(key)
 }
 
-func saveSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo, kv *etcdkv.EtcdKV) error {
-	infoBytes := proto.MarshalTextString(info)
+func saveSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo, kv kv.MetaKv) error {
+	infoBytes, err := proto.Marshal(info)
+	if err != nil {
+		return err
+	}
 
 	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
-	return kv.Save(key, infoBytes)
+	return kv.Save(key, string(infoBytes))
 }
 
-func removeSegmentInfo(segmentID UniqueID, kv *etcdkv.EtcdKV) error {
+func removeSegmentInfo(segmentID UniqueID, kv kv.MetaKv) error {
 	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
 	return kv.Remove(key)
 }
 
-func saveQueryChannelInfo(collectionID UniqueID, info *querypb.QueryChannelInfo, kv *etcdkv.EtcdKV) error {
-	infoBytes := proto.MarshalTextString(info)
+func saveQueryChannelInfo(collectionID UniqueID, info *querypb.QueryChannelInfo, kv kv.MetaKv) error {
+	infoBytes, err := proto.Marshal(info)
+	if err != nil {
+		return err
+	}
 
 	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
-	return kv.Save(key, infoBytes)
-}
-
-func removeQueryChannelInfo(collectionID UniqueID, kv *etcdkv.EtcdKV) error {
-	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
-	return kv.Remove(key)
+	return kv.Save(key, string(infoBytes))
 }

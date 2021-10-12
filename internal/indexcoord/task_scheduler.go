@@ -27,6 +27,7 @@ import (
 	oplog "github.com/opentracing/opentracing-go/log"
 )
 
+// TaskQueue is a queue used to store tasks.
 type TaskQueue interface {
 	utChan() <-chan int
 	utEmpty() bool
@@ -40,6 +41,7 @@ type TaskQueue interface {
 	tryToRemoveUselessIndexAddTask(indexID UniqueID) []UniqueID
 }
 
+// BaseTaskQueue is a basic instance of TaskQueue.
 type BaseTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[UniqueID]task
@@ -90,12 +92,12 @@ func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
 //	return queue.unissuedTasks.Front().Value.(task)
 //}
 
+// PopUnissuedTask pops a task from tasks queue.
 func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Fatal("sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -105,6 +107,7 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	return ft.Value.(task)
 }
 
+// AddActiveTask adds a task to activeTasks.
 func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
@@ -118,6 +121,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.activeTasks[tID] = t
 }
 
+// PopActiveTask tasks out a task from activateTask and the task will be executed.
 func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
@@ -131,6 +135,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	return nil
 }
 
+// Enqueue adds a task to TaskQueue.
 func (queue *BaseTaskQueue) Enqueue(t task) error {
 	tID, _ := queue.sched.idAllocator.AllocOne()
 	log.Debug("indexcoord", zap.Int64("[Builder] allocate reqID", tID))
@@ -142,11 +147,13 @@ func (queue *BaseTaskQueue) Enqueue(t task) error {
 	return queue.addUnissuedTask(t)
 }
 
+// IndexAddTaskQueue is a task queue used to store building index tasks.
 type IndexAddTaskQueue struct {
 	BaseTaskQueue
 	lock sync.Mutex
 }
 
+// Enqueue adds a building index task to IndexAddTaskQueue.
 func (queue *IndexAddTaskQueue) Enqueue(t task) error {
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
@@ -176,6 +183,7 @@ func (queue *IndexAddTaskQueue) tryToRemoveUselessIndexAddTask(indexID UniqueID)
 	return indexBuildIDs
 }
 
+// NewIndexAddTaskQueue creates a new IndexAddTaskQueue.
 func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {
 	return &IndexAddTaskQueue{
 		BaseTaskQueue: BaseTaskQueue{
@@ -188,6 +196,7 @@ func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {
 	}
 }
 
+// TaskScheduler is a scheduler of indexing tasks.
 type TaskScheduler struct {
 	IndexAddQueue TaskQueue
 
@@ -200,6 +209,7 @@ type TaskScheduler struct {
 	cancel context.CancelFunc
 }
 
+// NewTaskScheduler creates a new task scheduler of indexing tasks.
 func NewTaskScheduler(ctx context.Context,
 	idAllocator *allocator.GlobalIDAllocator,
 	kv kv.BaseKV,
@@ -273,6 +283,7 @@ func (sched *TaskScheduler) indexAddLoop() {
 	}
 }
 
+// Start stats the task scheduler of indexing tasks.
 func (sched *TaskScheduler) Start() error {
 
 	sched.wg.Add(1)
@@ -281,6 +292,7 @@ func (sched *TaskScheduler) Start() error {
 	return nil
 }
 
+// Close closes the task scheduler of indexing tasks.
 func (sched *TaskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()

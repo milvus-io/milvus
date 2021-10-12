@@ -16,8 +16,7 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -27,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type reqTask interface {
@@ -69,15 +69,18 @@ func executeTask(t reqTask) error {
 	}
 }
 
+// CreateCollectionReqTask create collection request task
 type CreateCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreateCollectionRequest
 }
 
+// Type return msg type
 func (t *CreateCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreateCollection {
 		return fmt.Errorf("create collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -92,7 +95,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.CollectionName, schema.Name)
 	}
 	if t.Req.ShardsNum <= 0 {
-		t.Req.ShardsNum = DefaultShardsNum
+		t.Req.ShardsNum = common.DefaultShardsNum
 	}
 	log.Debug("CreateCollectionReqTask Execute", zap.Any("CollectionName", t.Req.CollectionName),
 		zap.Any("ShardsNum", t.Req.ShardsNum))
@@ -194,17 +197,24 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 
-		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
-		if err != nil {
-			return fmt.Errorf("meta table add collection failed,error = %w", err)
-		}
-
 		// add dml channel before send dd msg
 		t.core.dmlChannels.AddProducerChannels(chanNames...)
 
-		err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
+		ids, err := t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 		if err != nil {
 			return fmt.Errorf("send dd create collection req failed, error = %w", err)
+		}
+		for _, pchan := range collInfo.PhysicalChannelNames {
+			collInfo.StartPositions = append(collInfo.StartPositions, &commonpb.KeyDataPair{
+				Key:  pchan,
+				Data: ids[pchan],
+			})
+		}
+		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
+		if err != nil {
+			t.core.dmlChannels.RemoveProducerChannels(chanNames...)
+			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
+			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
 
 		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
@@ -221,18 +231,24 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	return t.core.setDdMsgSendFlag(true)
 }
 
+// DropCollectionReqTask drop collection request task
 type DropCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.DropCollectionRequest
 }
 
+// Type return msg type
 func (t *DropCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropCollection {
 		return fmt.Errorf("drop collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+	if t.core.MetaTable.IsAlias(t.Req.CollectionName) {
+		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
 	}
 
 	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
@@ -260,6 +276,8 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
+
+	aliases := t.core.MetaTable.ListAliases(collMeta.ID)
 
 	// use lambda function here to guarantee all resources to be released
 	dropCollectionFn := func() error {
@@ -316,20 +334,37 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	// error doesn't matter here
 	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
+	for _, alias := range aliases {
+		req = proxypb.InvalidateCollMetaCacheRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO, msg type
+				MsgID:     0, //TODO, msg id
+				Timestamp: ts,
+				SourceID:  t.core.session.ServerID,
+			},
+			DbName:         t.Req.DbName,
+			CollectionName: alias,
+		}
+		t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+	}
+
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
 }
 
+// HasCollectionReqTask has collection request task
 type HasCollectionReqTask struct {
 	baseReqTask
 	Req           *milvuspb.HasCollectionRequest
 	HasCollection bool
 }
 
+// Type return msg type
 func (t *HasCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *HasCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_HasCollection {
 		return fmt.Errorf("has collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -343,16 +378,19 @@ func (t *HasCollectionReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// DescribeCollectionReqTask describe collection request task
 type DescribeCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.DescribeCollectionRequest
 	Rsp *milvuspb.DescribeCollectionResponse
 }
 
+// Type return msg type
 func (t *DescribeCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeCollection {
 		return fmt.Errorf("describe collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -384,20 +422,24 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	t.Rsp.CreatedTimestamp = collInfo.CreateTime
 	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)
 	t.Rsp.CreatedUtcTimestamp = createdPhysicalTime
-
+	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID)
+	t.Rsp.StartPositions = collInfo.GetStartPositions()
 	return nil
 }
 
+// ShowCollectionReqTask show collection request task
 type ShowCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.ShowCollectionsRequest
 	Rsp *milvuspb.ShowCollectionsResponse
 }
 
+// Type return msg type
 func (t *ShowCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowCollections {
 		return fmt.Errorf("show collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -416,15 +458,18 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// CreatePartitionReqTask create partition request task
 type CreatePartitionReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreatePartitionRequest
 }
 
+// Type return msg type
 func (t *CreatePartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreatePartition {
 		return fmt.Errorf("create partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -508,15 +553,18 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	return t.core.setDdMsgSendFlag(true)
 }
 
+// DropPartitionReqTask drop partition request task
 type DropPartitionReqTask struct {
 	baseReqTask
 	Req *milvuspb.DropPartitionRequest
 }
 
+// Type return msg type
 func (t *DropPartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropPartition {
 		return fmt.Errorf("drop partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -606,16 +654,19 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	return t.core.setDdMsgSendFlag(true)
 }
 
+// HasPartitionReqTask has partition request task
 type HasPartitionReqTask struct {
 	baseReqTask
 	Req          *milvuspb.HasPartitionRequest
 	HasPartition bool
 }
 
+// Type return msg type
 func (t *HasPartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *HasPartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_HasPartition {
 		return fmt.Errorf("has partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -628,16 +679,19 @@ func (t *HasPartitionReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// ShowPartitionReqTask show partition request task
 type ShowPartitionReqTask struct {
 	baseReqTask
 	Req *milvuspb.ShowPartitionsRequest
 	Rsp *milvuspb.ShowPartitionsResponse
 }
 
+// Type return msg type
 func (t *ShowPartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowPartitions {
 		return fmt.Errorf("show partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -664,16 +718,19 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// DescribeSegmentReqTask describe segment request task
 type DescribeSegmentReqTask struct {
 	baseReqTask
 	Req *milvuspb.DescribeSegmentRequest
 	Rsp *milvuspb.DescribeSegmentResponse //TODO,return repeated segment id in the future
 }
 
+// Type return msg type
 func (t *DescribeSegmentReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeSegment {
 		return fmt.Errorf("describe segment, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -712,16 +769,19 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// ShowSegmentReqTask show segment request task
 type ShowSegmentReqTask struct {
 	baseReqTask
 	Req *milvuspb.ShowSegmentsRequest
 	Rsp *milvuspb.ShowSegmentsResponse
 }
 
+// Type return msg type
 func (t *ShowSegmentReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowSegments {
 		return fmt.Errorf("show segments, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -750,15 +810,18 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// CreateIndexReqTask create index request task
 type CreateIndexReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreateIndexRequest
 }
 
+// Type return msg type
 func (t *CreateIndexReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreateIndex {
 		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -822,16 +885,19 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// DescribeIndexReqTask describe index request task
 type DescribeIndexReqTask struct {
 	baseReqTask
 	Req *milvuspb.DescribeIndexRequest
 	Rsp *milvuspb.DescribeIndexResponse
 }
 
+// Type return msg type
 func (t *DescribeIndexReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeIndex {
 		return fmt.Errorf("describe index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -857,15 +923,18 @@ func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// DropIndexReqTask drop index request task
 type DropIndexReqTask struct {
 	baseReqTask
 	Req *milvuspb.DropIndexRequest
 }
 
+// Type return msg type
 func (t *DropIndexReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+// Execute task execution
 func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropIndex {
 		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -888,4 +957,211 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	ts, _ := t.core.TSOAllocator(1)
 	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName, ts)
 	return err
+}
+
+// CreateAliasReqTask create alias request task
+type CreateAliasReqTask struct {
+	baseReqTask
+	Req *milvuspb.CreateAliasRequest
+}
+
+// Type return msg type
+func (t *CreateAliasReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+// Execute task execution
+func (t *CreateAliasReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_CreateAlias {
+		return fmt.Errorf("create alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	ddReq := internalpb.CreateAliasRequest{
+		Base:           t.Req.Base,
+		CollectionName: t.Req.CollectionName,
+		Alias:          t.Req.Alias,
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, CreateAliasDDType)
+	}
+
+	reason := fmt.Sprintf("create alias %s", t.Req.Alias)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	createAliasFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		err = t.core.MetaTable.AddAlias(t.Req.Alias, t.Req.CollectionName, ts, ddOp)
+		if err != nil {
+			return err
+		}
+		return t.core.SendTimeTick(ts, reason)
+	}
+
+	err = createAliasFn()
+	if err != nil {
+		return err
+	}
+
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
+}
+
+// DropAliasReqTask drop alias request task
+type DropAliasReqTask struct {
+	baseReqTask
+	Req *milvuspb.DropAliasRequest
+}
+
+// Type return msg type
+func (t *DropAliasReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+// Execute task execution
+func (t *DropAliasReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DropAlias {
+		return fmt.Errorf("create alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	ddReq := internalpb.DropAliasRequest{
+		Base:  t.Req.Base,
+		Alias: t.Req.Alias,
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, DropAliasDDType)
+	}
+
+	reason := fmt.Sprintf("create alias %s", t.Req.Alias)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	dropAliasFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		err = t.core.MetaTable.DeleteAlias(t.Req.Alias, ts, ddOp)
+		if err != nil {
+			return err
+		}
+		t.core.SendTimeTick(ts, reason)
+		return nil
+	}
+
+	err = dropAliasFn()
+	if err != nil {
+		return err
+	}
+
+	req := proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0, //TODO, msg type
+			MsgID:     0, //TODO, msg id
+			Timestamp: ts,
+			SourceID:  t.core.session.ServerID,
+		},
+		CollectionName: t.Req.Alias,
+	}
+	// error doesn't matter here
+	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
+}
+
+// AlterAliasReqTask alter alias request task
+type AlterAliasReqTask struct {
+	baseReqTask
+	Req *milvuspb.AlterAliasRequest
+}
+
+// Type return msg type
+func (t *AlterAliasReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+// Execute task execution
+func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_AlterAlias {
+		return fmt.Errorf("alter alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	ddReq := internalpb.DropAliasRequest{
+		Base:  t.Req.Base,
+		Alias: t.Req.Alias,
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, AlterAliasDDType)
+	}
+
+	reason := fmt.Sprintf("alter alias %s", t.Req.Alias)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	alterAliasFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		err = t.core.MetaTable.AlterAlias(t.Req.Alias, t.Req.CollectionName, ts, ddOp)
+		if err != nil {
+			return err
+		}
+		t.core.SendTimeTick(ts, reason)
+		return nil
+	}
+
+	err = alterAliasFn()
+	if err != nil {
+		return err
+	}
+
+	req := proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0, //TODO, msg type
+			MsgID:     0, //TODO, msg id
+			Timestamp: ts,
+			SourceID:  t.core.session.ServerID,
+		},
+		CollectionName: t.Req.Alias,
+	}
+	// error doesn't matter here
+	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
 }

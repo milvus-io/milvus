@@ -13,11 +13,17 @@ package datanode
 
 import (
 	"log"
+	"path"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestParamTable_DataNode(t *testing.T) {
-
+func TestParamTable(t *testing.T) {
+	Params.Init()
+	Params.NodeID = 2
+	Params.initMsgChannelSubName()
 	t.Run("Test NodeID", func(t *testing.T) {
 		id := Params.NodeID
 		log.Println("NodeID:", id)
@@ -54,18 +60,27 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("PulsarAddress:", address)
 	})
 
+	t.Run("Test ClusterChannelPrefix", func(t *testing.T) {
+		path := Params.ClusterChannelPrefix
+		assert.Equal(t, path, "by-dev")
+		log.Println("ClusterChannelPrefix:", Params.ClusterChannelPrefix)
+	})
+
 	t.Run("Test SegmentStatisticsChannelName", func(t *testing.T) {
 		path := Params.SegmentStatisticsChannelName
+		assert.Equal(t, path, "by-dev-datacoord-statistics-channel")
 		log.Println("SegmentStatisticsChannelName:", path)
 	})
 
 	t.Run("Test TimeTickChannelName", func(t *testing.T) {
 		name := Params.TimeTickChannelName
+		assert.Equal(t, name, "by-dev-datacoord-timetick-channel")
 		log.Println("TimeTickChannelName:", name)
 	})
 
 	t.Run("Test msgChannelSubName", func(t *testing.T) {
 		name := Params.MsgChannelSubName
+		assert.Equal(t, name, "by-dev-dataNode-2")
 		log.Println("MsgChannelSubName:", name)
 	})
 
@@ -97,5 +112,26 @@ func TestParamTable_DataNode(t *testing.T) {
 	t.Run("Test MinioBucketName", func(t *testing.T) {
 		name := Params.MinioBucketName
 		log.Println("MinioBucketName:", name)
+	})
+
+	t.Run("Test CreatedTime", func(t *testing.T) {
+		Params.CreatedTime = time.Now()
+		log.Println("CreatedTime: ", Params.CreatedTime)
+	})
+
+	t.Run("Test UpdatedTime", func(t *testing.T) {
+		Params.UpdatedTime = time.Now()
+		log.Println("UpdatedTime: ", Params.UpdatedTime)
+	})
+
+	t.Run("Test InsertBinlogRootPath", func(t *testing.T) {
+		Params.Init()
+		assert.Equal(t, path.Join("files", "insert_log"), Params.InsertBinlogRootPath)
+	})
+
+	t.Run("Test StatsBinlogRootPath", func(t *testing.T) {
+		p := new(ParamTable)
+		p.Init()
+		assert.Equal(t, path.Join("files", "stats_log"), Params.StatsBinlogRootPath)
 	})
 }

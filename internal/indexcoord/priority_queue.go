@@ -16,7 +16,7 @@ import (
 	"sync"
 )
 
-// An Item is something we manage in a priority queue.
+// PQItem is something we manage in a priority queue.
 type PQItem struct {
 	key UniqueID
 
@@ -25,28 +25,32 @@ type PQItem struct {
 	index int // The index of the item in the heap.
 }
 
-// A PriorityQueue implements heap.Interface and holds Items.
-
+// PriorityQueue implements heap.Interface and holds Items.
 type PriorityQueue struct {
 	items []*PQItem
 	lock  sync.RWMutex
 }
 
+// Len is the length of the priority queue.
 func (pq *PriorityQueue) Len() int {
 	return len(pq.items)
 }
 
+// Less reports whether the element with index i
+// must sort before the element with index j.
 func (pq *PriorityQueue) Less(i, j int) bool {
 	// We want Pop to give us the highest, not lowest, priority so we use greater than here.
 	return pq.items[i].priority < pq.items[j].priority
 }
 
+// Swap swaps the elements with indexes i and j.
 func (pq *PriorityQueue) Swap(i, j int) {
 	pq.items[i], pq.items[j] = pq.items[j], pq.items[i]
 	pq.items[i].index = i
 	pq.items[j].index = j
 }
 
+// Push adds an element to the priority.
 func (pq *PriorityQueue) Push(x interface{}) {
 	pq.lock.Lock()
 	defer pq.lock.Unlock()
@@ -66,6 +70,7 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return item
 }
 
+// CheckExist checks whether the nodeID is already in the priority.
 func (pq *PriorityQueue) CheckExist(nodeID UniqueID) bool {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
@@ -111,6 +116,7 @@ func (pq *PriorityQueue) UpdatePriority(key UniqueID, priority int) {
 	}
 }
 
+// Remove deletes the corresponding item according to the key.
 func (pq *PriorityQueue) Remove(key UniqueID) {
 	pq.lock.Lock()
 	defer pq.lock.Unlock()
@@ -120,7 +126,7 @@ func (pq *PriorityQueue) Remove(key UniqueID) {
 	}
 }
 
-// PeekClient picks an key with the lowest load.
+// Peek picks an key with the lowest load.
 func (pq *PriorityQueue) Peek() UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
@@ -131,6 +137,7 @@ func (pq *PriorityQueue) Peek() UniqueID {
 	return pq.items[0].key
 }
 
+// PeekAll return the key of all the items.
 func (pq *PriorityQueue) PeekAll() []UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()

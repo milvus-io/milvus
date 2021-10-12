@@ -13,6 +13,7 @@ def operations_parser(operations):
 
 
 def collection_parser(collection_name):
+    """ Collection size analysis """
     tmp = collection_name.split("_")
     # if len(tmp) != 5:
     #     return None

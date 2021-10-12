@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
+// queryNodeFlowGraph is a TimeTickedFlowGraph in query node
 type queryNodeFlowGraph struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -113,7 +114,7 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstre
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
-	node := flowgraph.NewInputNode(&insertStream, "dmlInputNode", maxQueueLength, maxParallelism)
+	node := flowgraph.NewInputNode(insertStream, "dmlInputNode", maxQueueLength, maxParallelism)
 	return node
 }
 

@@ -49,7 +49,14 @@ def update_values(src_values_file, deploy_params_file):
     values_dict["service"]["type"] = "ClusterIP"
     if deploy_mode != config.DEFUALT_DEPLOY_MODE:
         cluster = True
-        values_dict["cluster"]["enabled"] = True
+        # values_dict["cluster"]["enabled"] = True
+    elif deploy_mode == config.CLUSTER_3RD_DEPLOY_MODE:
+        cluster = True
+    elif deploy_mode == config.SINGLE_DEPLOY_MODE:
+        values_dict["cluster"]["enabled"] = False
+        values_dict["etcd"]["replicaCount"] = 1
+        values_dict["minio"]["mode"] = "standalone"
+        values_dict["pulsar"]["enabled"] = False
     server_tag = utils.get_server_tag(deploy_params)
     print(server_tag)
     # TODO: update milvus config
@@ -73,13 +80,16 @@ def update_values(src_values_file, deploy_params_file):
         cpus = res["cpus"]
         mems = res["mems"]
         gpus = res["gpus"]
-    if cpus:
+    if cpus and mems:
+        # Set the scope of cpu application according to the configuration
         resources = {
                 "limits": {
-                    "cpu": str(int(cpus)) + ".0"
+                    "cpu": str(int(cpus)) + ".0",
+                    "memory": str(int(mems)) + "Gi"
                 },
                 "requests": {
-                    "cpu": str(int(cpus) // 2 + 1) + ".0"
+                    "cpu": str(int(cpus) // 2 + 1) + ".0",
+                    "memory": str(int(mems) // 2 + 1) + "Gi"
                     # "cpu": "4.0"
                     # "cpu": str(int(cpus) - 1) + ".0"
                 }
@@ -147,7 +157,8 @@ def update_values(src_values_file, deploy_params_file):
         values_dict['dataNode']['tolerations'] = perf_tolerations
         values_dict['etcd']['tolerations'] = perf_tolerations
         values_dict['minio']['tolerations'] = perf_tolerations
-        values_dict['pulsarStandalone']['tolerations'] = perf_tolerations
+        if deploy_mode != config.CLUSTER_3RD_DEPLOY_MODE:
+            values_dict['pulsarStandalone']['tolerations'] = perf_tolerations
         # TODO: for distributed deployment
         # values_dict['pulsar']['autoRecovery']['tolerations'] = perf_tolerations
         # values_dict['pulsar']['proxy']['tolerations'] = perf_tolerations
@@ -187,6 +198,8 @@ def update_values(src_values_file, deploy_params_file):
         'mountPath': '/test'
     }]
 
+    print(values_dict)
+    # Update content of src_values_file
     with open(src_values_file, 'w') as f:
         dump(values_dict, f, default_flow_style=False)
     f.close()

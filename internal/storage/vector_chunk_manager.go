@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 )
 
+// VectorChunkManager is responsible for read and write vector data.
 type VectorChunkManager struct {
 	localChunkManager  ChunkManager
 	remoteChunkManager ChunkManager
@@ -29,6 +30,7 @@ type VectorChunkManager struct {
 	localCacheEnable bool
 }
 
+// NewVectorChunkManager create a new vector manager object.
 func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager ChunkManager, schema *etcdpb.CollectionMeta, localCacheEnable bool) *VectorChunkManager {
 	return &VectorChunkManager{
 		localChunkManager:  localChunkManager,
@@ -39,6 +41,9 @@ func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager Ch
 	}
 }
 
+// For vector data, we will download vector file from storage. And we will
+// deserialize the file for it has binlog style. At last we store pure vector
+// data to local storage as cache.
 func (vcm *VectorChunkManager) downloadVectorFile(key string) ([]byte, error) {
 	if vcm.localChunkManager.Exist(key) {
 		return vcm.localChunkManager.Read(key)
@@ -78,6 +83,8 @@ func (vcm *VectorChunkManager) downloadVectorFile(key string) ([]byte, error) {
 	return results, nil
 }
 
+// GetPath returns the path of vector data. If cached, return local path.
+// If not cached return remote path.
 func (vcm *VectorChunkManager) GetPath(key string) (string, error) {
 	if vcm.localChunkManager.Exist(key) && vcm.localCacheEnable {
 		return vcm.localChunkManager.GetPath(key)
@@ -85,6 +92,7 @@ func (vcm *VectorChunkManager) GetPath(key string) (string, error) {
 	return vcm.remoteChunkManager.GetPath(key)
 }
 
+// Write writes the vector data to local cache if cache enabled.
 func (vcm *VectorChunkManager) Write(key string, content []byte) error {
 	if !vcm.localCacheEnable {
 		return errors.New("Cannot write local file for local cache is not allowed")
@@ -92,10 +100,12 @@ func (vcm *VectorChunkManager) Write(key string, content []byte) error {
 	return vcm.localChunkManager.Write(key, content)
 }
 
+// Exist checks whether vector data is saved to local cache.
 func (vcm *VectorChunkManager) Exist(key string) bool {
 	return vcm.localChunkManager.Exist(key)
 }
 
+// Read reads the pure vector data. If cached, it reads from local.
 func (vcm *VectorChunkManager) Read(key string) ([]byte, error) {
 	if vcm.localCacheEnable {
 		if vcm.localChunkManager.Exist(key) {
@@ -114,6 +124,7 @@ func (vcm *VectorChunkManager) Read(key string) ([]byte, error) {
 	return vcm.downloadVectorFile(key)
 }
 
+// ReadAt reads specific position data of vector. If cached, it reads from local.
 func (vcm *VectorChunkManager) ReadAt(key string, p []byte, off int64) (int, error) {
 	if vcm.localCacheEnable {
 		if vcm.localChunkManager.Exist(key) {

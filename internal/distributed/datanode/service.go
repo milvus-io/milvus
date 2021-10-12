@@ -41,7 +41,7 @@ import (
 )
 
 type Server struct {
-	datanode    *dn.DataNode
+	datanode    types.DataNodeComponent
 	wg          sync.WaitGroup
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
@@ -113,11 +113,11 @@ func (s *Server) startGrpcLoop(listener net.Listener) {
 }
 
 func (s *Server) SetRootCoordInterface(ms types.RootCoord) error {
-	return s.datanode.SetRootCoordInterface(ms)
+	return s.datanode.SetRootCoord(ms)
 }
 
 func (s *Server) SetDataCoordInterface(ds types.DataCoord) error {
-	return s.datanode.SetDataCoordInterface(ds)
+	return s.datanode.SetDataCoord(ds)
 }
 
 func (s *Server) Run() error {
@@ -141,7 +141,21 @@ func (s *Server) Stop() error {
 	}
 	s.cancel()
 	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
+		// make graceful stop has a timeout
+		stopped := make(chan struct{})
+		go func() {
+			s.grpcServer.GracefulStop()
+			close(stopped)
+		}()
+
+		t := time.NewTimer(10 * time.Second)
+		select {
+		case <-t.C:
+			// hard stop since grace timeout
+			s.grpcServer.Stop()
+		case <-stopped:
+			t.Stop()
+		}
 	}
 
 	err := s.datanode.Stop()
@@ -155,10 +169,8 @@ func (s *Server) Stop() error {
 func (s *Server) init() error {
 	ctx := context.Background()
 	Params.Init()
-	Params.LoadFromEnv()
-	Params.LoadFromArgs()
 
-	dn.Params.Init()
+	dn.Params.InitOnce()
 	dn.Params.Port = Params.Port
 	dn.Params.IP = Params.IP
 
@@ -228,7 +240,7 @@ func (s *Server) init() error {
 		}
 	}
 
-	s.datanode.NodeID = dn.Params.NodeID
+	s.datanode.SetNodeID(dn.Params.NodeID)
 	s.datanode.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if err := s.datanode.Init(); err != nil {
@@ -264,7 +276,7 @@ func (s *Server) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 }
 
 func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	if s.datanode.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+	if s.datanode.GetStateCode() != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "DataNode isn't healthy.",

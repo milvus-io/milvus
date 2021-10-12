@@ -43,8 +43,9 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
 					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
 				},
-				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-				Type: typeutil.RootCoordRole,
+				CreatedTime: Params.CreatedTime.String(),
+				UpdatedTime: Params.UpdatedTime.String(),
+				Type:        typeutil.RootCoordRole,
 			},
 			SystemConfigurations: metricsinfo.RootCoordConfiguration{
 				MinSegmentSizeToEnableIndex: Params.MinSegmentSizeToEnableIndex,

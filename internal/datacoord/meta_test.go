@@ -124,14 +124,14 @@ func TestMeta_Basic(t *testing.T) {
 		// inject error for `Save`
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := NewMeta(fkv)
+		meta, err := newMeta(fkv)
 		assert.Nil(t, err)
 
 		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
 		assert.NotNil(t, err)
 
 		fkv2 := &removeFailKV{TxnKV: memoryKV}
-		meta, err = NewMeta(fkv2)
+		meta, err = newMeta(fkv2)
 		assert.Nil(t, err)
 		// nil, since no segment yet
 		err = meta.DropSegment(0)
@@ -147,7 +147,6 @@ func TestMeta_Basic(t *testing.T) {
 	t.Run("Test GetCount", func(t *testing.T) {
 		const rowCount0 = 100
 		const rowCount1 = 300
-		const dim = 1024
 
 		// no segment
 		nums := meta.GetNumRowsOfCollection(collID)

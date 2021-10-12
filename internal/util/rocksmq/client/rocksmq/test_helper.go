@@ -18,8 +18,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	"github.com/milvus-io/milvus/internal/log"
 	rocksmq "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
+	"go.uber.org/zap"
 )
 
 func newTopicName() string {
@@ -64,9 +66,18 @@ func newRocksMQ(rmqPath string) server.RocksMQ {
 
 func removePath(rmqPath string) {
 	kvPath := rmqPath + "_kv"
-	os.RemoveAll(kvPath)
+	err := os.RemoveAll(kvPath)
+	if err != nil {
+		log.Error("os removeAll failed.", zap.Any("path", kvPath))
+	}
 	rocksdbPath := rmqPath + "_db"
-	os.RemoveAll(rocksdbPath)
+	err = os.RemoveAll(rocksdbPath)
+	if err != nil {
+		log.Error("os removeAll failed.", zap.Any("path", kvPath))
+	}
 	metaPath := rmqPath + "_meta_kv"
-	os.RemoveAll(metaPath)
+	err = os.RemoveAll(metaPath)
+	if err != nil {
+		log.Error("os removeAll failed.", zap.Any("path", kvPath))
+	}
 }

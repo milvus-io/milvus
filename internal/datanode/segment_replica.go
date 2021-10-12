@@ -35,6 +35,7 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
+// Replica is DataNode unique replication
 type Replica interface {
 	getCollectionID() UniqueID
 	getCollectionSchema(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error)
@@ -42,6 +43,8 @@ type Replica interface {
 
 	addNewSegment(segID, collID, partitionID UniqueID, channelName string, startPos, endPos *internalpb.MsgPosition) error
 	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error
+	filterSegments(channelName string, partitionID UniqueID) []*Segment
+	addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64) error
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
@@ -49,7 +52,7 @@ type Replica interface {
 	updateSegmentPKRange(segID UniqueID, rowIDs []int64)
 	hasSegment(segID UniqueID, countFlushed bool) bool
 
-	updateStatistics(segID UniqueID, numRows int64) error
+	updateStatistics(segID UniqueID, numRows int64)
 	getSegmentStatisticsUpdates(segID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
 	segmentFlushed(segID UniqueID)
 }
@@ -153,6 +156,8 @@ func (replica *SegmentReplica) new2FlushedSegment(segID UniqueID) {
 	delete(replica.newSegments, segID)
 }
 
+// normal2FlushedSegment transfers a segment from *normal* to *flushed* by changing *isFlushed*
+//  flag into true, and mv the segment from normalSegments map to flushedSegments map.
 func (replica *SegmentReplica) normal2FlushedSegment(segID UniqueID) {
 	var seg Segment = *replica.normalSegments[segID]
 
@@ -174,10 +179,15 @@ func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (coll
 		return seg.collectionID, seg.partitionID, nil
 	}
 
+	if seg, ok := replica.flushedSegments[segID]; ok {
+		return seg.collectionID, seg.partitionID, nil
+	}
+
 	return 0, 0, fmt.Errorf("Cannot find segment, id = %v", segID)
 }
 
-// addNewSegment adds a *New* and *NotFlushed* new segment
+// addNewSegment adds a *New* and *NotFlushed* new segment. Before add, please make sure there's no
+// such segment by `hasSegment`
 func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID, channelName string,
 	startPos, endPos *internalpb.MsgPosition) error {
 
@@ -185,7 +195,9 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	defer replica.segMu.Unlock()
 
 	if collID != replica.collectionID {
-		log.Warn("Mismatch collection", zap.Int64("ID", collID))
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
 		return fmt.Errorf("Mismatch collection, ID=%d", collID)
 	}
 
@@ -218,13 +230,43 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	return nil
 }
 
-// addNormalSegment adds a *NotNew* and *NotFlushed* segment
+// filterSegments return segments with same channelName and partition ID
+func (replica *SegmentReplica) filterSegments(channelName string, partitionID UniqueID) []*Segment {
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
+	results := make([]*Segment, 0)
+
+	isMatched := func(segment *Segment, chanName string, partID UniqueID) bool {
+		return segment.channelName == chanName && (partID == 0 || segment.partitionID == partID)
+	}
+	for _, seg := range replica.newSegments {
+		if isMatched(seg, channelName, partitionID) {
+			results = append(results, seg)
+		}
+	}
+	for _, seg := range replica.normalSegments {
+		if isMatched(seg, channelName, partitionID) {
+			results = append(results, seg)
+		}
+	}
+	for _, seg := range replica.flushedSegments {
+		if isMatched(seg, channelName, partitionID) {
+			results = append(results, seg)
+		}
+	}
+	return results
+}
+
+// addNormalSegment adds a *NotNew* and *NotFlushed* segment. Before add, please make sure there's no
+// such segment by `hasSegment`
 func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 
 	if collID != replica.collectionID {
-		log.Warn("Mismatch collection", zap.Int64("ID", collID))
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
 		return fmt.Errorf("Mismatch collection, ID=%d", collID)
 	}
 
@@ -255,6 +297,46 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 	seg.isFlushed.Store(false)
 
 	replica.normalSegments[segID] = seg
+	return nil
+}
+
+// addFlushedSegment adds a *Flushed* segment. Before add, please make sure there's no
+// such segment by `hasSegment`
+func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64) error {
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
+
+	if collID != replica.collectionID {
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
+		return fmt.Errorf("Mismatch collection, ID=%d", collID)
+	}
+
+	log.Debug("Add Flushed segment",
+		zap.Int64("segment ID", segID),
+		zap.Int64("collection ID", collID),
+		zap.Int64("partition ID", partitionID),
+		zap.String("channel name", channelName),
+	)
+
+	seg := &Segment{
+		collectionID: collID,
+		partitionID:  partitionID,
+		segmentID:    segID,
+		channelName:  channelName,
+		numRows:      numOfRows,
+
+		//TODO silverxia, normal segments bloom filter and pk range should be loaded from serialized files
+		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+		minPK:    math.MaxInt64, // use max value, represents no value
+		maxPK:    math.MinInt64, // use min value represents no value
+	}
+
+	seg.isNew.Store(false)
+	seg.isFlushed.Store(true)
+
+	replica.flushedSegments[segID] = seg
 	return nil
 }
 
@@ -356,7 +438,7 @@ func (replica *SegmentReplica) hasSegment(segID UniqueID, countFlushed bool) boo
 }
 
 // updateStatistics updates the number of rows of a segment in replica.
-func (replica *SegmentReplica) updateStatistics(segID UniqueID, numRows int64) error {
+func (replica *SegmentReplica) updateStatistics(segID UniqueID, numRows int64) {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 
@@ -364,16 +446,16 @@ func (replica *SegmentReplica) updateStatistics(segID UniqueID, numRows int64) e
 	if seg, ok := replica.newSegments[segID]; ok {
 		seg.memorySize = 0
 		seg.numRows += numRows
-		return nil
+		return
 	}
 
 	if seg, ok := replica.normalSegments[segID]; ok {
 		seg.memorySize = 0
 		seg.numRows += numRows
-		return nil
+		return
 	}
 
-	return fmt.Errorf("There's no segment %v", segID)
+	log.Warn("update segment num row not exist", zap.Int64("segID", segID))
 }
 
 // getSegmentStatisticsUpdates gives current segment's statistics updates.
@@ -409,7 +491,7 @@ func (replica *SegmentReplica) getCollectionSchema(collID UniqueID, ts Timestamp
 	defer replica.segMu.Unlock()
 
 	if !replica.validCollection(collID) {
-		log.Error("Mismatch collection for the replica",
+		log.Warn("Mismatch collection for the replica",
 			zap.Int64("Want", replica.collectionID),
 			zap.Int64("Actual", collID),
 		)

@@ -1,6 +1,6 @@
 # metaSnapShot
 
-`metaSnapShot` enable `RootCoord` to query historical meta base on timestamp, it provide `Key-Vaule` interface. Take a example to illustrate what `metaSnapShot`. The following figure show a series of operations happened on the timeline.
+`metaSnapShot` enables `RootCoord` to query historical meta based on timestamp, it provides `Key-Vaule` interface. Take an example to illustrate what `metaSnapShot` is. The following figure shows a series of operations happened on the timeline.
 
 ![snap_shot](./graphs/snapshot_1.png)
 
@@ -13,9 +13,9 @@
 | 500       | Delete B  |
 | 600       | Delete C  |
 
-Now assuming the Wall-Clock is `Timestamp=700`, so the `B` should have been deleted from the system, But I want to know what's the value of `B` at `Timesamp=450`, how to do it? `metaSnapShot` is invented to solve this problem.
+Now assuming the Wall-Clock is `Timestamp=700`, so `B` should have been deleted from the system. But I want to know the value of `B` at `Timesamp=450`, how to do it? `metaSnapShot` is invented to solve this problem.
 
-We need to briefly introduce `etcd`'s `MVCC` before `metaSnapShot`, here is the test program.
+We need to briefly introduce `etcd`'s `MVCC` before `metaSnapShot`. Here is the test program:
 
 ```go
 package etcdkv
@@ -57,7 +57,7 @@ func TestMVCC(t *testing.T) {
 }
 ```
 
-The output of abrove test program should looks like this:
+The output of above test program should look like this:
 ```text
 === RUN   TestMVCC
     etcd_mvcc_test.go:23: revision:401
@@ -67,24 +67,24 @@ The output of abrove test program should looks like this:
 --- PASS: TestMVCC (0.01s)
 ```
 
-In the `etcd`, each write operation would let `Revision` add by `1`, so if we specify the `Revision` value at query, we can get the historical value under that `Revision`.
+In `etcd`, each write operation would add 1 to `Revision`. So if we specify the `Revision` value at query, we can get the historical value under that `Revision`.
 
-`metaSnapShot` is base on this feature of `etcd`, We will write an extra `Timestamp` on each write operation. `etcd`'s `Txn` make sure that the `Timestamp` would have the same `Revision` with user data.
+`metaSnapShot` is based on this feature of `etcd`. We will write an extra `Timestamp` on each write operation. `etcd`'s `Txn` makes sure that the `Timestamp` would have the same `Revision` with user data.
 
-When querying, `metaSnapShot` will find an appropriate `Revision` base on the input `Timestamp`, and then query on `etcd` with this `Revision`. 
+When querying, `metaSnapShot` will find an appropriate `Revision` based on the input `Timestamp`, and then query on `etcd` with this `Revision`.
 
-In order to speed up to find `Revision` by `Timestamp`, `metaSnapShot` would maintain a array which mapping the `Timesamp` to `Revision`, the default lenght of this array is `1024`, it's a type of circular array.
+In order to speed up getting `Revision` by `Timestamp`, `metaSnapShot` would maintain an array mapping the `Timestamp` to `Revision`. The default length of this array is `1024`, which is a type of circular array.
 
 ![snap_shot](./graphs/snapshot_2.png)
 
 - `maxPos` points to the position where `Timestamp` and `Revision` are maximum.
-- `minPos` pionts to the position where `Timestamp` and `Revision` are minimun.
-- For each update operation, we first add `1` to `maxPos`, so the new `maxPos` would cover the old `minPos` postion, and then add `1` to the old `minPos`
-- From `0` to `maxPos` and from `minPos` to `1023`, which are two incremental arrays, we can use binary search to quickly get the `Revision` by to the input `Timestamp`
+- `minPos` points to the position where `Timestamp` and `Revision` are minimum.
+- For each update operation, we first add `1` to `maxPos`. So the new `maxPos` would cover the old `minPos` position, and then add `1` to the old `minPos`
+- From `0` to `maxPos` and from `minPos` to `1023`, which are two incremental arrays. We can use binary search to quickly get the `Revision` by the input `Timestamp`
 - If the input `Timestamp` is greater than the `Timestamp` where the `maxPos` is located, then the `Revision` at the position of the `maxPos` will be returned
-- If the input `Timestamp` is less than the `Timestamp` where `minPos` is located, `metaSnapshot` will load the historical `Timesamp` and `Revision` from `etcd` to find an appropriate `Revision` value.
+- If the input `Timestamp` is less than the `Timestamp` where `minPos` is located, `metaSnapshot` will load the historical `Timestamp` and `Revision` from `etcd` to find an appropriate `Revision` value.
 
-The interface of `metaSnapShot` is defined as follow.
+The interface of `metaSnapShot` is defined as follows:
 ```go
 type SnapShotKV interface {
 	Load(key string, ts typeutil.Timestamp) (string, error)
@@ -96,18 +96,14 @@ type SnapShotKV interface {
 }
 ```
 
-For the `Read` operations, `Load` and `LoadWithPrefix`, the input parameter `typeutil.Timestamp` is used to tell `metaSnapShot` to load the value base on that `Timestamp`.
+For the `Read` operations (`Load` and `LoadWithPrefix`), the input parameter `typeutil.Timestamp` is used to tell `metaSnapShot` to load the value based on that `Timestamp`.
 
-For the `Write` operations, `Save`,`MiltiSave` and `MultiSaveAndRemoveWithPrefix`, the return values includes `typeutil.Timestamp` which used to tell the caller when these write operations happened.
+For the `Write` operations (`Save`, `MiltiSave`, `MultiSaveAndRemoveWithPrefix`), return values include `typeutil.Timestamp`, which is used to tell the caller when these write operations happened.
 
-You might be curious about the parameter of `additions` on the `MultiSave` and `MultiSaveAndRemoveWithPrefix`, what does `additions` do, and why?
+You might be curious about the parameter `additions` of `MultiSave` and `MultiSaveAndRemoveWithPrefix`: What does `additions` do, and why?
 
-`additions` is array of  `func(ts typeutil.Timestamp) (string, string, error)`, so it's a function, receiving `typeutil.Timestamp` as an input, and retuns two `sting` which is `key-value` pair, if `error` is `nil` in the return value, `metaSnapShot` would write this `key-value` pair into `etcd`.
+`additions` is an array of  `func(ts typeutil.Timestamp) (string, string, error)`. So it's a function, receiving `typeutil.Timestamp` as an input, and returns two `sting` which is `key-value` pair. If `error` is `nil` in the return value, `metaSnapShot` would write this `key-value` pair into `etcd`.
 
-Refer to the document of `CreateCollection`, the `Collection`'s create timestamp, is the timestamp when the `Collection`'s meta have been writen into `etcd`, not the timestamp when `RootCoord` receives the request. So before writes the `Collection`'s meta into `etcd`, `metaSnapshot` would allocate a timestamp, and call all the `additions`, this would make sure the create timestamp of the `Collection` is correct.
+Refer to the document of `CreateCollection`, a timestamp is created for `Collection`, which is the timestamp when the `Collection`'s meta have been written into `etcd`, not the timestamp when `RootCoord` receives the request. So before writing the `Collection`'s meta into `etcd`, `metaSnapshot` would allocate a timestamp, and call all the `additions`. This would make sure the timestamp created for the `Collection` is correct.
 
 ![create_collection](./graphs/dml_create_collection.png)
-
-
-
-

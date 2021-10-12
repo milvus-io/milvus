@@ -15,6 +15,8 @@ import "time"
 
 // ZeroTime is a zero time.
 var ZeroTime = time.Time{}
+
+// ZeroTimestamp is a zero timestamp
 var ZeroTimestamp = Timestamp(0)
 
 // ParseTimestamp returns a timestamp for a given byte slice.

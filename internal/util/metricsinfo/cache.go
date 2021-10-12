@@ -22,6 +22,7 @@ import (
 const DefaultMetricsRetention = time.Second * 5
 
 // TODO(dragondriver): we can use a map to manage the metrics if there are too many kind metrics
+// MetricsCacheManager manage the cache of metrics information.
 type MetricsCacheManager struct {
 	systemInfoMetrics                *milvuspb.GetMetricsResponse
 	systemInfoMetricsInvalid         bool
@@ -32,6 +33,7 @@ type MetricsCacheManager struct {
 	retentionMtx sync.RWMutex // necessary?
 }
 
+// NewMetricsCacheManager returns a cache manager of metrics information.
 func NewMetricsCacheManager() *MetricsCacheManager {
 	manager := &MetricsCacheManager{
 		systemInfoMetrics:                nil,
@@ -65,6 +67,7 @@ func (manager *MetricsCacheManager) ResetRetention() {
 	manager.retention = DefaultMetricsRetention
 }
 
+// InvalidateSystemInfoMetrics invalidates the system information metrics.
 func (manager *MetricsCacheManager) InvalidateSystemInfoMetrics() {
 	manager.systemInfoMetricsMtx.Lock()
 	defer manager.systemInfoMetricsMtx.Unlock()
@@ -83,6 +86,7 @@ func (manager *MetricsCacheManager) IsSystemInfoMetricsValid() bool {
 		(time.Since(manager.systemInfoMetricsLastUpdatedTime) < retention)
 }
 
+// GetSystemInfoMetrics returns the cached system information metrics.
 func (manager *MetricsCacheManager) GetSystemInfoMetrics() (*milvuspb.GetMetricsResponse, error) {
 	retention := manager.GetRetention()
 
@@ -93,7 +97,7 @@ func (manager *MetricsCacheManager) GetSystemInfoMetrics() (*milvuspb.GetMetrics
 		manager.systemInfoMetrics == nil ||
 		time.Since(manager.systemInfoMetricsLastUpdatedTime) >= retention {
 
-		return nil, ErrInvalidSystemInfosMetricCache
+		return nil, errInvalidSystemInfosMetricCache
 	}
 
 	return manager.systemInfoMetrics, nil

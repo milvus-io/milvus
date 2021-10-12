@@ -53,6 +53,7 @@ class GetRunner(BaseRunner):
         for ids_length in ids_length_list:
             ids = get_ids(ids_length, collection_size)
             case_metric = copy.deepcopy(self.metric)
+            # set metric type as case
             case_metric.set_case_metric_type()
             case_params = list()
             case_metric.run_params = {"ids_length": ids_length}

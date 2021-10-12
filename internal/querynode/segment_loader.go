@@ -29,8 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -72,25 +70,21 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 		return nil
 	}
 
-	err := loader.checkSegmentMemory(req.Infos)
-	if err != nil {
-		return err
-	}
-
 	newSegments := make([]*Segment, 0)
 	segmentGC := func() {
 		for _, s := range newSegments {
 			deleteSegment(s)
 		}
 	}
-	setSegments := func() {
+	setSegments := func() error {
 		for _, s := range newSegments {
 			err := loader.historicalReplica.setSegment(s)
 			if err != nil {
-				log.Warn(err.Error())
-				deleteSegment(s)
+				segmentGC()
+				return err
 			}
 		}
+		return nil
 	}
 
 	// start to load
@@ -123,7 +117,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 				return err
 			}
 			segmentInfo := &querypb.SegmentInfo{}
-			err = proto.UnmarshalText(value, segmentInfo)
+			err = proto.Unmarshal([]byte(value), segmentInfo)
 			if err != nil {
 				deleteSegment(segment)
 				log.Warn("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
@@ -132,7 +126,14 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			}
 			segmentInfo.SegmentState = querypb.SegmentState_sealed
 			newKey := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
-			err = loader.etcdKV.Save(newKey, proto.MarshalTextString(segmentInfo))
+			newValue, err := proto.Marshal(segmentInfo)
+			if err != nil {
+				deleteSegment(segment)
+				log.Warn("error when marshal segment info", zap.Error(err))
+				segmentGC()
+				return err
+			}
+			err = loader.etcdKV.Save(newKey, string(newValue))
 			if err != nil {
 				deleteSegment(segment)
 				log.Warn("error when update segment info to etcd", zap.Any("error", err.Error()))
@@ -142,10 +143,8 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 		}
 		newSegments = append(newSegments, segment)
 	}
-	setSegments()
 
-	// sendQueryNodeStats
-	return loader.indexLoader.sendQueryNodeStats()
+	return setSegments()
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
@@ -165,7 +164,7 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		}
 	}
 
-	indexedFieldIDs := make([]int64, 0)
+	indexedFieldIDs := make([]FieldID, 0)
 	for _, vecFieldID := range vectorFieldIDs {
 		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
 		if err != nil {
@@ -188,48 +187,6 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		err = loader.indexLoader.loadIndex(segment, id)
 		if err != nil {
 			return err
-		}
-	}
-
-	return nil
-}
-
-func (loader *segmentLoader) checkSegmentMemory(segmentLoadInfos []*querypb.SegmentLoadInfo) error {
-	totalRAM := metricsinfo.GetMemoryCount()
-	usedRAM := metricsinfo.GetUsedMemoryCount()
-
-	segmentTotalSize := uint64(0)
-	for _, segInfo := range segmentLoadInfos {
-		collectionID := segInfo.CollectionID
-		segmentID := segInfo.SegmentID
-
-		col, err := loader.historicalReplica.getCollectionByID(collectionID)
-		if err != nil {
-			return err
-		}
-
-		sizePerRecord, err := typeutil.EstimateSizePerRecord(col.schema)
-		if err != nil {
-			return err
-		}
-
-		segmentSize := uint64(int64(sizePerRecord) * segInfo.NumOfRows)
-		segmentTotalSize += segmentSize
-		// TODO: get 0.9 from param table
-		thresholdMemSize := float64(totalRAM) * 0.9
-
-		log.Debug("memory size[byte] stats when load segment",
-			zap.Any("collectionIDs", collectionID),
-			zap.Any("segmentID", segmentID),
-			zap.Any("numOfRows", segInfo.NumOfRows),
-			zap.Any("totalRAM", totalRAM),
-			zap.Any("usedRAM", usedRAM),
-			zap.Any("segmentSize", segmentSize),
-			zap.Any("segmentTotalSize", segmentTotalSize),
-			zap.Any("thresholdMemSize", thresholdMemSize),
-		)
-		if usedRAM+segmentTotalSize > uint64(thresholdMemSize) {
-			return errors.New("load segment failed, OOM if load, collectionID = " + fmt.Sprintln(collectionID))
 		}
 	}
 

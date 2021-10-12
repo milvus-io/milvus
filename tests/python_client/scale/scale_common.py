@@ -15,12 +15,14 @@ def get_milvus_chart_env_var(var=constants.MILVUS_CHART_ENV):
         milvus_helm_chart = os.environ[var]
         return str(milvus_helm_chart)
     except Exception as e:
-        milvus_helm_chart = constants.MILVUS_CHART_PATH
-        log.warning(
-            f"Failed to get environment variables: {var}, use default: {constants.MILVUS_CHART_PATH}, {str(e)}")
-    if not os.path.exists(milvus_helm_chart):
-        raise Exception(f'milvus_helm_chart: {milvus_helm_chart} not exist')
-    return milvus_helm_chart
+        log.error(f'Failed to get environment variables {var}, with exception {str(e)}')
+        # milvus_helm_chart = constants.MILVUS_CHART_PATH
+        # log.error(f'Failed to get environment variables {var}, please set.')
+        # log.warning(
+        # f"Failed to get environment variables: {var}, use default: {constants.MILVUS_CHART_PATH}, {str(e)}")
+    # if not os.path.exists(milvus_helm_chart):
+    #     raise Exception(f'milvus_helm_chart: {milvus_helm_chart} not exist')
+    # return milvus_helm_chart
 
 
 def e2e_milvus(host, c_name, collection_exist=False):

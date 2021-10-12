@@ -42,12 +42,10 @@ type taskQueue interface {
 	AddActiveTask(t task)
 	PopActiveTask(tID UniqueID) task
 	getTaskByReqID(reqID UniqueID) task
-	TaskDoneTest(ts Timestamp) bool
 	Enqueue(t task) error
+	setMaxTaskNum(num int64)
+	getMaxTaskNum() int64
 }
-
-// TODO(dragondriver): load from config
-const maxTaskNum = 1024
 
 type baseTaskQueue struct {
 	unissuedTasks *list.List
@@ -56,7 +54,8 @@ type baseTaskQueue struct {
 	atLock        sync.RWMutex
 
 	// maxTaskNum should keep still
-	maxTaskNum int64
+	maxTaskNum    int64
+	maxTaskNumMtx sync.RWMutex
 
 	utBufChan chan int // to block scheduler
 
@@ -75,7 +74,7 @@ func (queue *baseTaskQueue) utEmpty() bool {
 }
 
 func (queue *baseTaskQueue) utFull() bool {
-	return int64(queue.unissuedTasks.Len()) >= queue.maxTaskNum
+	return int64(queue.unissuedTasks.Len()) >= queue.getMaxTaskNum()
 }
 
 func (queue *baseTaskQueue) addUnissuedTask(t task) error {
@@ -162,26 +161,6 @@ func (queue *baseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	return nil
 }
 
-func (queue *baseTaskQueue) TaskDoneTest(ts Timestamp) bool {
-	queue.utLock.RLock()
-	defer queue.utLock.RUnlock()
-	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if e.Value.(task).EndTs() < ts {
-			return false
-		}
-	}
-
-	queue.atLock.RLock()
-	defer queue.atLock.RUnlock()
-	for _, task := range queue.activeTasks {
-		if task.BeginTs() < ts {
-			return false
-		}
-	}
-
-	return true
-}
-
 func (queue *baseTaskQueue) Enqueue(t task) error {
 	err := t.OnEnqueue()
 	if err != nil {
@@ -203,14 +182,28 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	return queue.addUnissuedTask(t)
 }
 
+func (queue *baseTaskQueue) setMaxTaskNum(num int64) {
+	queue.maxTaskNumMtx.Lock()
+	defer queue.maxTaskNumMtx.Unlock()
+
+	queue.maxTaskNum = num
+}
+
+func (queue *baseTaskQueue) getMaxTaskNum() int64 {
+	queue.maxTaskNumMtx.RLock()
+	defer queue.maxTaskNumMtx.RUnlock()
+
+	return queue.maxTaskNum
+}
+
 func newBaseTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *baseTaskQueue {
 	return &baseTaskQueue{
 		unissuedTasks:   list.New(),
 		activeTasks:     make(map[UniqueID]task),
 		utLock:          sync.RWMutex{},
 		atLock:          sync.RWMutex{},
-		maxTaskNum:      maxTaskNum,
-		utBufChan:       make(chan int, maxTaskNum),
+		maxTaskNum:      Params.MaxTaskNum,
+		utBufChan:       make(chan int, Params.MaxTaskNum),
 		tsoAllocatorIns: tsoAllocatorIns,
 		idAllocatorIns:  idAllocatorIns,
 	}
@@ -372,9 +365,9 @@ func newDqTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInte
 }
 
 type taskScheduler struct {
-	ddQueue taskQueue
+	ddQueue *ddTaskQueue
 	dmQueue *dmTaskQueue
-	dqQueue taskQueue
+	dqQueue *dqTaskQueue
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -432,6 +425,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 			"ID":   t.ID(),
 		})
 	defer span.Finish()
+	traceID, _, _ := trace.InfoFromSpan(span)
 
 	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
 	q.AddActiveTask(t)
@@ -449,6 +443,8 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	}()
 	if err != nil {
 		trace.LogError(span, err)
+		log.Error("Failed to pre-execute task: "+err.Error(),
+			zap.String("traceID", traceID))
 		return
 	}
 
@@ -456,11 +452,20 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	err = t.Execute(ctx)
 	if err != nil {
 		trace.LogError(span, err)
+		log.Error("Failed to execute task: "+err.Error(),
+			zap.String("traceID", traceID))
 		return
 	}
 
 	span.LogFields(oplog.Int64("scheduler process PostExecute", t.ID()))
 	err = t.PostExecute(ctx)
+
+	if err != nil {
+		trace.LogError(span, err)
+		log.Error("Failed to post-execute task: "+err.Error(),
+			zap.String("traceID", traceID))
+		return
+	}
 }
 
 func (sched *taskScheduler) definitionLoop() {
@@ -684,9 +689,9 @@ func (sched *taskScheduler) collectResultLoop() {
 						continue
 					}
 
-					st, ok := t.(*SearchTask)
+					st, ok := t.(*searchTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as SearchTask failed", zap.Any("ReqID", reqID))
+						log.Debug("Proxy collectResultLoop type assert t as searchTask failed", zap.Any("ReqID", reqID))
 						delete(searchResultBufs, reqID)
 						searchResultBufFlags[reqID] = true
 						continue
@@ -718,7 +723,7 @@ func (sched *taskScheduler) collectResultLoop() {
 
 					//t := sched.getTaskByReqID(reqID)
 					{
-						colName := t.(*SearchTask).query.CollectionName
+						colName := t.(*searchTask).query.CollectionName
 						log.Debug("Proxy collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(searchResultBufs[reqID].resultBuf)))
 					}
 
@@ -783,9 +788,9 @@ func (sched *taskScheduler) collectResultLoop() {
 						continue
 					}
 
-					st, ok := t.(*QueryTask)
+					st, ok := t.(*queryTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as QueryTask failed")
+						log.Debug("Proxy collectResultLoop type assert t as queryTask failed")
 						delete(queryResultBufs, reqID)
 						queryResultBufFlags[reqID] = true
 						continue
@@ -817,7 +822,7 @@ func (sched *taskScheduler) collectResultLoop() {
 
 					//t := sched.getTaskByReqID(reqID)
 					{
-						colName := t.(*QueryTask).query.CollectionName
+						colName := t.(*queryTask).query.CollectionName
 						log.Debug("Proxy collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBufs[reqID].resultBuf)))
 					}
 
@@ -856,12 +861,6 @@ func (sched *taskScheduler) Start() error {
 func (sched *taskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
-}
-
-func (sched *taskScheduler) TaskDoneTest(ts Timestamp) bool {
-	ddTaskDone := sched.ddQueue.TaskDoneTest(ts)
-	dmTaskDone := sched.dmQueue.TaskDoneTest(ts)
-	return ddTaskDone && dmTaskDone
 }
 
 func (sched *taskScheduler) getPChanStatistics() (map[pChan]*pChanStatistics, error) {

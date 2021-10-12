@@ -14,7 +14,10 @@ package querynode
 import "C"
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -31,7 +34,8 @@ type queryService struct {
 	historical *historical
 	streaming  *streaming
 
-	queryCollections map[UniqueID]*queryCollection
+	queryCollectionMu sync.Mutex // guards queryCollections
+	queryCollections  map[UniqueID]*queryCollection
 
 	factory msgstream.Factory
 
@@ -91,20 +95,27 @@ func newQueryService(ctx context.Context,
 
 func (q *queryService) close() {
 	log.Debug("search service closed")
-	for collectionID := range q.queryCollections {
-		q.stopQueryCollection(collectionID)
+	q.queryCollectionMu.Lock()
+	for collectionID, sc := range q.queryCollections {
+		sc.close()
+		sc.cancel()
+		delete(q.queryCollections, collectionID)
 	}
 	q.queryCollections = make(map[UniqueID]*queryCollection)
+	q.queryCollectionMu.Unlock()
 	q.cancel()
 }
 
-func (q *queryService) addQueryCollection(collectionID UniqueID) {
+func (q *queryService) addQueryCollection(collectionID UniqueID) error {
+	q.queryCollectionMu.Lock()
+	defer q.queryCollectionMu.Unlock()
 	if _, ok := q.queryCollections[collectionID]; ok {
 		log.Warn("query collection already exists", zap.Any("collectionID", collectionID))
-		return
+		err := errors.New(fmt.Sprintln("query collection already exists, collectionID = ", collectionID))
+		return err
 	}
 	ctx1, cancel := context.WithCancel(q.ctx)
-	qc := newQueryCollection(ctx1,
+	qc, err := newQueryCollection(ctx1,
 		cancel,
 		collectionID,
 		q.historical,
@@ -114,15 +125,33 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) {
 		q.remoteChunkManager,
 		q.localCacheEnabled,
 	)
+	if err != nil {
+		return err
+	}
 	q.queryCollections[collectionID] = qc
+	return nil
 }
 
 func (q *queryService) hasQueryCollection(collectionID UniqueID) bool {
+	q.queryCollectionMu.Lock()
+	defer q.queryCollectionMu.Unlock()
 	_, ok := q.queryCollections[collectionID]
 	return ok
 }
 
+func (q *queryService) getQueryCollection(collectionID UniqueID) (*queryCollection, error) {
+	q.queryCollectionMu.Lock()
+	defer q.queryCollectionMu.Unlock()
+	_, ok := q.queryCollections[collectionID]
+	if ok {
+		return q.queryCollections[collectionID], nil
+	}
+	return nil, errors.New(fmt.Sprintln("queryCollection not exists, collectionID = ", collectionID))
+}
+
 func (q *queryService) stopQueryCollection(collectionID UniqueID) {
+	q.queryCollectionMu.Lock()
+	defer q.queryCollectionMu.Unlock()
 	sc, ok := q.queryCollections[collectionID]
 	if !ok {
 		log.Warn("stopQueryCollection failed, collection doesn't exist", zap.Int64("collectionID", collectionID))

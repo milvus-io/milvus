@@ -13,21 +13,25 @@ package mqclient
 
 import "context"
 
+// ProducerOptions contains the options of a producer
 type ProducerOptions struct {
+	// The topic that this Producer will publish
 	Topic string
 }
 
+// ProducerMessage contains the messages of a producer
 type ProducerMessage struct {
 	Payload    []byte
 	Properties map[string]string
 }
 
+// Producer is the interface that provides operations of producer
 type Producer interface {
 	// return the topic which producer is publishing to
 	//Topic() string
 
 	// publish a message
-	Send(ctx context.Context, message *ProducerMessage) error
+	Send(ctx context.Context, message *ProducerMessage) (MessageID, error)
 
 	Close()
 }

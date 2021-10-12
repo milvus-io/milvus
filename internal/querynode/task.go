@@ -112,6 +112,7 @@ func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
 func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	collectionID := w.req.CollectionID
 	partitionID := w.req.PartitionID
+	// if no partitionID is specified, load type is load collection
 	loadPartition := partitionID != 0
 
 	// get all vChannels
@@ -229,17 +230,23 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// add flow graph
 	if loadPartition {
-		err = w.node.streaming.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, vChannels)
-		if err != nil {
-			return err
-		}
+		w.node.streaming.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, vChannels)
 		log.Debug("query node add partition flow graphs", zap.Any("channels", vChannels))
 	} else {
-		err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, vChannels)
-		if err != nil {
-			return err
-		}
+		w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, vChannels)
 		log.Debug("query node add collection flow graphs", zap.Any("channels", vChannels))
+	}
+
+	// add tSafe watcher if queryCollection exists
+	qc, err := w.node.queryService.getQueryCollection(collectionID)
+	if err == nil {
+		for _, channel := range vChannels {
+			err = qc.addTSafeWatcher(channel)
+			if err != nil {
+				// tSafe have been exist, not error
+				log.Warn(err.Error())
+			}
+		}
 	}
 
 	// channels as consumer
@@ -374,6 +381,12 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		}
 	}
 
+	err = checkSegmentMemory(l.req.Infos, l.node.historical.replica, l.node.streaming.replica)
+	if err != nil {
+		log.Warn(err.Error())
+		return err
+	}
+
 	switch l.req.LoadCondition {
 	case queryPb.TriggerCondition_handoff:
 		err = l.node.historical.loader.loadSegmentOfConditionHandOff(l.req)
@@ -473,7 +486,11 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 			zap.Any("collectionID", r.req.CollectionID),
 			zap.Any("vChannel", channel),
 		)
-		r.node.streaming.tSafeReplica.removeTSafe(channel)
+		// no tSafe in tSafeReplica, don't return error
+		err = r.node.streaming.tSafeReplica.removeTSafe(channel)
+		if err != nil {
+			log.Warn(err.Error())
+		}
 	}
 
 	// remove excludedSegments record
@@ -567,7 +584,11 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 					zap.Any("partitionID", id),
 					zap.Any("vChannel", channel),
 				)
-				r.node.streaming.tSafeReplica.removeTSafe(channel)
+				// no tSafe in tSafeReplica, don't return error
+				err = r.node.streaming.tSafeReplica.removeTSafe(channel)
+				if err != nil {
+					log.Warn(err.Error())
+				}
 			}
 		}
 

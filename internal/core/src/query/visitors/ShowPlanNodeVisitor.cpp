@@ -63,7 +63,7 @@ ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
     };
     if (node.predicate_.has_value()) {
         ShowExprVisitor expr_show;
-        Assert(node.predicate_.value());
+        AssertInfo(node.predicate_.value(), "[ShowPlanNodeVisitor]Can't get value from node predict");
         json_body["predicate"] = expr_show.call_child(node.predicate_->operator*());
     } else {
         json_body["predicate"] = "None";
@@ -85,7 +85,7 @@ ShowPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     };
     if (node.predicate_.has_value()) {
         ShowExprVisitor expr_show;
-        Assert(node.predicate_.value());
+        AssertInfo(node.predicate_.value(), "[ShowPlanNodeVisitor]Can't get value from node predict");
         json_body["predicate"] = expr_show.call_child(node.predicate_->operator*());
     } else {
         json_body["predicate"] = "None";

@@ -40,9 +40,11 @@ func calBySchemaPolicy(schema *schemapb.CollectionSchema) (int, error) {
 	return int(threshold / float64(sizePerRecord)), nil
 }
 
+// AllocatePolicy helper function definition to allocate Segment space
 type AllocatePolicy func(segments []*SegmentInfo, count int64,
 	maxCountPerSegment int64) ([]*Allocation, []*Allocation)
 
+// AllocatePolicyV1 v1 policy simple allocation policy using Greedy Algorithm
 func AllocatePolicyV1(segments []*SegmentInfo, count int64,
 	maxCountPerSegment int64) ([]*Allocation, []*Allocation) {
 	newSegmentAllocations := make([]*Allocation, 0)
@@ -78,8 +80,6 @@ func AllocatePolicyV1(segments []*SegmentInfo, count int64,
 	newSegmentAllocations = append(newSegmentAllocations, allocation)
 	return newSegmentAllocations, existedSegmentAllocations
 }
-
-type sealPolicy func(maxCount, writtenCount, allocatedCount int64) bool
 
 // segmentSealPolicy seal policy applies to segment
 type segmentSealPolicy func(segment *SegmentInfo, ts Timestamp) bool

@@ -94,6 +94,7 @@ class LocustInsertRunner(LocustRunner):
         }
         self.init_metric(self.name, collection_info, index_info, None, run_params)
         case_metric = copy.deepcopy(self.metric)
+        # set metric type as case
         case_metric.set_case_metric_type()
         case_metrics = list()
         case_params = list()
@@ -197,6 +198,7 @@ class LocustSearchRunner(LocustRunner):
         }
         self.init_metric(self.name, collection_info, index_info, None, run_params)
         case_metric = copy.deepcopy(self.metric)
+        # set metric type as case
         case_metric.set_case_metric_type()
         case_metrics = list()
         case_params = list()

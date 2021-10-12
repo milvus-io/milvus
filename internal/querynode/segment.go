@@ -85,7 +85,7 @@ type Segment struct {
 	segmentType segmentType
 
 	paramMutex sync.RWMutex // guards index
-	indexInfos map[int64]*indexInfo
+	indexInfos map[FieldID]*indexInfo
 
 	idBinlogRowSizes []int64
 
@@ -167,7 +167,7 @@ func (s *Segment) getVectorFieldInfo(fieldID UniqueID) (*VectorFieldInfo, error)
 	return nil, errors.New("Invalid fieldID " + strconv.Itoa(int(fieldID)))
 }
 
-func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) *Segment {
+func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) *Segment {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
@@ -186,7 +186,7 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 		return nil
 	}
 
-	log.Debug("create segment", zap.Int64("segmentID", segmentID))
+	log.Debug("create segment", zap.Int64("segmentID", segmentID), zap.Int32("segmentType", int32(segType)))
 
 	var segment = &Segment{
 		segmentPtr:       segmentPtr,
@@ -234,7 +234,6 @@ func (s *Segment) getRowCount() int64 {
 		return -1
 	}
 	var rowCount = C.GetRowCount(s.segmentPtr)
-	//log.Debug("QueryNode::Segment::getRowCount", zap.Any("rowCount", rowCount))
 	return int64(rowCount)
 }
 
@@ -296,7 +295,6 @@ func (s *Segment) search(plan *SearchPlan,
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
 	var status = C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult)
 	errorCode := status.error_code
-
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
@@ -502,7 +500,7 @@ func (s *Segment) matchIndexParam(fieldID int64, indexParams indexParam) bool {
 	if fieldIndexParam == nil {
 		return false
 	}
-	paramSize := len(s.indexInfos)
+	paramSize := len(s.indexInfos[fieldID].indexParams)
 	matchCount := 0
 	for k, v := range indexParams {
 		value, ok := fieldIndexParam[k]
@@ -591,7 +589,6 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	if s.segmentType != segmentTypeGrowing {
 		return nil
 	}
-	log.Debug("QueryNode::Segment::segmentInsert:", zap.Any("s.segmentPtr", s.segmentPtr))
 
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")

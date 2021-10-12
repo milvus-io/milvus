@@ -165,3 +165,39 @@ func TestUpdateSessions(t *testing.T) {
 	assert.Equal(t, addEventLen, 10)
 	assert.Equal(t, delEventLen, 10)
 }
+
+func TestSessionLivenessCheck(t *testing.T) {
+	s := &Session{}
+	ctx := context.Background()
+	ch := make(chan bool)
+	signal := make(chan struct{}, 1)
+
+	flag := false
+
+	go s.LivenessCheck(ctx, ch, func() {
+		flag = true
+		signal <- struct{}{}
+	})
+
+	assert.False(t, flag)
+	ch <- true
+
+	assert.False(t, flag)
+	close(ch)
+
+	<-signal
+	assert.True(t, flag)
+
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+	ch = make(chan bool)
+
+	flag = false
+
+	go s.LivenessCheck(ctx, ch, func() {
+		flag = true
+		signal <- struct{}{}
+	})
+
+	assert.False(t, flag)
+}

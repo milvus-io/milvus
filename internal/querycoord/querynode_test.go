@@ -13,56 +13,47 @@ package querycoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
-
-func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
-	factory := msgstream.NewPmsFactory()
-
-	coord, err := NewQueryCoordTest(ctx, factory)
-	if err != nil {
-		return nil, err
-	}
-
-	rootCoord := newRootCoordMock()
-	rootCoord.createCollection(defaultCollectionID)
-	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
-
-	dataCoord, err := newDataCoordMock(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	coord.SetRootCoord(rootCoord)
-	coord.SetDataCoord(dataCoord)
-
-	err = coord.Register()
-	if err != nil {
-		return nil, err
-	}
-	err = coord.Init()
-	if err != nil {
-		return nil, err
-	}
-	err = coord.Start()
-	if err != nil {
-		return nil, err
-	}
-	return coord, nil
-}
 
 //func waitQueryNodeOnline(cluster *queryNodeCluster, nodeID int64)
 
-func waitAllQueryNodeOffline(cluster *queryNodeCluster, nodes map[int64]Node) bool {
-	reDoCount := 20
+func removeNodeSession(id int64) error {
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	if err != nil {
+		return err
+	}
+	err = kv.Remove(fmt.Sprintf("session/"+typeutil.QueryNodeRole+"-%d", id))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func removeAllSession() error {
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	if err != nil {
+		return err
+	}
+	err = kv.RemoveWithPrefix("session")
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func waitAllQueryNodeOffline(cluster Cluster, nodes map[int64]Node) bool {
+	reDoCount := 40
 	for {
 		if reDoCount <= 0 {
 			return false
@@ -79,12 +70,25 @@ func waitAllQueryNodeOffline(cluster *queryNodeCluster, nodes map[int64]Node) bo
 			return true
 		}
 		log.Debug("wait all queryNode offline")
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 		reDoCount--
 	}
 }
 
+func waitQueryNodeOnline(cluster Cluster, nodeID int64) {
+	for {
+		online, err := cluster.isOnline(nodeID)
+		if err != nil {
+			continue
+		}
+		if online {
+			return
+		}
+	}
+}
+
 func TestQueryNode_MultiNode_stop(t *testing.T) {
+	refreshParams()
 	baseCtx := context.Background()
 
 	queryCoord, err := startQueryCoord(baseCtx)
@@ -92,12 +96,15 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode1.queryNodeID)
 
-	queryNode5, err := startQueryNodeServer(baseCtx)
+	queryNode2, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode2.queryNodeID)
 
-	time.Sleep(2 * time.Second)
 	queryNode1.stop()
+	err = removeNodeSession(queryNode1.queryNodeID)
+	assert.Nil(t, err)
 
 	queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -106,7 +113,6 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 		CollectionID: defaultCollectionID,
 		Schema:       genCollectionSchema(defaultCollectionID, false),
 	})
-	time.Sleep(2 * time.Second)
 	_, err = queryCoord.ReleaseCollection(baseCtx, &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleaseCollection,
@@ -114,17 +120,22 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 		CollectionID: defaultCollectionID,
 	})
 	assert.Nil(t, err)
-	time.Sleep(2 * time.Second)
-	nodes, err := queryCoord.cluster.onServiceNodes()
+	time.Sleep(100 * time.Millisecond)
+	nodes, err := queryCoord.cluster.onlineNodes()
 	assert.Nil(t, err)
-	queryNode5.stop()
+	queryNode2.stop()
+	err = removeNodeSession(queryNode2.queryNodeID)
+	assert.Nil(t, err)
 
 	allNodeOffline := waitAllQueryNodeOffline(queryCoord.cluster, nodes)
 	assert.Equal(t, allNodeOffline, true)
 	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
 }
 
 func TestQueryNode_MultiNode_reStart(t *testing.T) {
+	refreshParams()
 	baseCtx := context.Background()
 
 	queryCoord, err := startQueryCoord(baseCtx)
@@ -132,8 +143,9 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode1.queryNodeID)
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 	queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
@@ -142,10 +154,12 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		Schema:       genCollectionSchema(defaultCollectionID, false),
 	})
 	queryNode1.stop()
+	err = removeNodeSession(queryNode1.queryNodeID)
+	assert.Nil(t, err)
 	queryNode3, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 	_, err = queryCoord.ReleaseCollection(baseCtx, &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleaseCollection,
@@ -153,15 +167,66 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		CollectionID: defaultCollectionID,
 	})
 	assert.Nil(t, err)
-	nodes, err := queryCoord.cluster.onServiceNodes()
+	nodes, err := queryCoord.cluster.onlineNodes()
 	assert.Nil(t, err)
 	queryNode3.stop()
+	err = removeNodeSession(queryNode3.queryNodeID)
+	assert.Nil(t, err)
 
 	allNodeOffline := waitAllQueryNodeOffline(queryCoord.cluster, nodes)
 	assert.Equal(t, allNodeOffline, true)
 	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
 }
 
 func TestQueryNode_getMetrics(t *testing.T) {
 	log.Info("TestQueryNode_getMetrics, todo")
+}
+
+func TestNewQueryNode(t *testing.T) {
+	refreshParams()
+	baseCtx, cancel := context.WithCancel(context.Background())
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	assert.Nil(t, err)
+
+	queryNode1, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+
+	addr := queryNode1.session.Address
+	nodeID := queryNode1.queryNodeID
+	node, err := newQueryNode(baseCtx, addr, nodeID, kv)
+	assert.Nil(t, err)
+
+	err = node.start()
+	assert.Nil(t, err)
+
+	cancel()
+	node.stop()
+	queryNode1.stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func TestReleaseCollectionOnOfflineNode(t *testing.T) {
+	refreshParams()
+	baseCtx, cancel := context.WithCancel(context.Background())
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	assert.Nil(t, err)
+
+	node, err := newQueryNode(baseCtx, "test", 100, kv)
+	assert.Nil(t, err)
+
+	node.setState(offline)
+	req := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: defaultCollectionID,
+	}
+
+	err = node.releaseCollection(baseCtx, req)
+	assert.Nil(t, err)
+
+	cancel()
 }

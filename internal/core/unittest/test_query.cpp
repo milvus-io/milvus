@@ -27,6 +27,10 @@ using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
 
+namespace {
+const int64_t ROW_COUNT = 100 * 1000;
+}
+
 TEST(Query, ShowExecutor) {
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -65,7 +69,8 @@ TEST(Query, DSL) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -90,7 +95,8 @@ TEST(Query, DSL) {
                     "nprobe": 10
                 },
                 "query": "$0",
-                "topk": 10
+                "topk": 10,
+                "round_decimal": 3
             }
         }
     }
@@ -113,7 +119,8 @@ TEST(Query, ParsePlaceholderGroup) {
                     "nprobe": 10
                 },
                 "query": "$0",
-                "topk": 10
+                "topk": 10,
+                "round_decimal":3
             }
         }
     }
@@ -154,14 +161,15 @@ TEST(Query, ExecWithPredicateLoader) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -183,41 +191,11 @@ TEST(Query, ExecWithPredicateLoader) {
     auto ref = json::parse(R"(
 [
   [
-    [
-      "982->0.000000",
-      "25315->4.741588",
-      "57893->4.758279",
-      "551029->5.078479",
-      "455002->5.134716"
-    ],
-    [
-      "528353->8.740297",
-      "659305->8.802286",
-      "935763->9.422906",
-      "794649->9.436665",
-      "192031->9.832053"
-    ],
-    [
-      "980439->3.342777",
-      "433044->3.424016",
-      "797884->3.663446",
-      "697705->3.944479",
-      "186546->4.404788"
-    ],
-    [
-      "642941->3.753775",
-      "967504->3.885163",
-      "764517->4.364819",
-      "332938->4.418214",
-      "232724->4.574215"
-    ],
-    [
-      "351788->4.453843",
-      "410227->4.699380",
-      "501497->4.805948",
-      "715061->5.166959",
-      "414882->5.179897"
-    ]
+    ["982->0.000000", "25315->4.742000", "57893->4.758000", "1499->6.066000", "48201->6.075000"],
+	["41772->10.111000", "80693->11.712000", "74859->11.790000", "79777->11.842000", "31878->12.308000"],
+	["65551->4.454000", "21617->5.144000", "50037->5.267000", "72204->5.332000", "96905->5.479000"],
+	["59219->5.458000", "21995->6.078000", "61367->7.029000", "44657->7.031000", "66957->7.174000"],
+	["66353->5.696000", "41087->5.917000", "97780->6.811000", "99239->7.562000", "86527->7.751000"]
   ]
 ])");
     std::cout << json.dump(2);
@@ -249,7 +227,8 @@ TEST(Query, ExecWithPredicateSmallN) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -300,14 +279,15 @@ TEST(Query, ExecWithPredicate) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -325,43 +305,13 @@ TEST(Query, ExecWithPredicate) {
     Json json = SearchResultToJson(sr);
     auto ref = json::parse(R"(
 [
-  [
-    [
-      "982->0.000000",
-      "25315->4.741588",
-      "57893->4.758279",
-      "551029->5.078479",
-      "455002->5.134716"
-    ],
-    [
-      "528353->8.740297",
-      "659305->8.802286",
-      "935763->9.422906",
-      "794649->9.436665",
-      "192031->9.832053"
-    ],
-    [
-      "980439->3.342777",
-      "433044->3.424016",
-      "797884->3.663446",
-      "697705->3.944479",
-      "186546->4.404788"
-    ],
-    [
-      "642941->3.753775",
-      "967504->3.885163",
-      "764517->4.364819",
-      "332938->4.418214",
-      "232724->4.574215"
-    ],
-    [
-      "351788->4.453843",
-      "410227->4.699380",
-      "501497->4.805948",
-      "715061->5.166959",
-      "414882->5.179897"
-    ]
-  ]
+	[
+		["982->0.000000", "25315->4.742000", "57893->4.758000", "1499->6.066000", "48201->6.075000"],
+		["41772->10.111000", "80693->11.712000", "74859->11.790000", "79777->11.842000", "31878->12.308000"],
+		["65551->4.454000", "21617->5.144000", "50037->5.267000", "72204->5.332000", "96905->5.479000"],
+		["59219->5.458000", "21995->6.078000", "61367->7.029000", "44657->7.031000", "66957->7.174000"],
+		["66353->5.696000", "41087->5.917000", "97780->6.811000", "99239->7.562000", "86527->7.751000"]
+	]
 ])");
     std::cout << json.dump(2);
     ASSERT_EQ(json.dump(2), ref.dump(2));
@@ -391,14 +341,15 @@ TEST(Query, ExecTerm) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -437,14 +388,15 @@ TEST(Query, ExecEmpty) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto segment = CreateGrowingSegment(schema);
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
@@ -481,7 +433,8 @@ TEST(Query, ExecWithoutPredicateFlat) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -489,7 +442,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
         }
     })";
     auto plan = CreatePlan(*schema, dsl);
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -525,7 +478,8 @@ TEST(Query, ExecWithoutPredicate) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal":3
                     }
                 }
             }
@@ -533,7 +487,7 @@ TEST(Query, ExecWithoutPredicate) {
         }
     })";
     auto plan = CreatePlan(*schema, dsl);
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -551,45 +505,14 @@ TEST(Query, ExecWithoutPredicate) {
     auto json = SearchResultToJson(sr);
     auto ref = json::parse(R"(
 [
-  [
-    [
-      "982->0.000000",
-      "25315->4.741588",
-      "57893->4.758279",
-      "694663->4.980466",
-      "551029->5.078479"
-    ],
-    [
-      "559507->7.956653",
-      "871836->8.694542",
-      "528353->8.740297",
-      "659305->8.802286",
-      "516137->8.935913"
-    ],
-    [
-      "980439->3.342777",
-      "433044->3.424016",
-      "527556->3.487235",
-      "797884->3.663446",
-      "814805->3.782786"
-    ],
-    [
-      "642941->3.753775",
-      "967504->3.885163",
-      "177960->4.339530",
-      "764517->4.364819",
-      "841079->4.403300"
-    ],
-    [
-      "688614->4.259011",
-      "351788->4.453843",
-      "452698->4.473838",
-      "410227->4.699380",
-      "501497->4.805948"
-    ]
-  ]
-]
-)");
+	[
+		["982->0.000000", "25315->4.742000", "57893->4.758000", "1499->6.066000", "48201->6.075000"],
+		["41772->10.111000", "80693->11.712000", "74859->11.790000", "79777->11.842000", "31878->12.308000"],
+		["65551->4.454000", "21617->5.144000", "50037->5.267000", "98268->5.321000", "72204->5.332000"],
+		["33572->5.432000", "59219->5.458000", "21995->6.078000", "17913->6.831000", "86628->6.835000"],
+		["66353->5.696000", "41087->5.917000", "24554->6.195000", "68019->6.654000", "97780->6.811000"]
+	]
+])");
     std::cout << json.dump(2);
     ASSERT_EQ(json.dump(2), ref.dump(2));
 }
@@ -611,7 +534,8 @@ TEST(Indexing, InnerProduct) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal":3
                     }
                 }
             }
@@ -720,7 +644,8 @@ TEST(Query, FillSegment) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -797,14 +722,15 @@ TEST(Query, ExecWithPredicateBinary) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);

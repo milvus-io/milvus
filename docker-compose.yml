@@ -18,6 +18,9 @@ services:
         - ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-${OS_NAME}-${LATEST_DATE_VERSION}
     # user: {{ CURRENT_ID }}
     shm_size: 2G
+    # expose 19530 port so we can directly access milvus inside build container
+    # ports:
+    #  - "19530:19530"
     environment:
       <<: *ccache
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
@@ -37,8 +40,12 @@ services:
         make check-proto-product && make verifiers && make unittest"
 
   etcd:
-    image: quay.io/coreos/etcd:v3.5.0
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379
+    image: docker.io/bitnami/etcd:3.5.0-debian-10-r24
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
 
   pulsar:
     image: apachepulsar/pulsar:2.7.3

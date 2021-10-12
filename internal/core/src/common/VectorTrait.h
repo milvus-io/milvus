@@ -30,7 +30,7 @@ class BinaryVector : public VectorTrait {
 
 template <typename VectorType>
 inline constexpr int64_t
-get_element_sizeof(int64_t dim) {
+element_sizeof(int64_t dim) {
     static_assert(std::is_base_of_v<VectorType, VectorTrait>);
     if constexpr (std::is_same_v<VectorType, FloatVector>) {
         return dim * sizeof(float);

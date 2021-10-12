@@ -13,18 +13,24 @@ package rocksmq
 
 import server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 
+// SubscriptionInitialPosition is the initial subscription position
 type SubscriptionInitialPosition int
+
+// UniqueID is the type of message ID
 type UniqueID = server.UniqueID
 
+// List 2 kinds of SubscriptionInitialPosition
 const (
 	SubscriptionPositionLatest SubscriptionInitialPosition = iota
 	SubscriptionPositionEarliest
 )
 
+// EarliestMessageID is used to get the earliest message ID, default -1
 func EarliestMessageID() UniqueID {
 	return -1
 }
 
+// ConsumerOptions is the options of a consumer
 type ConsumerOptions struct {
 	// The topic that this consumer will subscribe on
 	Topic string
@@ -41,6 +47,7 @@ type ConsumerOptions struct {
 	MessageChannel chan ConsumerMessage
 }
 
+// ConsumerMessage is the message content of a consumer message
 type ConsumerMessage struct {
 	Consumer
 	MsgID   UniqueID
@@ -48,6 +55,7 @@ type ConsumerMessage struct {
 	Payload []byte
 }
 
+// Consumer interface provide operations for a consumer
 type Consumer interface {
 	// returns the subscription for the consumer
 	Subscription() string

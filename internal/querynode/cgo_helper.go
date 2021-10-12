@@ -39,6 +39,7 @@ type ProtoCGo struct {
 	blob   []byte
 }
 
+// MarshalForCGo convert golang proto to ProtoCGo
 func MarshalForCGo(msg proto.Message) (*ProtoCGo, error) {
 	blob, err := proto.Marshal(msg)
 	if err != nil {
@@ -55,11 +56,13 @@ func MarshalForCGo(msg proto.Message) (*ProtoCGo, error) {
 	return protoCGo, nil
 }
 
+// destruct free ProtoCGo go memory
 func (protoCGo *ProtoCGo) destruct() {
 	// NOTE: at ProtoCGo, blob is go heap memory, no need to destruct
 	protoCGo.blob = nil
 }
 
+// HandleCStatus deal with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	if status.error_code == 0 {
 		return nil
@@ -78,6 +81,7 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	return errors.New(finalMsg)
 }
 
+// HandleCProtoResult deal with the result proto returned from CGO
 func HandleCProtoResult(cRes *C.CProtoResult, msg proto.Message) error {
 	// Standalone CProto is protobuf created by C side,
 	// Passed from c side

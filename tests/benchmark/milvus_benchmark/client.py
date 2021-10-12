@@ -14,6 +14,8 @@ from milvus_benchmark.runners import utils
 
 logger = logging.getLogger("milvus_benchmark.client")
 
+
+# yaml file and code file comparison table of Index parameters
 INDEX_MAP = {
     "flat": "FLAT",
     "ivf_flat": "IVF_FLAT",
@@ -39,14 +41,23 @@ def time_wrapper(func):
     """
 
     def wrapper(*args, **kwargs):
+        """
+        log: Specify output log
+        rps: Specify the rps of the return interface
+        """
         start = time.time()
         # logger.debug("Milvus {} start".format(func.__name__))
         log = kwargs.get("log", True)
         kwargs.pop("log", None)
+        rps = kwargs.get("rps", False)
+        kwargs.pop("rps", None)
         result = func(*args, **kwargs)
         end = time.time()
         if log:
-            logger.debug("Milvus {} run in {}s".format(func.__name__, round(end - start, 2)))
+            _rps = round(end - start, 2)
+            logger.debug("Milvus {} run in {}s".format(func.__name__, _rps))
+            if rps is not False:
+                return result, _rps
         return result
 
     return wrapper
@@ -85,6 +96,7 @@ class MilvusClient(object):
         return 'Milvus collection %s' % self._collection_name
 
     def set_collection(self, collection_name):
+        """ seting collection name """
         self._collection_name = collection_name
 
     # TODO: server not support
@@ -155,6 +167,7 @@ class MilvusClient(object):
 
     @time_wrapper
     def insert_flush(self, entities, _async=False, collection_name=None):
+        # the method that included insert and flush
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         try:
             insert_res = self._milvus.insert(tmp_collection_name, entities)
@@ -215,6 +228,7 @@ class MilvusClient(object):
 
     @time_wrapper
     def delete(self, ids, collection_name=None):
+        # delete entity by id
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         self._milvus.delete_entity_by_id(tmp_collection_name, ids)
 
@@ -289,6 +303,7 @@ class MilvusClient(object):
 
     @time_wrapper
     def query(self, vector_query, filter_query=None, collection_name=None, timeout=300):
+        """ This method corresponds to the search method of milvus """
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         must_params = [vector_query]
         if filter_query:
@@ -390,6 +405,12 @@ class MilvusClient(object):
         return row_count
 
     def drop(self, timeout=120, collection_name=None):
+        """
+        drop steps:
+        1.drop collection
+        2.check collection exist
+        3.Set timeout to exit
+        """
         timeout = int(timeout)
         if collection_name is None:
             collection_name = self._collection_name
@@ -398,8 +419,13 @@ class MilvusClient(object):
         i = 0
         while i < timeout:
             try:
-                row_count = self.count(collection_name=collection_name)
-                if row_count:
+                # row_count = self.count(collection_name=collection_name)
+                # if row_count:
+                #     time.sleep(1)
+                #     i = i + 1
+                #     continue
+                res = self._milvus.has_collection(collection_name)
+                if res:
                     time.sleep(1)
                     i = i + 1
                     continue
@@ -456,6 +482,39 @@ class MilvusClient(object):
         if collection_name is None:
             collection_name = self._collection_name
         return self._milvus.release_partitions(collection_name, tag_names, timeout=timeout)
+
+    @time_wrapper
+    def scene_test(self, collection_name=None, vectors=None, ids=None):
+        """
+        Scene test steps：
+        1.create collection with the specified collection name
+        2.insert data
+        3.flush data
+        4.create index
+        5.drop collection
+        """
+
+        logger.debug("[scene_test] Start scene test : %s" % collection_name)
+        self.create_collection(dimension=128, collection_name=collection_name)
+        time.sleep(1)
+
+        collection_info = self.get_info(collection_name)
+
+        entities = utils.generate_entities(collection_info, vectors, ids)
+        logger.debug("[scene_test] Start insert : %s" % collection_name)
+        self.insert(entities, collection_name=collection_name)
+        logger.debug("[scene_test] Start flush : %s" % collection_name)
+        self.flush(collection_name=collection_name)
+
+        logger.debug("[scene_test] Start create index : %s" % collection_name)
+        self.create_index(field_name='float_vector', index_type="ivf_sq8", metric_type='l2',
+                          collection_name=collection_name, index_param={'nlist': 2048})
+        # time.sleep(59)
+
+        logger.debug("[scene_test] Start drop : %s" % collection_name)
+        self.drop(collection_name=collection_name)
+        logger.debug("[scene_test]Scene test close : %s" % collection_name)
+        # time.sleep(1)
 
     # TODO: remove
     # def get_server_version(self):

@@ -13,6 +13,15 @@ def operations_parser(operations):
 
 
 def collection_parser(collection_name):
+    """
+    Resolve the collection name to obtain the corresponding configuration
+    e.g.:
+    sift_1m_128_l2
+    sift: type of data set
+    1m: size of the data inserted in the collection
+    128: vector dimension
+    l2: metric type
+    """
     tmp = collection_name.split("_")
     # if len(tmp) != 5:
     #     return None

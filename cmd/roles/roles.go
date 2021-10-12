@@ -1,19 +1,25 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package roles
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path"
@@ -21,7 +27,10 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/milvus-io/milvus/internal/util/healthz"
+
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
@@ -84,11 +93,8 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 	go func() {
 		rootcoord.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&rootcoord.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		rootcoord.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
@@ -97,6 +103,9 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 		}
 		wg.Done()
 		_ = rc.Run()
+		if !localMsg {
+			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: rc})
+		}
 	}()
 	wg.Wait()
 
@@ -113,11 +122,8 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 		proxy.Params.InitAlias(alias)
 		proxy.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&proxy.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		proxy.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
@@ -126,6 +132,9 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 		}
 		wg.Done()
 		_ = pn.Run()
+		if !localMsg {
+			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: pn})
+		}
 	}()
 	wg.Wait()
 
@@ -141,11 +150,8 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 	go func() {
 		querycoord.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&querycoord.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		querycoord.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		qs, err = components.NewQueryCoord(ctx, factory)
@@ -154,6 +160,9 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 		}
 		wg.Done()
 		_ = qs.Run()
+		if !localMsg {
+			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: qs})
+		}
 	}()
 	wg.Wait()
 
@@ -170,11 +179,8 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 		querynode.Params.InitAlias(alias)
 		querynode.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&querynode.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		querynode.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		qn, err = components.NewQueryNode(ctx, factory)
@@ -183,6 +189,9 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 		}
 		wg.Done()
 		_ = qn.Run()
+		if !localMsg {
+			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: qn})
+		}
 	}()
 	wg.Wait()
 
@@ -198,11 +207,8 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 	go func() {
 		datacoord.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&datacoord.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		datacoord.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		ds, err = components.NewDataCoord(ctx, factory)
@@ -211,6 +217,9 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 		}
 		wg.Done()
 		_ = ds.Run()
+		if !localMsg {
+			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: ds})
+		}
 	}()
 	wg.Wait()
 
@@ -226,12 +235,8 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 	go func() {
 		datanode.Params.InitAlias(alias)
 		datanode.Params.Init()
-
-		if !localMsg {
-			logutil.SetupLogger(&datanode.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		datanode.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		dn, err = components.NewDataNode(ctx, factory)
@@ -240,6 +245,9 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 		}
 		wg.Done()
 		_ = dn.Run()
+		if !localMsg {
+			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: dn})
+		}
 	}()
 	wg.Wait()
 
@@ -255,11 +263,8 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 	go func() {
 		indexcoord.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&indexcoord.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		indexcoord.Params.SetLogConfig(f)
 		var err error
 		is, err = components.NewIndexCoord(ctx)
 		if err != nil {
@@ -267,6 +272,9 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 		}
 		wg.Done()
 		_ = is.Run()
+		if !localMsg {
+			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: is})
+		}
 	}()
 	wg.Wait()
 
@@ -283,11 +291,8 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 		indexnode.Params.InitAlias(alias)
 		indexnode.Params.Init()
 
-		if !localMsg {
-			logutil.SetupLogger(&indexnode.Params.Log)
-			defer log.Sync()
-		}
-
+		f := setLoggerFunc(localMsg)
+		indexnode.Params.SetLogConfig(f)
 		var err error
 		in, err = components.NewIndexNode(ctx)
 		if err != nil {
@@ -295,6 +300,9 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 		}
 		wg.Done()
 		_ = in.Run()
+		if !localMsg {
+			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: in})
+		}
 	}()
 	wg.Wait()
 
@@ -341,7 +349,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	} else {
 		err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
 		if err != nil {
-			fmt.Println("failed to set deploy mode: ", err)
+			log.Error("failed to set deploy mode: ", zap.Error(err))
 		}
 	}
 
@@ -417,6 +425,39 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 		}
 	}
 
+	if localMsg {
+		standaloneHealthzHandler := func(w http.ResponseWriter, r *http.Request) {
+			if rc == nil {
+				rootCoordNotServingHandler(w, r)
+				return
+			}
+			if qs == nil {
+				queryCoordNotServingHandler(w, r)
+				return
+			}
+			if ds == nil {
+				dataCoordNotServingHandler(w, r)
+				return
+			}
+			if is == nil {
+				indexCoordNotServingHandler(w, r)
+				return
+			}
+			// TODO(dragondriver): need to check node state?
+
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set(healthz.ContentTypeHeader, healthz.ContentTypeText)
+			_, err := fmt.Fprint(w, "OK")
+			if err != nil {
+				log.Warn("failed to send response",
+					zap.Error(err))
+			}
+
+			// TODO(dragondriver): handle component states
+		}
+		http.HandleFunc(healthz.HealthzRouterPath, standaloneHealthzHandler)
+	}
+
 	metrics.ServeHTTP()
 
 	sc := make(chan os.Signal, 1)
@@ -426,8 +467,20 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 	sig := <-sc
-	fmt.Printf("Get %s signal to exit\n", sig.String())
+	log.Error("Get signal to exit\n", zap.String("signal", sig.String()))
 
 	// some deferred Stop has race with context cancel
 	cancel()
+}
+
+func setLoggerFunc(localMsg bool) func(cfg log.Config) {
+	if !localMsg {
+		return func(cfg log.Config) {
+			log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
+			logutil.SetupLogger(&cfg)
+			defer log.Sync()
+		}
+	}
+	// no need to setup logger for standalone
+	return func(cfg log.Config) {}
 }

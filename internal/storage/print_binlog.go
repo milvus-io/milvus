@@ -12,6 +12,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -23,6 +24,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
+// PrintBinlogFiles call printBinlogFile in turn for the file list specified by parameter fileList.
+// Return an error early if it encounters any error.
 func PrintBinlogFiles(fileList []string) error {
 	for _, file := range fileList {
 		if err := printBinlogFile(file); err != nil {
@@ -64,14 +67,9 @@ func printBinlogFile(filename string) error {
 	physical, _ := tsoutil.ParseTS(r.descriptorEvent.descriptorEventHeader.Timestamp)
 	fmt.Printf("\tTimestamp: %v\n", physical)
 	fmt.Printf("\tTypeCode: %s\n", r.descriptorEvent.descriptorEventHeader.TypeCode.String())
-	fmt.Printf("\tServerID: %d\n", r.descriptorEvent.descriptorEventHeader.ServerID)
 	fmt.Printf("\tEventLength: %d\n", r.descriptorEvent.descriptorEventHeader.EventLength)
 	fmt.Printf("\tNextPosition :%d\n", r.descriptorEvent.descriptorEventHeader.NextPosition)
 	fmt.Println("descriptor event data:")
-	fmt.Printf("\tBinlogVersion: %d\n", r.descriptorEvent.descriptorEventData.BinlogVersion)
-	fmt.Printf("\tServerVersion: %d\n", r.descriptorEvent.descriptorEventData.ServerVersion)
-	fmt.Printf("\tCommitID: %d\n", r.descriptorEvent.descriptorEventData.CommitID)
-	fmt.Printf("\tHeaderLength: %d\n", r.descriptorEvent.descriptorEventData.HeaderLength)
 	fmt.Printf("\tCollectionID: %d\n", r.descriptorEvent.descriptorEventData.CollectionID)
 	fmt.Printf("\tPartitionID: %d\n", r.descriptorEvent.descriptorEventData.PartitionID)
 	fmt.Printf("\tSegmentID: %d\n", r.descriptorEvent.descriptorEventData.SegmentID)
@@ -99,7 +97,6 @@ func printBinlogFile(filename string) error {
 		physical, _ = tsoutil.ParseTS(event.eventHeader.Timestamp)
 		fmt.Printf("\tTimestamp: %v\n", physical)
 		fmt.Printf("\tTypeCode: %s\n", event.eventHeader.TypeCode.String())
-		fmt.Printf("\tServerID: %d\n", event.eventHeader.ServerID)
 		fmt.Printf("\tEventLength: %d\n", event.eventHeader.EventLength)
 		fmt.Printf("\tNextPosition: %d\n", event.eventHeader.NextPosition)
 		switch event.eventHeader.TypeCode {
@@ -179,6 +176,30 @@ func printBinlogFile(filename string) error {
 			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
 			fmt.Printf("\tEndTimestamp: %v\n", physical)
 			if err := printDDLPayloadValues(event.eventHeader.TypeCode, r.descriptorEvent.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
+				return err
+			}
+		case IndexFileEventType:
+			desc := r.descriptorEvent
+			extraBytes := desc.ExtraBytes
+			extra := make(map[string]interface{})
+			err = json.Unmarshal(extraBytes, &extra)
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal extra: %s", err.Error())
+			}
+			fmt.Printf("indexBuildID: %v\n", extra["indexBuildID"])
+			fmt.Printf("indexName: %v\n", extra["indexName"])
+			fmt.Printf("indexID: %v\n", extra["indexID"])
+			evd, ok := event.eventData.(*indexFileEventData)
+			if !ok {
+				return errors.New("incorrect event data type")
+			}
+			fmt.Printf("index file event num: %d\n", eventNum)
+			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
+			fmt.Printf("\tStartTimestamp: %v\n", physical)
+			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
+			fmt.Printf("\tEndTimestamp: %v\n", physical)
+			key := fmt.Sprintf("%v", extra["key"])
+			if err := printIndexFilePayloadValues(event.PayloadReaderInterface, key); err != nil {
 				return err
 			}
 		default:
@@ -351,5 +372,51 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 	default:
 		return errors.New("undefined data type")
 	}
+	return nil
+}
+
+// only print slice meta and index params
+func printIndexFilePayloadValues(reader PayloadReaderInterface, key string) error {
+	if key == IndexParamsKey {
+		rows, err := reader.GetPayloadLengthFromReader()
+		if err != nil {
+			return err
+		}
+		var content []byte
+		for i := 0; i < rows; i++ {
+			val, err := reader.GetOneStringFromPayload(i)
+			if err != nil {
+				return err
+			}
+			content = append(content, []byte(val)...)
+		}
+		fmt.Print("index params: \n")
+		fmt.Println(string(content))
+
+		return nil
+	}
+
+	if key == "SLICE_META" {
+		rows, err := reader.GetPayloadLengthFromReader()
+		if err != nil {
+			return err
+		}
+		var content []byte
+		for i := 0; i < rows; i++ {
+			val, err := reader.GetOneStringFromPayload(i)
+			if err != nil {
+				return err
+			}
+			content = append(content, []byte(val)...)
+		}
+		// content is a json string serialized by milvus::json,
+		// it's better to use milvus::json to parse the content also,
+		// fortunately, the json string is readable enough.
+		fmt.Print("index slice meta: \n")
+		fmt.Println(string(content))
+
+		return nil
+	}
+
 	return nil
 }

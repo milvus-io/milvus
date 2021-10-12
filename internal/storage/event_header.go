@@ -23,7 +23,6 @@ import (
 type baseEventHeader struct {
 	Timestamp    typeutil.Timestamp
 	TypeCode     EventTypeCode
-	ServerID     int32
 	EventLength  int32
 	NextPosition int32
 }
@@ -63,7 +62,6 @@ func newDescriptorEventHeader() *descriptorEventHeader {
 	header := descriptorEventHeader{
 		Timestamp: tsoutil.ComposeTS(time.Now().UnixNano()/int64(time.Millisecond), 0),
 		TypeCode:  DescriptorEventType,
-		ServerID:  ServerID,
 	}
 	return &header
 }
@@ -73,7 +71,6 @@ func newEventHeader(eventTypeCode EventTypeCode) *eventHeader {
 		baseEventHeader: baseEventHeader{
 			Timestamp:    tsoutil.ComposeTS(time.Now().UnixNano()/int64(time.Millisecond), 0),
 			TypeCode:     eventTypeCode,
-			ServerID:     ServerID,
 			EventLength:  -1,
 			NextPosition: -1,
 		},

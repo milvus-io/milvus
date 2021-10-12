@@ -15,6 +15,9 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 )
 
+// Check pulsarMessage implements ConsumerMessage
+var _ ConsumerMessage = (*pulsarMessage)(nil)
+
 type pulsarMessage struct {
 	msg pulsar.ConsumerMessage
 }

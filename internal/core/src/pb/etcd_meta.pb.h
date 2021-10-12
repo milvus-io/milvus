@@ -842,6 +842,7 @@ class CollectionInfo :
     kVirtualChannelNamesFieldNumber = 7,
     kPhysicalChannelNamesFieldNumber = 8,
     kPartitionCreatedTimestampsFieldNumber = 9,
+    kStartPositionsFieldNumber = 11,
     kSchemaFieldNumber = 2,
     kIDFieldNumber = 1,
     kCreateTimeFieldNumber = 3,
@@ -931,6 +932,17 @@ class CollectionInfo :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >*
       mutable_partition_created_timestamps();
 
+  // repeated .milvus.proto.common.KeyDataPair start_positions = 11;
+  int start_positions_size() const;
+  void clear_start_positions();
+  ::milvus::proto::common::KeyDataPair* mutable_start_positions(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >*
+      mutable_start_positions();
+  const ::milvus::proto::common::KeyDataPair& start_positions(int index) const;
+  ::milvus::proto::common::KeyDataPair* add_start_positions();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >&
+      start_positions() const;
+
   // .milvus.proto.schema.CollectionSchema schema = 2;
   bool has_schema() const;
   void clear_schema();
@@ -967,6 +979,7 @@ class CollectionInfo :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> physical_channel_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 > partition_created_timestamps_;
   mutable std::atomic<int> _partition_created_timestamps_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair > start_positions_;
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 id_;
   ::PROTOBUF_NAMESPACE_ID::uint64 create_time_;
@@ -2127,6 +2140,33 @@ inline void CollectionInfo::set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value)
   
   shards_num_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionInfo.shards_num)
+}
+
+// repeated .milvus.proto.common.KeyDataPair start_positions = 11;
+inline int CollectionInfo::start_positions_size() const {
+  return start_positions_.size();
+}
+inline ::milvus::proto::common::KeyDataPair* CollectionInfo::mutable_start_positions(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.CollectionInfo.start_positions)
+  return start_positions_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >*
+CollectionInfo::mutable_start_positions() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionInfo.start_positions)
+  return &start_positions_;
+}
+inline const ::milvus::proto::common::KeyDataPair& CollectionInfo::start_positions(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionInfo.start_positions)
+  return start_positions_.Get(index);
+}
+inline ::milvus::proto::common::KeyDataPair* CollectionInfo::add_start_positions() {
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionInfo.start_positions)
+  return start_positions_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >&
+CollectionInfo::start_positions() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionInfo.start_positions)
+  return start_positions_;
 }
 
 // -------------------------------------------------------------------

@@ -11,7 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.18)
 message(STATUS "------------------------------KNOWHERE-----------------------------------")
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
@@ -93,7 +93,7 @@ endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
-if (KNOWHERE_BUILD_TESTS)
+if (BUILD_UNIT_TEST)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DELPP_DISABLE_LOGS")
     add_subdirectory(unittest)
 endif ()

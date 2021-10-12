@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+// EventReader is used to parse the events contained in the Binlog file.
 type EventReader struct {
 	eventHeader
 	eventData
@@ -57,6 +58,8 @@ func (reader *EventReader) readData() error {
 		data, err = readCreatePartitionEventDataFixPart(reader.buffer)
 	case DropPartitionEventType:
 		data, err = readDropPartitionEventDataFixPart(reader.buffer)
+	case IndexFileEventType:
+		data, err = readIndexFileEventDataFixPart(reader.buffer)
 	default:
 		return fmt.Errorf("unknown header type code: %d", reader.TypeCode)
 	}
@@ -68,6 +71,8 @@ func (reader *EventReader) readData() error {
 	return nil
 }
 
+// Close closes EventReader object. It mainly calls the Close method of inner PayloadReaderInterface and
+// mark itself as closed.
 func (reader *EventReader) Close() error {
 	if !reader.isClosed {
 		reader.isClosed = true

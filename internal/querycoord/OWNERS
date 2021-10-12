@@ -9,6 +9,4 @@ reviewers:
 approvers:
   - pr-inspection
 
-labels:
-- component/querycoord
 
