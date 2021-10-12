@@ -73,6 +73,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 	return s, nil
 }
 
+// init initializes QueryNode's grpc service.
 func (s *Server) init() error {
 	Params.Init()
 
@@ -172,10 +173,12 @@ func (s *Server) init() error {
 	return nil
 }
 
+// start starts QueryNode's grpc service.
 func (s *Server) start() error {
 	return s.querynode.Start()
 }
 
+// startGrpcLoop starts the grpc loop of QueryNode component.
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.wg.Done()
 
