@@ -245,6 +245,7 @@ const (
 	MsgType_WatchQueryChannels       MsgType = 510
 	MsgType_RemoveQueryChannels      MsgType = 511
 	MsgType_SealedSegmentsChangeInfo MsgType = 512
+	MsgType_SearchById		MsgType = 513
 	// DATA SERVICE
 	MsgType_SegmentInfo MsgType = 600
 	// SYSTEM CONTROL
@@ -304,6 +305,7 @@ var MsgType_name = map[int32]string{
 	510:  "WatchQueryChannels",
 	511:  "RemoveQueryChannels",
 	512:  "SealedSegmentsChangeInfo",
+	513:  "SearchById",
 	600:  "SegmentInfo",
 	1200: "TimeTick",
 	1201: "QueryNodeStats",
@@ -361,6 +363,7 @@ var MsgType_value = map[string]int32{
 	"WatchQueryChannels":       510,
 	"RemoveQueryChannels":      511,
 	"SealedSegmentsChangeInfo": 512,
+	"SearchById":		    513,
 	"SegmentInfo":              600,
 	"TimeTick":                 1200,
 	"QueryNodeStats":           1201,
