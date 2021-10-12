@@ -976,48 +976,16 @@ func (t *CreateAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("create alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
 
-	ddReq := internalpb.CreateAliasRequest{
-		Base:           t.Req.Base,
-		CollectionName: t.Req.CollectionName,
-		Alias:          t.Req.Alias,
-	}
-
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, CreateAliasDDType)
-	}
-
-	reason := fmt.Sprintf("create alias %s", t.Req.Alias)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
-
-	// use lambda function here to guarantee all resources to be released
-	createAliasFn := func() error {
-		// lock for ddl operation
-		t.core.ddlLock.Lock()
-		defer t.core.ddlLock.Unlock()
-
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
-		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
-		err = t.core.MetaTable.AddAlias(t.Req.Alias, t.Req.CollectionName, ts, ddOp)
-		if err != nil {
-			return err
-		}
-		return t.core.SendTimeTick(ts, reason)
-	}
-
-	err = createAliasFn()
+	err = t.core.MetaTable.AddAlias(t.Req.Alias, t.Req.CollectionName, ts)
 	if err != nil {
-		return err
+		return fmt.Errorf("meta table add alias failed, error = %w", err)
 	}
 
-	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return nil
 }
 
 // DropAliasReqTask drop alias request task
@@ -1037,44 +1005,13 @@ func (t *DropAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("create alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
 
-	ddReq := internalpb.DropAliasRequest{
-		Base:  t.Req.Base,
-		Alias: t.Req.Alias,
-	}
-
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, DropAliasDDType)
-	}
-
-	reason := fmt.Sprintf("create alias %s", t.Req.Alias)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
-
-	// use lambda function here to guarantee all resources to be released
-	dropAliasFn := func() error {
-		// lock for ddl operation
-		t.core.ddlLock.Lock()
-		defer t.core.ddlLock.Unlock()
-
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
-		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
-		err = t.core.MetaTable.DeleteAlias(t.Req.Alias, ts, ddOp)
-		if err != nil {
-			return err
-		}
-		t.core.SendTimeTick(ts, reason)
-		return nil
-	}
-
-	err = dropAliasFn()
+	err = t.core.MetaTable.DropAlias(t.Req.Alias, ts)
 	if err != nil {
-		return err
+		return fmt.Errorf("meta table drop alias failed, error = %w", err)
 	}
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
@@ -1089,8 +1026,7 @@ func (t *DropAliasReqTask) Execute(ctx context.Context) error {
 	// error doesn't matter here
 	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
-	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return nil
 }
 
 // AlterAliasReqTask alter alias request task
@@ -1110,44 +1046,13 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("alter alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
 
-	ddReq := internalpb.DropAliasRequest{
-		Base:  t.Req.Base,
-		Alias: t.Req.Alias,
-	}
-
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, AlterAliasDDType)
-	}
-
-	reason := fmt.Sprintf("alter alias %s", t.Req.Alias)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
-
-	// use lambda function here to guarantee all resources to be released
-	alterAliasFn := func() error {
-		// lock for ddl operation
-		t.core.ddlLock.Lock()
-		defer t.core.ddlLock.Unlock()
-
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
-		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
-		err = t.core.MetaTable.AlterAlias(t.Req.Alias, t.Req.CollectionName, ts, ddOp)
-		if err != nil {
-			return err
-		}
-		t.core.SendTimeTick(ts, reason)
-		return nil
-	}
-
-	err = alterAliasFn()
+	err = t.core.MetaTable.AlterAlias(t.Req.Alias, t.Req.CollectionName, ts)
 	if err != nil {
-		return err
+		return fmt.Errorf("meta table alter alias failed, error = %w", err)
 	}
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
@@ -1162,6 +1067,5 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 	// error doesn't matter here
 	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
-	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return nil
 }

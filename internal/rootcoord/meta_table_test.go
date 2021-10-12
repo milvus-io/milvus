@@ -149,20 +149,23 @@ func Test_MockKV(t *testing.T) {
 
 func TestMetaTable(t *testing.T) {
 	const (
-		collID        = typeutil.UniqueID(1)
-		collName      = "testColl"
-		collIDInvalid = typeutil.UniqueID(2)
-		partIDDefault = typeutil.UniqueID(10)
-		partID        = typeutil.UniqueID(20)
-		partName      = "testPart"
-		partIDInvalid = typeutil.UniqueID(21)
-		segID         = typeutil.UniqueID(100)
-		segID2        = typeutil.UniqueID(101)
-		fieldID       = typeutil.UniqueID(110)
-		fieldID2      = typeutil.UniqueID(111)
-		indexID       = typeutil.UniqueID(10000)
-		indexID2      = typeutil.UniqueID(10001)
-		buildID       = typeutil.UniqueID(201)
+		collName        = "testColl"
+		collNameInvalid = "testColl_invalid"
+		aliasName1      = "alias1"
+		aliasName2      = "alias2"
+		collID          = typeutil.UniqueID(1)
+		collIDInvalid   = typeutil.UniqueID(2)
+		partIDDefault   = typeutil.UniqueID(10)
+		partID          = typeutil.UniqueID(20)
+		partName        = "testPart"
+		partIDInvalid   = typeutil.UniqueID(21)
+		segID           = typeutil.UniqueID(100)
+		segID2          = typeutil.UniqueID(101)
+		fieldID         = typeutil.UniqueID(110)
+		fieldID2        = typeutil.UniqueID(111)
+		indexID         = typeutil.UniqueID(10000)
+		indexID2        = typeutil.UniqueID(10001)
+		buildID         = typeutil.UniqueID(201)
 	)
 
 	rand.Seed(time.Now().UnixNano())
@@ -188,9 +191,8 @@ func TestMetaTable(t *testing.T) {
 	collInfo := &pb.CollectionInfo{
 		ID: collID,
 		Schema: &schemapb.CollectionSchema{
-			Name:        "testColl",
-			Description: "",
-			AutoID:      false,
+			Name:   collName,
+			AutoID: false,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      fieldID,
@@ -262,7 +264,7 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, uint64(1), ts)
 
-		collMeta, err := mt.GetCollectionByName("testColl", 0)
+		collMeta, err := mt.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.CreateTime, ts)
 		assert.Equal(t, collMeta.PartitionCreatedTimestamps[0], ts)
@@ -271,7 +273,7 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
 		assert.True(t, mt.HasCollection(collInfo.ID, 0))
 
-		field, err := mt.GetFieldSchema("testColl", "field110")
+		field, err := mt.GetFieldSchema(collName, "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, collInfo.Schema.Fields[0].FieldID, field.FieldID)
 
@@ -283,25 +285,27 @@ func TestMetaTable(t *testing.T) {
 
 	t.Run("add alias", func(t *testing.T) {
 		ts := ftso()
-		exists := mt.IsAlias("alias1")
+		exists := mt.IsAlias(aliasName1)
 		assert.False(t, exists)
-		err = mt.AddAlias("alias1", "testColl", ts, ddOp)
+		err = mt.AddAlias(aliasName1, collName, ts)
 		assert.Nil(t, err)
 		aliases := mt.ListAliases(collID)
-		assert.Equal(t, aliases, []string{"alias1"})
-		exists = mt.IsAlias("alias1")
+		assert.Equal(t, aliases, []string{aliasName1})
+		exists = mt.IsAlias(aliasName1)
 		assert.True(t, exists)
 	})
 
 	t.Run("alter alias", func(t *testing.T) {
 		ts := ftso()
-		err = mt.AlterAlias("alias1", "testColl", ts, ddOp)
+		err = mt.AlterAlias(aliasName1, collName, ts)
 		assert.Nil(t, err)
+		err = mt.AlterAlias(aliasName1, collNameInvalid, ts)
+		assert.NotNil(t, err)
 	})
 
 	t.Run("delete alias", func(t *testing.T) {
 		ts := ftso()
-		err = mt.DeleteAlias("alias1", ts, ddOp)
+		err = mt.DropAlias(aliasName1, ts)
 		assert.Nil(t, err)
 	})
 
@@ -375,7 +379,7 @@ func TestMetaTable(t *testing.T) {
 
 		_, _, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo, nil, 0)
 		assert.NotNil(t, err)
-		seg, field, err := mt.GetNotIndexedSegments("testColl", "field110", idxInfo, []typeutil.UniqueID{segID, segID2}, 0)
+		seg, field, err := mt.GetNotIndexedSegments(collName, "field110", idxInfo, []typeutil.UniqueID{segID, segID2}, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(seg))
 		assert.Equal(t, segID2, seg[0])
@@ -391,7 +395,7 @@ func TestMetaTable(t *testing.T) {
 		idxInfo.IndexID = 2001
 		idxInfo.IndexName = "field110-1"
 
-		seg, field, err = mt.GetNotIndexedSegments("testColl", "field110", idxInfo, []typeutil.UniqueID{segID, segID2}, 0)
+		seg, field, err = mt.GetNotIndexedSegments(collName, "field110", idxInfo, []typeutil.UniqueID{segID, segID2}, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(seg))
 		assert.Equal(t, segID, seg[0])
@@ -401,7 +405,7 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("get index by name", func(t *testing.T) {
-		_, idx, err := mt.GetIndexByName("testColl", "field110")
+		_, idx, err := mt.GetIndexByName(collName, "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(idx))
 		assert.Equal(t, indexID, idx[0].IndexID)
@@ -417,7 +421,7 @@ func TestMetaTable(t *testing.T) {
 		}
 		assert.True(t, EqualKeyPairArray(idx[0].IndexParams, params))
 
-		_, idx, err = mt.GetIndexByName("testColl", "idx201")
+		_, idx, err = mt.GetIndexByName(collName, "idx201")
 		assert.Nil(t, err)
 		assert.Zero(t, len(idx))
 	})
@@ -439,20 +443,20 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("drop index", func(t *testing.T) {
-		idx, ok, err := mt.DropIndex("testColl", "field110", "field110", 0)
+		idx, ok, err := mt.DropIndex(collName, "field110", "field110", 0)
 		assert.Nil(t, err)
 		assert.True(t, ok)
 		assert.Equal(t, indexID, idx)
 
-		_, ok, err = mt.DropIndex("testColl", "field110", "field110-error", 0)
+		_, ok, err = mt.DropIndex(collName, "field110", "field110-error", 0)
 		assert.Nil(t, err)
 		assert.False(t, ok)
 
-		_, idxs, err := mt.GetIndexByName("testColl", "field110")
+		_, idxs, err := mt.GetIndexByName(collName, "field110")
 		assert.Nil(t, err)
 		assert.Zero(t, len(idxs))
 
-		_, idxs, err = mt.GetIndexByName("testColl", "field110-1")
+		_, idxs, err = mt.GetIndexByName(collName, "field110-1")
 		assert.Nil(t, err)
 		assert.Equal(t, len(idxs), 1)
 		assert.Equal(t, idxs[0].IndexID, int64(2001))
@@ -478,12 +482,12 @@ func TestMetaTable(t *testing.T) {
 		err = mt.DeleteCollection(collIDInvalid, ts, nil)
 		assert.NotNil(t, err)
 		ts2 := ftso()
-		err = mt.AddAlias("alias1", "testColl", ts2, ddOp)
+		err = mt.AddAlias(aliasName2, collName, ts2)
 		assert.Nil(t, err)
 		err = mt.DeleteCollection(collID, ts, nil)
 		assert.Nil(t, err)
 		ts3 := ftso()
-		err = mt.DeleteAlias("alias1", ts3, ddOp)
+		err = mt.DropAlias(aliasName2, ts3)
 		assert.NotNil(t, err)
 
 		// check DD operation flag

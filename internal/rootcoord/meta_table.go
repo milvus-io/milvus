@@ -70,15 +70,6 @@ const (
 
 	// DropPartitionDDType name of DD type for drop partition
 	DropPartitionDDType = "DropPartition"
-
-	// CreateAliasDDType name of DD type for create collection alias
-	CreateAliasDDType = "CreateAlias"
-
-	// DropAliasDDType name of DD type for drop collection alias
-	DropAliasDDType = "DropAlias"
-
-	// AlterAliasDDType name of DD type for alter collection alias
-	AlterAliasDDType = "AlterAlias"
 )
 
 // MetaTable store all rootcoord meta info
@@ -1225,8 +1216,7 @@ func (mt *MetaTable) dupMeta() (
 }
 
 // AddAlias add collection alias
-func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string,
-	ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	if _, ok := mt.collAlias2ID[collectionAlias]; ok {
@@ -1243,30 +1233,24 @@ func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string,
 	}
 	mt.collAlias2ID[collectionAlias] = id
 
-	meta := make(map[string]string)
-	addition := mt.getAdditionKV(ddOpStr, meta)
-	saveAlias := func(ts typeutil.Timestamp) (string, string, error) {
-		k1 := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
-		v1, err := proto.Marshal(&pb.CollectionInfo{ID: id, Schema: &schemapb.CollectionSchema{Name: collectionAlias}})
-		if err != nil {
-			log.Error("MetaTable AddAlias saveAlias Marshal CollectionInfo fail",
-				zap.String("key", k1), zap.Error(err))
-			return "", "", fmt.Errorf("MetaTable AddAlias saveAlias Marshal CollectionInfo fail key:%s, err:%w", k1, err)
-		}
-		meta[k1] = string(v1)
-		return k1, string(v1), nil
+	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
+	v, err := proto.Marshal(&pb.CollectionInfo{ID: id, Schema: &schemapb.CollectionSchema{Name: collectionAlias}})
+	if err != nil {
+		log.Error("MetaTable AddAlias Marshal CollectionInfo fail",
+			zap.String("key", k), zap.Error(err))
+		return fmt.Errorf("MetaTable AddAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
 	}
 
-	err := mt.client.MultiSave(meta, ts, addition, saveAlias)
+	err = mt.client.Save(k, string(v), ts)
 	if err != nil {
-		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
-		panic("SnapShotKV MultiSave fail")
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 	return nil
 }
 
-// DeleteAlias delete collection alias
-func (mt *MetaTable) DeleteAlias(collectionAlias string, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+// DropAlias drop collection alias
+func (mt *MetaTable) DropAlias(collectionAlias string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
@@ -1278,17 +1262,16 @@ func (mt *MetaTable) DeleteAlias(collectionAlias string, ts typeutil.Timestamp, 
 		fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias),
 	}
 	meta := make(map[string]string)
-	addition := mt.getAdditionKV(ddOpStr, meta)
-	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetakeys, ts, addition)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetakeys, ts)
 	if err != nil {
-		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
-		panic("SnapShotKV MultiSave fail")
+		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
+		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
 	}
 	return nil
 }
 
 // AlterAlias alter collection alias
-func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
@@ -1300,24 +1283,19 @@ func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, t
 		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
 	}
 	mt.collAlias2ID[collectionAlias] = id
-	meta := make(map[string]string)
-	addition := mt.getAdditionKV(ddOpStr, meta)
-	alterAlias := func(ts typeutil.Timestamp) (string, string, error) {
-		k1 := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
-		v1, err := proto.Marshal(&pb.CollectionInfo{ID: id, Schema: &schemapb.CollectionSchema{Name: collectionAlias}})
-		if err != nil {
-			log.Error("MetaTable AlterAlias alterAlias Marshal CollectionInfo fail",
-				zap.String("key", k1), zap.Error(err))
-			return "", "", fmt.Errorf("MetaTable AlterAlias alterAlias Marshal CollectionInfo fail key:%s, err:%w", k1, err)
-		}
-		meta[k1] = string(v1)
-		return k1, string(v1), nil
+
+	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
+	v, err := proto.Marshal(&pb.CollectionInfo{ID: id, Schema: &schemapb.CollectionSchema{Name: collectionAlias}})
+	if err != nil {
+		log.Error("MetaTable AlterAlias Marshal CollectionInfo fail",
+			zap.String("key", k), zap.Error(err))
+		return fmt.Errorf("MetaTable AlterAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
 	}
 
-	err := mt.client.MultiSave(meta, ts, addition, alterAlias)
+	err = mt.client.Save(k, string(v), ts)
 	if err != nil {
-		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
-		panic("SnapShotKV MultiSave fail")
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 	return nil
 }
