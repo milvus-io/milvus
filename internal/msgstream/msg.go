@@ -1039,6 +1039,7 @@ func (s *SealedSegmentsChangeInfoMsg) Unmarshal(input MarshalType) (TsMsg, error
 
 /////////////////////////////////////////DataNodeTtMsg//////////////////////////////////////////
 
+
 // DataNodeTtMsg is a message pack that contains datanode time tick
 type DataNodeTtMsg struct {
 	BaseMsg
@@ -1087,4 +1088,71 @@ func (m *DataNodeTtMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return &DataNodeTtMsg{
 		DataNodeTtMsg: msg,
 	}, nil
+}
+
+/////////////////////////////////////////SearchById//////////////////////////////////////////
+
+// SearchByIdMsg is a message pack that contains search request
+type SearchByIdMsg struct {
+	BaseMsg
+	internalpb.SearchByIdRequest
+}
+
+// interface implementation validation
+var _ TsMsg = &SearchByIdMsg{}
+
+// ID returns the ID of this message pack
+func (st *SearchByIdMsg) ID() UniqueID {
+	return st.Base.MsgID
+}
+
+// Type returns the type of this message pack
+func (st *SearchByIdMsg) Type() MsgType {
+	return st.Base.MsgType
+}
+
+// SourceID indicated which component generated this message
+func (st *SearchByIdMsg) SourceID() int64 {
+	return st.Base.SourceID
+}
+
+// GuaranteeTs returns the guarantee timestamp that querynode can perform this search request. This timestamp
+// filled in client(e.g. pymilvus). The timestamp will be 0 if client never execute any insert, otherwise equals
+// the timestamp from last insert response.
+func (st *SearchByIdMsg) GuaranteeTs() Timestamp {
+	return st.GetGuaranteeTimestamp()
+}
+
+// TravelTs returns the timestamp of a time travel search request
+func (st *SearchByIdMsg) TravelTs() Timestamp {
+	return st.GetTravelTimestamp()
+}
+
+// Marshal is used to serializing a message pack to byte array
+func (st *SearchByIdMsg) Marshal(input TsMsg) (MarshalType, error) {
+	searchByIdTask := input.(*SearchByIdMsg)
+	searchByIdRequest := &searchByIdTask.SearchByIdRequest
+	mb, err := proto.Marshal(searchByIdRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+// Unmarshal is used to deserializing a message pack from byte array
+func (st *SearchByIdMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	searchByIdRequest := internalpb.SearchByIdRequest{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &searchByIdRequest)
+	if err != nil {
+		return nil, err
+	}
+	searchMsg := &SearchByIdMsg{SearchByIdRequest: searchByIdRequest}
+	searchMsg.BeginTimestamp = searchByIdMsg.Base.Timestamp
+	searchMsg.EndTimestamp = searchByIdMsg.Base.Timestamp
+
+	return searchByIdMsg, nil
 }
