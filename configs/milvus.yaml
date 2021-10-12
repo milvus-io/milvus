@@ -47,6 +47,7 @@ rocksmq:
   retentionTimeInMinutes: 4320
   retentionSizeInMB: 0
 
+# Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   address: localhost
   port: 53100
