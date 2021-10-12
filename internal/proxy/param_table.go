@@ -65,6 +65,9 @@ type ParamTable struct {
 	MaxTaskNum int64
 
 	PulsarMaxMessageSize int
+
+	CreatedTime time.Time
+	UpdatedTime time.Time
 }
 
 var Params ParamTable
