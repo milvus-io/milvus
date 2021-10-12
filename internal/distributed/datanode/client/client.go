@@ -34,7 +34,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Client is the grpc client for DataCoord
+// Client is the grpc client for DataNode
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
