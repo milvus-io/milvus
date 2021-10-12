@@ -224,6 +224,7 @@ func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]U
 	return collection.partitionIDs, nil
 }
 
+// getVecFieldIDsByCollectionID returns vector field ids of collection
 func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
