@@ -162,6 +162,14 @@ type DataCoord interface {
 	// 	only row count for now
 	// error is returned only when some communication issue occurs
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
+
+	// GetSegmentInfo requests segment info
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the list of segment ids to query
+	//
+	// response struct `GetSegmentInfoResponse` contains the list of segment info
+	// error is returned only when some communication issue occurs
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
 	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
