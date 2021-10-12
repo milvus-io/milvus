@@ -824,7 +824,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 		return nil, nil, err
 	}
 
-	// binLogs -> minIO/S3
+	// binLogs -> MinIO/S3
 	segIDStr := strconv.FormatInt(segmentID, 10)
 	keyPrefix = path.Join(keyPrefix, segIDStr)
 
