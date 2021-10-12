@@ -9,25 +9,25 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/format.hpp>
 #include <gtest/gtest.h>
-#include "query/deprecated/ParserDeprecated.h"
+#include <regex>
+
 #include "query/Expr.h"
+#include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "query/generated/ExprVisitor.h"
 #include "query/generated/PlanNodeVisitor.h"
-#include "test_utils/DataGen.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
 #include "query/generated/ExecExprVisitor.h"
-#include "query/Plan.h"
-#include "utils/tools.h"
-#include <regex>
-#include <boost/format.hpp>
 #include "segcore/SegmentGrowingImpl.h"
+#include "test_utils/DataGen.h"
+#include "utils/tools.h"
+
 using namespace milvus;
 
 TEST(Expr, Naive) {
     SUCCEED();
-    using namespace milvus::wtf;
     std::string dsl_string = R"(
 {
     "bool": {
