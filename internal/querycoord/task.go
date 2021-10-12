@@ -183,6 +183,7 @@ func (bt *BaseTask) Reschedule(ctx context.Context) ([]task, error) {
 	return nil, nil
 }
 
+// State returns the state of task, such as taskUndo, taskDoing, taskDone, taskExpired, taskFailed
 func (bt *BaseTask) State() taskState {
 	bt.stateMu.RLock()
 	defer bt.stateMu.RUnlock()
