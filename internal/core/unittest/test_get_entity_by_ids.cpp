@@ -10,9 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "test_utils/DataGen.h"
-#include "segcore/ScalarIndex.h"
+
 #include "query/ExprImpl.h"
+#include "segcore/ScalarIndex.h"
+#include "test_utils/DataGen.h"
+
 using namespace milvus;
 using namespace milvus::segcore;
 
