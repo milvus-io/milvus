@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package logutil
 
 import (
@@ -110,6 +111,7 @@ func init() {
 	})
 }
 
+// SetupLogger is used to initialize the log with config.
 func SetupLogger(cfg *log.Config) {
 	once.Do(func() {
 		// initialize logger
@@ -135,6 +137,7 @@ func SetupLogger(cfg *log.Config) {
 	})
 }
 
+// GetZapWrapper returns the stored zapWrapper object.
 func GetZapWrapper() *zapWrapper {
 	return _globalZapWrapper.Load().(*zapWrapper)
 }
