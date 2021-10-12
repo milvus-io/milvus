@@ -316,6 +316,9 @@ func (node *Proxy) Start() error {
 		cb()
 	}
 
+	Params.CreatedTime = time.Now()
+	Params.UpdatedTime = time.Now()
+
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("Proxy", zap.Any("State", node.stateCode.Load()))
 

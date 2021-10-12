@@ -65,8 +65,9 @@ func getSystemInfoMetrics(
 					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
 					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
 				},
-				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-				Type: typeutil.ProxyRole,
+				CreatedTime: Params.CreatedTime.String(),
+				UpdatedTime: Params.UpdatedTime.String(),
+				Type:        typeutil.ProxyRole,
 			},
 			SystemConfigurations: metricsinfo.ProxyConfiguration{
 				DefaultPartitionName: Params.DefaultPartitionName,
