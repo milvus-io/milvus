@@ -517,11 +517,17 @@ func (ri *retentionInfo) newExpiredCleanUp(topic string) error {
 
 	newAckedSize := totalAckedSize - deletedAckedSize
 	writeBatch.Put([]byte(ackedSizeKey), []byte(strconv.FormatInt(newAckedSize, 10)))
+
+	err = DeleteMessages(ri.db, topic, startID, endID)
+	if err != nil {
+		return err
+	}
+
 	writeOpts := gorocksdb.NewDefaultWriteOptions()
 	defer writeOpts.Destroy()
 	ri.kv.DB.Write(writeOpts, writeBatch)
 
-	return DeleteMessages(ri.db, topic, startID, endID)
+	return nil
 }
 
 /*
