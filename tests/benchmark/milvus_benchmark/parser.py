@@ -40,6 +40,11 @@ def collection_parser(collection_name):
 
 
 def parse_ann_collection_name(collection_name):
+    """
+    Analyze the collection name of the accuracy test and obtain the corresponding configuration
+    e.g.:
+    sift_128_euclidean
+    """
     data_type = collection_name.split("_")[0]
     dimension = int(collection_name.split("_")[1])
     metric = collection_name.split("_")[2]
