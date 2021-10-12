@@ -46,7 +46,7 @@ type deleteNode struct {
 	minIOKV     kv.BaseKV
 }
 
-// BufferData buffers insert data, monitoring buffer size and limit
+// DelDataBuf buffers insert data, monitoring buffer size and limit
 // size and limit both indicate numOfRows
 type DelDataBuf struct {
 	delData *DeleteData
