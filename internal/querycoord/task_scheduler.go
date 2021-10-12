@@ -821,6 +821,7 @@ func (scheduler *TaskScheduler) Start() error {
 	return nil
 }
 
+// Close function stops the scheduleLoop and the processActivateTaskLoop
 func (scheduler *TaskScheduler) Close() {
 	scheduler.cancel()
 	scheduler.wg.Wait()
