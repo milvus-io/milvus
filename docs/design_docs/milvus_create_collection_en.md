@@ -122,7 +122,7 @@ message CreateCollectionRequest {
 
 ```
 
-9. After all these operations, `RootCoord` would update internal timestamp and return, so the `Proxy` would get the response.
+9. After all these operations, `RootCoord` would update the internal timestamp and return, so the `Proxy` would get the response.
 
 *Notes:*
 1. In the `Proxy`, all `DDL` requests will be wrapped into `task`, and push the `task` into `DdTaskQueue`, the background service will read a new `task` from `DdTaskQueue` only when the previous one is finished. So all the `DDL` requests are executed serially on the `Proxy`
