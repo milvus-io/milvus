@@ -143,16 +143,16 @@ class TestChaos(TestChaosBase):
         for k, t in self.checker_threads.items():
             log.info(f"10s later: Thread {k} is_alive(): {t.is_alive()}")
 
-        # # assert statistic
-        # log.info("******2nd assert after chaos injected: ")
-        # assert_statistic(self.health_checkers,
-        #                  expectations={Op.create: self.expect_create,
-        #                                Op.insert: self.expect_insert,
-        #                                Op.flush: self.expect_flush,
-        #                                Op.index: self.expect_index,
-        #                                Op.search: self.expect_search,
-        #                                Op.query: self.expect_query
-        #                                })
+        # assert statistic
+        log.info("******2nd assert after chaos injected: ")
+        assert_statistic(self.health_checkers,
+                         expectations={Op.create: self.expect_create,
+                                       Op.insert: self.expect_insert,
+                                       Op.flush: self.expect_flush,
+                                       Op.index: self.expect_index,
+                                       Op.search: self.expect_search,
+                                       Op.query: self.expect_query
+                                       })
 
         # delete chaos
         meta_name = chaos_config.get('metadata', None).get('name', None)
