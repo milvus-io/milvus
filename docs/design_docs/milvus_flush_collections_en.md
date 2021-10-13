@@ -53,7 +53,7 @@ type FlushTask struct {
 }
 ```
 
-3. There is a backgroud service in `Proxy`. This service gets `FlushTask` from `DdTaskQueue`, and executes in three phases:
+3. There is a background service in `Proxy`. This service gets `FlushTask` from `DdTaskQueue`, and executes in three phases:
     - `PreExecute`
 
       `FlushTask` does nothing at this phase, and returns directly
