@@ -166,7 +166,8 @@ func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
 
 func newDDNode(clearSignal chan<- UniqueID, collID UniqueID, vchanInfo *datapb.VchannelInfo) *ddNode {
 	baseNode := BaseNode{}
-	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
+	baseNode.SetMaxQueueLength(Params.FlowGraphMaxQueueLength)
+	baseNode.SetMaxParallelism(Params.FlowGraphMaxParallelism)
 
 	fs := make([]*datapb.SegmentInfo, 0, len(vchanInfo.GetFlushedSegments()))
 	fs = append(fs, vchanInfo.GetFlushedSegments()...)

@@ -91,6 +91,6 @@ func (mtm *mockTtMsgStream) Seek(offset []*internalpb.MsgPosition) error {
 
 func TestNewDmInputNode(t *testing.T) {
 	ctx := context.Background()
-	_, err := newDmInputNode(ctx, &mockMsgStreamFactory{}, 0, "abc_adc", new(internalpb.MsgPosition))
+	_, err := newDmInputNode(ctx, new(internalpb.MsgPosition), &nodeConfig{msFactory: &mockMsgStreamFactory{}})
 	assert.Nil(t, err)
 }

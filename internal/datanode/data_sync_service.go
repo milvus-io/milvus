@@ -82,6 +82,26 @@ func newDataSyncService(ctx context.Context,
 	return service, nil
 }
 
+type parallelConfig struct {
+	maxQueueLength int32
+	maxParallelism int32
+}
+
+type nodeConfig struct {
+	msFactory    msgstream.Factory // msgStream factory
+	collectionID UniqueID
+	vChannelName string
+	replica      Replica // Segment replica
+	allocator    allocatorInterface
+
+	// defaults
+	parallelConfig
+}
+
+func newParallelConfig() parallelConfig {
+	return parallelConfig{Params.FlowGraphMaxQueueLength, Params.FlowGraphMaxParallelism}
+}
+
 // start starts the flowgraph in datasyncservice
 func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
@@ -163,41 +183,37 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 	dsService.saveBinlog = saveBinlog
 
+	c := &nodeConfig{
+		msFactory:    dsService.msFactory,
+		collectionID: vchanInfo.GetCollectionID(),
+		vChannelName: vchanInfo.GetChannelName(),
+		replica:      dsService.replica,
+		allocator:    dsService.idAllocator,
+
+		parallelConfig: newParallelConfig(),
+	}
+
 	var dmStreamNode Node
-	dmStreamNode, err = newDmInputNode(
-		dsService.ctx,
-		dsService.msFactory,
-		vchanInfo.CollectionID,
-		vchanInfo.GetChannelName(),
-		vchanInfo.GetSeekPosition(),
-	)
+	dmStreamNode, err = newDmInputNode(dsService.ctx, vchanInfo.GetSeekPosition(), c)
 	if err != nil {
 		return err
 	}
+
 	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
 	var insertBufferNode Node
 	insertBufferNode, err = newInsertBufferNode(
 		dsService.ctx,
-		dsService.replica,
-		dsService.msFactory,
-		dsService.idAllocator,
 		dsService.flushChs.insertBufferCh,
 		saveBinlog,
-		vchanInfo.GetChannelName(),
 		dsService.flushingSegCache,
+		c,
 	)
 	if err != nil {
 		return err
 	}
 
 	var deleteNode Node
-	deleteNode, err = newDeleteNode(
-		dsService.ctx,
-		dsService.replica,
-		dsService.idAllocator,
-		dsService.flushChs.deleteBufferCh,
-		vchanInfo.GetChannelName(),
-	)
+	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushChs.deleteBufferCh, c)
 	if err != nil {
 		return err
 	}

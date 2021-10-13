@@ -874,23 +874,12 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return ibNode.replica.getCollectionAndPartitionID(segmentID)
 }
 
-func newInsertBufferNode(
-	ctx context.Context,
-	replica Replica,
-	factory msgstream.Factory,
-	idAllocator allocatorInterface,
-	flushCh <-chan *flushMsg,
-	saveBinlog func(*segmentFlushUnit) error,
-	channelName string,
-	flushingSegCache *Cache,
-) (*insertBufferNode, error) {
-
-	maxQueueLength := Params.FlowGraphMaxQueueLength
-	maxParallelism := Params.FlowGraphMaxParallelism
+func newInsertBufferNode(ctx context.Context, flushCh <-chan *flushMsg, saveBinlog func(*segmentFlushUnit) error,
+	flushingSegCache *Cache, config *nodeConfig) (*insertBufferNode, error) {
 
 	baseNode := BaseNode{}
-	baseNode.SetMaxQueueLength(maxQueueLength)
-	baseNode.SetMaxParallelism(maxParallelism)
+	baseNode.SetMaxQueueLength(config.maxQueueLength)
+	baseNode.SetMaxParallelism(config.maxParallelism)
 
 	// MinIO
 	option := &miniokv.Option{
@@ -908,7 +897,7 @@ func newInsertBufferNode(
 	}
 
 	//input stream, data node time tick
-	wTt, err := factory.NewMsgStream(ctx)
+	wTt, err := config.msFactory.NewMsgStream(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -918,7 +907,7 @@ func newInsertBufferNode(
 	wTtMsgStream.Start()
 
 	// update statistics channel
-	segS, err := factory.NewMsgStream(ctx)
+	segS, err := config.msFactory.NewMsgStream(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -931,16 +920,17 @@ func newInsertBufferNode(
 		BaseNode:     baseNode,
 		insertBuffer: sync.Map{},
 		minIOKV:      minIOKV,
-		channelName:  channelName,
 
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,
 
-		replica:          replica,
 		flushMap:         sync.Map{},
 		flushChan:        flushCh,
-		idAllocator:      idAllocator,
 		dsSaveBinlog:     saveBinlog,
 		flushingSegCache: flushingSegCache,
+
+		replica:     config.replica,
+		idAllocator: config.allocator,
+		channelName: config.vChannelName,
 	}, nil
 }

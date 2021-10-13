@@ -84,27 +84,36 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+
+	c := &nodeConfig{
+		replica:      replica,
+		msFactory:    msFactory,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: "string",
+	}
+
+	iBNode, err := newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	assert.NotNil(t, iBNode)
 	require.NoError(t, err)
 
 	ctxDone, cancel := context.WithCancel(ctx)
 	cancel() // cancel now to make context done
-	_, err = newInsertBufferNode(ctxDone, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+	_, err = newInsertBufferNode(ctxDone, flushChan, saveBinlog, newCache(), c)
 	assert.Error(t, err)
 
-	cdf := &CDFMsFactory{
+	c.msFactory = &CDFMsFactory{
 		Factory: msFactory,
 		cd:      0,
 	}
 
-	_, err = newInsertBufferNode(ctx, replica, cdf, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+	_, err = newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	assert.Error(t, err)
-	cdf = &CDFMsFactory{
+
+	c.msFactory = &CDFMsFactory{
 		Factory: msFactory,
 		cd:      1,
 	}
-	_, err = newInsertBufferNode(ctx, replica, cdf, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+	_, err = newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	assert.Error(t, err)
 }
 
@@ -170,7 +179,14 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+	c := &nodeConfig{
+		replica:      replica,
+		msFactory:    msFactory,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: "string",
+	}
+
+	iBNode, err := newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	require.NoError(t, err)
 
 	flushChan <- &flushMsg{
@@ -238,7 +254,14 @@ func TestFlushSegment(t *testing.T) {
 	saveBinlog := func(*segmentFlushUnit) error {
 		return nil
 	}
-	ibNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+
+	c := &nodeConfig{
+		replica:      replica,
+		msFactory:    msFactory,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: "string",
+	}
+	ibNode, err := newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	require.NoError(t, err)
 
 	flushSegment(collMeta,
@@ -352,7 +375,13 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+	c := &nodeConfig{
+		replica:      colRep,
+		msFactory:    msFactory,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: "string",
+	}
+	iBNode, err := newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
@@ -583,7 +612,13 @@ func TestInsertBufferNode_getCollMetaBySegID(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+	c := &nodeConfig{
+		replica:      replica,
+		msFactory:    msFactory,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: "string",
+	}
+	iBNode, err := newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	require.NoError(t, err)
 
 	meta, err := iBNode.getCollMetabySegID(1, 101)
@@ -636,7 +671,13 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string", newCache())
+	c := &nodeConfig{
+		replica:      replica,
+		msFactory:    msFactory,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: "string",
+	}
+	iBNode, err := newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	require.NoError(t, err)
 
 	inMsg := GenFlowGraphInsertMsg(insertChannelName)
