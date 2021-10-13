@@ -277,7 +277,7 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 func (ri *retentionInfo) retention() error {
 	log.Debug("Rocksmq retention goroutine start!")
 	// Do retention check every 6s
-	ticker := time.NewTicker(time.Duration(TickerTimeInSeconds * int64(time.Second)))
+	ticker := time.NewTicker(time.Duration(atomic.LoadInt64(&TickerTimeInSeconds) * int64(time.Second)))
 
 	for {
 		select {
