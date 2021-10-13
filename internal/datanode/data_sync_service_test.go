@@ -12,13 +12,17 @@
 package datanode
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"math"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -303,4 +307,65 @@ func TestDataSyncService_Start(t *testing.T) {
 	<-sync.ctx.Done()
 
 	sync.close()
+}
+
+func genBytes() (rawData []byte) {
+	const DIM = 2
+	const N = 1
+
+	// Float vector
+	var fvector = [DIM]float32{1, 2}
+	for _, ele := range fvector {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		rawData = append(rawData, buf...)
+	}
+
+	// Binary vector
+	// Dimension of binary vector is 32
+	// size := 4,  = 32 / 8
+	var bvector = []byte{255, 255, 255, 0}
+	rawData = append(rawData, bvector...)
+
+	// Bool
+	var fieldBool = true
+	buf := new(bytes.Buffer)
+	if err := binary.Write(buf, binary.LittleEndian, fieldBool); err != nil {
+		panic(err)
+	}
+
+	rawData = append(rawData, buf.Bytes()...)
+
+	// int8
+	var dataInt8 int8 = 100
+	bint8 := new(bytes.Buffer)
+	if err := binary.Write(bint8, binary.LittleEndian, dataInt8); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, bint8.Bytes()...)
+	log.Debug("Rawdata length:", zap.Int("Length of rawData", len(rawData)))
+	return
+}
+
+func TestBytesReader(t *testing.T) {
+	rawData := genBytes()
+
+	// Bytes Reader is able to recording the position
+	rawDataReader := bytes.NewReader(rawData)
+
+	var fvector []float32 = make([]float32, 2)
+	binary.Read(rawDataReader, binary.LittleEndian, &fvector)
+	assert.ElementsMatch(t, fvector, []float32{1, 2})
+
+	var bvector []byte = make([]byte, 4)
+	binary.Read(rawDataReader, binary.LittleEndian, &bvector)
+	assert.ElementsMatch(t, bvector, []byte{255, 255, 255, 0})
+
+	var fieldBool bool
+	binary.Read(rawDataReader, binary.LittleEndian, &fieldBool)
+	assert.Equal(t, true, fieldBool)
+
+	var dataInt8 int8
+	binary.Read(rawDataReader, binary.LittleEndian, &dataInt8)
+	assert.Equal(t, int8(100), dataInt8)
 }
