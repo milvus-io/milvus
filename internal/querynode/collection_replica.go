@@ -265,6 +265,7 @@ func (colReplica *collectionReplica) addPartition(collectionID UniqueID, partiti
 	return colReplica.addPartitionPrivate(collectionID, partitionID)
 }
 
+// addPartitionPrivate is the private function in collectionReplica, to add a new partition to collection
 func (colReplica *collectionReplica) addPartitionPrivate(collectionID UniqueID, partitionID UniqueID) error {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
