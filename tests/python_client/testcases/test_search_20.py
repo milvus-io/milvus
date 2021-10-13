@@ -895,9 +895,9 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: test search function before and after release
         method: 1. search the collection
-                2. release a partition
+                2. release all partitions
                 3. search the collection
-        expected: the deleted entities should not be searched
+        expected: 0 entity should be searched
         """
         # 1. initialize with data
         nb = 1000
