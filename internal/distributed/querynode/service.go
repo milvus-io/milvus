@@ -237,6 +237,7 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// Stop stops QueryNode's grpc service.
 func (s *Server) Stop() error {
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
