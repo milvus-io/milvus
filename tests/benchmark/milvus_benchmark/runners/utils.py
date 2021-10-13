@@ -159,6 +159,7 @@ def get_default_field_name(data_type=DataType.FLOAT_VECTOR):
 
 
 def get_vector_type(data_type):
+    """ Return vector type according to data type """
     vector_type = ''
     if data_type in ["random", "sift", "deep", "glove", "local"]:
         vector_type = DataType.FLOAT_VECTOR
