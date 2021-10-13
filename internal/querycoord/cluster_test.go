@@ -166,7 +166,7 @@ func TestGrpcRequest(t *testing.T) {
 	})
 
 	t.Run("Test AddQueryChannel", func(t *testing.T) {
-		reqChannel, resChannel, err := cluster.clusterMeta.GetQueryChannel(defaultCollectionID)
+		reqChannel, resChannel, err := cluster.clusterMeta.getQueryChannel(defaultCollectionID)
 		assert.Nil(t, err)
 		addQueryChannelReq := &querypb.AddQueryChannelRequest{
 			NodeID:           nodeID,
@@ -179,7 +179,7 @@ func TestGrpcRequest(t *testing.T) {
 	})
 
 	t.Run("Test RemoveQueryChannel", func(t *testing.T) {
-		reqChannel, resChannel, err := cluster.clusterMeta.GetQueryChannel(defaultCollectionID)
+		reqChannel, resChannel, err := cluster.clusterMeta.getQueryChannel(defaultCollectionID)
 		assert.Nil(t, err)
 		removeQueryChannelReq := &querypb.RemoveQueryChannelRequest{
 			NodeID:           nodeID,

@@ -63,7 +63,7 @@ type Meta interface {
 	removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
 
 	getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error)
-	GetQueryChannel(collectionID UniqueID) (string, string, error)
+	getQueryChannel(collectionID UniqueID) (string, string, error)
 
 	setLoadType(collectionID UniqueID, loadType querypb.LoadType) error
 	getLoadType(collectionID UniqueID) (querypb.LoadType, error)
@@ -578,7 +578,7 @@ func (m *MetaReplica) removeDmChannel(collectionID UniqueID, nodeID int64, chann
 	return errors.New("addDmChannels: can't find collection in collectionInfos")
 }
 
-func (m *MetaReplica) GetQueryChannel(collectionID UniqueID) (string, string, error) {
+func (m *MetaReplica) getQueryChannel(collectionID UniqueID) (string, string, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -601,7 +601,7 @@ func (m *MetaReplica) GetQueryChannel(collectionID UniqueID) (string, string, er
 	}
 	err := saveQueryChannelInfo(collectionID, queryChannelInfo, m.client)
 	if err != nil {
-		log.Error("GetQueryChannel: save channel to etcd error", zap.Error(err))
+		log.Error("getQueryChannel: save channel to etcd error", zap.Error(err))
 		return "", "", err
 	}
 	m.queryChannelInfos[collectionID] = queryChannelInfo
