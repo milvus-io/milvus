@@ -253,8 +253,8 @@ TEST(Indexing, BinaryBruteForce) {
         num_queries,                        //
         topk,                               //
         round_decimal,
-        dim,                                //
-        query_data                          //
+        dim,        //
+        query_data  //
     };
 
     auto sub_result = query::BinarySearchBruteForce(search_dataset, bin_vec.data(), N, nullptr);

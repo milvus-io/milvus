@@ -118,7 +118,7 @@ TEST(Sealed, without_predicate) {
     sr = sealed_segment->Search(plan.get(), *ph_group, time);
 
     auto post_result = SearchResultToJson(sr);
-    std::cout << "ref_result"<< std::endl;
+    std::cout << "ref_result" << std::endl;
     std::cout << ref_result.dump(1) << std::endl;
     std::cout << "post_result" << std::endl;
     std::cout << post_result.dump(1);
