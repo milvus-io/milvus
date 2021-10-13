@@ -258,6 +258,7 @@ func (colReplica *collectionReplica) getFieldsByCollectionIDPrivate(collectionID
 }
 
 //----------------------------------------------------------------------------------------------------- partition
+// addPartition adds a new partition to collection
 func (colReplica *collectionReplica) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
