@@ -3,7 +3,7 @@ import logging
 from multiprocessing import Pool, Process
 import pytest
 from utils.utils import *
-from common.constants import *
+from common.constants import default_entities, default_fields
 from common.common_type import CaseLabel
 
 TIMEOUT = 120
