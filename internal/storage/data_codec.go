@@ -576,11 +576,13 @@ type DeleteData struct {
 	Data map[string]int64 // primary key to timestamp
 }
 
+// DeleteCodec serializes and deserializes the delete data
 type DeleteCodec struct {
 	Schema          *etcdpb.CollectionMeta
 	readerCloseFunc []func() error
 }
 
+// NewDeleteCodec returns a DeleteCodec
 func NewDeleteCodec(schema *etcdpb.CollectionMeta) *DeleteCodec {
 	return &DeleteCodec{Schema: schema}
 }
