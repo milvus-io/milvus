@@ -20,14 +20,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
-type TimestampAllocator struct {
+type timestampAllocator struct {
 	ctx    context.Context
 	tso    timestampAllocatorInterface
 	peerID UniqueID
 }
 
-func NewTimestampAllocator(ctx context.Context, tso timestampAllocatorInterface, peerID UniqueID) (*TimestampAllocator, error) {
-	a := &TimestampAllocator{
+func newTimestampAllocator(ctx context.Context, tso timestampAllocatorInterface, peerID UniqueID) (*timestampAllocator, error) {
+	a := &timestampAllocator{
 		ctx:    ctx,
 		peerID: peerID,
 		tso:    tso,
@@ -35,7 +35,7 @@ func NewTimestampAllocator(ctx context.Context, tso timestampAllocatorInterface,
 	return a, nil
 }
 
-func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
+func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 	ctx, cancel := context.WithTimeout(ta.ctx, 5*time.Second)
 	req := &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
@@ -65,8 +65,8 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 	return ret, nil
 }
 
-func (ta *TimestampAllocator) AllocOne() (Timestamp, error) {
-	ret, err := ta.Alloc(1)
+func (ta *timestampAllocator) AllocOne() (Timestamp, error) {
+	ret, err := ta.alloc(1)
 	if err != nil {
 		return 0, err
 	}
