@@ -97,12 +97,12 @@ class TestMixBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_mix_multi_collections(self, connect):
-        '''
+        """
         target: test functions with multiple collections of different metric_types and index_types
         method: create 60 collections which 30 are L2 and the other are IP, add vectors into them
                 and test describe index and search
         expected: status ok
-        '''
+        """
         nq = 10000
         collection_list = []
         idx = []
