@@ -1551,7 +1551,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			zap.String("anns field", annsField),
 			zap.Any("query info", queryInfo))
 
-		plan, err := CreateQueryPlan(schema, st.query.Dsl, annsField, queryInfo)
+		plan, err := createQueryPlan(schema, st.query.Dsl, annsField, queryInfo)
 		if err != nil {
 			log.Debug("failed to create query plan",
 				zap.Error(err),
@@ -2243,7 +2243,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf(errMsg)
 	}
 
-	plan, err := CreateExprPlan(schema, qt.query.Expr)
+	plan, err := createExprPlan(schema, qt.query.Expr)
 	if err != nil {
 		return err
 	}
@@ -4644,7 +4644,7 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 		return
 	}
 
-	plan, err := CreateExprPlan(schema, expr)
+	plan, err := createExprPlan(schema, expr)
 	if err != nil {
 		return res, fmt.Errorf("failed to create expr plan, expr = %s", expr)
 	}
