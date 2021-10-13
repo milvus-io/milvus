@@ -338,6 +338,7 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	return nil
 }
 
+// ExistConsumerGroup check if a consumer exists and return the existed consumer
 func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer) {
 	key := constructCurrentID(topicName, groupName)
 	if rmq.checkKeyExist(key) {
