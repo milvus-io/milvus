@@ -26,7 +26,7 @@ So what's DataNode's starting procedure?
 
 ### 1. Serveice Registration
 
-DataNode registers itself to Etcd after grpc server started, in *INITIALIZING* state.
+DataNode registers itself to etcd after grpc server started, in *INITIALIZING* state.
 
 ### 2. Service Discovery
 
@@ -50,9 +50,9 @@ keep the vchannel states update.
 
 ## Some of the following interface/proto designs are outdated, will be updated soon
 
-### 1. DataNode no longer interacts with Etcd except service registering
+### 1. DataNode no longer interacts with etcd except service registering
 
-#### DataCoord rather than DataNode saves binlog paths into Etcd
+#### DataCoord rather than DataNode saves binlog paths into etcd
 
    ![datanode_design](graphs/datanode_design_01.jpg)
 
@@ -134,7 +134,7 @@ type dataSyncService struct {
 }
 ```
 
-DataNode Init -> Resigter to Etcd -> Discovery data service -> Discover master service -> IDLE
+DataNode Init -> Resigter to etcd -> Discovery data service -> Discover master service -> IDLE
 
 WatchDmChannels -> new dataSyncService -> HEALTH
 
