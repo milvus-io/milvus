@@ -20,7 +20,7 @@ import (
 var errNilKvClient = errors.New("kv client not initialized")
 
 // serverNotServingErrMsg used for Status Reason when datacoord is not healthy
-const serverNotServingErrMsg = "server is not serving"
+const serverNotServingErrMsg = "DataCoord is not serving"
 
 // errors for VerifyResponse
 var errNilResponse = errors.New("response is nil")
