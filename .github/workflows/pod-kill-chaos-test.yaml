@@ -66,6 +66,9 @@ jobs:
           sleep 20s
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
+          # check whether milvus server is healthy
+          wget https://raw.githubusercontent.com/milvus-io/pymilvus/v2.0.0rc6/examples/hello_milvus.py
+          python hello_milvus.py
       
       - name: Chaos Test
         shell: bash
@@ -74,7 +77,7 @@ jobs:
           # replace chaos object
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_podkill.yaml\'/g" constants.py
           cat constants.py
-          pytest -s -v test_chaos.py --host 127.0.0.1 --log-level=INFO --tb=no
+          pytest -s -v test_chaos.py --host 127.0.0.1
       
       - name: Export logs
         if: ${{ always() }}
