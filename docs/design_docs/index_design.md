@@ -13,13 +13,13 @@ The following figure shows the design of the indexcoord component:
 
 ![indexcoord](graphs/indexcoord_design.png)
 
-## 8.1 Use ETCD as a reliable service
+## 8.1 Use etcd as a reliable service
 
-Based on ETCD service discovery, IndexCoord components, like other Milvus components, rely on ETCD to implement
-service discovery. IndexCoord relies on the lease mechanism of ETCD to sense the online and offline news of IndexNode.
+Based on etcd service discovery, IndexCoord components, like other Milvus components, rely on etcd to implement
+service discovery. IndexCoord relies on the lease mechanism of etcd to sense the online and offline news of IndexNode.
 
-In addition to being used for service discovery, Milvus also uses ETCD as a reliable meta storage, and writes all
-persistent status information to ETCD. The purpose is to restore a certain Milvus component to its original
+In addition to being used for service discovery, Milvus also uses etcd as a reliable meta storage, and writes all
+persistent status information to etcd. The purpose is to restore a certain Milvus component to its original
 state after power off and restart.
 
 ## 8.2 Receive requests about index from RootCoordinate
