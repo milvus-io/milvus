@@ -53,19 +53,19 @@ func (pt *ParamTable) Init() {
 		pt.initDataCoordAddress()
 		pt.initPort()
 
-		pt.LoadFromEnv()
-		pt.LoadFromArgs()
+		pt.loadFromEnv()
+		pt.loadFromArgs()
 
 		pt.initServerMaxSendSize()
 		pt.initServerMaxRecvSize()
 	})
 }
 
-func (pt *ParamTable) LoadFromArgs() {
+func (pt *ParamTable) loadFromArgs() {
 
 }
 
-func (pt *ParamTable) LoadFromEnv() {
+func (pt *ParamTable) loadFromEnv() {
 	Params.IP = funcutil.GetLocalIP()
 }
 

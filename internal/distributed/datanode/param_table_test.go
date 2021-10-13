@@ -24,7 +24,7 @@ import (
 func TestParamTable(t *testing.T) {
 	Params.Init()
 
-	Params.LoadFromEnv()
+	Params.loadFromEnv()
 	assert.NotEqual(t, Params.IP, "")
 	t.Logf("DataNode IP:%s", Params.IP)
 
