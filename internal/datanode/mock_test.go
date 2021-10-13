@@ -521,6 +521,11 @@ func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
 	return alloc.r.Int63n(10000), nil
 }
 
+func (alloc *AllocatorFactory) allocIDBatch(count uint32) (UniqueID, uint32, error) {
+	start, err := alloc.allocID()
+	return start, count, err
+}
+
 func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string, err error) {
 	if isalloc {
 		idx, err := alloc.allocID()
@@ -570,6 +575,7 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 	}
 
 	resp.ID = m.ID
+	resp.Count = in.GetCount()
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
