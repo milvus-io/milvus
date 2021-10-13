@@ -38,7 +38,7 @@ var RocksmqPageSize int64 = 2 << 30
 const (
 	DefaultMessageID        = "-1"
 	FixedChannelNameLen     = 320
-	RocksDBLRUCacheCapacity = 512 * 1024 * 1024
+	RocksDBLRUCacheCapacity = 0
 
 	kvSuffix = "_meta_kv"
 
