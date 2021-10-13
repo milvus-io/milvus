@@ -78,8 +78,7 @@ endif
 
 verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
 
-# Build various components locally.
-binlog:
+binlog: ## Build various components locally.
 	@echo "Building binlog ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/tools/binlog/main.go 1>/dev/null
 
@@ -108,10 +107,9 @@ build-cpp-with-unittest:
 	@(env bash $(PWD)/scripts/core_build.sh -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-# Run the tests.
-unittest: test-cpp test-go
+unittest: test-cpp test-go ## Run the tests.
 
-test-go: build-cpp-with-unittest
+test-go: build-cpp-with-unittest ## Run test-go
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 # 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
@@ -120,26 +118,21 @@ test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
-# Run code coverage.
-codecov: codecov-go codecov-cpp
+codecov: codecov-go codecov-cpp ## Run code coverage.
 
-# Run codecov-go
-codecov-go: build-cpp-with-unittest
+codecov-go: build-cpp-with-unittest ## Run codecov-go
 	@echo "Running go coverage..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 
-# Run codecov-cpp
-codecov-cpp: build-cpp-with-unittest
+codecov-cpp: build-cpp-with-unittest ## Run codecov-cpp
 	@echo "Running cpp coverage..."
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
-# Package docker image locally.
 # TODO: fix error occur at starting up
-docker: install
+docker: install ## Package docker image locally.
 	./build/build_image.sh
 
-# Build each component and install binary to $GOPATH/bin.
-install: all
+install: all ## Build each component and install binary to $GOPATH/bin.
 	@echo "Installing binary to './bin'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
 	@mkdir -p $(LIBRARY_PATH) && cp -P $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
@@ -158,3 +151,7 @@ milvus-tools:
 	@mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
 		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null
+
+help: SHELL := /bin/sh
+help: ## List available commands and their usage
+	@awk 'BEGIN {FS = ":.*?##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[0-9a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } ' $(MAKEFILE_LIST)
