@@ -4,19 +4,19 @@ In this section, we introduce the RPCs of milvus service. A brief description of
 
 | RPC                     | description                                                                                   |
 | :---------------------- | --------------------------------------------------------------------------------------------- |
-| CreateCollection        | create a collection base on schema statement                                                  |
+| CreateCollection        | create a collection based on schema statement                                                  |
 | DropCollection          | drop a collection                                                                             |
-| HasCollection           | whether a collection exists                                                                   |
+| HasCollection           | check whether a collection exists                                                                   |
 | LoadCollection          | load collection to memory for future search                                                   |
-| ReleaseCollection       | release the memory the collection memory                                                      |
+| ReleaseCollection       | release the collection from memory                                                      |
 | DescribeCollection      | show a collection's schema and its descriptive statistics                                     |
 | GetCollectionStatistics | show a collection's statistics                                                                |
 | ShowCollections         | list all collections                                                                          |
 | CreatePartition         | create a partition                                                                            |
 | DropPartition           | drop a partition                                                                              |
-| HasPartition            | whether a partition exists                                                                    |
+| HasPartition            | check whether a partition exists                                                                    |
 | LoadPartition           | load collection to memory for future search                                                   |
-| ReleasePartitions       | release the memory the collection memory                                                      |
+| ReleasePartitions       | release partitions from memory                                                      |
 | GetPartitionStatistics  | show a partition's statistics                                                                 |
 | ShowPartitions          | list a collection's all partitions                                                            |
 | CreateIndex             | create index for a field in the collection                                                    |
@@ -97,7 +97,7 @@ message FieldSchema {
 }
 ```
 
-**Field schema** contains all the base information of a field including **fieldID**, **name**, **description**, **data_type**, **type_params** and **index_params**. **data_type** is an enum type to distinguish different data types.Total enum is shown in the last of this doc
+**Field schema** contains all the base information of a field including **fieldID**, **name**, **description**, **data_type**, **type_params** and **index_params**. **data_type** is an enum type to distinguish different data types. Total enum is shown in the last of this doc
 
 **type_params** contains the detailed information of data_type. For example, vector data type should include dimension information. You can give a pair of <dim, 8> to let the field store an 8-dimension vector.
 
@@ -309,7 +309,7 @@ message DescribeCollectionRequest {
 }
 ```
 
-The server finds the collection through **collection_name** and gets detailed collection information. And **collectionID** is for internel component to get collection details.
+The server finds the collection through **collection_name** and gets detailed collection information. And **collectionID** is for internal component to get collection details.
 
 **Returns:**
 
@@ -699,7 +699,7 @@ message ShowPartitionsResponse {
 **status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is an enum type to distinguish the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describes the detailed error.
 
 **partition_names** is a list contains all partitions' name.
-**partitionIDs** is a list contains all partitions' ids. And the index of a parition in **partition_names** and **partitionIDs** are same.
+**partitionIDs** is a list contains all partitions' ids. And the index of a partition in **partition_names** and **partitionIDs** are same.
 
 #### 3.2 Manipulation Requsts
 
@@ -835,7 +835,7 @@ message DescribeIndexRequest {
 }
 ```
 
-Get a index details for the field with **field_name** in collection with **collection_name**.
+Get details of an index for the field with **field_name** in collection with **collection_name**.
 
 **index_name**： A field can create multiple indexes. And you can drop a specific index through index_name.
 
@@ -872,7 +872,7 @@ rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesRequest){}
 
 **Description:**
 
-Get a index build progress info.
+Get index build progress info.
 
 **Parameters:**
 
@@ -883,14 +883,14 @@ GetIndexStatesRequest struct is shown as follows:
 ```protobuf
 message GetIndexStatesRequest {
   common.MsgBase base = 1;
-  string db_name = 2 ;
+  string db_name = 2;
   string collection_name = 3;
   string field_name = 4;
   string index_name = 5;
 }
 ```
 
-Get a index build progress info for the field with **field_name** in collection with **collection_name**.
+Get index build progress info for the field with **field_name** in collection with **collection_name**.
 
 **index_name**： A field can create multiple indexes. And you can get specific index state through index_name.
 
