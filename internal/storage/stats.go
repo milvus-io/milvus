@@ -12,12 +12,27 @@
 package storage
 
 import (
+	"encoding/binary"
 	"encoding/json"
+
+	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/milvus-io/milvus/internal/common"
 )
 
+const (
+	// TODO silverxia maybe need set from config
+	bloomFilterSize       uint    = 100000
+	maxBloomFalsePositive float64 = 0.005
+)
+
+type Stats interface {
+}
+
 type Int64Stats struct {
-	Max int64 `json:"max"`
-	Min int64 `json:"min"`
+	FieldID int64              `json:"fieldID"`
+	Max     int64              `json:"max"`
+	Min     int64              `json:"min"`
+	BF      *bloom.BloomFilter `json:"bf"`
 }
 
 type StatsWriter struct {
@@ -28,15 +43,24 @@ func (sw *StatsWriter) GetBuffer() []byte {
 	return sw.buffer
 }
 
-func (sw *StatsWriter) StatsInt64(msgs []int64) error {
+func (sw *StatsWriter) StatsInt64(fieldID int64, msgs []int64) error {
 	if len(msgs) < 1 {
 		// return error: msgs must has one element at least
 		return nil
 	}
 
 	stats := &Int64Stats{
-		Max: msgs[len(msgs)-1],
-		Min: msgs[0],
+		FieldID: fieldID,
+		Max:     msgs[len(msgs)-1],
+		Min:     msgs[0],
+		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+	}
+	if fieldID == common.RowIDField {
+		b := make([]byte, 8)
+		for _, msg := range msgs {
+			binary.LittleEndian.PutUint64(b, uint64(msg))
+			stats.BF.Add(b)
+		}
 	}
 	b, err := json.Marshal(stats)
 	if err != nil {
@@ -55,8 +79,29 @@ func (sr *StatsReader) SetBuffer(buffer []byte) {
 	sr.buffer = buffer
 }
 
-func (sr *StatsReader) GetInt64Stats() Int64Stats {
-	stats := Int64Stats{}
-	json.Unmarshal(sr.buffer, &stats)
-	return stats
+func (sr *StatsReader) GetInt64Stats() (*Int64Stats, error) {
+	stats := &Int64Stats{}
+	err := json.Unmarshal(sr.buffer, &stats)
+	if err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func DeserializeStats(blobs []*Blob) ([]*Int64Stats, error) {
+	results := make([]*Int64Stats, len(blobs))
+	for i, blob := range blobs {
+		if blob.Value == nil {
+			continue
+		}
+		sr := &StatsReader{}
+		sr.SetBuffer(blob.Value)
+		stats, err := sr.GetInt64Stats()
+		if err != nil {
+			return nil, err
+		}
+		results[i] = stats
+	}
+	return results, nil
+
 }

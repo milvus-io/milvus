@@ -12,30 +12,34 @@
 package storage
 
 import (
+	"encoding/binary"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestStatsWriter_StatsInt64(t *testing.T) {
 	data := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9}
 	sw := &StatsWriter{}
-	err := sw.StatsInt64(data)
+	err := sw.StatsInt64(common.RowIDField, data)
 	assert.NoError(t, err)
 	b := sw.GetBuffer()
 
-	assert.Equal(t, string(b), `{"max":9,"min":1}`)
-
 	sr := &StatsReader{}
 	sr.SetBuffer(b)
-	stats := sr.GetInt64Stats()
-	expectedStats := Int64Stats{
-		Max: 9,
-		Min: 1,
+	stats, err := sr.GetInt64Stats()
+	assert.Nil(t, err)
+	assert.Equal(t, stats.Max, int64(9))
+	assert.Equal(t, stats.Min, int64(1))
+	buffer := make([]byte, 8)
+	for _, id := range data {
+		binary.LittleEndian.PutUint64(buffer, uint64(id))
+		assert.True(t, stats.BF.Test(buffer))
 	}
-	assert.Equal(t, stats, expectedStats)
 
 	msgs := []int64{}
-	err = sw.StatsInt64(msgs)
+	err = sw.StatsInt64(rootcoord.RowIDField, msgs)
 	assert.Nil(t, err)
 }

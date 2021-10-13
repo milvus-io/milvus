@@ -260,7 +260,6 @@ func TestFlushSegment(t *testing.T) {
 	key := path.Join(Params.StatsBinlogRootPath, k)
 	_, values, _ := mockMinIO.LoadWithPrefix(key)
 	assert.Equal(t, len(values), 1)
-	assert.Equal(t, values[0], `{"max":9,"min":0}`)
 }
 
 func genCollectionMeta(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {

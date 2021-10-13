@@ -251,13 +251,13 @@ func TestInsertCodec(t *testing.T) {
 			},
 		},
 	}
-	Blobs1, _, err := insertCodec.Serialize(PartitionID, SegmentID, insertData1)
+	Blobs1, statsBlob1, err := insertCodec.Serialize(PartitionID, SegmentID, insertData1)
 	assert.Nil(t, err)
 	for _, blob := range Blobs1 {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 100)
 		assert.Equal(t, blob.GetKey(), blob.Key)
 	}
-	Blobs2, _, err := insertCodec.Serialize(PartitionID, SegmentID, insertData2)
+	Blobs2, statsBlob2, err := insertCodec.Serialize(PartitionID, SegmentID, insertData2)
 	assert.Nil(t, err)
 	for _, blob := range Blobs2 {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 99)
@@ -302,6 +302,12 @@ func TestInsertCodec(t *testing.T) {
 	assert.NotNil(t, err)
 	_, _, _, _, err = insertCodec.DeserializeAll(blobs)
 	assert.NotNil(t, err)
+
+	_, err = DeserializeStats(statsBlob1)
+	assert.Nil(t, err)
+
+	_, err = DeserializeStats(statsBlob2)
+	assert.Nil(t, err)
 }
 
 func TestDeleteCodec(t *testing.T) {
