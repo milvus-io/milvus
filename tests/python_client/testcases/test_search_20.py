@@ -471,8 +471,10 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def test_search_with_empty_collection(self):
         """
         target: test search with empty connection
-        method: search the empty collection
-        expected: raise exception and report the error
+        method: 1. search the empty collection before load
+                2. search the empty collection after load
+        expected: 1. raise exception if not loaded
+                  2. return topk=0  if loaded
         """
         # 1. initialize without data
         collection_w = self.init_collection_general(prefix)[0]
@@ -493,6 +495,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": [],
                                          "limit": 0})
+        # 4. TODO: search collection with data inserted and not load again
+
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_partition_deleted(self):
