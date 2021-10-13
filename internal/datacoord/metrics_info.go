@@ -16,6 +16,8 @@ import (
 	"errors"
 	"os"
 
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
+
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"go.uber.org/zap"
@@ -102,6 +104,7 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 			CreatedTime: Params.CreatedTime.String(),
 			UpdatedTime: Params.UpdatedTime.String(),
 			Type:        typeutil.DataCoordRole,
+			ID:          s.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
 			SegmentMaxSize: Params.SegmentMaxSize,
@@ -115,6 +118,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	infos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HasError: true,
+			ID:       int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 		},
 	}
 	if node == nil {

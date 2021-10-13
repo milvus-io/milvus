@@ -44,6 +44,7 @@ func TestBaseComponentInfos_Codec(t *testing.T) {
 		CreatedTime: time.Now().String(),
 		UpdatedTime: time.Now().String(),
 		Type:        typeutil.ProxyRole,
+		ID:          1,
 	}
 	s, err := MarshalComponentInfos(infos1)
 	assert.Equal(t, nil, err)
@@ -77,6 +78,7 @@ func TestQueryNodeInfos_Codec(t *testing.T) {
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
 			Type:        typeutil.QueryNodeRole,
+			ID:          1,
 		},
 		SystemConfigurations: QueryNodeConfiguration{
 			SearchReceiveBufSize:         1024,
@@ -121,6 +123,7 @@ func TestQueryCoordInfos_Codec(t *testing.T) {
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
 			Type:        typeutil.QueryCoordRole,
+			ID:          1,
 		},
 		SystemConfigurations: QueryCoordConfiguration{
 			SearchChannelPrefix:       "search",
@@ -159,6 +162,7 @@ func TestIndexNodeInfos_Codec(t *testing.T) {
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
 			Type:        typeutil.IndexNodeRole,
+			ID:          1,
 		},
 		SystemConfigurations: IndexNodeConfiguration{
 			MinioBucketName: "a-bucket",
@@ -198,6 +202,7 @@ func TestIndexCoordInfos_Codec(t *testing.T) {
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
 			Type:        typeutil.IndexCoordRole,
+			ID:          1,
 		},
 		SystemConfigurations: IndexCoordConfiguration{
 			MinioBucketName: "a-bucket",
@@ -235,6 +240,7 @@ func TestDataNodeInfos_Codec(t *testing.T) {
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
 			Type:        typeutil.DataNodeRole,
+			ID:          1,
 		},
 		SystemConfigurations: DataNodeConfiguration{
 			FlushInsertBufferSize: 1024,
@@ -272,6 +278,7 @@ func TestDataCoordInfos_Codec(t *testing.T) {
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
 			Type:        typeutil.DataCoordRole,
+			ID:          1,
 		},
 		SystemConfigurations: DataCoordConfiguration{
 			SegmentMaxSize: 1024 * 1024,
@@ -309,6 +316,7 @@ func TestRootCoordInfos_Codec(t *testing.T) {
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
 			Type:        typeutil.RootCoordRole,
+			ID:          1,
 		},
 		SystemConfigurations: RootCoordConfiguration{
 			MinSegmentSizeToEnableIndex: 1024 * 10,

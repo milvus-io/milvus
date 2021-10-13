@@ -46,6 +46,7 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 				CreatedTime: Params.CreatedTime.String(),
 				UpdatedTime: Params.UpdatedTime.String(),
 				Type:        typeutil.RootCoordRole,
+				ID:          c.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.RootCoordConfiguration{
 				MinSegmentSizeToEnableIndex: Params.MinSegmentSizeToEnableIndex,

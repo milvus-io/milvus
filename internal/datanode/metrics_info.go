@@ -42,6 +42,7 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 			CreatedTime: Params.CreatedTime.String(),
 			UpdatedTime: Params.UpdatedTime.String(),
 			Type:        typeutil.DataNodeRole,
+			ID:          node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.DataNodeConfiguration{
 			FlushInsertBufferSize: Params.FlushInsertBufferSize,
