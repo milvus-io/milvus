@@ -232,8 +232,8 @@ func TestMetaFunc(t *testing.T) {
 		assert.Equal(t, defaultSegmentID, infos[0].SegmentID)
 	})
 
-	t.Run("Test GetQueryChannel", func(t *testing.T) {
-		reqChannel, resChannel, err := meta.GetQueryChannel(defaultCollectionID)
+	t.Run("Test getQueryChannel", func(t *testing.T) {
+		reqChannel, resChannel, err := meta.getQueryChannel(defaultCollectionID)
 		assert.NotNil(t, reqChannel)
 		assert.NotNil(t, resChannel)
 		assert.Nil(t, err)

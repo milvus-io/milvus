@@ -1038,7 +1038,7 @@ func (lst *LoadSegmentTask) Reschedule(ctx context.Context) ([]task, error) {
 
 		hasWatchQueryChannel := lst.cluster.hasWatchedQueryChannel(lst.ctx, nodeID, collectionID)
 		if !hasWatchQueryChannel {
-			queryChannel, queryResultChannel, err := lst.meta.GetQueryChannel(collectionID)
+			queryChannel, queryResultChannel, err := lst.meta.getQueryChannel(collectionID)
 			if err != nil {
 				return nil, err
 			}
@@ -1257,7 +1257,7 @@ func (wdt *WatchDmChannelTask) Reschedule(ctx context.Context) ([]task, error) {
 
 		hasWatchQueryChannel := wdt.cluster.hasWatchedQueryChannel(wdt.ctx, nodeID, collectionID)
 		if !hasWatchQueryChannel {
-			queryChannel, queryResultChannel, err := wdt.meta.GetQueryChannel(collectionID)
+			queryChannel, queryResultChannel, err := wdt.meta.getQueryChannel(collectionID)
 			if err != nil {
 				return nil, err
 			}
@@ -1818,7 +1818,7 @@ func assignInternalTask(ctx context.Context,
 	for nodeID, watched := range watchQueryChannelInfo {
 		if !watched {
 			ctx = opentracing.ContextWithSpan(context.Background(), sp)
-			queryChannel, queryResultChannel, err := meta.GetQueryChannel(collectionID)
+			queryChannel, queryResultChannel, err := meta.getQueryChannel(collectionID)
 			if err != nil {
 				return err
 			}
