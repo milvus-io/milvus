@@ -426,7 +426,7 @@ class TestInsertOperation(TestcaseBase):
     def test_insert_multi_float_vec_fields(self, vec_fields):
         """
         target: test insert into multi float vec fields collection
-        method: create collection and insert
+        method: create collection with different schema and insert
         expected: verify num entities
         """
         schema = cf.gen_schema_multi_vector_fields(vec_fields)
