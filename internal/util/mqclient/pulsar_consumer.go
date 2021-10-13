@@ -34,7 +34,7 @@ func (pc *pulsarConsumer) Subscription() string {
 func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
 	if pc.msgChannel == nil {
 		pc.once.Do(func() {
-			pc.msgChannel = make(chan ConsumerMessage)
+			pc.msgChannel = make(chan ConsumerMessage, 256)
 			// this part handles msgstream expectation when the consumer is not seeked
 			// pulsar's default behavior is setting postition to the earliest pointer when client of the same subscription pointer is not acked
 			// yet, our message stream is to setting to the very start point of the topic

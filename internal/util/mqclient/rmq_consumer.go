@@ -34,7 +34,7 @@ func (rc *RmqConsumer) Subscription() string {
 func (rc *RmqConsumer) Chan() <-chan ConsumerMessage {
 	if rc.msgChannel == nil {
 		rc.once.Do(func() {
-			rc.msgChannel = make(chan ConsumerMessage)
+			rc.msgChannel = make(chan ConsumerMessage, 256)
 			go func() {
 				for { //nolint:gosimple
 					select {
