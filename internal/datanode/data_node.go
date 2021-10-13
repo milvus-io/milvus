@@ -26,7 +26,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -200,14 +202,21 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
 	watchPrefix := fmt.Sprintf("channel/%d", node.NodeID)
 	evtChan := node.kvClient.WatchWithPrefix(watchPrefix)
+	// after watch, first check all exists nodes first
+	node.checkWatchedList()
 	for {
 		select {
 		case <-ctx.Done():
 			log.Debug("watch etcd loop quit")
 			return
 		case event := <-evtChan:
-			if event.Canceled { // failed to watch
-				log.Warn("Watch channel failed", zap.Error(event.Err()))
+			if event.Canceled { // event canceled
+				log.Warn("watch channel canceled", zap.Error(event.Err()))
+				// https://github.com/etcd-io/etcd/issues/8980
+				if event.Err() == v3rpc.ErrCompacted {
+					go node.StartWatchChannels(ctx)
+					return
+				}
 				// if watch loop return due to event canceled, the datanode is not functional anymore
 				// stop the datanode and wait for restart
 				err := node.Stop()
@@ -223,44 +232,63 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	}
 }
 
+// checkWatchedList list all nodes under [prefix]/channel/{node_id} and make sure all nodeds are watched
+// serves the corner case for etcd connection lost and missing some events
+func (node *DataNode) checkWatchedList() error {
+	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
+	prefix := fmt.Sprintf("channel/%d", node.NodeID)
+
+	keys, values, err := node.kvClient.LoadWithPrefix(prefix)
+	if err != nil {
+		return err
+	}
+	for i, val := range values {
+		node.handleWatchInfo(keys[i], []byte(val))
+	}
+	return nil
+}
+
 // handleChannelEvt handles event from kv watch event
 func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 	switch evt.Type {
 	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
-		watchInfo := datapb.ChannelWatchInfo{}
-		err := proto.Unmarshal(evt.Kv.Value, &watchInfo)
-		if err != nil {
-			log.Warn("fail to parse ChannelWatchInfo", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
-			return
-		}
-		if watchInfo.State == datapb.ChannelWatchState_Complete {
-			return
-		}
-		if watchInfo.Vchan == nil {
-			log.Warn("found ChannelWatchInfo with nil VChannelInfo", zap.String("key", string(evt.Kv.Key)))
-			return
-		}
-		err = node.NewDataSyncService(watchInfo.Vchan)
-		if err != nil {
-			log.Warn("fail to create DataSyncService", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
-			return
-		}
-		watchInfo.State = datapb.ChannelWatchState_Complete
-		v, err := proto.Marshal(&watchInfo)
-		if err != nil {
-			log.Warn("fail to Marshal watchInfo", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
-			return
-		}
-		err = node.kvClient.Save(fmt.Sprintf("channel/%d/%s", node.NodeID, watchInfo.Vchan.ChannelName), string(v))
-		if err != nil {
-			log.Warn("fail to change WatchState to complete", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
-			node.ReleaseDataSyncService(string(evt.Kv.Key))
-			// TODO GOOSE: maybe retry logic and exit logic
-		}
+		node.handleWatchInfo(string(evt.Kv.Key), evt.Kv.Value)
 	case clientv3.EventTypeDelete:
 		// guaranteed there is no "/" in channel name
 		parts := strings.Split(string(evt.Kv.Key), "/")
 		node.ReleaseDataSyncService(parts[len(parts)-1])
+	}
+}
+
+func (node *DataNode) handleWatchInfo(key string, data []byte) {
+	watchInfo := datapb.ChannelWatchInfo{}
+	err := proto.Unmarshal(data, &watchInfo)
+	if err != nil {
+		log.Warn("fail to parse ChannelWatchInfo", zap.String("key", key), zap.Error(err))
+		return
+	}
+	if watchInfo.State == datapb.ChannelWatchState_Complete {
+		return
+	}
+	if watchInfo.Vchan == nil {
+		log.Warn("found ChannelWatchInfo with nil VChannelInfo", zap.String("key", key))
+		return
+	}
+	err = node.NewDataSyncService(watchInfo.Vchan)
+	if err != nil {
+		log.Warn("fail to create DataSyncService", zap.String("key", key), zap.Error(err))
+		return
+	}
+	watchInfo.State = datapb.ChannelWatchState_Complete
+	v, err := proto.Marshal(&watchInfo)
+	if err != nil {
+		log.Warn("fail to Marshal watchInfo", zap.String("key", key), zap.Error(err))
+		return
+	}
+	err = node.kvClient.Save(fmt.Sprintf("channel/%d/%s", node.NodeID, watchInfo.Vchan.ChannelName), string(v))
+	if err != nil {
+		log.Warn("fail to change WatchState to complete", zap.String("key", key), zap.Error(err))
+		node.ReleaseDataSyncService(key)
 	}
 }
 

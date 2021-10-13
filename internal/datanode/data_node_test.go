@@ -530,8 +530,13 @@ func TestWatchChannel(t *testing.T) {
 
 		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		require.NoError(t, err)
+		oldInvalidCh := "datanode-etcd-test-channel-invalid"
+		path := fmt.Sprintf("channel/%d/%s", node.NodeID, oldInvalidCh)
+		err = kv.Save(path, string([]byte{23}))
+		assert.NoError(t, err)
+
 		ch := fmt.Sprintf("datanode-etcd-test-channel_%d", rand.Int31())
-		path := fmt.Sprintf("channel/%d/%s", node.NodeID, ch)
+		path = fmt.Sprintf("channel/%d/%s", node.NodeID, ch)
 		c := make(chan struct{})
 		go func() {
 			ec := kv.WatchWithPrefix(fmt.Sprintf("channel/%d", node.NodeID))
@@ -589,5 +594,44 @@ func TestWatchChannel(t *testing.T) {
 		s, err := node.WatchDmChannels(context.Background(), &datapb.WatchDmChannelsRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, s.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	})
+
+	t.Run("handle watch info failed", func(t *testing.T) {
+		node.handleWatchInfo("test1", []byte{23})
+
+		node.chanMut.RLock()
+		_, has := node.vchan2SyncService["test1"]
+		assert.False(t, has)
+		node.chanMut.RUnlock()
+
+		info := datapb.ChannelWatchInfo{
+			Vchan: nil,
+			State: datapb.ChannelWatchState_Uncomplete,
+		}
+		bs, err := proto.Marshal(&info)
+		assert.NoError(t, err)
+		node.handleWatchInfo("test2", bs)
+
+		node.chanMut.RLock()
+		_, has = node.vchan2SyncService["test2"]
+		assert.False(t, has)
+		node.chanMut.RUnlock()
+
+		info = datapb.ChannelWatchInfo{
+			Vchan: &datapb.VchannelInfo{},
+			State: datapb.ChannelWatchState_Uncomplete,
+		}
+		bs, err = proto.Marshal(&info)
+		assert.NoError(t, err)
+
+		node.msFactory = &FailMessageStreamFactory{
+			node.msFactory,
+		}
+		node.handleWatchInfo("test3", bs)
+		node.chanMut.RLock()
+		_, has = node.vchan2SyncService["test3"]
+		assert.False(t, has)
+		node.chanMut.RUnlock()
+
 	})
 }
