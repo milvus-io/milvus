@@ -55,14 +55,14 @@ endmacro()
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
-set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
+set(KNOWHERE_DEPENDENCY_SOURCE "AUTO")
 
 define_option_string(KNOWHERE_DEPENDENCY_SOURCE
         "Method to use for acquiring KNOWHERE's build dependencies"
-        "${KNOWHERE_DEPENDENCY_SOURCE_DEFAULT}"
         "AUTO"
         "BUNDLED"
         "SYSTEM")
+
 
 define_option(KNOWHERE_USE_CCACHE "Use ccache when compiling (if available)" ON)
 

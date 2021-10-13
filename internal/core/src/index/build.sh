@@ -21,8 +21,8 @@ do
                 ;;
              r)
                 if [[ -d cmake_build ]]; then
-                    rm ./cmake_build -r
-                    MAKE_CLEAN="ON"
+                    cd cmake_build
+                    make clean
                 fi
                 ;;
              g)
@@ -52,26 +52,24 @@ done
 
 if [[ ! -d cmake_build ]]; then
 	mkdir cmake_build
-	MAKE_CLEAN="ON"
 fi
 
 cd cmake_build
 
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-if [[ ${MAKE_CLEAN} == "ON" ]]; then
-    CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
-    -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
-    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
-    -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
-    -DMILVUS_ENABLE_PROFILING=${PROFILING} \
-    ../"
-    echo ${CMAKE_CMD}
+CMAKE_CMD="cmake -DKNOWHERE_BUILD_TESTS=${BUILD_UNITTEST} \
+-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
+-DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+-DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+-DMILVUS_ENABLE_PROFILING=${PROFILING} \
+../"
+echo ${CMAKE_CMD}
 
-    ${CMAKE_CMD}
-    make clean
-fi
+${CMAKE_CMD}
 
-make -j 8 || exit 1
+make -j 8 ||exit 1
 
 make install || exit 1
+
+
