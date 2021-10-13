@@ -296,7 +296,7 @@ func (c *Core) sessionLoop() {
 			return
 		case _, ok := <-c.sessCloseCh:
 			if !ok {
-				log.Error("rootcoord disconnect with etcd, process will exit in 1 second")
+				log.Error("rootcoord disconnected from etcd, process will exit in 1 second")
 				go func() {
 					time.Sleep(time.Second)
 					os.Exit(-1)
@@ -313,7 +313,7 @@ func (c *Core) checkFlushedSegmentsLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Debug("RootCoord context done,exit checkFlushedSegmentsLoop")
+			log.Debug("RootCoord context done, exit check FlushedSegmentsLoop")
 			return
 		case <-ticker.C:
 			log.Debug("check flushed segments")
@@ -332,7 +332,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 			ctx2, cancel2 := context.WithTimeout(ctx, 3*time.Minute)
 			segIDs, err := c.CallGetFlushedSegmentsService(ctx2, collMeta.ID, partID)
 			if err != nil {
-				log.Debug("get flushed segments from data coord failed",
+				log.Debug("failed to get flushed segments from data coord",
 					zap.Int64("collection id", collMeta.ID),
 					zap.Int64("partition id", partID),
 					zap.Error(err))
@@ -360,7 +360,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 						}
 						indexMeta, ok := indexID2Meta[idxInfo.IndexID]
 						if !ok {
-							log.Debug("index meta not exist", zap.Int64("index_id", idxInfo.IndexID))
+							log.Debug("index meta does not exist", zap.Int64("index_id", idxInfo.IndexID))
 							continue
 						}
 						info := etcdpb.SegmentIndexInfo{
@@ -371,7 +371,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 							IndexID:      idxInfo.IndexID,
 							EnableIndex:  false,
 						}
-						log.Debug("build index by background checker",
+						log.Debug("building index by background checker",
 							zap.Int64("segment_id", segID),
 							zap.Int64("index_id", indexMeta.IndexID),
 							zap.Int64("collection_id", collMeta.ID))
@@ -414,7 +414,7 @@ func (c *Core) getSegments(ctx context.Context, collID typeutil.UniqueID) (map[t
 				segID2PartID[s] = partID
 			}
 		} else {
-			log.Debug("get flushed segments from data coord failed", zap.Int64("collection_id", collID), zap.Int64("partition_id", partID), zap.Error(err))
+			log.Debug("failed to get flushed segments from data coord", zap.Int64("collection_id", collID), zap.Int64("partition_id", partID), zap.Error(err))
 			return nil, err
 		}
 	}
@@ -587,11 +587,11 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 			if err := s.Init(); err == nil {
 				if err := s.Start(); err == nil {
 					close(initCh)
-					log.Debug("RootCoord connect to DataCoord")
+					log.Debug("RootCoord connected to DataCoord")
 					return
 				}
 			}
-			log.Debug("RootCoord connect to DataCoord, retry")
+			log.Debug("Retrying RootCoord connection to DataCoord")
 		}
 	}()
 	c.CallGetBinlogFilePathsService = func(ctx context.Context, segID typeutil.UniqueID, fieldID typeutil.UniqueID) (retFiles []string, retErr error) {
@@ -625,7 +625,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 				return binlog.Paths[i].Values, nil
 			}
 		}
-		return nil, fmt.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
+		return nil, fmt.Errorf("binlog file does not exist, segment id = %d, field id = %d", segID, fieldID)
 	}
 
 	c.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (retRows int64, retErr error) {
@@ -703,11 +703,11 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 			if err := s.Init(); err == nil {
 				if err := s.Start(); err == nil {
 					close(initCh)
-					log.Debug("RootCoord connect to IndexCoord")
+					log.Debug("RootCoord connected to IndexCoord")
 					return
 				}
 			}
-			log.Debug("RootCoord connect to IndexCoord, retry")
+			log.Debug("Retrying RootCoord connection to IndexCoord")
 		}
 	}()
 
@@ -764,11 +764,11 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 			if err := s.Init(); err == nil {
 				if err := s.Start(); err == nil {
 					close(initCh)
-					log.Debug("RootCoord connect to QueryCoord")
+					log.Debug("RootCoord connected to QueryCoord")
 					return
 				}
 			}
-			log.Debug("RootCoord connect to QueryCoord, retry")
+			log.Debug("Retrying RootCoord connection to QueryCoord")
 		}
 	}()
 	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) (retErr error) {
@@ -860,7 +860,7 @@ func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *s
 func (c *Core) Register() error {
 	c.session = sessionutil.NewSession(c.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	if c.session == nil {
-		return fmt.Errorf("session is nil, maybe the etcd client connection fails")
+		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	c.sessCloseCh = c.session.Init(typeutil.RootCoordRole, Params.Address, true)
 	Params.SetLogger(typeutil.UniqueID(-1))
@@ -903,13 +903,13 @@ func (c *Core) Init() error {
 
 			return nil
 		}
-		log.Debug("RootCoord, Connect to Etcd", zap.String("kv root", Params.KvRootPath), zap.String("meta root", Params.MetaRootPath))
+		log.Debug("RootCoord, Connecting to Etcd", zap.String("kv root", Params.KvRootPath), zap.String("meta root", Params.MetaRootPath))
 		err := retry.Do(c.ctx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
 			return
 		}
 
-		log.Debug("RootCoord, Set TSO and ID Allocator")
+		log.Debug("RootCoord, Setting TSO and ID Allocator")
 		kv, initError := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid")
 		if initError != nil {
 			return
@@ -1253,7 +1253,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 			Reason:    "Drop collection failed: " + err.Error(),
 		}, nil
 	}
-	log.Debug("DropCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("DropCollection Succeeded", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordDropCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -1294,7 +1294,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 			Value: false,
 		}, nil
 	}
-	log.Debug("HasCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("HasCollection Succeeded", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordHasCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
@@ -1339,7 +1339,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 			Schema: nil,
 		}, nil
 	}
-	log.Debug("DescribeCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("DescribeCollection Succeeded", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordDescribeCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -1386,7 +1386,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 			},
 		}, nil
 	}
-	log.Debug("ShowCollections Success", zap.String("dbname", in.DbName), zap.Strings("collection names", t.Rsp.CollectionNames), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("ShowCollections Succeeded", zap.String("dbname", in.DbName), zap.Strings("collection names", t.Rsp.CollectionNames), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordShowCollectionsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -1422,7 +1422,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 			Reason:    "create partition failed: " + err.Error(),
 		}, nil
 	}
-	log.Debug("CreatePartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("CreatePartition Succeeded", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordCreatePartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -1457,7 +1457,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 			Reason:    "DropPartition failed: " + err.Error(),
 		}, nil
 	}
-	log.Debug("DropPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("DropPartition Succeeded", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordDropPartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -1498,7 +1498,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 			Value: false,
 		}, nil
 	}
-	log.Debug("HasPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("HasPartition Succeeded", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordHasPartitionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
@@ -1549,7 +1549,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 			},
 		}, nil
 	}
-	log.Debug("ShowPartitions succeed", zap.String("role", Params.RoleName), zap.Int64("msgID", t.Req.Base.MsgID),
+	log.Debug("ShowPartitions succeeded", zap.String("role", Params.RoleName), zap.Int64("msgID", t.Req.Base.MsgID),
 		zap.String("collection name", in.CollectionName), zap.Int("num of partitions", len(t.Rsp.PartitionNames)))
 	metrics.RootCoordShowPartitionsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
@@ -1587,7 +1587,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 			Reason:    "CreateIndex failed, error = " + err.Error(),
 		}, nil
 	}
-	log.Debug("CreateIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("CreateIndex Succeeded", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordCreateIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -1635,12 +1635,12 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	for _, i := range t.Rsp.IndexDescriptions {
 		idxNames = append(idxNames, i.IndexName)
 	}
-	log.Debug("DescribeIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Strings("index names", idxNames), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("DescribeIndex Succeeded", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Strings("index names", idxNames), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordDescribeIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	if len(t.Rsp.IndexDescriptions) == 0 {
 		t.Rsp.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IndexNotExist,
-			Reason:    "index not exist",
+			Reason:    "index does not exist",
 		}
 	} else {
 		t.Rsp.Status = &commonpb.Status{
@@ -1677,7 +1677,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 			Reason:    "DropIndex failed, error = " + err.Error(),
 		}, nil
 	}
-	log.Debug("DropIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("DropIndex Succeeded", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordDropIndexCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -1721,7 +1721,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 			IndexID: 0,
 		}, nil
 	}
-	log.Debug("DescribeSegment Success", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("DescribeSegment Succeeded", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordDescribeSegmentCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -1766,7 +1766,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 			SegmentIDs: nil,
 		}, nil
 	}
-	log.Debug("ShowSegments Success", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64s("segments ids", t.Rsp.SegmentIDs), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("ShowSegments Succeeded", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64s("segments ids", t.Rsp.SegmentIDs), zap.Int64("msgID", in.Base.MsgID))
 	metrics.RootCoordShowSegmentsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
