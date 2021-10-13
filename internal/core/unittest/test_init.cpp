@@ -9,12 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-//
-// Created by Mike Dog on 2021/3/15.
-//
-#include "test_utils/DataGen.h"
 #include <gtest/gtest.h>
+
 #include "segcore/segcore_init_c.h"
+#include "test_utils/DataGen.h"
 
 TEST(Init, Naive) {
     using namespace milvus;
