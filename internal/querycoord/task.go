@@ -120,6 +120,7 @@ func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *Bas
 	return baseTask
 }
 
+// ID function returns the unique taskID of the trigger task
 func (bt *BaseTask) ID() UniqueID {
 	return bt.taskID
 }
