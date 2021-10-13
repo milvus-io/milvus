@@ -89,33 +89,46 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 			return nil, errors.New("len(msg.hashValue) must equal 1, but it is: " + strconv.Itoa(len(keys)))
 		}
 
-		key := keys[0]
-		_, ok := result[key]
-		if !ok {
-			msgPack := MsgPack{}
-			result[key] = &msgPack
+		timestampLen := len(deleteRequest.Timestamps)
+		pkLen := len(deleteRequest.PrimaryKeys)
+		keysLen := len(keys)
+
+		if keysLen != timestampLen || keysLen != pkLen {
+			return nil, errors.New("the length of hashValue, timestamps, primaryKeys are not equal")
 		}
 
-		sliceRequest := internalpb.DeleteRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Delete,
-				MsgID:     deleteRequest.Base.MsgID,
-				Timestamp: deleteRequest.Timestamp,
-				SourceID:  deleteRequest.Base.SourceID,
-			},
-			CollectionName: deleteRequest.CollectionName,
-			ShardName:      deleteRequest.ShardName,
-			Timestamp:      deleteRequest.Timestamp,
-			PrimaryKeys:    deleteRequest.PrimaryKeys,
-		}
+		for index, key := range keys {
+			_, ok := result[key]
+			if !ok {
+				msgPack := MsgPack{}
+				result[key] = &msgPack
+			}
 
-		deleteMsg := &DeleteMsg{
-			BaseMsg: BaseMsg{
-				Ctx: request.TraceCtx(),
-			},
-			DeleteRequest: sliceRequest,
+			sliceRequest := internalpb.DeleteRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Delete,
+					MsgID:     deleteRequest.Base.MsgID,
+					Timestamp: deleteRequest.Timestamps[index],
+					SourceID:  deleteRequest.Base.SourceID,
+				},
+				DbID:           deleteRequest.DbID,
+				CollectionID:   deleteRequest.CollectionID,
+				PartitionID:    deleteRequest.PartitionID,
+				CollectionName: deleteRequest.CollectionName,
+				PartitionName:  deleteRequest.PartitionName,
+				ShardName:      deleteRequest.ShardName,
+				Timestamps:     []uint64{deleteRequest.Timestamps[index]},
+				PrimaryKeys:    []int64{deleteRequest.PrimaryKeys[index]},
+			}
+
+			deleteMsg := &DeleteMsg{
+				BaseMsg: BaseMsg{
+					Ctx: request.TraceCtx(),
+				},
+				DeleteRequest: sliceRequest,
+			}
+			result[key].Msgs = append(result[key].Msgs, deleteMsg)
 		}
-		result[key].Msgs = append(result[key].Msgs, deleteMsg)
 	}
 	return result, nil
 }

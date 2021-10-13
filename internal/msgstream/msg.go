@@ -214,8 +214,19 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 		return nil, err
 	}
 	deleteMsg := &DeleteMsg{DeleteRequest: deleteRequest}
-	deleteMsg.BeginTimestamp = deleteMsg.Timestamp
-	deleteMsg.EndTimestamp = deleteMsg.Timestamp
+	for _, timestamp := range deleteMsg.Timestamps {
+		deleteMsg.BeginTimestamp = timestamp
+		deleteMsg.EndTimestamp = timestamp
+		break
+	}
+	for _, timestamp := range deleteMsg.Timestamps {
+		if timestamp > deleteMsg.EndTimestamp {
+			deleteMsg.EndTimestamp = timestamp
+		}
+		if timestamp < deleteMsg.BeginTimestamp {
+			deleteMsg.BeginTimestamp = timestamp
+		}
+	}
 
 	return deleteMsg, nil
 }

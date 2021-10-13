@@ -208,7 +208,7 @@ message DeleteRequest {
   int64 collectionID = 7;
   int64 partitionID = 8;
   repeated int64 primary_keys = 9;
-  uint64 timestamp = 10;
+  repeated uint64 timestamps = 10;
 }
 
 message LoadBalanceSegmentsRequest {

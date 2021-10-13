@@ -4724,7 +4724,11 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 	dt.result.DeleteCnt = int64(len(primaryKeys))
 
-	dt.DeleteRequest.Timestamp = dt.BeginTs()
+	rowNum := len(primaryKeys)
+	dt.Timestamps = make([]uint64, rowNum)
+	for index := range dt.Timestamps {
+		dt.Timestamps[index] = dt.BeginTs()
+	}
 
 	return nil
 }
