@@ -195,10 +195,9 @@ func TestEstimateMemorySize(t *testing.T) {
 		assert.Nil(t, err)
 
 		buf := bytes.NewBuffer(blob.Value)
-		desc := &descriptorEvent{}
 
 		_, _ = readMagicNumber(buf)
-		desc, _ = ReadDescriptorEvent(buf)
+		desc, _ := ReadDescriptorEvent(buf)
 
 		size, err = EstimateMemorySize(memoryKV, blob.Key)
 		assert.Nil(t, err)

@@ -1,7 +1,6 @@
 package rootcoord
 
 import (
-	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -314,11 +313,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 		saves := map[string]string{"k1": fmt.Sprintf("v1-%d", i), "k2": fmt.Sprintf("v2-%d", i)}
 		vtso = typeutil.Timestamp(100 + i*5)
 		ts := ftso()
-		err = ss.MultiSave(saves, ts, func(ts typeutil.Timestamp) (string, string, error) {
-			return "extra", "extra-value", nil
-		}, func(ts typeutil.Timestamp) (string, string, error) {
-			return "extra", "extra-value", errors.New("out of range")
-		})
+		err = ss.MultiSave(saves, ts)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}
@@ -400,11 +395,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		dm := []string{fmt.Sprintf("kd-%04d", i-20)}
 		vtso = typeutil.Timestamp(100 + i*5)
 		ts := ftso()
-		err = ss.MultiSaveAndRemoveWithPrefix(sm, dm, ts, func(ts typeutil.Timestamp) (string, string, error) {
-			return "extra", "extra-value", nil
-		}, func(ts typeutil.Timestamp) (string, string, error) {
-			return "extra", "extra-value", errors.New("out of range")
-		})
+		err = ss.MultiSaveAndRemoveWithPrefix(sm, dm, ts)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}

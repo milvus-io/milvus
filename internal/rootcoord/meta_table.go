@@ -220,20 +220,6 @@ func (mt *MetaTable) reloadFromKV() error {
 	return nil
 }
 
-func (mt *MetaTable) getAdditionKV(op func(ts typeutil.Timestamp) (string, error), meta map[string]string) func(ts typeutil.Timestamp) (string, string, error) {
-	if op == nil {
-		return nil
-	}
-	meta[DDMsgSendPrefix] = "false"
-	return func(ts typeutil.Timestamp) (string, string, error) {
-		val, err := op(ts)
-		if err != nil {
-			return "", "", err
-		}
-		return DDOperationPrefix, val, nil
-	}
-}
-
 // AddTenant add tenant
 func (mt *MetaTable) AddTenant(te *pb.TenantMeta, ts typeutil.Timestamp) error {
 	mt.tenantLock.Lock()
@@ -277,7 +263,7 @@ func (mt *MetaTable) AddProxy(po *pb.ProxyMeta, ts typeutil.Timestamp) error {
 }
 
 // AddCollection add collection
-func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestamp, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestamp, idx []*pb.IndexInfo, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -293,11 +279,24 @@ func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestam
 		return fmt.Errorf("incorrect index id when creating collection")
 	}
 
+	coll.CreateTime = ts
+	if len(coll.PartitionCreatedTimestamps) == 1 {
+		coll.PartitionCreatedTimestamps[0] = ts
+	}
+	mt.collID2Meta[coll.ID] = *coll
+	mt.collName2ID[coll.Schema.Name] = coll.ID
 	for _, i := range idx {
 		mt.indexID2Meta[i.IndexID] = *i
 	}
 
-	meta := make(map[string]string)
+	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, coll.ID)
+	v1, err := proto.Marshal(coll)
+	if err != nil {
+		log.Error("MetaTable AddCollection saveColl Marshal fail",
+			zap.String("key", k1), zap.Error(err))
+		return fmt.Errorf("MetaTable AddCollection Marshal fail key:%s, err:%w", k1, err)
+	}
+	meta := map[string]string{k1: string(v1)}
 
 	for _, i := range idx {
 		k := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, coll.ID, i.IndexID)
@@ -311,26 +310,10 @@ func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestam
 	}
 
 	// save ddOpStr into etcd
-	addition := mt.getAdditionKV(ddOpStr, meta)
-	saveColl := func(ts typeutil.Timestamp) (string, string, error) {
-		coll.CreateTime = ts
-		if len(coll.PartitionCreatedTimestamps) == 1 {
-			coll.PartitionCreatedTimestamps[0] = ts
-		}
-		mt.collID2Meta[coll.ID] = *coll
-		mt.collName2ID[coll.Schema.Name] = coll.ID
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, coll.ID)
-		v1, err := proto.Marshal(coll)
-		if err != nil {
-			log.Error("MetaTable AddCollection saveColl Marshal fail",
-				zap.String("key", k1), zap.Error(err))
-			return "", "", fmt.Errorf("MetaTable AddCollection saveColl Marshal fail key:%s, err:%w", k1, err)
-		}
-		meta[k1] = string(v1)
-		return k1, string(v1), nil
-	}
+	meta[DDMsgSendPrefix] = "false"
+	meta[DDOperationPrefix] = ddOpStr
 
-	err := mt.client.MultiSave(meta, ts, addition, saveColl)
+	err = mt.client.MultiSave(meta, ts)
 	if err != nil {
 		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
 		panic("SnapShotKV MultiSave fail")
@@ -340,7 +323,7 @@ func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestam
 }
 
 // DeleteCollection delete collection
-func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -396,9 +379,12 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 	}
 
 	// save ddOpStr into etcd
-	var saveMeta = map[string]string{}
-	addition := mt.getAdditionKV(ddOpStr, saveMeta)
-	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys, ts, addition)
+	var saveMeta = map[string]string{
+		DDMsgSendPrefix:   "false",
+		DDOperationPrefix: ddOpStr,
+	}
+
+	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys, ts)
 	if err != nil {
 		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
 		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
@@ -551,7 +537,7 @@ func (mt *MetaTable) ListCollectionPhysicalChannels() []string {
 }
 
 // AddPartition add partition
-func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) error {
+func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -585,30 +571,26 @@ func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		}
 		// no necessary to check created timestamp
 	}
-	meta := make(map[string]string)
+
+	coll.PartitionIDs = append(coll.PartitionIDs, partitionID)
+	coll.PartitionNames = append(coll.PartitionNames, partitionName)
+	coll.PartitionCreatedTimestamps = append(coll.PartitionCreatedTimestamps, ts)
+	mt.collID2Meta[collID] = coll
+
+	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
+	v1, err := proto.Marshal(&coll)
+	if err != nil {
+		log.Error("MetaTable AddPartition saveColl Marshal fail",
+			zap.String("key", k1), zap.Error(err))
+		return fmt.Errorf("MetaTable AddPartition Marshal fail, k1:%s, err:%w", k1, err)
+	}
+	meta := map[string]string{k1: string(v1)}
 
 	// save ddOpStr into etcd
-	addition := mt.getAdditionKV(ddOpStr, meta)
+	meta[DDMsgSendPrefix] = "false"
+	meta[DDOperationPrefix] = ddOpStr
 
-	saveColl := func(ts typeutil.Timestamp) (string, string, error) {
-		coll.PartitionIDs = append(coll.PartitionIDs, partitionID)
-		coll.PartitionNames = append(coll.PartitionNames, partitionName)
-		coll.PartitionCreatedTimestamps = append(coll.PartitionCreatedTimestamps, ts)
-		mt.collID2Meta[collID] = coll
-
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
-		v1, err := proto.Marshal(&coll)
-		if err != nil {
-			log.Error("MetaTable AddPartition saveColl Marshal fail",
-				zap.String("key", k1), zap.Error(err))
-			return "", "", fmt.Errorf("MetaTable AddPartition saveColl Marshal fail, k1:%s, err:%w", k1, err)
-		}
-		meta[k1] = string(v1)
-
-		return k1, string(v1), nil
-	}
-
-	err := mt.client.MultiSave(meta, ts, addition, saveColl)
+	err = mt.client.MultiSave(meta, ts)
 	if err != nil {
 		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
 		panic("SnapShotKV MultiSave fail")
@@ -697,7 +679,7 @@ func (mt *MetaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 }
 
 // DeletePartition delete partition
-func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.UniqueID, error) {
+func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp, ddOpStr string) (typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -758,9 +740,10 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	}
 
 	// save ddOpStr into etcd
-	addition := mt.getAdditionKV(ddOpStr, meta)
+	meta[DDMsgSendPrefix] = "false"
+	meta[DDOperationPrefix] = ddOpStr
 
-	err = mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys, ts, addition)
+	err = mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys, ts)
 	if err != nil {
 		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
 		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")

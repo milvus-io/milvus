@@ -362,17 +362,18 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		PhysicalChannelNames: chanNames,
 	}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddCollReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
-	}
-
 	reason := fmt.Sprintf("create collection %d", collID)
 	ts, err := core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddCollReq.Base.Timestamp = ts
+	ddOpStr, err := EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
+	if err != nil {
+		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
@@ -385,7 +386,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		// clear ddl timetick in all conditions
 		defer core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 
-		err = core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
+		err = core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
 		if err != nil {
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
