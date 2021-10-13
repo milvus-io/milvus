@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-type ParserContext struct {
+type parserContext struct {
 	schema *typeutil.SchemaHelper
 }
 
@@ -179,7 +179,7 @@ func parseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 		return nil, optimizer.err
 	}
 
-	pc := ParserContext{schema}
+	pc := parserContext{schema}
 	expr, err := pc.handleExpr(&ast.Node)
 	if err != nil {
 		return nil, err
@@ -270,7 +270,7 @@ func parseBoolNode(nodeRaw *ant_ast.Node) *ant_ast.BoolNode {
 	}
 }
 
-func (pc *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string) (*planpb.Expr, error) {
+func (pc *parserContext) createCmpExpr(left, right ant_ast.Node, operator string) (*planpb.Expr, error) {
 	if boolNode := parseBoolNode(&left); boolNode != nil {
 		left = boolNode
 	}
@@ -347,11 +347,11 @@ func (pc *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string
 	return expr, nil
 }
 
-func (pc *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+func (pc *parserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	return pc.createCmpExpr(node.Left, node.Right, node.Operator)
 }
 
-func (pc *ParserContext) handleLogicalExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+func (pc *parserContext) handleLogicalExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	op := getLogicalOpType(node.Operator)
 	if op == planpb.BinaryExpr_Invalid {
 		return nil, fmt.Errorf("invalid logical operator(%s)", node.Operator)
@@ -379,7 +379,7 @@ func (pc *ParserContext) handleLogicalExpr(node *ant_ast.BinaryNode) (*planpb.Ex
 	return expr, nil
 }
 
-func (pc *ParserContext) handleArrayExpr(node *ant_ast.Node, dataType schemapb.DataType) ([]*planpb.GenericValue, error) {
+func (pc *parserContext) handleArrayExpr(node *ant_ast.Node, dataType schemapb.DataType) ([]*planpb.GenericValue, error) {
 	arrayNode, ok2 := (*node).(*ant_ast.ArrayNode)
 	if !ok2 {
 		return nil, fmt.Errorf("right operand of the InExpr must be array")
@@ -397,7 +397,7 @@ func (pc *ParserContext) handleArrayExpr(node *ant_ast.Node, dataType schemapb.D
 	return arr, nil
 }
 
-func (pc *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+func (pc *parserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	if node.Operator != "in" && node.Operator != "not in" {
 		return nil, fmt.Errorf("invalid operator(%s)", node.Operator)
 	}
@@ -429,7 +429,7 @@ func (pc *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Expr, e
 	return expr, nil
 }
 
-func (pc *ParserContext) combineUnaryRangeExpr(a, b *planpb.UnaryRangeExpr) *planpb.Expr {
+func (pc *parserContext) combineUnaryRangeExpr(a, b *planpb.UnaryRangeExpr) *planpb.Expr {
 	if a.Op == planpb.OpType_LessEqual || a.Op == planpb.OpType_LessThan {
 		a, b = b, a
 	}
@@ -451,7 +451,7 @@ func (pc *ParserContext) combineUnaryRangeExpr(a, b *planpb.UnaryRangeExpr) *pla
 	return expr
 }
 
-func (pc *ParserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+func (pc *parserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	exprs := []*planpb.Expr{}
 	curNode := node
 
@@ -511,7 +511,7 @@ func (pc *ParserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 	return combinedExpr, nil
 }
 
-func (pc *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+func (pc *parserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	switch node.Operator {
 	case "<", "<=", ">", ">=":
 		return pc.handleMultiCmpExpr(node)
@@ -525,7 +525,7 @@ func (pc *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Exp
 	return nil, fmt.Errorf("unsupported binary operator %s", node.Operator)
 }
 
-func (pc *ParserContext) createNotExpr(childExpr *planpb.Expr) (*planpb.Expr, error) {
+func (pc *parserContext) createNotExpr(childExpr *planpb.Expr) (*planpb.Expr, error) {
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryExpr{
 			UnaryExpr: &planpb.UnaryExpr{
@@ -537,7 +537,7 @@ func (pc *ParserContext) createNotExpr(childExpr *planpb.Expr) (*planpb.Expr, er
 	return expr, nil
 }
 
-func (pc *ParserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType schemapb.DataType) (gv *planpb.GenericValue, err error) {
+func (pc *parserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType schemapb.DataType) (gv *planpb.GenericValue, err error) {
 	switch node := (*nodeRaw).(type) {
 	case *ant_ast.FloatNode:
 		if typeutil.IsFloatingType(dataType) {
@@ -591,13 +591,13 @@ func (pc *ParserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType schemap
 	return gv, nil
 }
 
-func (pc *ParserContext) handleIdentifier(node *ant_ast.IdentifierNode) (*schemapb.FieldSchema, error) {
+func (pc *parserContext) handleIdentifier(node *ant_ast.IdentifierNode) (*schemapb.FieldSchema, error) {
 	fieldName := node.Value
 	field, err := pc.schema.GetFieldFromName(fieldName)
 	return field, err
 }
 
-func (pc *ParserContext) handleUnaryExpr(node *ant_ast.UnaryNode) (*planpb.Expr, error) {
+func (pc *parserContext) handleUnaryExpr(node *ant_ast.UnaryNode) (*planpb.Expr, error) {
 	switch node.Operator {
 	case "!", "not":
 		subExpr, err := pc.handleExpr(&node.Node)
@@ -610,7 +610,7 @@ func (pc *ParserContext) handleUnaryExpr(node *ant_ast.UnaryNode) (*planpb.Expr,
 	}
 }
 
-func (pc *ParserContext) handleExpr(nodeRaw *ant_ast.Node) (*planpb.Expr, error) {
+func (pc *parserContext) handleExpr(nodeRaw *ant_ast.Node) (*planpb.Expr, error) {
 	switch node := (*nodeRaw).(type) {
 	case *ant_ast.IdentifierNode,
 		*ant_ast.FloatNode,
@@ -630,7 +630,7 @@ func (pc *ParserContext) handleExpr(nodeRaw *ant_ast.Node) (*planpb.Expr, error)
 	}
 }
 
-func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
+func createQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	if err != nil {
 		return nil, err
@@ -665,7 +665,7 @@ func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vector
 	return planNode, nil
 }
 
-func CreateExprPlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
+func createExprPlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	if err != nil {
 		return nil, err
