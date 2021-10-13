@@ -174,17 +174,18 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		PhysicalChannelNames: chanNames,
 	}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddCollReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
-	}
-
 	reason := fmt.Sprintf("create collection %d", collID)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddCollReq.Base.Timestamp = ts
+	ddOpStr, err := EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
+	if err != nil {
+		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
@@ -210,7 +211,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 				Data: ids[pchan],
 			})
 		}
-		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
+		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
 		if err != nil {
 			t.core.dmlChannels.RemoveProducerChannels(chanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
@@ -264,17 +265,18 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		CollectionID:   collMeta.ID,
 	}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, DropCollectionDDType)
-	}
-
 	reason := fmt.Sprintf("drop collection %d", collMeta.ID)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddReq.Base.Timestamp = ts
+	ddOpStr, err := EncodeDdOperation(&ddReq, DropCollectionDDType)
+	if err != nil {
+		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
 	}
 
 	aliases := t.core.MetaTable.ListAliases(collMeta.ID)
@@ -289,7 +291,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 
-		err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOp)
+		err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOpStr)
 		if err != nil {
 			return err
 		}
@@ -493,17 +495,18 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partID,
 	}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, CreatePartitionDDType)
-	}
-
 	reason := fmt.Sprintf("create partition %s", t.Req.PartitionName)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddReq.Base.Timestamp = ts
+	ddOpStr, err := EncodeDdOperation(&ddReq, CreatePartitionDDType)
+	if err != nil {
+		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
@@ -516,7 +519,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 
-		err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ts, ddOp)
+		err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ts, ddOpStr)
 		if err != nil {
 			return err
 		}
@@ -588,17 +591,18 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partID,
 	}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, DropPartitionDDType)
-	}
-
 	reason := fmt.Sprintf("drop partition %s", t.Req.PartitionName)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddReq.Base.Timestamp = ts
+	ddOpStr, err := EncodeDdOperation(&ddReq, DropPartitionDDType)
+	if err != nil {
+		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
@@ -611,7 +615,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 
-		_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ts, ddOp)
+		_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ts, ddOpStr)
 		if err != nil {
 			return err
 		}

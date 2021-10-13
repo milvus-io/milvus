@@ -345,18 +345,9 @@ func (ss *suffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error
 
 // MultiSave save muiltple kvs
 // if ts == 0, act like TxnKV
-// additions is executed before process each kvs
-// each key-value (including additions result) will be treat in same logic like Save
-func (ss *suffixSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error {
-	// apply additions
-	for _, addition := range additions {
-		k, v, err := addition(ts)
-		if err != nil {
-			continue
-		}
-		kvs[k] = v
-	}
-	// if ts == 0, act like TxnKV, with additions executed
+// each key-value will be treat in same logic like Save
+func (ss *suffixSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) error {
+	// if ts == 0, act like TxnKV
 	if ts == 0 {
 		return ss.TxnKV.MultiSave(kvs)
 	}
@@ -487,19 +478,9 @@ func (ss *suffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]s
 
 // MultiSaveAndRemoveWithPrefix save muiltple kvs and remove as well
 // if ts == 0, act like TxnKV
-// additions is executed before process each kvs
-// each key-value (including additions result) will be treat in same logic like Save
-func (ss *suffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error {
-	// apply additions
-	for _, addition := range additions {
-		k, v, err := addition(ts)
-		if err != nil {
-			continue
-		}
-		saves[k] = v
-	}
-
-	// if ts == 0, act like TxnKV, with additions executed
+// each key-value will be treat in same logic like Save
+func (ss *suffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+	// if ts == 0, act like TxnKV
 	if ts == 0 {
 		return ss.TxnKV.MultiSaveAndRemoveWithPrefix(saves, removals)
 	}
