@@ -19,7 +19,10 @@ import (
 )
 
 const (
-	MetricTypeKey     = "metric_type"
+	// MetricTypeKey are the key of metric type in GetMetrics request.
+	MetricTypeKey = "metric_type"
+
+	// SystemInfoMetrics means users request for system information metrics.
 	SystemInfoMetrics = "system_info"
 )
 
