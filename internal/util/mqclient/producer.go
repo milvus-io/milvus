@@ -22,7 +22,7 @@ type ProducerOptions struct {
 // ProducerMessage contains the messages of a producer
 type ProducerMessage struct {
 	// Payload get the payload of the message
-	Payload    []byte
+	Payload []byte
 	// Properties are application defined key/value pairs that will be attached to the message.
 	// Return the properties attached to the message.
 	Properties map[string]string
