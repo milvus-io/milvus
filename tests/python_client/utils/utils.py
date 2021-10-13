@@ -395,7 +395,7 @@ def gen_search_vectors_params(field_name, entities, top_k, nq, search_params={"n
     _params = {
         "data": query_vectors,
         "anns_field": field_name,
-        "param": search_params,
+        "param": copy.deepcopy(search_params),
         "limit": top_k,
     }
     return _params, query_vectors
