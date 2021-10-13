@@ -69,7 +69,7 @@ type Proxy struct {
 	chTicker channelsTimeTicker
 
 	idAllocator  *allocator.IDAllocator
-	tsoAllocator *TimestampAllocator
+	tsoAllocator *timestampAllocator
 	segAssigner  *segIDAssigner
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
@@ -180,7 +180,7 @@ func (node *Proxy) Init() error {
 
 	node.idAllocator = idAllocator
 
-	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyID)
+	tsoAllocator, err := newTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyID)
 	if err != nil {
 		return err
 	}

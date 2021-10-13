@@ -32,7 +32,6 @@ type idAllocatorInterface interface {
 }
 
 // use timestampAllocatorInterface to keep other components testable
-// include: TimestampAllocator
 type timestampAllocatorInterface interface {
 	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
 }

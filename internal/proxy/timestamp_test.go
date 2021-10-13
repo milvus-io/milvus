@@ -26,22 +26,22 @@ func TestNewTimestampAllocator(t *testing.T) {
 	tso := newMockTimestampAllocatorInterface()
 	peerID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
-	tsAllocator, err := NewTimestampAllocator(ctx, tso, peerID)
+	tsAllocator, err := newTimestampAllocator(ctx, tso, peerID)
 	assert.Nil(t, err)
 	assert.NotNil(t, tsAllocator)
 }
 
-func TestTimestampAllocator_Alloc(t *testing.T) {
+func TestTimestampAllocator_alloc(t *testing.T) {
 	ctx := context.Background()
 	tso := newMockTimestampAllocatorInterface()
 	peerID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
-	tsAllocator, err := NewTimestampAllocator(ctx, tso, peerID)
+	tsAllocator, err := newTimestampAllocator(ctx, tso, peerID)
 	assert.Nil(t, err)
 	assert.NotNil(t, tsAllocator)
 
 	count := rand.Uint32()%100 + 1
-	ret, err := tsAllocator.Alloc(count)
+	ret, err := tsAllocator.alloc(count)
 	assert.Nil(t, err)
 	assert.Equal(t, int(count), len(ret))
 }
@@ -51,7 +51,7 @@ func TestTimestampAllocator_AllocOne(t *testing.T) {
 	tso := newMockTimestampAllocatorInterface()
 	peerID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
-	tsAllocator, err := NewTimestampAllocator(ctx, tso, peerID)
+	tsAllocator, err := newTimestampAllocator(ctx, tso, peerID)
 	assert.Nil(t, err)
 	assert.NotNil(t, tsAllocator)
 
