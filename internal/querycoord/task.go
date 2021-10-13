@@ -150,6 +150,8 @@ func (bt *BaseTask) GetParentTask() task {
 	return bt.parentTask
 }
 
+// GetChildTask function returns all the child tasks of the trigger task
+// Child task may be loadSegmentTask, watchDmChannelTask or watchQueryChannelTask
 func (bt *BaseTask) GetChildTask() []task {
 	bt.childTasksMu.RLock()
 	defer bt.childTasksMu.RUnlock()
