@@ -25,6 +25,7 @@ import (
 
 type allocatorInterface interface {
 	allocID() (UniqueID, error)
+	allocIDBatch(count uint32) (UniqueID, uint32, error)
 	genKey(alloc bool, ids ...UniqueID) (key string, err error)
 }
 
@@ -63,6 +64,27 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 	}
 
 	return resp.ID, nil
+}
+
+// allocIDBatch allocates IDs in batch from rootCoord
+func (alloc *allocator) allocIDBatch(count uint32) (UniqueID, uint32, error) {
+	ctx := context.Background()
+	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_RequestID,
+			SourceID: Params.NodeID,
+		},
+		Count: count,
+	})
+
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return 0, 0, errors.New(resp.Status.GetReason())
+	}
+
+	if err != nil {
+		return 0, 0, err
+	}
+	return resp.GetID(), resp.GetCount(), nil
 }
 
 // genKey gives a valid key string for lists of UniqueIDs:
