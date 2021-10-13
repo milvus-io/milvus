@@ -2617,8 +2617,8 @@ class TestListCollections:
     @pytest.mark.tags(CaseLabel.L2)
     def test_list_collections_multithread(self, connect):
         """
-        target: test list collection with multithread
-        method: list collection using multithread,
+        target: test list collection with multi-threads
+        method: list collection using multi-threads
         expected: list collections correctly
         """
         threads_num = 10
