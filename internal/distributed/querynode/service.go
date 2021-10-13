@@ -223,6 +223,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 }
 
+// Run initializes and starts QueryNode's grpc service.
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
