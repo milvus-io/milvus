@@ -125,6 +125,7 @@ func (bt *BaseTask) ID() UniqueID {
 	return bt.taskID
 }
 
+// SetID function sets the trigger task with a unique id, which is allocated by tso
 func (bt *BaseTask) SetID(id UniqueID) {
 	bt.taskID = id
 }
