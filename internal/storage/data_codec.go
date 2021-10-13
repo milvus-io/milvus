@@ -32,8 +32,11 @@ import (
 )
 
 const (
-	Ts             = "ts"
-	DDL            = "ddl"
+	// Ts is blob key "ts"
+	Ts = "ts"
+	// DDL is blob key "ddl"
+	DDL = "ddl"
+	// IndexParamsKey is blob key "indexParams"
 	IndexParamsKey = "indexParams"
 )
 
