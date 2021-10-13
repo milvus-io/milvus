@@ -243,6 +243,7 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID U
 	return vecFields, nil
 }
 
+// getFieldsByCollectionIDPrivate is the private function in collectionReplica, to return vector field ids of collection
 func (colReplica *collectionReplica) getFieldsByCollectionIDPrivate(collectionID UniqueID) ([]*schemapb.FieldSchema, error) {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
