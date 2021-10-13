@@ -17,13 +17,13 @@ TIMEOUT = 20
 class ApiCollectionWrapper:
     collection = None
 
-    def init_collection(self, name, schema=None, check_task=None, check_items=None, **kwargs):
+    def init_collection(self, name, schema=None, using="default", shards_num=2, check_task=None, check_items=None, **kwargs):
         """ In order to distinguish the same name of collection """
         func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([Collection, name, schema], **kwargs)
+        res, is_succ = api_request([Collection, name, schema, using, shards_num], **kwargs)
         self.collection = res if is_succ else None
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       name=name, schema=schema, **kwargs).run()
+                                       name=name, schema=schema, using=using, shards_num=shards_num, **kwargs).run()
         return res, check_result
 
     @property
@@ -49,6 +49,10 @@ class ApiCollectionWrapper:
     @property
     def primary_field(self):
         return self.collection.primary_field
+
+    @property
+    def _shards_num(self):
+        return self.collection._shards_num
 
     def construct_from_dataframe(self, name, dataframe, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name

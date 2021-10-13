@@ -900,7 +900,7 @@ class TestCollectionParams(TestcaseBase):
     def test_collection_shards_num_with_not_default_value(self, shards_num):
         """
         target:test collection with shards_num
-        method:create collection with not default shard_num
+        method:create collection with not default shards_num
         expected: no exception
         """
         self._connect()
@@ -914,7 +914,7 @@ class TestCollectionParams(TestcaseBase):
     def test_collection_shards_num_with_error_type(self):
         """
         target:test collection with error type shards_num
-        method:create collection with error type shard_num
+        method:create collection with error type shards_num
         expected: raise exception
         """
         self._connect()
