@@ -400,6 +400,10 @@ class TestInsertOperation(TestcaseBase):
     ******************************************************************
     """
 
+    @pytest.fixture(scope="function", params=[8, 4096])
+    def dim(self, request):
+        yield request.param
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_without_connection(self):
         """
@@ -674,22 +678,22 @@ class TestInsertOperation(TestcaseBase):
         pass
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_multi_times(self):
+    def test_insert_multi_times(self, dim):
         """
         target: test insert multi times
         method: insert data multi times
         expected: verify num entities
         """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
         step = 120
-        for _ in range(ct.default_nb // step):
-            df = cf.gen_default_dataframe_data(step)
+        nb = 12000
+        collection_w = self.init_collection_general(prefix, False, dim=dim)[0]
+        for _ in range(nb // step):
+            df = cf.gen_default_dataframe_data(step, dim)
             mutation_res, _ = collection_w.insert(data=df)
             assert mutation_res.insert_count == step
             assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
 
-        assert collection_w.num_entities == ct.default_nb
+        assert collection_w.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_all_datatype_collection(self):
