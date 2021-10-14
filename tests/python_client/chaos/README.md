@@ -81,6 +81,7 @@ still in planning
 - [ ] pod_failure
 - [ ] container_kill
 - [x] network attack
+- [ ] memory stress
 
 ## How to contribute
 * Get familiar with chaos engineering and [Chaos Mesh](https://chaos-mesh.org)
