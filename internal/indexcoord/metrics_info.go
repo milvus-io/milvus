@@ -15,6 +15,8 @@ import (
 	"context"
 	"os"
 
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
+
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"go.uber.org/zap"
@@ -53,6 +55,7 @@ func getSystemInfoMetrics(
 				CreatedTime: Params.CreatedTime.String(),
 				UpdatedTime: Params.UpdatedTime.String(),
 				Type:        typeutil.IndexCoordRole,
+				ID:          coord.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.IndexCoordConfiguration{
 				MinioBucketName: Params.MinioBucketName,
@@ -72,6 +75,7 @@ func getSystemInfoMetrics(
 					ErrorReason: nodeMetrics.err.Error(),
 					// Name doesn't matter here cause we can't get it when error occurs, using address as the Name?
 					Name: "",
+					ID:   int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 				},
 			})
 			continue
@@ -86,6 +90,7 @@ func getSystemInfoMetrics(
 					HasError:    true,
 					ErrorReason: nodeMetrics.resp.Status.Reason,
 					Name:        nodeMetrics.resp.ComponentName,
+					ID:          int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 				},
 			})
 			continue
@@ -101,6 +106,7 @@ func getSystemInfoMetrics(
 					HasError:    true,
 					ErrorReason: err.Error(),
 					Name:        nodeMetrics.resp.ComponentName,
+					ID:          int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 				},
 			})
 			continue

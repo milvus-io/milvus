@@ -43,17 +43,20 @@ func TestQueryClusterTopology_Codec(t *testing.T) {
 		Self: QueryCoordInfos{
 			BaseComponentInfos: BaseComponentInfos{
 				Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+				ID:   1,
 			},
 		},
 		ConnectedNodes: []QueryNodeInfos{
 			{
 				BaseComponentInfos: BaseComponentInfos{
-					Name: ConstructComponentName(typeutil.QueryNodeRole, 1),
+					Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+					ID:   2,
 				},
 			},
 			{
 				BaseComponentInfos: BaseComponentInfos{
-					Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+					Name: ConstructComponentName(typeutil.QueryNodeRole, 3),
+					ID:   3,
 				},
 			},
 		},
@@ -78,17 +81,20 @@ func TestQueryCoordTopology_Codec(t *testing.T) {
 			Self: QueryCoordInfos{
 				BaseComponentInfos: BaseComponentInfos{
 					Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+					ID:   1,
 				},
 			},
 			ConnectedNodes: []QueryNodeInfos{
 				{
 					BaseComponentInfos: BaseComponentInfos{
-						Name: ConstructComponentName(typeutil.QueryNodeRole, 1),
+						Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+						ID:   2,
 					},
 				},
 				{
 					BaseComponentInfos: BaseComponentInfos{
-						Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+						Name: ConstructComponentName(typeutil.QueryNodeRole, 3),
+						ID:   3,
 					},
 				},
 			},
@@ -126,17 +132,20 @@ func TestIndexClusterTopology_Codec(t *testing.T) {
 		Self: IndexCoordInfos{
 			BaseComponentInfos: BaseComponentInfos{
 				Name: ConstructComponentName(typeutil.IndexCoordRole, 1),
+				ID:   1,
 			},
 		},
 		ConnectedNodes: []IndexNodeInfos{
 			{
 				BaseComponentInfos: BaseComponentInfos{
-					Name: ConstructComponentName(typeutil.IndexNodeRole, 1),
+					Name: ConstructComponentName(typeutil.IndexNodeRole, 2),
+					ID:   2,
 				},
 			},
 			{
 				BaseComponentInfos: BaseComponentInfos{
-					Name: ConstructComponentName(typeutil.IndexNodeRole, 2),
+					Name: ConstructComponentName(typeutil.IndexNodeRole, 3),
+					ID:   3,
 				},
 			},
 		},
@@ -161,17 +170,20 @@ func TestIndexCoordTopology_Codec(t *testing.T) {
 			Self: IndexCoordInfos{
 				BaseComponentInfos: BaseComponentInfos{
 					Name: ConstructComponentName(typeutil.IndexCoordRole, 1),
+					ID:   1,
 				},
 			},
 			ConnectedNodes: []IndexNodeInfos{
 				{
 					BaseComponentInfos: BaseComponentInfos{
-						Name: ConstructComponentName(typeutil.IndexNodeRole, 1),
+						Name: ConstructComponentName(typeutil.IndexNodeRole, 2),
+						ID:   2,
 					},
 				},
 				{
 					BaseComponentInfos: BaseComponentInfos{
-						Name: ConstructComponentName(typeutil.IndexNodeRole, 2),
+						Name: ConstructComponentName(typeutil.IndexNodeRole, 3),
+						ID:   3,
 					},
 				},
 			},
@@ -209,17 +221,20 @@ func TestDataClusterTopology_Codec(t *testing.T) {
 		Self: DataCoordInfos{
 			BaseComponentInfos: BaseComponentInfos{
 				Name: ConstructComponentName(typeutil.DataCoordRole, 1),
+				ID:   1,
 			},
 		},
 		ConnectedNodes: []DataNodeInfos{
 			{
 				BaseComponentInfos: BaseComponentInfos{
-					Name: ConstructComponentName(typeutil.DataNodeRole, 1),
+					Name: ConstructComponentName(typeutil.DataNodeRole, 2),
+					ID:   2,
 				},
 			},
 			{
 				BaseComponentInfos: BaseComponentInfos{
-					Name: ConstructComponentName(typeutil.DataNodeRole, 2),
+					Name: ConstructComponentName(typeutil.DataNodeRole, 3),
+					ID:   3,
 				},
 			},
 		},
@@ -244,17 +259,20 @@ func TestDataCoordTopology_Codec(t *testing.T) {
 			Self: DataCoordInfos{
 				BaseComponentInfos: BaseComponentInfos{
 					Name: ConstructComponentName(typeutil.DataCoordRole, 1),
+					ID:   1,
 				},
 			},
 			ConnectedNodes: []DataNodeInfos{
 				{
 					BaseComponentInfos: BaseComponentInfos{
-						Name: ConstructComponentName(typeutil.DataNodeRole, 1),
+						Name: ConstructComponentName(typeutil.DataNodeRole, 2),
+						ID:   2,
 					},
 				},
 				{
 					BaseComponentInfos: BaseComponentInfos{
-						Name: ConstructComponentName(typeutil.DataNodeRole, 2),
+						Name: ConstructComponentName(typeutil.DataNodeRole, 3),
+						ID:   3,
 					},
 				},
 			},
@@ -292,6 +310,7 @@ func TestRootCoordTopology_Codec(t *testing.T) {
 		Self: RootCoordInfos{
 			BaseComponentInfos: BaseComponentInfos{
 				Name: ConstructComponentName(typeutil.RootCoordRole, 1),
+				ID:   1,
 			},
 		},
 		Connections: ConnTopology{
@@ -358,6 +377,7 @@ func TestSystemTopology_Codec(t *testing.T) {
 				Infos: &QueryCoordInfos{
 					BaseComponentInfos: BaseComponentInfos{
 						Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+						ID:   1,
 					},
 				},
 				Connected: []ConnectionEdge{
@@ -373,6 +393,7 @@ func TestSystemTopology_Codec(t *testing.T) {
 				Infos: &QueryNodeInfos{
 					BaseComponentInfos: BaseComponentInfos{
 						Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+						ID:   2,
 					},
 				},
 				Connected: []ConnectionEdge{},

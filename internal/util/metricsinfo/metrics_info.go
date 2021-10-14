@@ -75,6 +75,7 @@ type BaseComponentInfos struct {
 	CreatedTime   string          `json:"created_time"`
 	UpdatedTime   string          `json:"updated_time"`
 	Type          string          `json:"type"`
+	ID            int64           `json:"id"`
 }
 
 // QueryNodeConfiguration records the configuration of query node.

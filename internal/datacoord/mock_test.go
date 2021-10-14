@@ -162,6 +162,7 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	nodeInfos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+			ID:   nodeID,
 		},
 	}
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
@@ -401,6 +402,7 @@ func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.Get
 		Self: metricsinfo.RootCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
+				ID:   nodeID,
 			},
 		},
 		Connections: metricsinfo.ConnTopology{
