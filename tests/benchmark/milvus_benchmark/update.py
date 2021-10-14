@@ -157,7 +157,7 @@ def update_values(src_values_file, deploy_params_file):
         values_dict['dataNode']['tolerations'] = perf_tolerations
         values_dict['etcd']['tolerations'] = perf_tolerations
         values_dict['minio']['tolerations'] = perf_tolerations
-        if deploy_mode != config.CLUSTER_3RD_DEPLOY_MODE:
+        if deploy_mode == config.SINGLE_DEPLOY_MODE:
             values_dict['pulsarStandalone']['tolerations'] = perf_tolerations
         # TODO: for distributed deployment
         # values_dict['pulsar']['autoRecovery']['tolerations'] = perf_tolerations
