@@ -150,6 +150,36 @@ func TestConnectionManager(t *testing.T) {
 	})
 }
 
+func TestConnectionManager_processEvent(t *testing.T) {
+	cm := &ConnectionManager{
+		closeCh: make(chan struct{}),
+	}
+
+	ech := make(chan *sessionutil.SessionEvent)
+	flag := false
+	signal := make(chan struct{}, 1)
+	go func() {
+		cm.processEvent(ech)
+		flag = true
+		signal <- struct{}{}
+	}()
+
+	close(ech)
+	<-signal
+	assert.True(t, flag)
+
+	ech = make(chan *sessionutil.SessionEvent)
+	flag = false
+	go func() {
+		cm.processEvent(ech)
+		flag = true
+		signal <- struct{}{}
+	}()
+	close(cm.closeCh)
+	<-signal
+	assert.True(t, flag)
+}
+
 type testRootCoord struct {
 	rootcoordpb.RootCoordServer
 }

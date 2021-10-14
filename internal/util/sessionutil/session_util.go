@@ -309,6 +309,12 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 				if !ok {
 					return
 				}
+				if wresp.Err() != nil {
+					//close event channel
+					log.Warn("Watch service found error", zap.Error(wresp.Err()))
+					close(eventCh)
+					return
+				}
 				for _, ev := range wresp.Events {
 					session := &Session{}
 					var eventType SessionEventType

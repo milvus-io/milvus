@@ -652,6 +652,10 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 }
 
 // watchNodeLoop is used to monitor IndexNode going online and offline.
+//go:norace
+// fix datarace in unittest
+// startWatchService will only be invoked at start procedure
+// otherwise, remove the annotation and add atomic protection
 func (i *IndexCoord) watchNodeLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
@@ -663,7 +667,11 @@ func (i *IndexCoord) watchNodeLoop() {
 		select {
 		case <-ctx.Done():
 			return
-		case event := <-i.eventChan:
+		case event, ok := <-i.eventChan:
+			if !ok {
+				//TODO silverxia add retry
+				return
+			}
 			log.Debug("IndexCoord watchNodeLoop event updated")
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:

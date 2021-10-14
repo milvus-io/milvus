@@ -14,6 +14,7 @@ package indexcoord
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 
 	"github.com/stretchr/testify/assert"
 
@@ -200,4 +202,27 @@ func TestIndexCoord(t *testing.T) {
 	assert.Nil(t, err)
 	err = ic.Stop()
 	assert.Nil(t, err)
+}
+
+func TestIndexCoord_watchNodeLoop(t *testing.T) {
+	ech := make(chan *sessionutil.SessionEvent)
+	in := &IndexCoord{
+		loopWg:    sync.WaitGroup{},
+		loopCtx:   context.Background(),
+		eventChan: ech,
+	}
+	in.loopWg.Add(1)
+
+	flag := false
+	signal := make(chan struct{}, 1)
+	go func() {
+		in.watchNodeLoop()
+		flag = true
+		signal <- struct{}{}
+	}()
+
+	close(ech)
+	<-signal
+	assert.True(t, flag)
+
 }

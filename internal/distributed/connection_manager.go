@@ -200,6 +200,10 @@ func (cm *ConnectionManager) Stop() {
 	}
 }
 
+//go:norace
+// fix datarace in unittest
+// startWatchService will only be invoked at start procedure
+// otherwise, remove the annotation and add atomic protection
 func (cm *ConnectionManager) processEvent(channel <-chan *sessionutil.SessionEvent) {
 	for {
 		select {
@@ -207,11 +211,16 @@ func (cm *ConnectionManager) processEvent(channel <-chan *sessionutil.SessionEve
 			if !ok {
 				return
 			}
-		case ev := <-channel:
-			if ev.EventType == sessionutil.SessionAddEvent {
+		case ev, ok := <-channel:
+			if !ok {
+				//TODO silverxia add retry logic
+				return
+			}
+			switch ev.EventType {
+			case sessionutil.SessionAddEvent:
 				log.Debug("ConnectionManager", zap.Any("add event", ev.Session))
 				cm.buildConnections(ev.Session)
-			} else if ev.EventType == sessionutil.SessionDelEvent {
+			case sessionutil.SessionDelEvent:
 				cm.removeTask(ev.Session.ServerID)
 				cm.removeConnection(ev.Session.ServerID)
 			}

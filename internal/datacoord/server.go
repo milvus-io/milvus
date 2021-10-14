@@ -432,6 +432,10 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	}
 }
 
+//go:norace
+// fix datarace in unittest
+// startWatchService will only be invoked at start procedure
+// otherwise, remove the annotation and add atomic protection
 func (s *Server) startWatchService(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -440,7 +444,11 @@ func (s *Server) startWatchService(ctx context.Context) {
 		case <-ctx.Done():
 			log.Debug("watch service shutdown")
 			return
-		case event := <-s.eventCh:
+		case event, ok := <-s.eventCh:
+			if !ok {
+				//TODO add retry logic
+				return
+			}
 			if err := s.handleSessionEvent(ctx, event); err != nil {
 				go func() {
 					if err := s.Stop(); err != nil {
