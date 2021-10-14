@@ -30,10 +30,14 @@ const (
 	MaxNBits     = 16
 	DefaultNBits = 8
 
+	// MinNList is the lower limit of nlist that used in Index IVFxxx
 	MinNList = 1
+	// MaxNList is the upper limit of nlist that used in Index IVFxxx
 	MaxNList = 65536
 
+	// DefaultMinDim is the smallest dimension supported in Milvus
 	DefaultMinDim = 1
+	// DefaultMaxDim is the largest dimension supported in Milvus
 	DefaultMaxDim = 32768
 
 	NgtMinEdgeSize = 1
