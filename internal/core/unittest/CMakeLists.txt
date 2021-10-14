@@ -28,7 +28,6 @@ set(MILVUS_TEST_FILES
         test_index_wrapper.cpp
         test_init.cpp
         test_interface.cpp
-        test_load.cpp
         test_naive.cpp
         test_plan_proto.cpp
         test_query.cpp
