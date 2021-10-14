@@ -65,17 +65,29 @@ type DataNodeComponent interface {
 	DataNode
 
 	// UpdateStateCode updates state code for DataNode
-	// State includes: Initializing, Healthy and Abnormal
-	UpdateStateCode(internalpb.StateCode)
+	//  `stateCode` is current statement of this data node, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
 
-	// GetStateCode return state code for DataNode
+	// GetStateCode return state code of this data node
 	GetStateCode() internalpb.StateCode
 
 	// SetRootCoord set RootCoord for DataNode
-	SetRootCoord(RootCoord) error
+	// `rootCoord` is a client of root coordinator.
+	//
+	// Return a generic error in status:
+	//     If the rootCoord is nil or the rootCoord has been set before.
+	// Return nil in status:
+	//     The rootCoord is not nil.
+	SetRootCoord(rootCoord RootCoord) error
 
 	// SetDataCoord set DataCoord for DataNode
-	SetDataCoord(DataCoord) error
+	// `dataCoord` is a client of data coordinator.
+	//
+	// Return a generic error in status:
+	//     If the dataCoord is nil or the dataCoord has been set before.
+	// Return nil in status:
+	//     The dataCoord is not nil.
+	SetDataCoord(dataCoord DataCoord) error
 
 	// SetNodeID set node id for DataNode
 	SetNodeID(typeutil.UniqueID)
@@ -470,13 +482,23 @@ type RootCoordComponent interface {
 	UpdateStateCode(internalpb.StateCode)
 
 	// SetDataCoord set DataCoord for RootCoord
-	SetDataCoord(context.Context, DataCoord) error
+	// `dataCoord` is a client of data coordinator.
+	// `ctx` is the context pass to DataCoord api.
+	//
+	// Always return nil.
+	SetDataCoord(ctx context.Context, dataCoord DataCoord) error
 
 	// SetIndexCoord set IndexCoord for RootCoord
-	SetIndexCoord(IndexCoord) error
+	//  `indexCoord` is a client of index coordinator.
+	//
+	// Always return nil.
+	SetIndexCoord(indexCoord IndexCoord) error
 
 	// SetQueryCoord set QueryCoord for RootCoord
-	SetQueryCoord(QueryCoord) error
+	//  `queryCoord` is a client of query coordinator.
+	//
+	// Always return nil.
+	SetQueryCoord(queryCoord QueryCoord) error
 
 	// SetNewProxyClient set Proxy client creator func for RootCoord
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
