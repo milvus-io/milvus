@@ -13,7 +13,7 @@ QueryNode subscribes to the insert channel and will determine whether to use the
 ## Goals
 
 - Support to retrieve one or more entities from a collection through primary keys
-- Support to retrieve only some fields of a entity
+- Support to retrieve only some fields of an entity
 - Consider backward file format compatibility if a new file is defined
 
 ## Non-Goals
