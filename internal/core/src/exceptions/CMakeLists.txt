@@ -14,4 +14,4 @@ set(exceptions_files
 )
 
 add_library(milvus_exceptions ${exceptions_files})
-target_link_libraries(milvus_exceptions milvus_proto)
+target_link_libraries(milvus_exceptions PRIVATE milvus_proto)

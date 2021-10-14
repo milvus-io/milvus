@@ -9,33 +9,33 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-get_property(PROTOC_EXCUTABLE GLOBAL PROPERTY PROTOC_EXCUTABLE )
+set( proto_file_names
+    segcore.proto
+    index_cgo_msg.proto
+    plan.proto
+    etcd_meta.proto
+    milvus.proto
+    schema.proto
+    common.proto
+    )
 
-
-set(proto_file_names common.proto etcd_meta.proto schema.proto milvus.proto index_cgo_msg.proto plan.proto segcore.proto)
-
-set( PROTO_PATH          "${MILVUS_SOURCE_DIR}/../proto/" )
+set( PROTO_PATH  "${MILVUS_SOURCE_DIR}/../proto/" )
 
 FOREACH(proto_file ${proto_file_names})
-    STRING(REGEX REPLACE "[^/]proto" "" proto_src_file_name ${proto_file})
-    LIST(APPEND MILVUS_PROTO_SRCS "${proto_src_file_name}.pb.cc")
+    STRING( REGEX REPLACE "[^/]proto" "" proto_src_file_name ${proto_file} )
+    LIST( APPEND milvus_proto_srcs "${proto_src_file_name}.pb.cc" )
 
     ADD_CUSTOM_COMMAND(
-	OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/${proto_src_file_name}.pb.h" "${CMAKE_CURRENT_SOURCE_DIR}/${proto_src_file_name}.pb.cc"
-	COMMAND ${PROTOC_EXCUTABLE} --proto_path=${PROTO_PATH}/
-	--cpp_out=${CMAKE_CURRENT_SOURCE_DIR}/ ${proto_file}
-	DEPENDS ${PROTO_PATH}/${proto_file}
-    )
+        OUTPUT  "${CMAKE_CURRENT_SOURCE_DIR}/${proto_src_file_name}.pb.h"
+                "${CMAKE_CURRENT_SOURCE_DIR}/${proto_src_file_name}.pb.cc"
+        COMMAND protobuf::protoc --proto_path=${PROTO_PATH}/
+                --cpp_out=${CMAKE_CURRENT_SOURCE_DIR}/
+                ${proto_file}
+        DEPENDS ${PROTO_PATH}/${proto_file} )
 
 ENDFOREACH(proto_file)
 
-add_library(milvus_proto STATIC
-	${MILVUS_PROTO_SRCS}
-        )
-message(${MILVUS_PROTO_SRCS})
+add_library(milvus_proto STATIC ${milvus_proto_srcs})
+message(STATUS "milvus proto sources: " ${milvus_proto_srcs})
 
-target_link_libraries(milvus_proto
-	libprotobuf
-        )
-
-add_dependencies( milvus_proto protoc )
+target_link_libraries( milvus_proto PUBLIC protobuf::libprotobuf)
