@@ -25,32 +25,32 @@ import (
 
 func TestIndexCoordinateServer(t *testing.T) {
 	ctx := context.Background()
-	indexCoord, err := NewServer(ctx)
+	server, err := NewServer(ctx)
 	assert.Nil(t, err)
-	assert.NotNil(t, indexCoord)
+	assert.NotNil(t, server)
 	indexCoordClient := &indexcoord.Mock{}
-	err = indexCoord.SetClient(indexCoordClient)
+	err = server.SetClient(indexCoordClient)
 	assert.Nil(t, err)
-	err = indexCoord.Run()
+	err = server.Run()
 	assert.Nil(t, err)
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		req := &internalpb.GetComponentStatesRequest{}
-		states, err := indexCoord.GetComponentStates(ctx, req)
+		states, err := server.GetComponentStates(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
 		req := &internalpb.GetTimeTickChannelRequest{}
-		resp, err := indexCoord.GetTimeTickChannel(ctx, req)
+		resp, err := server.GetTimeTickChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
-		resp, err := indexCoord.GetStatisticsChannel(ctx, req)
+		resp, err := server.GetStatisticsChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
@@ -61,7 +61,7 @@ func TestIndexCoordinateServer(t *testing.T) {
 			IndexID:      0,
 			DataPaths:    []string{},
 		}
-		resp, err := indexCoord.BuildIndex(ctx, req)
+		resp, err := server.BuildIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
@@ -70,7 +70,7 @@ func TestIndexCoordinateServer(t *testing.T) {
 		req := &indexpb.GetIndexStatesRequest{
 			IndexBuildIDs: []UniqueID{0},
 		}
-		resp, err := indexCoord.GetIndexStates(ctx, req)
+		resp, err := server.GetIndexStates(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, len(req.IndexBuildIDs), len(resp.States))
 		assert.Equal(t, commonpb.IndexState_Finished, resp.States[0].State)
@@ -80,7 +80,7 @@ func TestIndexCoordinateServer(t *testing.T) {
 		req := &indexpb.DropIndexRequest{
 			IndexID: 0,
 		}
-		resp, err := indexCoord.DropIndex(ctx, req)
+		resp, err := server.DropIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
@@ -89,7 +89,7 @@ func TestIndexCoordinateServer(t *testing.T) {
 		req := &indexpb.GetIndexFilePathsRequest{
 			IndexBuildIDs: []UniqueID{0, 1},
 		}
-		resp, err := indexCoord.GetIndexFilePaths(ctx, req)
+		resp, err := server.GetIndexFilePaths(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.Equal(t, len(req.IndexBuildIDs), len(resp.FilePaths))
@@ -99,12 +99,12 @@ func TestIndexCoordinateServer(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{
 			Request: "",
 		}
-		resp, err := indexCoord.GetMetrics(ctx, req)
+		resp, err := server.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.Equal(t, "IndexCoord", resp.ComponentName)
 	})
 
-	err = indexCoord.Stop()
+	err = server.Stop()
 	assert.Nil(t, err)
 }
