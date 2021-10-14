@@ -1,10 +1,10 @@
 # Run Milvus standalone through binary files
 
-To quickly install and experience Milvus without docker or kubernetes, this document provides a tutorial for installing Milvus and dependencies, Etcd and MinIO, through binary files.
+To quickly install and experience Milvus without docker or kubernetes, this document provides a tutorial for installing Milvus and dependencies, etcd and MinIO, through binary files.
 
-Before installing, you can refer to [docker-compose.yml](https://github.com/milvus-io/milvus/blob/master/deployments/docker/standalone/docker-compose.yml) to check the versions required by Etcd and MinIO.
+Before installing, you can refer to [docker-compose.yml](https://github.com/milvus-io/milvus/blob/master/deployments/docker/standalone/docker-compose.yml) to check the versions required by etcd and MinIO.
 
-## Start Etcd service
+## Start etcd service
 
 #### Refer: https://github.com/etcd-io/etcd/releases
 
