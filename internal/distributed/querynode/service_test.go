@@ -183,9 +183,9 @@ func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*internalpb.Co
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
-	qns, err := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
-	assert.NotNil(t, qns)
+	assert.NotNil(t, server)
 
 	mqn := &MockQueryNode{
 		states:     &internalpb.ComponentStates{State: &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy}},
@@ -195,89 +195,89 @@ func Test_NewServer(t *testing.T) {
 		infoResp:   &querypb.GetSegmentInfoResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 		metricResp: &milvuspb.GetMetricsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 	}
-	qns.querynode = mqn
+	server.querynode = mqn
 
 	t.Run("Run", func(t *testing.T) {
-		qns.rootCoord = &MockRootCoord{}
-		qns.indexCoord = &MockIndexCoord{}
+		server.rootCoord = &MockRootCoord{}
+		server.indexCoord = &MockIndexCoord{}
 
-		err = qns.Run()
+		err = server.Run()
 		assert.Nil(t, err)
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		req := &internalpb.GetComponentStatesRequest{}
-		states, err := qns.GetComponentStates(ctx, req)
+		states, err := server.GetComponentStates(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
-		resp, err := qns.GetStatisticsChannel(ctx, req)
+		resp, err := server.GetStatisticsChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
 		req := &internalpb.GetTimeTickChannelRequest{}
-		resp, err := qns.GetTimeTickChannel(ctx, req)
+		resp, err := server.GetTimeTickChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("AddQueryChannel", func(t *testing.T) {
 		req := &querypb.AddQueryChannelRequest{}
-		resp, err := qns.AddQueryChannel(ctx, req)
+		resp, err := server.AddQueryChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("RemoveQueryChannel", func(t *testing.T) {
 		req := &querypb.RemoveQueryChannelRequest{}
-		resp, err := qns.RemoveQueryChannel(ctx, req)
+		resp, err := server.RemoveQueryChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("WatchDmChannels", func(t *testing.T) {
 		req := &querypb.WatchDmChannelsRequest{}
-		resp, err := qns.WatchDmChannels(ctx, req)
+		resp, err := server.WatchDmChannels(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("LoadSegments", func(t *testing.T) {
 		req := &querypb.LoadSegmentsRequest{}
-		resp, err := qns.LoadSegments(ctx, req)
+		resp, err := server.LoadSegments(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("ReleaseCollection", func(t *testing.T) {
 		req := &querypb.ReleaseCollectionRequest{}
-		resp, err := qns.ReleaseCollection(ctx, req)
+		resp, err := server.ReleaseCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("ReleasePartitions", func(t *testing.T) {
 		req := &querypb.ReleasePartitionsRequest{}
-		resp, err := qns.ReleasePartitions(ctx, req)
+		resp, err := server.ReleasePartitions(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("ReleaseSegments", func(t *testing.T) {
 		req := &querypb.ReleaseSegmentsRequest{}
-		resp, err := qns.ReleaseSegments(ctx, req)
+		resp, err := server.ReleaseSegments(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("GetSegmentInfo", func(t *testing.T) {
 		req := &querypb.GetSegmentInfoRequest{}
-		resp, err := qns.GetSegmentInfo(ctx, req)
+		resp, err := server.GetSegmentInfo(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
@@ -286,52 +286,52 @@ func Test_NewServer(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{
 			Request: "",
 		}
-		resp, err := qns.GetMetrics(ctx, req)
+		resp, err := server.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	err = qns.Stop()
+	err = server.Stop()
 	assert.Nil(t, err)
 }
 
 func Test_Run(t *testing.T) {
 	ctx := context.Background()
-	qns, err := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
-	assert.NotNil(t, qns)
+	assert.NotNil(t, server)
 
-	qns.querynode = &MockQueryNode{}
-	qns.indexCoord = &MockIndexCoord{}
-	qns.rootCoord = &MockRootCoord{initErr: errors.New("Failed")}
-	assert.Panics(t, func() { err = qns.Run() })
+	server.querynode = &MockQueryNode{}
+	server.indexCoord = &MockIndexCoord{}
+	server.rootCoord = &MockRootCoord{initErr: errors.New("Failed")}
+	assert.Panics(t, func() { err = server.Run() })
 
-	qns.rootCoord = &MockRootCoord{startErr: errors.New("Failed")}
-	assert.Panics(t, func() { err = qns.Run() })
+	server.rootCoord = &MockRootCoord{startErr: errors.New("Failed")}
+	assert.Panics(t, func() { err = server.Run() })
 
-	qns.querynode = &MockQueryNode{}
-	qns.rootCoord = &MockRootCoord{}
-	qns.indexCoord = &MockIndexCoord{initErr: errors.New("Failed")}
-	assert.Panics(t, func() { err = qns.Run() })
+	server.querynode = &MockQueryNode{}
+	server.rootCoord = &MockRootCoord{}
+	server.indexCoord = &MockIndexCoord{initErr: errors.New("Failed")}
+	assert.Panics(t, func() { err = server.Run() })
 
-	qns.indexCoord = &MockIndexCoord{startErr: errors.New("Failed")}
-	assert.Panics(t, func() { err = qns.Run() })
+	server.indexCoord = &MockIndexCoord{startErr: errors.New("Failed")}
+	assert.Panics(t, func() { err = server.Run() })
 
-	qns.indexCoord = &MockIndexCoord{}
-	qns.rootCoord = &MockRootCoord{}
-	qns.querynode = &MockQueryNode{initErr: errors.New("Failed")}
-	err = qns.Run()
+	server.indexCoord = &MockIndexCoord{}
+	server.rootCoord = &MockRootCoord{}
+	server.querynode = &MockQueryNode{initErr: errors.New("Failed")}
+	err = server.Run()
 	assert.Error(t, err)
 
-	qns.querynode = &MockQueryNode{startErr: errors.New("Failed")}
-	err = qns.Run()
+	server.querynode = &MockQueryNode{startErr: errors.New("Failed")}
+	err = server.Run()
 	assert.Error(t, err)
 
-	qns.querynode = &MockQueryNode{regErr: errors.New("Failed")}
-	err = qns.Run()
+	server.querynode = &MockQueryNode{regErr: errors.New("Failed")}
+	err = server.Run()
 	assert.Error(t, err)
 
-	qns.querynode = &MockQueryNode{stopErr: errors.New("Failed")}
-	err = qns.Stop()
+	server.querynode = &MockQueryNode{stopErr: errors.New("Failed")}
+	err = server.Stop()
 	assert.Error(t, err)
 }

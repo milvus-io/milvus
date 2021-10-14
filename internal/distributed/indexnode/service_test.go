@@ -26,34 +26,34 @@ import (
 
 func TestIndexNodeServer(t *testing.T) {
 	ctx := context.Background()
-	ins, err := NewServer(ctx)
+	server, err := NewServer(ctx)
 	assert.Nil(t, err)
-	assert.NotNil(t, ins)
+	assert.NotNil(t, server)
 
 	inm := &indexnode.Mock{}
-	err = ins.SetClient(inm)
+	err = server.SetClient(inm)
 	assert.Nil(t, err)
 
-	err = ins.Run()
+	err = server.Run()
 	assert.Nil(t, err)
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		req := &internalpb.GetComponentStatesRequest{}
-		states, err := ins.GetComponentStates(ctx, req)
+		states, err := server.GetComponentStates(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
 		req := &internalpb.GetTimeTickChannelRequest{}
-		resp, err := ins.GetTimeTickChannel(ctx, req)
+		resp, err := server.GetTimeTickChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
-		resp, err := ins.GetStatisticsChannel(ctx, req)
+		resp, err := server.GetStatisticsChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
@@ -64,7 +64,7 @@ func TestIndexNodeServer(t *testing.T) {
 			IndexID:      0,
 			DataPaths:    []string{},
 		}
-		resp, err := ins.CreateIndex(ctx, req)
+		resp, err := server.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
@@ -73,11 +73,11 @@ func TestIndexNodeServer(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{
 			Request: "",
 		}
-		resp, err := ins.GetMetrics(ctx, req)
+		resp, err := server.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	err = ins.Stop()
+	err = server.Stop()
 	assert.Nil(t, err)
 }

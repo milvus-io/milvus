@@ -26,13 +26,13 @@ import (
 
 func TestIndexCoordClient(t *testing.T) {
 	ctx := context.Background()
-	indexCoordServer, err := grpcindexcoord.NewServer(ctx)
+	server, err := grpcindexcoord.NewServer(ctx)
 	assert.Nil(t, err)
 	icm := &indexcoord.Mock{}
-	err = indexCoordServer.SetClient(icm)
+	err = server.SetClient(icm)
 	assert.Nil(t, err)
 
-	err = indexCoordServer.Run()
+	err = server.Run()
 	assert.Nil(t, err)
 
 	icc, err := NewClient(ctx, indexcoord.Params.MetaRootPath, indexcoord.Params.EtcdEndpoints)
@@ -114,7 +114,7 @@ func TestIndexCoordClient(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	err = indexCoordServer.Stop()
+	err = server.Stop()
 	assert.Nil(t, err)
 
 	err = icc.Stop()

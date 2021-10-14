@@ -194,9 +194,9 @@ func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.Com
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
-	qcs, err := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
-	assert.NotNil(t, qcs)
+	assert.NotNil(t, server)
 
 	mqc := &MockQueryCoord{
 		states: &internalpb.ComponentStates{
@@ -223,91 +223,91 @@ func Test_NewServer(t *testing.T) {
 	}
 
 	t.Run("Run", func(t *testing.T) {
-		qcs.queryCoord = mqc
-		qcs.dataCoord = mdc
-		qcs.rootCoord = mrc
+		server.queryCoord = mqc
+		server.dataCoord = mdc
+		server.rootCoord = mrc
 
-		err = qcs.Run()
+		err = server.Run()
 		assert.Nil(t, err)
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		req := &internalpb.GetComponentStatesRequest{}
-		states, err := qcs.GetComponentStates(ctx, req)
+		states, err := server.GetComponentStates(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
-		resp, err := qcs.GetStatisticsChannel(ctx, req)
+		resp, err := server.GetStatisticsChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
 		req := &internalpb.GetTimeTickChannelRequest{}
-		resp, err := qcs.GetTimeTickChannel(ctx, req)
+		resp, err := server.GetTimeTickChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("ShowCollections", func(t *testing.T) {
-		resp, err := qcs.ShowCollections(ctx, nil)
+		resp, err := server.ShowCollections(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("LoadCollection", func(t *testing.T) {
-		resp, err := qcs.LoadCollection(ctx, nil)
+		resp, err := server.LoadCollection(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ReleaseCollection", func(t *testing.T) {
-		resp, err := qcs.ReleaseCollection(ctx, nil)
+		resp, err := server.ReleaseCollection(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ShowPartitions", func(t *testing.T) {
-		resp, err := qcs.ShowPartitions(ctx, nil)
+		resp, err := server.ShowPartitions(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 	t.Run("GetPartitionStates", func(t *testing.T) {
-		resp, err := qcs.GetPartitionStates(ctx, nil)
+		resp, err := server.GetPartitionStates(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("LoadPartitions", func(t *testing.T) {
-		resp, err := qcs.LoadPartitions(ctx, nil)
+		resp, err := server.LoadPartitions(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ReleasePartitions", func(t *testing.T) {
-		resp, err := qcs.ReleasePartitions(ctx, nil)
+		resp, err := server.ReleasePartitions(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("CreateQueryChannel", func(t *testing.T) {
-		resp, err := qcs.CreateQueryChannel(ctx, nil)
+		resp, err := server.CreateQueryChannel(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
-		resp, err := qcs.GetTimeTickChannel(ctx, nil)
+		resp, err := server.GetTimeTickChannel(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("GetSegmentInfo", func(t *testing.T) {
 		req := &querypb.GetSegmentInfoRequest{}
-		resp, err := qcs.GetSegmentInfo(ctx, req)
+		resp, err := server.GetSegmentInfo(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
@@ -316,90 +316,90 @@ func Test_NewServer(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{
 			Request: "",
 		}
-		resp, err := qcs.GetMetrics(ctx, req)
+		resp, err := server.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	err = qcs.Stop()
+	err = server.Stop()
 	assert.Nil(t, err)
 }
 
 func TestServer_Run1(t *testing.T) {
 	ctx := context.Background()
-	qcs, err := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
-	assert.NotNil(t, qcs)
+	assert.NotNil(t, server)
 
-	qcs.queryCoord = &MockQueryCoord{
+	server.queryCoord = &MockQueryCoord{
 		regErr: errors.New("error"),
 	}
-	err = qcs.Run()
+	err = server.Run()
 	assert.Error(t, err)
 
-	err = qcs.Stop()
+	err = server.Stop()
 	assert.Nil(t, err)
 }
 
 func TestServer_Run2(t *testing.T) {
 	ctx := context.Background()
-	qcs, err := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
-	assert.NotNil(t, qcs)
+	assert.NotNil(t, server)
 
-	qcs.queryCoord = &MockQueryCoord{}
-	qcs.rootCoord = &MockRootCoord{
+	server.queryCoord = &MockQueryCoord{}
+	server.rootCoord = &MockRootCoord{
 		initErr: errors.New("error"),
 	}
-	assert.Panics(t, func() { qcs.Run() })
-	err = qcs.Stop()
+	assert.Panics(t, func() { server.Run() })
+	err = server.Stop()
 	assert.Nil(t, err)
 }
 
 func TestServer_Run3(t *testing.T) {
 	ctx := context.Background()
-	qcs, err := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
-	assert.NotNil(t, qcs)
+	assert.NotNil(t, server)
 
-	qcs.queryCoord = &MockQueryCoord{}
-	qcs.rootCoord = &MockRootCoord{
+	server.queryCoord = &MockQueryCoord{}
+	server.rootCoord = &MockRootCoord{
 		startErr: errors.New("error"),
 	}
-	assert.Panics(t, func() { qcs.Run() })
-	err = qcs.Stop()
+	assert.Panics(t, func() { server.Run() })
+	err = server.Stop()
 	assert.Nil(t, err)
 
 }
 
 func TestServer_Run4(t *testing.T) {
 	ctx := context.Background()
-	qcs, err := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
-	assert.NotNil(t, qcs)
+	assert.NotNil(t, server)
 
-	qcs.queryCoord = &MockQueryCoord{}
-	qcs.rootCoord = &MockRootCoord{}
-	qcs.dataCoord = &MockDataCoord{
+	server.queryCoord = &MockQueryCoord{}
+	server.rootCoord = &MockRootCoord{}
+	server.dataCoord = &MockDataCoord{
 		initErr: errors.New("error"),
 	}
-	assert.Panics(t, func() { qcs.Run() })
-	err = qcs.Stop()
+	assert.Panics(t, func() { server.Run() })
+	err = server.Stop()
 	assert.Nil(t, err)
 }
 
 func TestServer_Run5(t *testing.T) {
 	ctx := context.Background()
-	qcs, err := NewServer(ctx, nil)
+	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
-	assert.NotNil(t, qcs)
+	assert.NotNil(t, server)
 
-	qcs.queryCoord = &MockQueryCoord{}
-	qcs.rootCoord = &MockRootCoord{}
-	qcs.dataCoord = &MockDataCoord{
+	server.queryCoord = &MockQueryCoord{}
+	server.rootCoord = &MockRootCoord{}
+	server.dataCoord = &MockDataCoord{
 		startErr: errors.New("error"),
 	}
-	assert.Panics(t, func() { qcs.Run() })
-	err = qcs.Stop()
+	assert.Panics(t, func() { server.Run() })
+	err = server.Stop()
 	assert.Nil(t, err)
 }
