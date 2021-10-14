@@ -179,6 +179,8 @@ type SegmentInfo struct {
 	MaxRowNum            int64
 	LastExpireTime       uint64
 	StartPosition        *internalpb.MsgPosition
+  DmlPosition          *internalpb.MsgPosition
+  Binlogs              []*FieldBinlog
 }
 
 type GetSegmentInfoResponse  struct{
