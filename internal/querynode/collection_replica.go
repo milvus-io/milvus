@@ -278,6 +278,7 @@ func (colReplica *collectionReplica) addPartitionPrivate(collectionID UniqueID, 
 	return nil
 }
 
+// removePartition removes the partition from collectionReplica
 func (colReplica *collectionReplica) removePartition(partitionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
