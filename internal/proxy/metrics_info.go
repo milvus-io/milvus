@@ -26,6 +26,7 @@ import (
 
 type getMetricsFuncType func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
+// getSystemInfoMetrics returns the system information metrics.
 func getSystemInfoMetrics(
 	ctx context.Context,
 	request *milvuspb.GetMetricsRequest,
