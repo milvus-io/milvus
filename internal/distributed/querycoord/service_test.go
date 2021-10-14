@@ -16,8 +16,6 @@ import (
 	"errors"
 	"testing"
 
-	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
 
@@ -129,7 +127,7 @@ func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockRootCoord struct {
-	rcc.Base
+	types.RootCoord
 	initErr  error
 	startErr error
 	regErr   error
@@ -162,7 +160,7 @@ func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*internalpb.Com
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
-	dcc.Base
+	types.DataCoord
 	initErr  error
 	startErr error
 	stopErr  error

@@ -49,8 +49,8 @@ type Server struct {
 
 	msFactory msgstream.Factory
 
-	dataCoord dsc.Base
-	rootCoord rcc.Base
+	dataCoord types.DataCoord
+	rootCoord types.RootCoord
 
 	closer io.Closer
 }

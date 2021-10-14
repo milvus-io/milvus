@@ -16,9 +16,6 @@ import (
 	"errors"
 	"testing"
 
-	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -119,7 +116,7 @@ func (m *MockQueryNode) SetIndexCoord(index types.IndexCoord) error {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockRootCoord struct {
-	rcc.Base
+	types.RootCoord
 	initErr  error
 	startErr error
 	regErr   error
@@ -152,7 +149,7 @@ func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*internalpb.Com
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockIndexCoord struct {
-	isc.Base
+	types.IndexCoord
 	initErr  error
 	startErr error
 	regErr   error
