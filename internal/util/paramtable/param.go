@@ -21,9 +21,12 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// Params is a package scoped variable of type BaseParamTable.
 var Params BaseParamTable
 var once sync.Once
 
+// BaseParamTable is a derived struct of BaseTable. It achieves Composition by
+// embedding BaseTable. It is used to quickly and easily access the system configuration.
 type BaseParamTable struct {
 	BaseTable
 
@@ -42,6 +45,8 @@ type BaseParamTable struct {
 	LogConfig *log.Config
 }
 
+// Init is an override method of BaseTable's Init. It mainly calls the
+// Init of BaseTable and do some other initialization.
 func (p *BaseParamTable) Init() {
 	p.initOnce.Do(func() {
 		p.BaseTable.Init()
