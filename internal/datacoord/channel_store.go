@@ -292,7 +292,7 @@ func parseNodeID(key string) (int64, error) {
 	return strconv.ParseInt(s[len(s)-2], 10, 64)
 }
 
-// Implement zap log marshaler for ChannelOpSet
+// ChannelOpTypeNames implements zap log marshaler for ChannelOpSet
 var ChannelOpTypeNames = []string{"Add", "Delete"}
 
 func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
