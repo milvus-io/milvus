@@ -55,8 +55,8 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
-	rootCoord  rcc.Base
-	indexCoord isc.Base
+	rootCoord  types.RootCoord
+	indexCoord types.IndexCoord
 
 	closer io.Closer
 }
