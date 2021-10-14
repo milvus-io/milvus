@@ -9,15 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
+#include <boost/format.hpp>
 #include <google/protobuf/text_format.h>
-#include "query/PlanProto.h"
-#include "pb/plan.pb.h"
-#include "query/generated/ShowPlanNodeVisitor.h"
-#include <vector>
+#include <gtest/gtest.h>
 #include <queue>
 #include <random>
-#include <boost/format.hpp>
+#include <vector>
+
+#include "pb/plan.pb.h"
+#include "query/PlanProto.h"
+#include "query/generated/ShowPlanNodeVisitor.h"
 
 using namespace milvus;
 using namespace milvus::query;
