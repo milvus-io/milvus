@@ -353,6 +353,7 @@ func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Cons
 	return false, nil
 }
 
+// CreateConsumerGroup creates an nonexistent consumer group for topic
 func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 	start := time.Now()
 	key := constructCurrentID(topicName, groupName)
