@@ -5,7 +5,7 @@ metadata:
   namespace: chaos-testing
 spec:
   action: pod-kill
-  mode: one
+  mode: all
   selector:
     namespaces:
       - chaos-testing         # target namespace of milvus deployment
