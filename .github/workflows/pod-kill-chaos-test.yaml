@@ -36,11 +36,15 @@ jobs:
           python-version: 3.8
 
       - name: Install dependency
-        shell: bash
-        working-directory: tests/python_client/chaos
-        run: |
-          pip install -r ../requirements.txt
-          pip install --upgrade protobuf
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_on: error
+          shell: bash
+          command: |
+            pip install -r tests/python_client/requirements.txt
+            pip install --upgrade protobuf
       
       - name: Deploy Chaos Mesh
         shell: bash
@@ -80,10 +84,30 @@ jobs:
           cat constants.py
           pytest -s -v test_chaos.py --host 127.0.0.1
 
-      - name: Milvus Function Test
+      - name: Milvus E2E Test
+        timeout-minutes: 5
+        if: ${{ always() }}
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
+          kubectl get pod -n chaos-testing
+          python hello_milvus.py
+
+      - name: Data Consist Test
+        timeout-minutes: 5
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1
+
+      - name: Milvus E2E Test
+        timeout-minutes: 5
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          kubectl get pod -n chaos-testing
           python hello_milvus.py
 
       - name: Export logs
