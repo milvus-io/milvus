@@ -65,7 +65,7 @@ node that executes index building tasks.
 NodeManager is responsible for managing the node information of IndexNode, and contains a priority queue to save the
 load information of each IndexNode. The load information of IndexNode is based on the number of tasks executed.
 When the IndexCoord service starts, it first obtains the node information of all
-current IndexNodes from ETCD, and then adds the node information to the NodeManager. After that, the online and offline
+current IndexNodes from etcd, and then adds the node information to the NodeManager. After that, the online and offline
 information of IndexNode node is obtained from watchNodeLoop. Then it will traverse the entire MetaTable, get the load
 information corresponding to each IndexNode node, and update the priority queue in the NodeManager. Whenever the task
 of building an index needs to be allocated, the IndexNode with the lowest load will be selected according to the
