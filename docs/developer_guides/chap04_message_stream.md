@@ -316,7 +316,7 @@ func NewRocksMQ(name string, idAllocator IDAllocator) (*RocksMQ, error)
 
 
 
-##### A.4.1 Meta (stored in Etcd)
+##### A.4.1 Meta (stored in etcd)
 
 ```go
 // channel meta
