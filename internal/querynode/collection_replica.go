@@ -309,6 +309,7 @@ func (colReplica *collectionReplica) removePartitionPrivate(partitionID UniqueID
 	return nil
 }
 
+// getPartitionByID returns the partition which id is partitionID
 func (colReplica *collectionReplica) getPartitionByID(partitionID UniqueID) (*Partition, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
