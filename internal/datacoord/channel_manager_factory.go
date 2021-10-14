@@ -30,30 +30,37 @@ type ChannelPolicyFactory interface {
 	NewBgChecker() ChannelBGChecker
 }
 
+// ChannelPolicyFactoryV1 equal to policy batch
 type ChannelPolicyFactoryV1 struct {
 	kv kv.TxnKV
 }
 
+// NewChannelPolicyFactoryV1 helper function creates a Channel policy factory v1 from kv
 func NewChannelPolicyFactoryV1(kv kv.TxnKV) *ChannelPolicyFactoryV1 {
 	return &ChannelPolicyFactoryV1{kv: kv}
 }
 
+// NewRegisterPolicy implementing ChannelPolicyFactory returns BufferChannelAssignPolicy
 func (f *ChannelPolicyFactoryV1) NewRegisterPolicy() RegisterPolicy {
 	return BufferChannelAssignPolicy
 }
 
+// NewDeregisterPolicy implementing ChannelPolicyFactory returns AvgAssignUnregisteredChannels
 func (f *ChannelPolicyFactoryV1) NewDeregisterPolicy() DeregisterPolicy {
 	return AvgAssignUnregisteredChannels
 }
 
+// NewAssignPolicy implementing ChannelPolicyFactory returns AverageAssignPolicy
 func (f *ChannelPolicyFactoryV1) NewAssignPolicy() ChannelAssignPolicy {
 	return AverageAssignPolicy
 }
 
+// NewReassignPolicy implementing ChannelPolicyFactory returns AvarageReassginPolicy
 func (f *ChannelPolicyFactoryV1) NewReassignPolicy() ChannelReassignPolicy {
 	return AverageReassignPolicy
 }
 
+// NewBgChecker implementing ChannelPolicyFactory
 func (f *ChannelPolicyFactoryV1) NewBgChecker() ChannelBGChecker {
 	return BgCheckWithMaxWatchDuration(f.kv)
 }
