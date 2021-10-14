@@ -572,6 +572,42 @@ func TestGetFlushedSegments(t *testing.T) {
 	})
 }
 
+func TestService_WatchServices(t *testing.T) {
+	svr := newTestServer(t, nil)
+
+	ech := make(chan *sessionutil.SessionEvent)
+	svr.eventCh = ech
+
+	flag := false
+	signal := make(chan struct{}, 1)
+
+	go func() {
+		svr.startWatchService(context.Background())
+		flag = true
+		signal <- struct{}{}
+	}()
+
+	close(ech)
+	<-signal
+	assert.True(t, flag)
+
+	ech = make(chan *sessionutil.SessionEvent)
+
+	flag = false
+	svr.eventCh = ech
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		svr.startWatchService(ctx)
+		flag = true
+		signal <- struct{}{}
+	}()
+
+	ech <- nil
+	cancel()
+	<-signal
+	assert.True(t, flag)
+}
+
 func TestServer_GetMetrics(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)

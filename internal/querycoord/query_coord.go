@@ -257,7 +257,10 @@ func (qc *QueryCoord) watchNodeLoop() {
 		select {
 		case <-ctx.Done():
 			return
-		case event := <-qc.eventChan:
+		case event, ok := <-qc.eventChan:
+			if !ok {
+				return
+			}
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
