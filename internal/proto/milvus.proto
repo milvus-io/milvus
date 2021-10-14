@@ -411,12 +411,20 @@ message ShowSegmentsResponse {
   repeated int64 segmentIDs = 2;
 }
 
+/*
+* Create index for vector datas
+*/
 message CreateIndexRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1; 
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
-  string field_name = 4; // must
-  repeated common.KeyValuePair extra_params = 5; // must
+  // The particular collection name you want to create index.
+  string collection_name = 3;
+  // The vector field name in this particular collection
+  string field_name = 4;
+  // Support keys: index_type,metric_type, params. Different index_type may has different params.
+  repeated common.KeyValuePair extra_params = 5; 
 }
 
 message DescribeIndexRequest {
