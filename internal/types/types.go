@@ -539,6 +539,366 @@ type Proxy interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
+type ProxyComponent interface {
+	Proxy
+
+	// SetRootCoord set RootCoord for Proxy
+	// `rootCoord` is a client of root coordinator.
+	SetRootCoordClient(rootCoord RootCoord)
+
+	// SetDataCoord set DataCoord for Proxy
+	// `dataCoord` is a client of data coordinator.
+	SetDataCoordClient(dataCoord DataCoord)
+
+	// SetIndexCoord set IndexCoord for Proxy
+	//  `indexCoord` is a client of index coordinator.
+	SetIndexCoordClient(indexCoord IndexCoord)
+
+	// SetQueryCoord set QueryCoord for Proxy
+	//  `queryCoord` is a client of query coordinator.
+	SetQueryCoordClient(queryCoord QueryCoord)
+
+	// UpdateStateCode updates state code for Proxy
+	//  `stateCode` is current statement of this proxy node, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
+
+	// CreateCollection notifies Proxy to create a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, collection schema
+	//
+	// The `ErrorCode` of `Status` is `Success` if create collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+
+	// DropCollection notifies Proxy to drop a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved) and collection name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+
+	// HasCollection notifies Proxy to check a collection's existence at specified timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name and timestamp
+	//
+	// The `Status` in response struct `BoolResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Value` in `BoolResponse` is `true` if the collection exists at the specified timestamp, `false` otherwise.
+	// Timestamp is ignored if set to 0.
+	// error is always nil
+	HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+
+	// LoadCollection notifies Proxy to load a collection's data
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name
+	//
+	// The `ErrorCode` of `Status` is `Success` if load collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error
+	// error is always nil
+	LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error)
+
+	// ReleaseCollection notifies Proxy to release a collection's data
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name
+	//
+	// The `ErrorCode` of `Status` is `Success` if release collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error
+	// error is always nil
+	ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error)
+
+	// DescribeCollection notifies Proxy to return a collection's description
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name or collection id
+	//
+	// The `Status` in response struct `DescribeCollectionResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Schema` in `DescribeCollectionResponse` return collection's schema.
+	// error is always nil
+	DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+
+	// GetCollectionStatistics notifies Proxy to return a collection's statistics
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name
+	//
+	// The `Status` in response struct `GetCollectionStatisticsResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Stats` in `GetCollectionStatisticsResponse` return collection's statistics in key-value format.
+	// error is always nil
+	GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error)
+
+	// ShowCollections notifies Proxy to return collections list in current db at specified timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), timestamp
+	//
+	// The `Status` in response struct `ShowCollectionsResponse` indicates if this operation is processed successfully or fail cause;
+	// the `CollectionNames` in `ShowCollectionsResponse` return collection names list.
+	// the `CollectionIds` in `ShowCollectionsResponse` return collection ids list.
+	// error is always nil
+	ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)
+
+	// CreatePartition notifies Proxy to create a partition
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition name
+	//
+	// The `ErrorCode` of `Status` is `Success` if create partition successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+
+	// DropPartition notifies Proxy to drop a partition
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop partition successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+
+	// HasPartition notifies Proxy to check a partition's existence
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition name
+	//
+	// The `ErrorCode` of `Status` is `Success` if check partition's existence successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+
+	// LoadPartitions notifies Proxy to load partition's data
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition names
+	//
+	// The `ErrorCode` of `Status` is `Success` if load partitions successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error
+	// error is always nil
+	LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error)
+
+	// ReleasePartitions notifies Proxy to release collection's data
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition names
+	//
+	// The `ErrorCode` of `Status` is `Success` if release collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error
+	// error is always nil
+	ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error)
+
+	// GetPartitionStatistics notifies Proxy to return a partiiton's statistics
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition name
+	//
+	// The `Status` in response struct `GetPartitionStatisticsResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Stats` in `GetPartitionStatisticsResponse` return collection's statistics in key-value format.
+	// error is always nil
+	GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error)
+
+	// ShowPartitions notifies Proxy to return collections list in current db at specified timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition names(optional)
+	// When partition names is specified, will return these patitions's inMemory_percentages.
+	//
+	// The `Status` in response struct `ShowPartitionsResponse` indicates if this operation is processed successfully or fail cause;
+	// the `PartitionNames` in `ShowPartitionsResponse` return partition names list.
+	// the `PartitionIds` in `ShowPartitionsResponse` return partition ids list.
+	// the `InMemoryPercentages` in `ShowPartitionsResponse` return partitions's inMemory_percentages if the partition names of req is specified.
+	// error is always nil
+	ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
+
+	// CreateIndex notifies Proxy to create index of a field
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, field name, index parameters
+	//
+	// The `ErrorCode` of `Status` is `Success` if create index successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+
+	// DropIndex notifies Proxy to drop an index
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, field name, index name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop index successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error)
+
+	// DescribeIndex notifies Proxy to return index's description
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, field name, index name
+	//
+	// The `Status` in response struct `DescribeIndexResponse` indicates if this operation is processed successfully or fail cause;
+	// the `IndexDescriptions` in `DescribeIndexResponse` return index's description.
+	// error is always nil
+	DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+
+	// GetIndexBuildProgress notifies Proxy to return index build progress
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, field name, index name
+	//
+	// The `Status` in response struct `GetIndexBuildProgressResponse` indicates if this operation is processed successfully or fail cause;
+	// the `IndexdRows` in `GetIndexBuildProgressResponse` return the num of indexed rows.
+	// the `TotalRows` in `GetIndexBuildProgressResponse` return the total number of segment rows.
+	// error is always nil
+	GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error)
+
+	// GetIndexState notifies Proxy to return index state
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, field name, index name
+	//
+	// The `Status` in response struct `GetIndexStateResponse` indicates if this operation is processed successfully or fail cause;
+	// the `State` in `GetIndexStateResponse` return the state of index: Unissued/InProgress/Finished/Failed.
+	// error is always nil
+	GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error)
+
+	// Insert notifies Proxy to insert rows
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition name(optional), fields data
+	//
+	// The `Status` in response struct `MutationResult` indicates if this operation is processed successfully or fail cause;
+	// the `IDs` in `MutationResult` return the id list of inserted rows.
+	// the `SuccIndex` in `MutationResult` return the succeed number of inserted rows.
+	// the `ErrIndex` in `MutationResult` return the failed number of insert rows.
+	// error is always nil
+	Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error)
+
+	// Delete notifies Proxy to delete rows
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition name(optional), filter expression
+	//
+	// The `Status` in response struct `MutationResult` indicates if this operation is processed successfully or fail cause;
+	// the `IDs` in `MutationResult` return the id list of deleted rows.
+	// the `SuccIndex` in `MutationResult` return the succeed number of deleted rows.
+	// the `ErrIndex` in `MutationResult` return the failed number of delete rows.
+	// error is always nil
+	Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error)
+
+	// Search notifies Proxy to do search
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition name(optional), filter expression
+	//
+	// The `Status` in response struct `SearchResults` indicates if this operation is processed successfully or fail cause;
+	// the `Results` in `SearchResults` return search results.
+	// error is always nil
+	Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
+
+	// Flush notifies Proxy to flush buffer into storage
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name
+	//
+	// The `Status` in response struct `FlushResponse` indicates if this operation is processed successfully or fail cause;
+	// error is always nil
+	Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error)
+
+	// Query notifies Proxy to query rows
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition names(optional), filter expression, output fields
+	//
+	// The `Status` in response struct `QueryResults` indicates if this operation is processed successfully or fail cause;
+	// the `FieldsData` in `QueryResults` return query results.
+	// error is always nil
+	Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error)
+
+	// CalcDistance notifies Proxy to calculate distance between specified vectors
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), vectors to calculate
+	//
+	// The `Status` in response struct `CalcDistanceResults` indicates if this operation is processed successfully or fail cause;
+	// The `Array` in response struct `CalcDistanceResults` return distance result
+	// Return generic error when specified vectors not found or float/binary vectors mismatch, otherwise return nil
+	CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error)
+
+	// Not yet implemented
+	GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error)
+
+	// GetPersistentSegmentInfo notifies Proxy to return sealed segments's information of a collection from data coord
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name
+	//
+	// The `Status` in response struct `GetPersistentSegmentInfoResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Infos` in `GetPersistentSegmentInfoResponse` return sealed segments's information of a collection.
+	// error is always nil
+	GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error)
+
+	// GetQuerySegmentInfo notifies Proxy to return growing segments's information of a collection from query coord
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name
+	//
+	// The `Status` in response struct `GetQuerySegmentInfoResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Infos` in `GetQuerySegmentInfoResponse` return growing segments's information of a collection.
+	// error is always nil
+	GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error)
+
+	// For internal usage
+	Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error)
+
+	// RegisterLink notifies Proxy to its state code
+	//
+	// ctx is the context to control request deadline and cancellation
+	//
+	// The `Status` in response struct `RegisterLinkResponse` indicates if this proxy is healthy or not
+	// error is always nil
+	RegisterLink(ctx context.Context, request *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error)
+
+	// GetMetrics gets the metrics of the proxy.
+	GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	// CreateAlias notifies Proxy to create alias for a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, alias
+	//
+	// The `ErrorCode` of `Status` is `Success` if create alias successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error)
+
+	// DropAlias notifies Proxy to drop an alias
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, alias
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop alias successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error)
+
+	// AlterAlias notifies Proxy to alter an alias from a colection to another
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, alias
+	//
+	// The `ErrorCode` of `Status` is `Success` if alter alias successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
+}
+
 // QueryNode is the interface `querynode` package implements
 type QueryNode interface {
 	Component
