@@ -33,18 +33,17 @@ the object name into object ID. Also taking search request as example, Proxy sho
 `CollectionID` and then the Query Node will recognize the request. Proxy holds a cache that translate object name into
 object id and dynamically updates the cache.
 
-#### 6.0 Service Discovery based on ETCD
+#### 6.0 Service Discovery based on etcd
 
-As you know, Proxy depends on some other components. So how Proxy knows their node information such as host and port,
-it is also called how Milvus implements the service discovery mechanism? As a cloud-native vector database, Milvus use
-the ETCD to provide service registration and service discovery. Every node in Milvus will register their node
-information(including host, port, ID and etc) into ETCD after startup. They should specific the prefix and key of ETCD
-when registration. Nodes with same type have same prefix in ETCD, while nodes with different type have different prefix.
-The key in ETCD can be assigned with a lease and you can specific the `time-to-live(ttl)` of lease. Milvus uses this
-mechanism to check if a node is online. When a node is healthy, it will continuously renew the lease in ETCD. Otherwise
-if some exception occurs in the node and the node stopped to renew the lease, ETCD will delete the related node
-information. By using this mechanism, nodes in Milvus can know if there are any other nodes going to be online or
-offline and synchronize the latest node information.
+As you know, Proxy depends on some other components. So how Proxy knows the other nodes' information such as host and port,
+it is also called how Milvus implements the service discovery mechanism? As a cloud-native vector database, Milvus uses 
+etcd to provide service registration and service discovery. Every node in Milvus registers its node information(including host, 
+port, ID etc) into etcd after startup. Nodes should specify the prefix and key of etcd when registration. Nodes with the 
+same type have the same prefix in etcd, while nodes with different types have different prefixes. Every key in etcd can be assigned with a lease, and you can specify the `time-to-live(ttl)` of the 
+lease. Milvus uses this mechanism to check if a node is online. When a node is healthy, it will continuously renew the 
+lease in etcd. Otherwise, if some exceptions occurred in a node, or a node stopped to renew the lease, etcd would delete
+the related node information. By using this mechanism, nodes in Milvus know if there are any other nodes going to be 
+online or offline and synchronize the latest node information.
 
 
 
