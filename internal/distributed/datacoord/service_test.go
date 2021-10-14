@@ -30,24 +30,26 @@ import (
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
-	states       *internalpb.ComponentStates
-	status       *commonpb.Status
-	err          error
-	initErr      error
-	startErr     error
-	stopErr      error
-	regErr       error
-	strResp      *milvuspb.StringResponse
-	infoResp     *datapb.GetSegmentInfoResponse
-	flushResp    *datapb.FlushResponse
-	assignResp   *datapb.AssignSegmentIDResponse
-	segStateResp *datapb.GetSegmentStatesResponse
-	binResp      *datapb.GetInsertBinlogPathsResponse
-	colStatResp  *datapb.GetCollectionStatisticsResponse
-	partStatResp *datapb.GetPartitionStatisticsResponse
-	recoverResp  *datapb.GetRecoveryInfoResponse
-	flushSegResp *datapb.GetFlushedSegmentsResponse
-	metricResp   *milvuspb.GetMetricsResponse
+	states               *internalpb.ComponentStates
+	status               *commonpb.Status
+	err                  error
+	initErr              error
+	startErr             error
+	stopErr              error
+	regErr               error
+	strResp              *milvuspb.StringResponse
+	infoResp             *datapb.GetSegmentInfoResponse
+	flushResp            *datapb.FlushResponse
+	assignResp           *datapb.AssignSegmentIDResponse
+	segStateResp         *datapb.GetSegmentStatesResponse
+	binResp              *datapb.GetInsertBinlogPathsResponse
+	colStatResp          *datapb.GetCollectionStatisticsResponse
+	partStatResp         *datapb.GetPartitionStatisticsResponse
+	recoverResp          *datapb.GetRecoveryInfoResponse
+	flushSegResp         *datapb.GetFlushedSegmentsResponse
+	metricResp           *milvuspb.GetMetricsResponse
+	compactionStateResp  *datapb.GetCompactionStateResponse
+	manualCompactionResp *datapb.ManualCompactionResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -124,6 +126,18 @@ func (m *MockDataCoord) GetFlushedSegments(ctx context.Context, req *datapb.GetF
 
 func (m *MockDataCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return m.metricResp, m.err
+}
+
+func (m *MockDataCoord) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
+func (m *MockDataCoord) ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error) {
+	return m.manualCompactionResp, m.err
+}
+
+func (m *MockDataCoord) GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error) {
+	return m.compactionStateResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

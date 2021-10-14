@@ -262,3 +262,15 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.dataCoord.GetMetrics(ctx, req)
 }
+
+func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
+	return s.dataCoord.CompleteCompaction(ctx, req)
+}
+
+func (s *Server) ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error) {
+	return s.dataCoord.ManualCompaction(ctx, req)
+}
+
+func (s *Server) GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error) {
+	return s.dataCoord.GetCompactionState(ctx, req)
+}

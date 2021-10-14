@@ -36,6 +36,7 @@ type SegmentInfo struct {
 	currRows      int64
 	allocations   []*Allocation
 	lastFlushTime time.Time
+	isCompacting  bool
 }
 
 // NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
@@ -173,6 +174,13 @@ func (s *SegmentsInfo) AddSegmentBinlogs(segmentID UniqueID, field2Binlogs map[U
 	}
 }
 
+// SetIsCompacting sets compactino status for segment
+func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.ShadowClone(SetIsCompacting(isCompacting))
+	}
+}
+
 // Clone deep clone the segment info and return a new instance
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
@@ -274,6 +282,13 @@ func SetBinlogs(binlogs []*datapb.FieldBinlog) SegmentInfoOption {
 func SetFlushTime(t time.Time) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.lastFlushTime = t
+	}
+}
+
+// SetIsCompacting is the option to set compacton state for segment info
+func SetIsCompacting(isCompacting bool) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.isCompacting = isCompacting
 	}
 }
 

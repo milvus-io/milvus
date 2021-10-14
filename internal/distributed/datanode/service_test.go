@@ -103,6 +103,10 @@ func (m *MockDataNode) GetMetrics(ctx context.Context, request *milvuspb.GetMetr
 	return m.metricResp, m.err
 }
 
+func (m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type mockDataCoord struct {
 	types.DataCoord
