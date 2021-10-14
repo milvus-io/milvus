@@ -212,7 +212,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def test_search_param_invalid_field_type(self, get_invalid_fields_type):
         """
         target: test search with invalid parameter type
-        method: search with invalid field
+        method: search with invalid field type
         expected: raise exception and report the error
         """
         # 1. initialize with data
@@ -231,7 +231,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def test_search_param_invalid_field_value(self, get_invalid_fields_value):
         """
         target: test search with invalid parameter values
-        method: search with invalid field
+        method: search with invalid field value
         expected: raise exception and report the error
         """
         # 1. initialize with data
@@ -302,7 +302,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def test_search_param_invalid_limit_type(self, get_invalid_limit):
         """
         target: test search with invalid limit type
-        method: search with invalid limit
+        method: search with invalid limit type
         expected: raise exception and report the error
         """
         # 1. initialize with data
