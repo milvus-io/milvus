@@ -8,7 +8,7 @@ import traceback
 from multiprocessing import Process
 from pymilvus import Milvus, DataType
 import numpy as np
-import utils
+import utils as util
 import config
 from milvus_benchmark.runners import utils
 
