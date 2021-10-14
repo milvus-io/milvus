@@ -81,7 +81,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg) error {
 	segIDToTsMap := make(map[UniqueID][]int64)
 
 	m := dn.filterSegmentByPK(msg.PartitionID, msg.PrimaryKeys)
-	for _, pk := range msg.PrimaryKeys {
+	for i, pk := range msg.PrimaryKeys {
 		segIDs, ok := m[pk]
 		if !ok {
 			log.Warn("primary key not exist in all segments", zap.Int64("primary key", pk))
@@ -89,7 +89,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg) error {
 		}
 		for _, segID := range segIDs {
 			segIDToPkMap[segID] = append(segIDToPkMap[segID], pk)
-			segIDToTsMap[segID] = append(segIDToTsMap[segID], int64(msg.Timestamp))
+			segIDToTsMap[segID] = append(segIDToTsMap[segID], int64(msg.Timestamps[i]))
 		}
 	}
 

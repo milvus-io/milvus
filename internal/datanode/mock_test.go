@@ -419,6 +419,10 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMs
 
 func (df *DataFactory) GenMsgStreamDeleteMsg(pks []int64, chanName string) *msgstream.DeleteMsg {
 	idx := 100
+	timestamps := make([]Timestamp, len(pks))
+	for i := 0; i < len(pks); i++ {
+		timestamps[i] = Timestamp(i) + 1000
+	}
 	var msg = &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
@@ -434,7 +438,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []int64, chanName string) *msgs
 			PartitionName:  "default",
 			ShardName:      chanName,
 			PrimaryKeys:    pks,
-			Timestamp:      Timestamp(idx + 1000),
+			Timestamps:     timestamps,
 		},
 	}
 	return msg
