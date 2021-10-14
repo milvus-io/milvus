@@ -18,12 +18,25 @@ import (
 )
 
 const (
-	L2             = "L2"
-	IP             = "IP"
-	HAMMING        = "HAMMING"
-	JACCARD        = "JACCARD"
-	TANIMOTO       = "TANIMOTO"
-	SUBSTRUCTURE   = "SUBSTRUCTURE"
+	// L2 represents Euclidean distance
+	L2 = "L2"
+
+	// IP represents inner product distance
+	IP = "IP"
+
+	// HAMMING represents hamming distance
+	HAMMING = "HAMMING"
+
+	// JACCARD represents jaccard distance
+	JACCARD = "JACCARD"
+
+	// TANIMOTO represents tanimoto distance
+	TANIMOTO = "TANIMOTO"
+
+	// SUBSTRUCTURE represents substructure distance
+	SUBSTRUCTURE = "SUBSTRUCTURE"
+
+	// SUPERSTRUCTURE represents superstructure distance
 	SUPERSTRUCTURE = "SUPERSTRUCTURE"
 
 	MinNBits     = 1
