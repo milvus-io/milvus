@@ -237,9 +237,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("NumOfRows", us.GetNumOfRows()),
 		)
 
-		err = dsService.replica.addNormalSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel(),
-			us.GetNumOfRows(), &segmentCheckPoint{us.GetNumOfRows(), *us.GetDmlPosition()})
-		if err != nil {
+		if err := dsService.replica.addNormalSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel(),
+			us.GetNumOfRows(), &segmentCheckPoint{us.GetNumOfRows(), *us.GetDmlPosition()}); err != nil {
 			return err
 		}
 	}
@@ -261,8 +260,10 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("SegmentID", fs.GetID()),
 			zap.Int64("NumOfRows", fs.GetNumOfRows()),
 		)
-		dsService.replica.addFlushedSegment(fs.GetID(), fs.CollectionID, fs.PartitionID, fs.GetInsertChannel(),
-			fs.GetNumOfRows())
+		if err := dsService.replica.addFlushedSegment(fs.GetID(), fs.CollectionID,
+			fs.PartitionID, fs.GetInsertChannel(), fs.GetNumOfRows()); err != nil {
+			return err
+		}
 	}
 
 	dsService.fg.AddNode(dmStreamNode)
