@@ -285,6 +285,7 @@ func (colReplica *collectionReplica) removePartition(partitionID UniqueID) error
 	return colReplica.removePartitionPrivate(partitionID)
 }
 
+// removePartitionPrivate is the private function in collectionReplica, to remove the partition from collectionReplica
 func (colReplica *collectionReplica) removePartitionPrivate(partitionID UniqueID) error {
 	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
