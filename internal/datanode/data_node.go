@@ -300,7 +300,10 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		return nil
 	}
 
-	replica := newReplica(node.rootCoord, vchan.CollectionID)
+	replica, err := newReplica(node.ctx, node.rootCoord, vchan.CollectionID)
+	if err != nil {
+		return err
+	}
 
 	var alloc allocatorInterface = newAllocator(node.rootCoord)
 

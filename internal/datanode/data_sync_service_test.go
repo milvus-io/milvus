@@ -125,7 +125,8 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 		te.Run(test.description, func(t *testing.T) {
 			df := &DataCoordFactory{}
 
-			replica := newReplica(&RootCoordFactory{}, test.collID)
+			replica, err := newReplica(context.Background(), &RootCoordFactory{}, test.collID)
+			assert.Nil(t, err)
 			if test.replicaNil {
 				replica = nil
 			}
@@ -197,7 +198,8 @@ func TestDataSyncService_Start(t *testing.T) {
 	collectionID := UniqueID(1)
 
 	flushChan := &flushChans{make(chan *flushMsg, 100), make(chan *flushMsg, 100)}
-	replica := newReplica(mockRootCoord, collectionID)
+	replica, err := newReplica(context.Background(), mockRootCoord, collectionID)
+	assert.Nil(t, err)
 
 	allocFactory := NewAllocatorFactory(1)
 	msFactory := msgstream.NewPmsFactory()
@@ -205,7 +207,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		"pulsarAddress":  pulsarURL,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
+	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
 	insertChannelName := "data_sync_service_test_dml"
