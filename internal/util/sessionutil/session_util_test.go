@@ -170,11 +170,12 @@ func TestSessionLivenessCheck(t *testing.T) {
 	s := &Session{}
 	ctx := context.Background()
 	ch := make(chan bool)
+	s.liveCh = ch
 	signal := make(chan struct{}, 1)
 
 	flag := false
 
-	go s.LivenessCheck(ctx, ch, func() {
+	go s.LivenessCheck(ctx, func() {
 		flag = true
 		signal <- struct{}{}
 	})
@@ -191,10 +192,10 @@ func TestSessionLivenessCheck(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 	ch = make(chan bool)
-
+	s.liveCh = ch
 	flag = false
 
-	go s.LivenessCheck(ctx, ch, func() {
+	go s.LivenessCheck(ctx, func() {
 		flag = true
 		signal <- struct{}{}
 	})

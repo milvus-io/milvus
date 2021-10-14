@@ -104,7 +104,6 @@ type Server struct {
 	msFactory msgstream.Factory
 
 	session *sessionutil.Session
-	liveCh  <-chan bool
 	eventCh <-chan *sessionutil.SessionEvent
 
 	dataNodeCreator        dataNodeCreatorFunc
@@ -187,7 +186,7 @@ func (s *Server) Register() error {
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	s.liveCh = s.session.Init(typeutil.DataCoordRole, Params.IP, true)
+	s.session.Init(typeutil.DataCoordRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil
@@ -310,7 +309,7 @@ func (s *Server) startServerLoop() {
 	go s.startDataNodeTtLoop(s.serverLoopCtx)
 	go s.startWatchService(s.serverLoopCtx)
 	go s.startFlushLoop(s.serverLoopCtx)
-	go s.session.LivenessCheck(s.serverLoopCtx, s.liveCh, func() {
+	go s.session.LivenessCheck(s.serverLoopCtx, func() {
 		if err := s.Stop(); err != nil {
 			log.Error("failed to stop server", zap.Error(err))
 		}

@@ -151,8 +151,7 @@ type Core struct {
 	startOnce sync.Once
 	//isInit    atomic.Value
 
-	session     *sessionutil.Session
-	sessCloseCh <-chan bool
+	session *sessionutil.Session
 
 	msFactory ms.Factory
 }
@@ -284,25 +283,6 @@ func (c *Core) tsLoop() {
 			// Server is closed and it should return nil.
 			log.Debug("tsLoop is closed")
 			return
-		}
-	}
-}
-
-func (c *Core) sessionLoop() {
-	defer c.wg.Done()
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case _, ok := <-c.sessCloseCh:
-			if !ok {
-				log.Error("rootcoord disconnected from etcd, process will exit in 1 second")
-				go func() {
-					time.Sleep(time.Second)
-					os.Exit(-1)
-				}()
-				return
-			}
 		}
 	}
 }
@@ -862,7 +842,7 @@ func (c *Core) Register() error {
 	if c.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
-	c.sessCloseCh = c.session.Init(typeutil.RootCoordRole, Params.Address, true)
+	c.session.Init(typeutil.RootCoordRole, Params.Address, true)
 	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil
 }
@@ -1118,13 +1098,19 @@ func (c *Core) Start() error {
 			log.Debug("RootCoord Start reSendDdMsg failed", zap.Error(err))
 			return
 		}
-		c.wg.Add(5)
+		c.wg.Add(4)
 		go c.startTimeTickLoop()
 		go c.tsLoop()
-		go c.sessionLoop()
 		go c.chanTimeTick.StartWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
 
+		go c.session.LivenessCheck(c.ctx, func() {
+			log.Error("rootcoord disconnected from etcd, process will exit in 1 second")
+			go func() {
+				time.Sleep(time.Second)
+				os.Exit(-1)
+			}()
+		})
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
 

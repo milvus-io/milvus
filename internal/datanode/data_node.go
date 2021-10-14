@@ -101,7 +101,6 @@ type DataNode struct {
 	dataCoord types.DataCoord
 
 	session  *sessionutil.Session
-	liveCh   <-chan bool
 	kvClient *etcdkv.EtcdKV
 
 	closer io.Closer
@@ -169,12 +168,19 @@ func (node *DataNode) SetNodeID(id UniqueID) {
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.liveCh = node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
 	Params.SetLogger(Params.NodeID)
 	// Start node watch node
 	go node.StartWatchChannels(node.ctx)
+	// Start liveness check
+	go node.session.LivenessCheck(node.ctx, func() {
+		err := node.Stop()
+		if err != nil {
+			log.Warn("node stop failed", zap.Error(err))
+		}
+	})
 
 	Params.initMsgChannelSubName()
 	//TODO reset
@@ -406,13 +412,6 @@ func (node *DataNode) Start() error {
 	FilterThreshold = rep.GetTimestamp()
 
 	go node.BackGroundGC(node.clearSignal)
-
-	go node.session.LivenessCheck(node.ctx, node.liveCh, func() {
-		err := node.Stop()
-		if err != nil {
-			log.Warn("node stop failed", zap.Error(err))
-		}
-	})
 
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()
