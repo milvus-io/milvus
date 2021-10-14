@@ -295,6 +295,7 @@ func parseNodeID(key string) (int64, error) {
 // ChannelOpTypeNames implements zap log marshaler for ChannelOpSet
 var ChannelOpTypeNames = []string{"Add", "Delete"}
 
+// MarshalLogObject implements the interface ObjectMarshaler
 func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("type", ChannelOpTypeNames[cu.Type])
 	enc.AddInt64("nodeID", cu.NodeID)
