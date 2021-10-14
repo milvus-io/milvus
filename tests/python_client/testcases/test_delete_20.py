@@ -1,14 +1,15 @@
 import pytest
 
 from base.client_base import TestcaseBase
-# from common import common_func as cf
+from common import common_func as cf
 from common import common_type as ct
 # from utils.util_log import test_log as log
-from common.common_type import CaseLabel
+from common.common_type import CaseLabel, CheckTasks
 
 prefix = "delete"
 half_nb = ct.default_nb // 2
 tmp_nb = 100
+tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
 
 
 class TestDeleteParams(TestcaseBase):
@@ -51,7 +52,57 @@ class TestDeleteParams(TestcaseBase):
         collection_w.delete(expr)
         assert collection_w.num_entities == ct.default_nb
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_without_connection(self):
+        """
+        target: test delete without connect
+        method: delete after remove connection
+        expected: raise exception
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
+        collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
+
 
 @pytest.mark.skip(reason="Waiting for development")
 class TestDeleteOperation(TestcaseBase):
-    pass
+    """
+    ******************************************************************
+      The following cases are used to test delete interface operations
+    ******************************************************************
+    """
+
+    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_empty_collection(self):
+        """
+        target: test delete entities from an empty collection
+        method: create an collection and delete entities
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        # raise exception
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(tmp_expr)
+
+    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_entities_repeatedly(self):
+        """
+        target: test delete entities twice
+        method: delete with same expr twice
+        expected: raise exception
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        # assert delete successfully
+        collection_w.delete(expr=tmp_expr)
+        # raise exception
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
