@@ -1085,7 +1085,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w_1, vectors_1, _, insert_ids_1 = self.init_collection_general(prefix_1, True, nb)
         vectors_l = vectors[0].loc[:, default_field_name]
         vectors_r = vectors_1[0].loc[:, default_field_name]
-        log.info("Extracting entities form collections for distance calculating")
+        log.info("Extracting entities from collections for distance calculating")
         op_l = {"ids": insert_ids, "collection": collection_w.name,
                 "field": default_field_name}
         op_r = {"ids": insert_ids_1, "collection": collection_w_1.name,
@@ -1117,7 +1117,7 @@ class TestUtilityBase(TestcaseBase):
         for i in range(middle):
             vectors_r.append(vectors[middle + i])
         op_l = {"float_vectors": vectors_l}
-        log.info("Extracting entities form collections for distance calculating")
+        log.info("Extracting entities from collections for distance calculating")
         op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
                 "field": default_field_name}
         params = {metric_field: metric, "sqrt": sqrt}
@@ -1144,7 +1144,7 @@ class TestUtilityBase(TestcaseBase):
         vectors = vectors[0].loc[:, default_field_name]
         vectors_l = vectors[:middle]
         vectors_r = cf.gen_vectors(nb, default_dim)
-        log.info("Extracting entities form collections for distance calculating")
+        log.info("Extracting entities from collections for distance calculating")
         op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
                 "field": default_field_name}
         op_r = {"float_vectors": vectors_r}
@@ -1164,6 +1164,7 @@ class TestUtilityBase(TestcaseBase):
         method: both left and right vectors are from partition
         expected: distance calculated successfully
         """
+        log.info("Creating connection")
         self._connect()
         nb = 10
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
@@ -1171,12 +1172,14 @@ class TestUtilityBase(TestcaseBase):
         middle = len(insert_ids) // 2
         params = {metric_field: metric, "sqrt": sqrt}
         for i in range(len(partitions)):
+            log.info("Extracting entities from partitions for distance calculating")
             vectors_l = vectors[i].loc[:, default_field_name]
             vectors_r = vectors[i].loc[:, default_field_name]
             op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
                     "partition": partitions[i].name, "field": default_field_name}
             op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
                     "partition": partitions[i].name, "field": default_field_name}
+            log.info("Calculating distance between entities from one partition")
             self.utility_wrap.calc_distance(op_l, op_r, params,
                                             check_task=CheckTasks.check_distance,
                                             check_items={"vectors_l": vectors_l,
