@@ -159,10 +159,10 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 		meta:                  queryCoord.meta,
 		cluster:               queryCoord.cluster,
 	}
-	parentTask.SetState(taskDone)
-	parentTask.SetResultInfo(nil)
-	parentTask.AddChildTask(watchDmChannelTask)
-	watchDmChannelTask.SetParentTask(parentTask)
+	parentTask.setState(taskDone)
+	parentTask.setResultInfo(nil)
+	parentTask.addChildTask(watchDmChannelTask)
+	watchDmChannelTask.setParentTask(parentTask)
 
 	queryCoord.meta.addCollection(defaultCollectionID, schema)
 	return watchDmChannelTask
@@ -209,10 +209,10 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 		meta:                  queryCoord.meta,
 		cluster:               queryCoord.cluster,
 	}
-	parentTask.SetState(taskDone)
-	parentTask.SetResultInfo(nil)
-	parentTask.AddChildTask(loadSegmentTask)
-	loadSegmentTask.SetParentTask(parentTask)
+	parentTask.setState(taskDone)
+	parentTask.setResultInfo(nil)
+	parentTask.addChildTask(loadSegmentTask)
+	loadSegmentTask.setParentTask(parentTask)
 
 	queryCoord.meta.addCollection(defaultCollectionID, schema)
 	return loadSegmentTask
@@ -220,7 +220,7 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 
 func waitTaskFinalState(t task, state taskState) {
 	for {
-		if t.State() == state {
+		if t.getState() == state {
 			break
 		}
 	}
@@ -291,7 +291,7 @@ func Test_LoadCollectionAfterLoadPartition(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(releaseCollectionTask)
 	assert.Nil(t, err)
 
-	err = releaseCollectionTask.WaitToFinish()
+	err = releaseCollectionTask.waitToFinish()
 	assert.Nil(t, err)
 
 	node.stop()
@@ -323,7 +323,7 @@ func Test_RepeatLoadCollection(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(releaseCollectionTask)
 	assert.Nil(t, err)
 
-	err = releaseCollectionTask.WaitToFinish()
+	err = releaseCollectionTask.waitToFinish()
 	assert.Nil(t, err)
 
 	node.stop()
@@ -342,7 +342,7 @@ func Test_LoadCollectionAssignTaskFail(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 
-	err = loadCollectionTask.WaitToFinish()
+	err = loadCollectionTask.waitToFinish()
 	assert.NotNil(t, err)
 
 	queryCoord.Stop()
@@ -384,7 +384,7 @@ func Test_LoadPartitionAssignTaskFail(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(loadPartitionTask)
 	assert.Nil(t, err)
 
-	err = loadPartitionTask.WaitToFinish()
+	err = loadPartitionTask.waitToFinish()
 	assert.NotNil(t, err)
 
 	queryCoord.Stop()

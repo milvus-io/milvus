@@ -17,8 +17,8 @@ import (
 )
 
 type Condition interface {
-	WaitToFinish() error
-	Notify(err error)
+	waitToFinish() error
+	notify(err error)
 	Ctx() context.Context
 }
 
@@ -27,7 +27,7 @@ type TaskCondition struct {
 	ctx  context.Context
 }
 
-func (tc *TaskCondition) WaitToFinish() error {
+func (tc *TaskCondition) waitToFinish() error {
 	for {
 		select {
 		case <-tc.ctx.Done():
@@ -38,7 +38,7 @@ func (tc *TaskCondition) WaitToFinish() error {
 	}
 }
 
-func (tc *TaskCondition) Notify(err error) {
+func (tc *TaskCondition) notify(err error) {
 	tc.done <- err
 }
 

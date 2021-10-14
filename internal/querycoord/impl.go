@@ -157,7 +157,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		return status, err
 	}
 
-	err = loadCollectionTask.WaitToFinish()
+	err = loadCollectionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -205,7 +205,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		return status, err
 	}
 
-	err = releaseCollectionTask.WaitToFinish()
+	err = releaseCollectionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -348,7 +348,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		return status, err
 	}
 
-	err = loadPartitionTask.WaitToFinish()
+	err = loadPartitionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -417,7 +417,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		return status, err
 	}
 
-	err = releasePartitionTask.WaitToFinish()
+	err = releasePartitionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()

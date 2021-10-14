@@ -71,7 +71,7 @@ func (queue *TaskQueue) addTask(t task) {
 	}
 
 	for e := queue.tasks.Back(); e != nil; e = e.Prev() {
-		if t.TaskPriority() > e.Value.(task).TaskPriority() {
+		if t.taskPriority() > e.Value.(task).taskPriority() {
 			if e.Prev() == nil {
 				queue.taskChan <- 1
 				queue.tasks.InsertBefore(t, e)
@@ -233,18 +233,18 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 			log.Error("reloadFromKV: taskStateInfo and triggerTaskInfo are inconsistent")
 			continue
 		}
-		triggerTasks[taskID].SetState(state)
+		triggerTasks[taskID].setState(state)
 	}
 
 	var doneTriggerTask task = nil
 	for _, t := range triggerTasks {
-		if t.State() == taskDone {
+		if t.getState() == taskDone {
 			doneTriggerTask = t
 			for _, childTask := range activeTasks {
-				childTask.SetParentTask(t) //replace child task after reScheduler
-				t.AddChildTask(childTask)
+				childTask.setParentTask(t) //replace child task after reScheduler
+				t.addChildTask(childTask)
 			}
-			t.SetResultInfo(nil)
+			t.setResultInfo(nil)
 			continue
 		}
 		scheduler.triggerTaskQueue.addTask(t)
@@ -399,7 +399,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		return nil, err
 	}
 
-	newTask.SetID(taskID)
+	newTask.setTaskID(taskID)
 	return newTask, nil
 }
 
@@ -410,26 +410,26 @@ func (scheduler *TaskScheduler) Enqueue(t task) error {
 		log.Error("allocator trigger taskID failed", zap.Error(err))
 		return err
 	}
-	t.SetID(id)
+	t.setTaskID(id)
 	kvs := make(map[string]string)
-	taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
-	blobs, err := t.Marshal()
+	taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.getTaskID())
+	blobs, err := t.marshal()
 	if err != nil {
-		log.Error("error when save marshal task", zap.Int64("taskID", t.ID()), zap.Error(err))
+		log.Error("error when save marshal task", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
 		return err
 	}
 	kvs[taskKey] = string(blobs)
-	stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+	stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 	kvs[stateKey] = strconv.Itoa(int(taskUndo))
 	err = scheduler.client.MultiSave(kvs)
 	if err != nil {
 		//TODO::clean etcd meta
-		log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.ID()), zap.Error(err))
+		log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
 		return err
 	}
-	t.SetState(taskUndo)
+	t.setState(taskUndo)
 	scheduler.triggerTaskQueue.addTask(t)
-	log.Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.ID()))
+	log.Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.getTaskID()))
 
 	return nil
 }
@@ -440,19 +440,19 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	updateKVFn := func(parentTask task) error {
 		kvs := make(map[string]string)
 		kvs[taskInfoKey] = strconv.Itoa(int(taskDone))
-		for _, childTask := range parentTask.GetChildTask() {
+		for _, childTask := range parentTask.getChildTask() {
 			id, err := scheduler.taskIDAllocator()
 			if err != nil {
 				return err
 			}
-			childTask.SetID(id)
-			childTaskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, childTask.ID())
-			blobs, err := childTask.Marshal()
+			childTask.setTaskID(id)
+			childTaskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, childTask.getTaskID())
+			blobs, err := childTask.marshal()
 			if err != nil {
 				return err
 			}
 			kvs[childTaskKey] = string(blobs)
-			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, childTask.ID())
+			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, childTask.getTaskID())
 			kvs[stateKey] = strconv.Itoa(int(taskUndo))
 		}
 		err := scheduler.client.MultiSave(kvs)
@@ -462,35 +462,35 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		return nil
 	}
 
-	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
+	span, ctx := trace.StartSpanFromContext(t.traceCtx(),
 		opentracing.Tags{
-			"Type": t.Type(),
-			"ID":   t.ID(),
+			"Type": t.msgType(),
+			"ID":   t.getTaskID(),
 		})
 	var err error
 	defer span.Finish()
 
 	defer func() {
 		//task postExecute
-		span.LogFields(oplog.Int64("processTask: scheduler process PostExecute", t.ID()))
-		t.PostExecute(ctx)
+		span.LogFields(oplog.Int64("processTask: scheduler process PostExecute", t.getTaskID()))
+		t.postExecute(ctx)
 	}()
 
 	// task preExecute
-	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.ID()))
-	t.PreExecute(ctx)
-	taskInfoKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.getTaskID()))
+	t.preExecute(ctx)
+	taskInfoKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 	err = scheduler.client.Save(taskInfoKey, strconv.Itoa(int(taskDoing)))
 	if err != nil {
 		trace.LogError(span, err)
-		t.SetResultInfo(err)
+		t.setResultInfo(err)
 		return err
 	}
-	t.SetState(taskDoing)
+	t.setState(taskDoing)
 
 	// task execute
-	span.LogFields(oplog.Int64("processTask: scheduler process Execute", t.ID()))
-	err = t.Execute(ctx)
+	span.LogFields(oplog.Int64("processTask: scheduler process Execute", t.getTaskID()))
+	err = t.execute(ctx)
 	if err != nil {
 		trace.LogError(span, err)
 		return err
@@ -498,16 +498,16 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	err = updateKVFn(t)
 	if err != nil {
 		trace.LogError(span, err)
-		t.SetResultInfo(err)
+		t.setResultInfo(err)
 		return err
 	}
-	log.Debug("processTask: update etcd success", zap.Int64("parent taskID", t.ID()))
-	if t.Type() == commonpb.MsgType_LoadCollection || t.Type() == commonpb.MsgType_LoadPartitions {
-		t.Notify(nil)
+	log.Debug("processTask: update etcd success", zap.Int64("parent taskID", t.getTaskID()))
+	if t.msgType() == commonpb.MsgType_LoadCollection || t.msgType() == commonpb.MsgType_LoadPartitions {
+		t.notify(nil)
 	}
 
-	t.SetState(taskDone)
-	t.UpdateTaskProcess()
+	t.setState(taskDone)
+	t.updateTaskProcess()
 
 	return nil
 }
@@ -521,7 +521,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 		log.Debug("scheduleLoop: num of child task", zap.Int("num child task", len(activateTasks)))
 		for _, childTask := range activateTasks {
 			if childTask != nil {
-				log.Debug("scheduleLoop: add a activate task to activateChan", zap.Int64("taskID", childTask.ID()))
+				log.Debug("scheduleLoop: add a activate task to activateChan", zap.Int64("taskID", childTask.getTaskID()))
 				scheduler.activateTaskChan <- childTask
 				activeTaskWg.Add(1)
 				go scheduler.waitActivateTaskDone(activeTaskWg, childTask, triggerTask)
@@ -535,10 +535,10 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 		removes := make([]string, 0)
 		childTaskIDs := make([]int64, 0)
 		for _, t := range originInternalTasks {
-			childTaskIDs = append(childTaskIDs, t.ID())
-			taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
+			childTaskIDs = append(childTaskIDs, t.getTaskID())
+			taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.getTaskID())
 			removes = append(removes, taskKey)
-			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 			removes = append(removes, stateKey)
 		}
 
@@ -547,14 +547,14 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			if err != nil {
 				return err
 			}
-			t.SetID(id)
-			taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
-			blobs, err := t.Marshal()
+			t.setTaskID(id)
+			taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.getTaskID())
+			blobs, err := t.marshal()
 			if err != nil {
 				return err
 			}
 			saves[taskKey] = string(blobs)
-			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 			saves[stateKey] = strconv.Itoa(int(taskUndo))
 		}
 
@@ -563,10 +563,10 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			return err
 		}
 		for _, taskID := range childTaskIDs {
-			triggerTask.RemoveChildTaskByID(taskID)
+			triggerTask.removeChildTaskByID(taskID)
 		}
 		for _, t := range rollBackTasks {
-			triggerTask.AddChildTask(t)
+			triggerTask.addChildTask(t)
 		}
 
 		return nil
@@ -574,14 +574,14 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 
 	removeTaskFromKVFn := func(triggerTask task) error {
 		keys := make([]string, 0)
-		taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, triggerTask.ID())
-		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, triggerTask.ID())
+		taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, triggerTask.getTaskID())
+		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, triggerTask.getTaskID())
 		keys = append(keys, taskKey)
 		keys = append(keys, stateKey)
-		childTasks := triggerTask.GetChildTask()
+		childTasks := triggerTask.getChildTask()
 		for _, t := range childTasks {
-			taskKey = fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
-			stateKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+			taskKey = fmt.Sprintf("%s/%d", activeTaskPrefix, t.getTaskID())
+			stateKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 			keys = append(keys, taskKey)
 			keys = append(keys, stateKey)
 		}
@@ -600,36 +600,36 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			return
 		case <-scheduler.triggerTaskQueue.Chan():
 			triggerTask = scheduler.triggerTaskQueue.PopTask()
-			log.Debug("scheduleLoop: pop a triggerTask from triggerTaskQueue", zap.Int64("triggerTaskID", triggerTask.ID()))
+			log.Debug("scheduleLoop: pop a triggerTask from triggerTaskQueue", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
 			alreadyNotify := true
-			if triggerTask.State() == taskUndo || triggerTask.State() == taskDoing {
+			if triggerTask.getState() == taskUndo || triggerTask.getState() == taskDoing {
 				err = scheduler.processTask(triggerTask)
 				if err != nil {
-					log.Debug("scheduleLoop: process triggerTask failed", zap.Int64("triggerTaskID", triggerTask.ID()), zap.Error(err))
+					log.Debug("scheduleLoop: process triggerTask failed", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
 					alreadyNotify = false
 				}
 			}
-			if triggerTask.Type() != commonpb.MsgType_LoadCollection && triggerTask.Type() != commonpb.MsgType_LoadPartitions {
+			if triggerTask.msgType() != commonpb.MsgType_LoadCollection && triggerTask.msgType() != commonpb.MsgType_LoadPartitions {
 				alreadyNotify = false
 			}
 
-			childTasks := triggerTask.GetChildTask()
+			childTasks := triggerTask.getChildTask()
 			if len(childTasks) != 0 {
 				activateTasks := make([]task, len(childTasks))
 				copy(activateTasks, childTasks)
 				processInternalTaskFn(activateTasks, triggerTask)
-				resultStatus := triggerTask.GetResultInfo()
+				resultStatus := triggerTask.getResultInfo()
 				if resultStatus.ErrorCode != commonpb.ErrorCode_Success {
-					rollBackTasks := triggerTask.RollBack(scheduler.ctx)
+					rollBackTasks := triggerTask.rollBack(scheduler.ctx)
 					log.Debug("scheduleLoop: start rollBack after triggerTask failed",
-						zap.Int64("triggerTaskID", triggerTask.ID()),
+						zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 						zap.Any("rollBackTasks", rollBackTasks))
 					err = rollBackInterTaskFn(triggerTask, childTasks, rollBackTasks)
 					if err != nil {
 						log.Error("scheduleLoop: rollBackInternalTask error",
-							zap.Int64("triggerTaskID", triggerTask.ID()),
+							zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 							zap.Error(err))
-						triggerTask.SetResultInfo(err)
+						triggerTask.setResultInfo(err)
 					} else {
 						processInternalTaskFn(rollBackTasks, triggerTask)
 					}
@@ -638,23 +638,23 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 
 			err = removeTaskFromKVFn(triggerTask)
 			if err != nil {
-				log.Error("scheduleLoop: error when remove trigger and internal tasks from etcd", zap.Int64("triggerTaskID", triggerTask.ID()), zap.Error(err))
-				triggerTask.SetResultInfo(err)
+				log.Error("scheduleLoop: error when remove trigger and internal tasks from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
+				triggerTask.setResultInfo(err)
 			} else {
-				log.Debug("scheduleLoop: trigger task done and delete from etcd", zap.Int64("triggerTaskID", triggerTask.ID()))
+				log.Debug("scheduleLoop: trigger task done and delete from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
 			}
 
-			resultStatus := triggerTask.GetResultInfo()
+			resultStatus := triggerTask.getResultInfo()
 			if resultStatus.ErrorCode != commonpb.ErrorCode_Success {
-				triggerTask.SetState(taskFailed)
+				triggerTask.setState(taskFailed)
 				if !alreadyNotify {
-					triggerTask.Notify(errors.New(resultStatus.Reason))
+					triggerTask.notify(errors.New(resultStatus.Reason))
 				}
 			} else {
-				triggerTask.UpdateTaskProcess()
-				triggerTask.SetState(taskExpired)
+				triggerTask.updateTaskProcess()
+				triggerTask.setState(taskExpired)
 				if !alreadyNotify {
-					triggerTask.Notify(nil)
+					triggerTask.notify(nil)
 				}
 			}
 		}
@@ -665,23 +665,23 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 	defer wg.Done()
 	var err error
 	redoFunc1 := func() {
-		if !t.IsValid() || !t.IsRetryable() {
+		if !t.isValid() || !t.isRetryable() {
 			log.Debug("waitActivateTaskDone: reSchedule the activate task",
-				zap.Int64("taskID", t.ID()),
-				zap.Int64("triggerTaskID", triggerTask.ID()))
-			reScheduledTasks, err := t.Reschedule(scheduler.ctx)
+				zap.Int64("taskID", t.getTaskID()),
+				zap.Int64("triggerTaskID", triggerTask.getTaskID()))
+			reScheduledTasks, err := t.reschedule(scheduler.ctx)
 			if err != nil {
 				log.Error("waitActivateTaskDone: reschedule task error",
-					zap.Int64("taskID", t.ID()),
-					zap.Int64("triggerTaskID", triggerTask.ID()),
+					zap.Int64("taskID", t.getTaskID()),
+					zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 					zap.Error(err))
-				triggerTask.SetResultInfo(err)
+				triggerTask.setResultInfo(err)
 				return
 			}
 			removes := make([]string, 0)
-			taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
+			taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.getTaskID())
 			removes = append(removes, taskKey)
-			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 			removes = append(removes, stateKey)
 
 			saves := make(map[string]string)
@@ -690,44 +690,44 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 					id, err := scheduler.taskIDAllocator()
 					if err != nil {
 						log.Error("waitActivateTaskDone: allocate id error",
-							zap.Int64("triggerTaskID", triggerTask.ID()),
+							zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 							zap.Error(err))
-						triggerTask.SetResultInfo(err)
+						triggerTask.setResultInfo(err)
 						return
 					}
-					rt.SetID(id)
-					log.Debug("waitActivateTaskDone: reScheduler set id", zap.Int64("id", rt.ID()))
-					taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, rt.ID())
-					blobs, err := rt.Marshal()
+					rt.setTaskID(id)
+					log.Debug("waitActivateTaskDone: reScheduler set id", zap.Int64("id", rt.getTaskID()))
+					taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, rt.getTaskID())
+					blobs, err := rt.marshal()
 					if err != nil {
 						log.Error("waitActivateTaskDone: error when marshal active task",
-							zap.Int64("triggerTaskID", triggerTask.ID()),
+							zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 							zap.Error(err))
-						triggerTask.SetResultInfo(err)
+						triggerTask.setResultInfo(err)
 						return
 					}
 					saves[taskKey] = string(blobs)
-					stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, rt.ID())
+					stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, rt.getTaskID())
 					saves[stateKey] = strconv.Itoa(int(taskUndo))
 				}
 			}
 			//TODO::queryNode auto watch queryChannel, then update etcd use same id directly
 			err = scheduler.client.MultiSaveAndRemove(saves, removes)
 			if err != nil {
-				log.Error("waitActivateTaskDone: error when save and remove task from etcd", zap.Int64("triggerTaskID", triggerTask.ID()))
-				triggerTask.SetResultInfo(err)
+				log.Error("waitActivateTaskDone: error when save and remove task from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
+				triggerTask.setResultInfo(err)
 				return
 			}
-			triggerTask.RemoveChildTaskByID(t.ID())
+			triggerTask.removeChildTaskByID(t.getTaskID())
 			log.Debug("waitActivateTaskDone: delete failed active task and save reScheduled task to etcd",
-				zap.Int64("triggerTaskID", triggerTask.ID()),
-				zap.Int64("failed taskID", t.ID()),
+				zap.Int64("triggerTaskID", triggerTask.getTaskID()),
+				zap.Int64("failed taskID", t.getTaskID()),
 				zap.Any("reScheduled tasks", reScheduledTasks))
 
 			for _, rt := range reScheduledTasks {
 				if rt != nil {
-					triggerTask.AddChildTask(rt)
-					log.Debug("waitActivateTaskDone: add a reScheduled active task to activateChan", zap.Int64("taskID", rt.ID()))
+					triggerTask.addChildTask(rt)
+					log.Debug("waitActivateTaskDone: add a reScheduled active task to activateChan", zap.Int64("taskID", rt.getTaskID()))
 					scheduler.activateTaskChan <- rt
 					wg.Add(1)
 					go scheduler.waitActivateTaskDone(wg, rt, triggerTask)
@@ -736,8 +736,8 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 			//delete task from etcd
 		} else {
 			log.Debug("waitActivateTaskDone: retry the active task",
-				zap.Int64("taskID", t.ID()),
-				zap.Int64("triggerTaskID", triggerTask.ID()))
+				zap.Int64("taskID", t.getTaskID()),
+				zap.Int64("triggerTaskID", triggerTask.getTaskID()))
 			scheduler.activateTaskChan <- t
 			wg.Add(1)
 			go scheduler.waitActivateTaskDone(wg, t, triggerTask)
@@ -745,30 +745,30 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 	}
 
 	redoFunc2 := func(err error) {
-		if t.IsValid() {
-			if !t.IsRetryable() {
+		if t.isValid() {
+			if !t.isRetryable() {
 				log.Error("waitActivateTaskDone: activate task failed after retry",
-					zap.Int64("taskID", t.ID()),
-					zap.Int64("triggerTaskID", triggerTask.ID()))
-				triggerTask.SetResultInfo(err)
+					zap.Int64("taskID", t.getTaskID()),
+					zap.Int64("triggerTaskID", triggerTask.getTaskID()))
+				triggerTask.setResultInfo(err)
 				return
 			}
 			log.Debug("waitActivateTaskDone: retry the active task",
-				zap.Int64("taskID", t.ID()),
-				zap.Int64("triggerTaskID", triggerTask.ID()))
+				zap.Int64("taskID", t.getTaskID()),
+				zap.Int64("triggerTaskID", triggerTask.getTaskID()))
 			scheduler.activateTaskChan <- t
 			wg.Add(1)
 			go scheduler.waitActivateTaskDone(wg, t, triggerTask)
 		}
 	}
-	err = t.WaitToFinish()
+	err = t.waitToFinish()
 	if err != nil {
 		log.Debug("waitActivateTaskDone: activate task return err",
-			zap.Int64("taskID", t.ID()),
-			zap.Int64("triggerTaskID", triggerTask.ID()),
+			zap.Int64("taskID", t.getTaskID()),
+			zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 			zap.Error(err))
 
-		switch t.Type() {
+		switch t.msgType() {
 		case commonpb.MsgType_LoadSegments:
 			redoFunc1()
 		case commonpb.MsgType_WatchDmChannels:
@@ -786,8 +786,8 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 		}
 	} else {
 		log.Debug("waitActivateTaskDone: one activate task done",
-			zap.Int64("taskID", t.ID()),
-			zap.Int64("triggerTaskID", triggerTask.ID()))
+			zap.Int64("taskID", t.getTaskID()),
+			zap.Int64("triggerTaskID", triggerTask.getTaskID()))
 	}
 }
 
@@ -801,14 +801,14 @@ func (scheduler *TaskScheduler) processActivateTaskLoop() {
 
 		case t := <-scheduler.activateTaskChan:
 			if t == nil {
-				log.Error("processActivateTaskLoop: pop a nil active task", zap.Int64("taskID", t.ID()))
+				log.Error("processActivateTaskLoop: pop a nil active task", zap.Int64("taskID", t.getTaskID()))
 				continue
 			}
 
-			log.Debug("processActivateTaskLoop: pop a active task from activateChan", zap.Int64("taskID", t.ID()))
+			log.Debug("processActivateTaskLoop: pop a active task from activateChan", zap.Int64("taskID", t.getTaskID()))
 			go func() {
 				err := scheduler.processTask(t)
-				t.Notify(err)
+				t.notify(err)
 			}()
 		}
 	}

@@ -32,29 +32,29 @@ type testTask struct {
 	nodeID  int64
 }
 
-func (tt *testTask) MsgBase() *commonpb.MsgBase {
+func (tt *testTask) msgBase() *commonpb.MsgBase {
 	return tt.baseMsg
 }
 
-func (tt *testTask) Marshal() ([]byte, error) {
+func (tt *testTask) marshal() ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (tt *testTask) Type() commonpb.MsgType {
+func (tt *testTask) msgType() commonpb.MsgType {
 	return tt.baseMsg.MsgType
 }
 
-func (tt *testTask) Timestamp() Timestamp {
+func (tt *testTask) timestamp() Timestamp {
 	return tt.baseMsg.Timestamp
 }
 
-func (tt *testTask) PreExecute(ctx context.Context) error {
-	tt.SetResultInfo(nil)
+func (tt *testTask) preExecute(ctx context.Context) error {
+	tt.setResultInfo(nil)
 	log.Debug("test task preExecute...")
 	return nil
 }
 
-func (tt *testTask) Execute(ctx context.Context) error {
+func (tt *testTask) execute(ctx context.Context) error {
 	log.Debug("test task execute...")
 
 	switch tt.baseMsg.MsgType {
@@ -75,7 +75,7 @@ func (tt *testTask) Execute(ctx context.Context) error {
 			cluster:        tt.cluster,
 			excludeNodeIDs: []int64{},
 		}
-		tt.AddChildTask(childTask)
+		tt.addChildTask(childTask)
 	case commonpb.MsgType_WatchDmChannels:
 		childTask := &WatchDmChannelTask{
 			BaseTask: &BaseTask{
@@ -93,7 +93,7 @@ func (tt *testTask) Execute(ctx context.Context) error {
 			meta:           tt.meta,
 			excludeNodeIDs: []int64{},
 		}
-		tt.AddChildTask(childTask)
+		tt.addChildTask(childTask)
 	case commonpb.MsgType_WatchQueryChannels:
 		childTask := &WatchQueryChannelTask{
 			BaseTask: &BaseTask{
@@ -109,13 +109,13 @@ func (tt *testTask) Execute(ctx context.Context) error {
 			},
 			cluster: tt.cluster,
 		}
-		tt.AddChildTask(childTask)
+		tt.addChildTask(childTask)
 	}
 
 	return nil
 }
 
-func (tt *testTask) PostExecute(ctx context.Context) error {
+func (tt *testTask) postExecute(ctx context.Context) error {
 	log.Debug("test task postExecute...")
 	return nil
 }
@@ -181,7 +181,7 @@ func TestUnMarshalTask(t *testing.T) {
 				},
 			},
 		}
-		blobs, err := loadTask.Marshal()
+		blobs, err := loadTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalLoadCollection", string(blobs))
 		assert.Nil(t, err)
@@ -191,7 +191,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1000, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_LoadCollection)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadCollection)
 	})
 
 	t.Run("Test LoadPartitionsTask", func(t *testing.T) {
@@ -202,7 +202,7 @@ func TestUnMarshalTask(t *testing.T) {
 				},
 			},
 		}
-		blobs, err := loadTask.Marshal()
+		blobs, err := loadTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalLoadPartition", string(blobs))
 		assert.Nil(t, err)
@@ -212,7 +212,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1001, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_LoadPartitions)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadPartitions)
 	})
 
 	t.Run("Test ReleaseCollectionTask", func(t *testing.T) {
@@ -223,7 +223,7 @@ func TestUnMarshalTask(t *testing.T) {
 				},
 			},
 		}
-		blobs, err := releaseTask.Marshal()
+		blobs, err := releaseTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalReleaseCollection", string(blobs))
 		assert.Nil(t, err)
@@ -233,7 +233,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1002, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_ReleaseCollection)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_ReleaseCollection)
 	})
 
 	t.Run("Test ReleasePartitionTask", func(t *testing.T) {
@@ -244,7 +244,7 @@ func TestUnMarshalTask(t *testing.T) {
 				},
 			},
 		}
-		blobs, err := releaseTask.Marshal()
+		blobs, err := releaseTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalReleasePartition", string(blobs))
 		assert.Nil(t, err)
@@ -254,7 +254,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1003, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_ReleasePartitions)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_ReleasePartitions)
 	})
 
 	t.Run("Test LoadSegmentTask", func(t *testing.T) {
@@ -265,7 +265,7 @@ func TestUnMarshalTask(t *testing.T) {
 				},
 			},
 		}
-		blobs, err := loadTask.Marshal()
+		blobs, err := loadTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalLoadSegment", string(blobs))
 		assert.Nil(t, err)
@@ -275,7 +275,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1004, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_LoadSegments)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadSegments)
 	})
 
 	t.Run("Test ReleaseSegmentTask", func(t *testing.T) {
@@ -286,7 +286,7 @@ func TestUnMarshalTask(t *testing.T) {
 				},
 			},
 		}
-		blobs, err := releaseTask.Marshal()
+		blobs, err := releaseTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalReleaseSegment", string(blobs))
 		assert.Nil(t, err)
@@ -296,7 +296,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1005, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_ReleaseSegments)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_ReleaseSegments)
 	})
 
 	t.Run("Test WatchDmChannelTask", func(t *testing.T) {
@@ -307,7 +307,7 @@ func TestUnMarshalTask(t *testing.T) {
 				},
 			},
 		}
-		blobs, err := watchTask.Marshal()
+		blobs, err := watchTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalWatchDmChannel", string(blobs))
 		assert.Nil(t, err)
@@ -317,7 +317,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1006, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_WatchDmChannels)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchDmChannels)
 	})
 
 	t.Run("Test WatchQueryChannelTask", func(t *testing.T) {
@@ -328,7 +328,7 @@ func TestUnMarshalTask(t *testing.T) {
 				},
 			},
 		}
-		blobs, err := watchTask.Marshal()
+		blobs, err := watchTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalWatchQueryChannel", string(blobs))
 		assert.Nil(t, err)
@@ -338,7 +338,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1007, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_WatchQueryChannels)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchQueryChannels)
 	})
 
 	t.Run("Test LoadBalanceTask", func(t *testing.T) {
@@ -350,7 +350,7 @@ func TestUnMarshalTask(t *testing.T) {
 			},
 		}
 
-		blobs, err := loadBalanceTask.Marshal()
+		blobs, err := loadBalanceTask.marshal()
 		assert.Nil(t, err)
 		err = kv.Save("testMarshalLoadBalanceTask", string(blobs))
 		assert.Nil(t, err)
@@ -360,7 +360,7 @@ func TestUnMarshalTask(t *testing.T) {
 
 		task, err := taskScheduler.unmarshalTask(1008, value)
 		assert.Nil(t, err)
-		assert.Equal(t, task.Type(), commonpb.MsgType_LoadBalanceSegments)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadBalanceSegments)
 	})
 
 	taskScheduler.Close()
@@ -387,7 +387,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 			},
 		},
 	}
-	triggerBlobs, err := triggerTask.Marshal()
+	triggerBlobs, err := triggerTask.marshal()
 	assert.Nil(t, err)
 	triggerTaskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, 100)
 	kvs[triggerTaskKey] = string(triggerBlobs)
@@ -400,7 +400,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 			},
 		},
 	}
-	activeBlobs, err := activeTask.Marshal()
+	activeBlobs, err := activeTask.marshal()
 	assert.Nil(t, err)
 	activeTaskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, 101)
 	kvs[activeTaskKey] = string(activeBlobs)
@@ -413,6 +413,6 @@ func TestReloadTaskFromKV(t *testing.T) {
 	taskScheduler.reloadFromKV()
 
 	task := taskScheduler.triggerTaskQueue.PopTask()
-	assert.Equal(t, taskDone, task.State())
-	assert.Equal(t, 1, len(task.GetChildTask()))
+	assert.Equal(t, taskDone, task.getState())
+	assert.Equal(t, 1, len(task.getChildTask()))
 }
