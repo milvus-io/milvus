@@ -269,6 +269,7 @@ func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {
 	return s.querynode.SetIndexCoord(indexCoord)
 }
 
+// GetTimeTickChannel gets the time tick channel of QueryNode.
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.querynode.GetTimeTickChannel(ctx)
 }
