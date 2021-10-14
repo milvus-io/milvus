@@ -1,12 +1,15 @@
 import threading
 import logging
+import time
 from multiprocessing import Pool, Process
 import pytest
-from utils.utils import *
+from utils import utils as ut
 from common.constants import default_entities, default_fields
 from common.common_type import CaseLabel
 
 TIMEOUT = 120
+default_nb = ut.default_nb
+default_tag = ut.default_tag
 
 
 class TestCreateBase:
@@ -39,18 +42,18 @@ class TestCreateBase:
             pytest.skip("skip in http mode")
 
         def create(connect, threads_num):
-            for i in range(max_partition_num // threads_num):
-                tag_tmp = gen_unique_str()
+            for i in range(ut.max_partition_num // threads_num):
+                tag_tmp = ut.gen_unique_str()
                 connect.create_partition(collection, tag_tmp)
 
         for i in range(threads_num):
-            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
+            m = ut.get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             t = threading.Thread(target=create, args=(m, threads_num))
             threads.append(t)
             t.start()
         for t in threads:
             t.join()
-        tag_tmp = gen_unique_str()
+        tag_tmp = ut.gen_unique_str()
         with pytest.raises(Exception) as e:
             connect.create_partition(collection, tag_tmp)
 
@@ -69,7 +72,7 @@ class TestCreateBase:
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "create partition failed: partition name = %s already exists" % default_tag
-        assert compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
+        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_collection_not_existed(self, connect):
@@ -78,7 +81,7 @@ class TestCreateBase:
         method: create a partition with a non_existing collection
         expected: raise an exception
         """
-        collection_name = gen_unique_str()
+        collection_name = ut.gen_unique_str()
         try:
             connect.create_partition(collection_name, default_tag)
         except Exception as e:
@@ -108,9 +111,9 @@ class TestCreateBase:
         expected: status ok
         """
         connect.create_partition(collection, default_tag)
-        tag_name = gen_unique_str()
+        tag_name = ut.gen_unique_str()
         connect.create_partition(collection, tag_name)
-        assert compare_list_elements(connect.list_partitions(collection), [default_tag, tag_name, '_default'])
+        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, tag_name, '_default'])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_default(self, connect, id_collection):
@@ -182,7 +185,7 @@ class TestCreateBase:
         expected: status ok, collection length is correct
         """
         connect.create_partition(collection, default_tag)
-        collection_new = gen_unique_str()
+        collection_new = ut.gen_unique_str()
         connect.create_collection(collection_new, default_fields)
         connect.create_partition(collection_new, default_tag)
         result = connect.insert(collection, default_entities, partition_name=default_tag)
@@ -211,7 +214,7 @@ class TestShowBase:
         expected: status ok, partition correct
         """
         connect.create_partition(collection, default_tag)
-        assert compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
+        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_list_partitions_no_partition(self, connect, collection):
@@ -221,7 +224,7 @@ class TestShowBase:
         expected: status ok, partitions correct
         """
         res = connect.list_partitions(collection)
-        assert compare_list_elements(res, ['_default'])
+        assert ut.compare_list_elements(res, ['_default'])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_show_multi_partitions(self, connect, collection):
@@ -230,11 +233,11 @@ class TestShowBase:
         method: create partitions first, then call function: list_partitions
         expected: status ok, partitions correct
         """
-        tag_new = gen_unique_str()
+        tag_new = ut.gen_unique_str()
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
         res = connect.list_partitions(collection)
-        assert compare_list_elements(res, [default_tag, tag_new, '_default'])
+        assert ut.compare_list_elements(res, [default_tag, tag_new, '_default'])
 
 
 class TestHasBase:
@@ -246,7 +249,7 @@ class TestHasBase:
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strs()
+        params=ut.gen_invalid_strs()
     )
     def get_tag_name(self, request):
         yield request.param
@@ -362,7 +365,7 @@ class TestDropBase:
         expected: status not ok
         """
         connect.create_partition(collection, default_tag)
-        new_collection = gen_unique_str()
+        new_collection = ut.gen_unique_str()
         try:
             connect.drop_partition(new_collection, default_tag)
         except Exception as e:
@@ -399,25 +402,25 @@ class TestDropBase:
         expected: status not ok, partition in db
         """
         connect.create_partition(collection, default_tag)
-        assert compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
+        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
         connect.drop_partition(collection, default_tag)
-        assert compare_list_elements(connect.list_partitions(collection), ['_default'])
+        assert ut.compare_list_elements(connect.list_partitions(collection), ['_default'])
         time.sleep(2)
         connect.create_partition(collection, default_tag)
-        assert compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
+        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
 
 
 class TestNameInvalid(object):
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strs()
+        params=ut.gen_invalid_strs()
     )
     def get_tag_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strs()
+        params=ut.gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
