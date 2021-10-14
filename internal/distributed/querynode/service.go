@@ -274,6 +274,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTime
 	return s.querynode.GetTimeTickChannel(ctx)
 }
 
+// GetStatisticsChannel gets the statistics channel of QueryNode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.querynode.GetStatisticsChannel(ctx)
 }
