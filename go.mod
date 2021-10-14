@@ -14,8 +14,6 @@ require (
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/go-basic/ipv4 v1.0.0
-	github.com/gogo/protobuf v1.3.2
-	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
@@ -49,6 +47,7 @@ require (
 	golang.org/x/tools v0.1.7 // indirect
 	google.golang.org/grpc v1.38.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
+	stathat.com/c/consistent v1.0.0
 )
 
 replace (

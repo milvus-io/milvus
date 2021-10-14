@@ -37,7 +37,7 @@ func (s *Server) getSystemInfoMetrics(
 	// TODO(dragondriver): add more detail metrics
 
 	// get datacoord info
-	nodes := s.cluster.GetNodes()
+	nodes := s.cluster.GetSessions()
 	clusterTopology := metricsinfo.DataClusterTopology{
 		Self:           s.getDataCoordMetrics(),
 		ConnectedNodes: make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
@@ -114,7 +114,7 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 
 // getDataNodeMetrics composes data node infos
 // this function will invoke GetMetrics with data node specified in NodeInfo
-func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *NodeInfo) (metricsinfo.DataNodeInfos, error) {
+func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *Session) (metricsinfo.DataNodeInfos, error) {
 	infos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HasError: true,
@@ -125,11 +125,12 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 		return infos, errors.New("datanode is nil")
 	}
 
-	if node.GetClient() == nil {
-		return infos, errors.New("datanode client is nil")
+	cli, err := node.GetOrCreateClient(ctx)
+	if err != nil {
+		return infos, err
 	}
 
-	metrics, err := node.GetClient().GetMetrics(ctx, req)
+	metrics, err := cli.GetMetrics(ctx, req)
 	if err != nil {
 		log.Warn("invalid metrics of data node was found",
 			zap.Error(err))

@@ -59,9 +59,10 @@ type ParamTable struct {
 	// Channel subscribition name -
 	MsgChannelSubName string
 
-	// ETCD
-	EtcdEndpoints []string
-	MetaRootPath  string
+	// --- ETCD ---
+	EtcdEndpoints       []string
+	MetaRootPath        string
+	ChannelWatchSubPath string
 
 	// MinIO
 
@@ -116,6 +117,7 @@ func (p *ParamTable) Init() {
 
 	p.initEtcdEndpoints()
 	p.initMetaRootPath()
+	p.initChannelWatchPath()
 
 	p.initMinioAddress()
 	p.initMinioAccessKeyID()
@@ -234,6 +236,11 @@ func (p *ParamTable) initMetaRootPath() {
 	p.MetaRootPath = path.Join(rootPath, subPath)
 }
 
+func (p *ParamTable) initChannelWatchPath() {
+	p.ChannelWatchSubPath = "channelwatch"
+}
+
+// --- MinIO ---
 func (p *ParamTable) initMinioAddress() {
 	endpoint, err := p.Load("_MinioAddress")
 	if err != nil {

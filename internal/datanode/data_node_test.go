@@ -527,19 +527,18 @@ func TestWatchChannel(t *testing.T) {
 	defer cancel()
 
 	t.Run("test watch channel", func(t *testing.T) {
-
 		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		require.NoError(t, err)
 		oldInvalidCh := "datanode-etcd-test-channel-invalid"
-		path := fmt.Sprintf("channel/%d/%s", node.NodeID, oldInvalidCh)
+		path := fmt.Sprintf("%s/%d/%s", Params.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))
 		assert.NoError(t, err)
 
 		ch := fmt.Sprintf("datanode-etcd-test-channel_%d", rand.Int31())
-		path = fmt.Sprintf("channel/%d/%s", node.NodeID, ch)
+		path = fmt.Sprintf("%s/%d/%s", Params.ChannelWatchSubPath, node.NodeID, ch)
 		c := make(chan struct{})
 		go func() {
-			ec := kv.WatchWithPrefix(fmt.Sprintf("channel/%d", node.NodeID))
+			ec := kv.WatchWithPrefix(fmt.Sprintf("%s/%d", Params.ChannelWatchSubPath, node.NodeID))
 			c <- struct{}{}
 			cnt := 0
 			for {
@@ -579,7 +578,7 @@ func TestWatchChannel(t *testing.T) {
 		node.chanMut.RUnlock()
 		assert.True(t, has)
 
-		err = kv.RemoveWithPrefix(fmt.Sprintf("channel/%d", node.NodeID))
+		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.ChannelWatchSubPath, node.NodeID))
 		assert.Nil(t, err)
 		//TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)

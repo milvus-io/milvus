@@ -56,6 +56,11 @@ func VerifyResponse(response interface{}, err error) error {
 	return nil
 }
 
+func FailResponse(status *commonpb.Status, reason string) {
+	status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+	status.Reason = reason
+}
+
 // LongTermChecker checks we receive at least one msg in d duration. If not, checker
 // will print a warn message.
 type LongTermChecker struct {

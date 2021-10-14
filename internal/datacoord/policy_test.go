@@ -1,171 +1,414 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
-// with the License. You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
-
 package datacoord
 
 import (
-	"context"
 	"testing"
+	"time"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/kv"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
+	"stathat.com/c/consistent"
 )
 
-func TestRandomReassign(t *testing.T) {
-	p := randomAssignRegisterFunc
-
-	clusters := make([]*NodeInfo, 0)
-	info1 := &datapb.DataNodeInfo{
-		Address:  "addr1",
-		Channels: make([]*datapb.ChannelStatus, 0, 10),
-	}
-	info2 := &datapb.DataNodeInfo{
-		Address:  "addr2",
-		Channels: make([]*datapb.ChannelStatus, 0, 10),
-	}
-	info3 := &datapb.DataNodeInfo{
-		Address:  "addr3",
-		Channels: make([]*datapb.ChannelStatus, 0, 10),
-	}
-
-	node1 := NewNodeInfo(context.TODO(), info1)
-	node2 := NewNodeInfo(context.TODO(), info2)
-	node3 := NewNodeInfo(context.TODO(), info3)
-	clusters = append(clusters, node1, node2, node3)
-
-	caseInfo1 := &datapb.DataNodeInfo{
-		Channels: []*datapb.ChannelStatus{},
-	}
-	caseInfo2 := &datapb.DataNodeInfo{
-		Channels: []*datapb.ChannelStatus{
-			{Name: "VChan1", CollectionID: 1},
-			{Name: "VChan2", CollectionID: 2},
-		},
-	}
-	cases := []*NodeInfo{
-		{Info: caseInfo1},
-		{Info: caseInfo2},
-		nil,
-	}
-
-	for _, ca := range cases {
-		nodes := p(clusters, ca)
-		if ca == nil || len(ca.Info.GetChannels()) == 0 {
-			assert.Equal(t, 0, len(nodes))
-		} else {
-			for _, ch := range ca.Info.GetChannels() {
-				found := false
-			loop:
-				for _, node := range nodes {
-					for _, nch := range node.Info.GetChannels() {
-						if nch.Name == ch.Name {
-							found = true
-							assert.EqualValues(t, datapb.ChannelWatchState_Uncomplete, nch.State)
-							break loop
-						}
-					}
-				}
-				assert.Equal(t, true, found)
+func fillEmptyPosition(operations ChannelOpSet) {
+	for _, op := range operations {
+		if op.Type == Add {
+			for range op.Channels {
+				op.ChannelWatchInfos = append(op.ChannelWatchInfos, nil)
 			}
 		}
 	}
 }
 
-func TestBalancedAssign(t *testing.T) {
-	clusters := make([]*NodeInfo, 0, 3)
-	info1 := &datapb.DataNodeInfo{
-		Address:  "addr1",
-		Channels: make([]*datapb.ChannelStatus, 0, 10),
-	}
-	info2 := &datapb.DataNodeInfo{
-		Address:  "addr2",
-		Channels: make([]*datapb.ChannelStatus, 0, 10),
-	}
-	info3 := &datapb.DataNodeInfo{
-		Address:  "addr3",
-		Channels: make([]*datapb.ChannelStatus, 0, 10),
+func TestBufferChannelAssignPolicy(t *testing.T) {
+	kv := memkv.NewMemoryKV()
+
+	channels := []*channel{{"chan1", 1}}
+	store := &ChannelStore{
+		store:        kv,
+		channelsInfo: map[int64]*NodeChannelInfo{bufferID: {bufferID, channels}},
 	}
 
-	node1 := NewNodeInfo(context.TODO(), info1)
-	node2 := NewNodeInfo(context.TODO(), info2)
-	node3 := NewNodeInfo(context.TODO(), info3)
-	clusters = append(clusters, node1, node2, node3)
+	updates := BufferChannelAssignPolicy(store, 1)
+	assert.NotNil(t, updates)
+	assert.Equal(t, 2, len(updates))
+	assert.EqualValues(t, &ChannelOp{Type: Delete, NodeID: bufferID, Channels: channels}, updates[0])
+	assert.EqualValues(t, 1, updates[1].NodeID)
+	assert.Equal(t, Add, updates[1].Type)
+	assert.Equal(t, channels, updates[1].Channels)
+}
 
-	emptyClusters := make([]*NodeInfo, 0)
-
-	type testCase struct {
-		cluster      []*NodeInfo
-		channel      string
-		collectionID UniqueID
-		validator    func(c testCase, result []*NodeInfo) bool
-	}
-	hits := make(map[string]struct{})
-	for _, info := range clusters {
-		hits[info.Info.Address] = struct{}{}
-	}
-
-	strategyValidator := func(c testCase, result []*NodeInfo) bool {
-		for _, info := range result {
-			for _, channel := range info.Info.Channels {
-				if channel.CollectionID == c.collectionID && channel.Name == c.channel {
-					if _, ok := hits[info.Info.Address]; !ok {
-						return false
-					}
-					delete(hits, info.Info.Address)
-					return true
-				}
-			}
+func TestConsistentHashRegisterPolicy(t *testing.T) {
+	t.Run("first register", func(t *testing.T) {
+		kv := memkv.NewMemoryKV()
+		channels := []*channel{
+			{"chan1", 1},
+			{"chan2", 2},
 		}
-		return false
-	}
+		store := &ChannelStore{
+			store:        kv,
+			channelsInfo: map[int64]*NodeChannelInfo{bufferID: {bufferID, channels}},
+		}
 
-	cases := []testCase{
+		hashring := consistent.New()
+		policy := ConsistentHashRegisterPolicy(hashring)
+
+		updates := policy(store, 1)
+		assert.NotNil(t, updates)
+		assert.Equal(t, 2, len(updates))
+		assert.EqualValues(t, &ChannelOp{Type: Delete, NodeID: bufferID, Channels: channels}, updates[0])
+		assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 1, Channels: channels}, updates[1])
+	})
+
+	t.Run("rebalance after register", func(t *testing.T) {
+		kv := memkv.NewMemoryKV()
+
+		channels := []*channel{
+			{"chan1", 1},
+			{"chan2", 2},
+		}
+
+		store := &ChannelStore{
+			store:        kv,
+			channelsInfo: map[int64]*NodeChannelInfo{1: {1, channels}, 2: {2, []*channel{}}},
+		}
+
+		hashring := consistent.New()
+		hashring.Add(formatNodeID(1))
+		policy := ConsistentHashRegisterPolicy(hashring)
+
+		updates := policy(store, 2)
+
+		// chan1 will be hash to 2, chan2 will be hash to 1
+		assert.NotNil(t, updates)
+		assert.Equal(t, 2, len(updates))
+		assert.EqualValues(t, &ChannelOp{Type: Delete, NodeID: 1, Channels: []*channel{channels[0]}}, updates[0])
+		assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 2, Channels: []*channel{channels[0]}}, updates[1])
+	})
+}
+
+func TestAverageAssignPolicy(t *testing.T) {
+	type args struct {
+		store    ROChannelStore
+		channels []*channel
+	}
+	tests := []struct {
+		name string
+		args args
+		want ChannelOpSet
+	}{
 		{
-			cluster:      emptyClusters,
-			channel:      "ch-01",
-			collectionID: 1,
-			validator: func(t testCase, result []*NodeInfo) bool {
-				return len(result) == 0
+			"test assign empty cluster",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{},
+				},
+				[]*channel{{"chan1", 1}},
 			},
+			[]*ChannelOp{{Add, bufferID, []*channel{{"chan1", 1}}, nil}},
 		},
 		{
-			cluster:      clusters,
-			channel:      "ch-01",
-			collectionID: 1,
-			validator:    strategyValidator,
+			"test watch same channel",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan1", 1}}},
+					},
+				},
+				[]*channel{{"chan1", 1}},
+			},
+			nil,
 		},
 		{
-			cluster:      clusters,
-			channel:      "ch-02",
-			collectionID: 1,
-			validator:    strategyValidator,
-		},
-		{
-			cluster:      clusters,
-			channel:      "ch-03",
-			collectionID: 1,
-			validator:    strategyValidator,
+			"test normal assign",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
+						2: {2, []*channel{{"chan3", 1}}},
+					},
+				},
+				[]*channel{{"chan4", 1}},
+			},
+			[]*ChannelOp{{Add, 2, []*channel{{"chan4", 1}}, nil}},
 		},
 	}
-	for _, c := range cases {
-		result := balancedAssignFunc(c.cluster, c.channel, c.collectionID)
-		if c.validator != nil {
-			assert.True(t, c.validator(c, result))
-		}
-		for _, info := range result {
-			for i, cluster := range clusters {
-				if cluster.Info.Address == info.Info.Address {
-					clusters[i] = info
-				}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AverageAssignPolicy(tt.args.store, tt.args.channels)
+			assert.EqualValues(t, tt.want, got)
+		})
+	}
+}
+
+func TestConsistentHashChannelAssignPolicy(t *testing.T) {
+	type args struct {
+		hashring *consistent.Consistent
+		store    ROChannelStore
+		channels []*channel
+	}
+	tests := []struct {
+		name string
+		args args
+		want ChannelOpSet
+	}{
+		{
+			"test assign empty cluster",
+			args{
+				consistent.New(),
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{},
+				},
+				[]*channel{{"chan1", 1}},
+			},
+			[]*ChannelOp{{Add, bufferID, []*channel{{"chan1", 1}}, nil}},
+		},
+		{
+			"test watch same channel",
+			args{
+				consistent.New(),
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
+					},
+				},
+				[]*channel{{"chan1", 1}},
+			},
+			nil,
+		},
+		{
+			"test normal watch",
+			args{
+				consistent.New(),
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{1: {1, nil}, 2: {2, nil}, 3: {3, nil}},
+				},
+				[]*channel{{"chan1", 1}, {"chan2", 1}, {"chan3", 1}},
+			},
+			[]*ChannelOp{{Add, 2, []*channel{{"chan1", 1}}, nil}, {Add, 1, []*channel{{"chan2", 1}}, nil}, {Add, 3, []*channel{{"chan3", 1}}, nil}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := ConsistentHashChannelAssignPolicy(tt.args.hashring)
+			got := policy(tt.args.store, tt.args.channels)
+			assert.Equal(t, len(tt.want), len(got))
+			for _, op := range tt.want {
+				assert.Contains(t, got, op)
 			}
+		})
+	}
+}
+
+func TestAvgAssignUnregisteredChannels(t *testing.T) {
+	type args struct {
+		store  ROChannelStore
+		nodeID int64
+	}
+	tests := []struct {
+		name string
+		args args
+		want ChannelOpSet
+	}{
+		{
+			"test deregister the last node",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan1", 1}}},
+					},
+				},
+				1,
+			},
+			[]*ChannelOp{{Delete, 1, []*channel{{"chan1", 1}}, nil}, {Add, bufferID, []*channel{{"chan1", 1}}, nil}},
+		},
+		{
+			"test rebalance channels after deregister",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan1", 1}}},
+						2: {2, []*channel{{"chan2", 1}}},
+						3: {3, []*channel{}},
+					},
+				},
+				2,
+			},
+			[]*ChannelOp{{Delete, 2, []*channel{{"chan2", 1}}, nil}, {Add, 3, []*channel{{"chan2", 1}}, nil}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AvgAssignUnregisteredChannels(tt.args.store, tt.args.nodeID)
+			assert.EqualValues(t, tt.want, got)
+		})
+	}
+}
+
+func TestConsistentHashDeregisterPolicy(t *testing.T) {
+	type args struct {
+		hashring *consistent.Consistent
+		store    ROChannelStore
+		nodeID   int64
+	}
+	tests := []struct {
+		name string
+		args args
+		want ChannelOpSet
+	}{
+		{
+			"test deregister the last node",
+			args{
+				consistent.New(),
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan1", 1}}},
+					},
+				},
+				1,
+			},
+			[]*ChannelOp{{Delete, 1, []*channel{{"chan1", 1}}, nil}, {Add, bufferID, []*channel{{"chan1", 1}}, nil}},
+		},
+		{
+			"rebalance after deregister",
+			args{
+				consistent.New(),
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan2", 1}}},
+						2: {2, []*channel{{"chan1", 1}}},
+						3: {3, []*channel{{"chan3", 1}}},
+					},
+				},
+				2,
+			},
+			[]*ChannelOp{{Delete, 2, []*channel{{"chan1", 1}}, nil}, {Add, 1, []*channel{{"chan1", 1}}, nil}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := ConsistentHashDeregisterPolicy(tt.args.hashring)
+			got := policy(tt.args.store, tt.args.nodeID)
+			assert.EqualValues(t, tt.want, got)
+		})
+	}
+}
+
+func TestAverageReassignPolicy(t *testing.T) {
+	type args struct {
+		store     ROChannelStore
+		reassigns []*NodeChannelInfo
+	}
+	tests := []struct {
+		name string
+		args args
+		want ChannelOpSet
+	}{
+		{
+			"test only one node",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan1", 1}}},
+					},
+				},
+				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}}}},
+			},
+			nil,
+		},
+		{
+			"test normal reassing",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
+						2: {2, []*channel{}},
+					},
+				},
+				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}, {"chan2", 1}}}},
+			},
+			[]*ChannelOp{{Delete, 1, []*channel{{"chan1", 1}, {"chan2", 1}}, nil}, {Add, 2, []*channel{{"chan1", 1}, {"chan2", 1}}, nil}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AverageReassignPolicy(tt.args.store, tt.args.reassigns)
+			assert.EqualValues(t, tt.want, got)
+		})
+	}
+}
+
+func TestBgCheckWithMaxWatchDuration(t *testing.T) {
+	type watch struct {
+		nodeID int64
+		name   string
+		info   *datapb.ChannelWatchInfo
+	}
+	getKv := func(watchInfos []*watch) kv.TxnKV {
+		kv := memkv.NewMemoryKV()
+		for _, info := range watchInfos {
+			k := buildChannelKey(info.nodeID, info.name)
+			v, _ := proto.Marshal(info.info)
+			kv.Save(k, string(v))
 		}
+		return kv
+	}
+
+	type args struct {
+		kv        kv.TxnKV
+		channels  []*NodeChannelInfo
+		timestamp time.Time
+	}
+
+	ts := time.Now()
+	tests := []struct {
+		name    string
+		args    args
+		want    []*NodeChannelInfo
+		wantErr error
+	}{
+		{
+			"test normal expiration",
+			args{
+				getKv([]*watch{{1, "chan1", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Uncomplete}},
+					{1, "chan2", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Complete}}}),
+				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}, {"chan2", 1}}}},
+				ts.Add(maxWatchDuration),
+			},
+			[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}}}},
+			nil,
+		},
+		{
+			"test no expiration",
+			args{
+				getKv([]*watch{{1, "chan1", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Uncomplete}}}),
+				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}}}},
+				ts.Add(maxWatchDuration).Add(-time.Second),
+			},
+			[]*NodeChannelInfo{},
+			nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := BgCheckWithMaxWatchDuration(tt.args.kv)
+			got, err := policy(tt.args.channels, tt.args.timestamp)
+			assert.Equal(t, tt.wantErr, err)
+			assert.EqualValues(t, tt.want, got)
+		})
 	}
 }
