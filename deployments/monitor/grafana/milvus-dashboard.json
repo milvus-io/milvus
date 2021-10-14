@@ -797,7 +797,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total  RootCoord drop collection operations",
+      "description": "Total RootCoord drop collection operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
