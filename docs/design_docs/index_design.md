@@ -75,11 +75,11 @@ priority queue to execute the task.
 
 In order to maintain the status information of the index, we introduced MetaTable to record the status information
 of the index. In order to ensure that the MetaTable information is not lost after IndexCoord is powered off and
-restarted, we write the MetaTable information into ETCD. When the IndexCoord service starts, it will first load the
-existing Meta information from ETCD, and then monitor the changes of Meta through watchNodeLoop. In order to distinguish
+restarted, we write the MetaTable information into etcd. When the IndexCoord service starts, it will first load the
+existing Meta information from etcd, and then monitor the changes of Meta through watchNodeLoop. In order to distinguish
 whether the modification of Meta was initiated by IndexCoord or IndexNode, revision was introduced in Meta.
-When watchMetaLoop detects that the Meta in ETCD is updated, compare the revision in Meta with the Event.Kv.Version
-of the ETCD event. If the revision is equal to Event.Kv.Version, it means that the update was initiated by IndexCoord.
+When watchMetaLoop detects that the Meta in etcd is updated, compare the revision in Meta with the Event.Kv.Version
+of the etcd event. If the revision is equal to Event.Kv.Version, it means that the update was initiated by IndexCoord.
 If the revision is less than Event. .Kv.Version means that this Meta update was initiated by IndexNode, and IndexCoord
 needs to update Meta. There will be no situation where revision is greater than Event.Kv.Version.
 
