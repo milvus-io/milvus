@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+// Collection is a wrapper of the underlying C-structure C.CCollection
 type Collection struct {
 	collectionPtr C.CCollection
 	id            UniqueID
