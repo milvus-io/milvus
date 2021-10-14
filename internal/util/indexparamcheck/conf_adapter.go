@@ -74,11 +74,14 @@ const (
 	// too large of n_trees takes much time, if there is real requirement, change this threshold.
 	MaxNTrees = 1024
 
-	DIM    = "dim"
+	// DIM is a constant used to represent dimension
+	DIM = "dim"
+	// Metric is a constant used to metric type
 	Metric = "metric_type"
-	NLIST  = "nlist"
-	NBITS  = "nbits"
-	IVFM   = "m"
+	// NLIST is a constant used to nlist in Index IVFxxx
+	NLIST = "nlist"
+	NBITS = "nbits"
+	IVFM  = "m"
 
 	KNNG         = "knng"
 	SearchLength = "search_length"
