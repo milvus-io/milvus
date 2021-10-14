@@ -62,6 +62,7 @@ func msgProxyIsUnhealthy(id UniqueID) string {
 	return fmt.Sprintf("proxy %d is unhealthy", id)
 }
 
+// errProxyIsUnhealthy returns an error represent proxy is unhealthy
 func errProxyIsUnhealthy(id UniqueID) error {
 	return errors.New(msgProxyIsUnhealthy(id))
 }
