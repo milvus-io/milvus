@@ -356,18 +356,22 @@ func TestBytesReader(t *testing.T) {
 	rawDataReader := bytes.NewReader(rawData)
 
 	var fvector []float32 = make([]float32, 2)
-	binary.Read(rawDataReader, binary.LittleEndian, &fvector)
+	err := binary.Read(rawDataReader, binary.LittleEndian, &fvector)
+	assert.Nil(t, err)
 	assert.ElementsMatch(t, fvector, []float32{1, 2})
 
 	var bvector []byte = make([]byte, 4)
-	binary.Read(rawDataReader, binary.LittleEndian, &bvector)
+	err = binary.Read(rawDataReader, binary.LittleEndian, &bvector)
+	assert.Nil(t, err)
 	assert.ElementsMatch(t, bvector, []byte{255, 255, 255, 0})
 
 	var fieldBool bool
-	binary.Read(rawDataReader, binary.LittleEndian, &fieldBool)
+	err = binary.Read(rawDataReader, binary.LittleEndian, &fieldBool)
+	assert.Nil(t, err)
 	assert.Equal(t, true, fieldBool)
 
 	var dataInt8 int8
-	binary.Read(rawDataReader, binary.LittleEndian, &dataInt8)
+	err = binary.Read(rawDataReader, binary.LittleEndian, &dataInt8)
+	assert.Nil(t, err)
 	assert.Equal(t, int8(100), dataInt8)
 }
