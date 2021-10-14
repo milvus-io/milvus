@@ -110,6 +110,7 @@ func (node *Proxy) Register() error {
 	return nil
 }
 
+// Init initialize proxy.
 func (node *Proxy) Init() error {
 	// wait for datacoord state changed to Healthy
 	if node.dataCoord != nil {
