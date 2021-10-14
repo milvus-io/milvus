@@ -67,7 +67,6 @@ type QueryCoord struct {
 	rootCoordClient types.RootCoord
 
 	session   *sessionutil.Session
-	liveCh    <-chan bool
 	eventChan <-chan *sessionutil.SessionEvent
 
 	stateCode  atomic.Value
@@ -80,7 +79,7 @@ type QueryCoord struct {
 func (qc *QueryCoord) Register() error {
 	log.Debug("query coord session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints), zap.String("address", Params.Address))
 	qc.session = sessionutil.NewSession(qc.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-	qc.liveCh = qc.session.Init(typeutil.QueryCoordRole, Params.Address, true)
+	qc.session.Init(typeutil.QueryCoordRole, Params.Address, true)
 	Params.NodeID = uint64(qc.session.ServerID)
 	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil
@@ -147,7 +146,7 @@ func (qc *QueryCoord) Start() error {
 	qc.loopWg.Add(1)
 	go qc.watchMetaLoop()
 
-	go qc.session.LivenessCheck(qc.loopCtx, qc.liveCh, func() {
+	go qc.session.LivenessCheck(qc.loopCtx, func() {
 		qc.Stop()
 	})
 

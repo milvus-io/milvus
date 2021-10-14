@@ -49,6 +49,7 @@ type Session struct {
 	Address    string `json:"Address,omitempty"`
 	Exclusive  bool   `json:"Exclusive,omitempty"`
 
+	liveCh   <-chan bool
 	etcdCli  *clientv3.Client
 	leaseID  clientv3.LeaseID
 	cancel   context.CancelFunc
@@ -94,7 +95,7 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 // Init will initialize base struct of the Session, including ServerName, ServerID,
 // Address, Exclusive. ServerID is obtained in getServerID.
 // Finally it will process keepAliveResponse to keep alive with etcd.
-func (s *Session) Init(serverName, address string, exclusive bool) <-chan bool {
+func (s *Session) Init(serverName, address string, exclusive bool) {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
@@ -108,7 +109,7 @@ func (s *Session) Init(serverName, address string, exclusive bool) <-chan bool {
 	if err != nil {
 		panic(err)
 	}
-	return s.processKeepAliveResponse(ch)
+	s.liveCh = s.processKeepAliveResponse(ch)
 }
 
 func (s *Session) getServerID() (int64, error) {
@@ -348,10 +349,10 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 // ctx controls the liveness check loop
 // ch is the liveness signal channel, ch is closed only when the session is expired
 // callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
-func (s *Session) LivenessCheck(ctx context.Context, ch <-chan bool, callback func()) {
+func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 	for {
 		select {
-		case _, ok := <-ch:
+		case _, ok := <-s.liveCh:
 			// ok, still alive
 			if ok {
 				continue

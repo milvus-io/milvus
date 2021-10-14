@@ -67,8 +67,6 @@ type QueryNode struct {
 
 	//call once
 	initOnce sync.Once
-	// liveness channel with etcd
-	liveCh <-chan bool
 
 	// internal components
 	historical *historical
@@ -110,7 +108,12 @@ func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
 func (node *QueryNode) Register() error {
 	log.Debug("query node session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints))
 	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.liveCh = node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
+	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
+	// start liveness check
+	go node.session.LivenessCheck(node.queryNodeLoopCtx, func() {
+		node.Stop()
+	})
+
 	Params.QueryNodeID = node.session.ServerID
 	Params.SetLogger(Params.QueryNodeID)
 	log.Debug("query nodeID", zap.Int64("nodeID", Params.QueryNodeID))
@@ -209,11 +212,6 @@ func (node *QueryNode) Start() error {
 
 	// start services
 	go node.historical.start()
-
-	// start liveness check
-	go node.session.LivenessCheck(node.queryNodeLoopCtx, node.liveCh, func() {
-		node.Stop()
-	})
 
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()

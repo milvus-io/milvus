@@ -62,7 +62,6 @@ type IndexCoord struct {
 
 	sched   *TaskScheduler
 	session *sessionutil.Session
-	liveCh  <-chan bool
 
 	eventChan <-chan *sessionutil.SessionEvent
 
@@ -115,7 +114,7 @@ func (i *IndexCoord) Register() error {
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	i.liveCh = i.session.Init(typeutil.IndexCoordRole, Params.Address, true)
+	i.session.Init(typeutil.IndexCoordRole, Params.Address, true)
 	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil
 }
@@ -248,7 +247,7 @@ func (i *IndexCoord) Start() error {
 		i.loopWg.Add(1)
 		go i.watchMetaLoop()
 
-		go i.session.LivenessCheck(i.loopCtx, i.liveCh, func() {
+		go i.session.LivenessCheck(i.loopCtx, func() {
 			i.Stop()
 		})
 
