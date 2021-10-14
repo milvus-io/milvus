@@ -2021,11 +2021,18 @@ func (m *ShowSegmentsResponse) GetSegmentIDs() []int64 {
 	return nil
 }
 
+//
+// Create index for vector datas
 type CreateIndexRequest struct {
-	Base                 *commonpb.MsgBase        `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName               string                   `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName       string                   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	FieldName            string                   `protobuf:"bytes,4,opt,name=field_name,json=fieldName,proto3" json:"field_name,omitempty"`
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The particular collection name you want to create index.
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// The vector field name in this particular collection
+	FieldName string `protobuf:"bytes,4,opt,name=field_name,json=fieldName,proto3" json:"field_name,omitempty"`
+	// Support keys: index_type,metric_type, params. Different index_type may has different params.
 	ExtraParams          []*commonpb.KeyValuePair `protobuf:"bytes,5,rep,name=extra_params,json=extraParams,proto3" json:"extra_params,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
 	XXX_unrecognized     []byte                   `json:"-"`
