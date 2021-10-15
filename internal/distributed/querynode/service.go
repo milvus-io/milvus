@@ -289,6 +289,7 @@ func (s *Server) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChann
 	return s.querynode.AddQueryChannel(ctx, req)
 }
 
+// RemoveQueryChannel removes the query channel for QueryNode component.
 func (s *Server) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.RemoveQueryChannel(ctx, req)
