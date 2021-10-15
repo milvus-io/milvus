@@ -45,6 +45,25 @@ func genFlowGraphInsertData() (*insertData, error) {
 	return iData, nil
 }
 
+func genFlowGraphDeleteData() (*deleteData, error) {
+	deleteMsg, err := genSimpleDeleteMsg()
+	if err != nil {
+		return nil, err
+	}
+	dData := &deleteData{
+		deleteIDs: map[UniqueID][]UniqueID{
+			defaultSegmentID: deleteMsg.PrimaryKeys,
+		},
+		deleteTimestamps: map[UniqueID][]Timestamp{
+			defaultSegmentID: deleteMsg.Timestamps,
+		},
+		deleteOffset: map[UniqueID]int64{
+			defaultSegmentID: 0,
+		},
+	}
+	return dData, nil
+}
+
 func TestFlowGraphInsertNode_insert(t *testing.T) {
 	t.Run("test insert", func(t *testing.T) {
 		replica, err := genSimpleReplica()
@@ -114,6 +133,84 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		insertNode.insert(nil, defaultSegmentID, wg)
+	})
+}
+
+func TestFlowGraphInsertNode_delete(t *testing.T) {
+	t.Run("test insert and delete", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultVChannel,
+			segmentTypeGrowing,
+			true)
+		assert.NoError(t, err)
+
+		insertData, err := genFlowGraphInsertData()
+		assert.NoError(t, err)
+
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		insertNode.insert(insertData, defaultSegmentID, wg)
+
+		deleteData, err := genFlowGraphDeleteData()
+		assert.NoError(t, err)
+		wg.Add(1)
+		insertNode.delete(deleteData, defaultSegmentID, wg)
+	})
+
+	t.Run("test only delete", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultVChannel,
+			segmentTypeGrowing,
+			true)
+		assert.NoError(t, err)
+
+		deleteData, err := genFlowGraphDeleteData()
+		assert.NoError(t, err)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		insertNode.delete(deleteData, defaultSegmentID, wg)
+	})
+
+	t.Run("test segment delete error", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultVChannel,
+			segmentTypeGrowing,
+			true)
+		assert.NoError(t, err)
+
+		deleteData, err := genFlowGraphDeleteData()
+		assert.NoError(t, err)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		deleteData.deleteTimestamps[defaultSegmentID] = deleteData.deleteTimestamps[defaultSegmentID][:len(deleteData.deleteTimestamps)/2]
+		insertNode.delete(deleteData, defaultSegmentID, wg)
+	})
+
+	t.Run("test no target segment", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		insertNode.delete(nil, defaultSegmentID, wg)
 	})
 }
 
