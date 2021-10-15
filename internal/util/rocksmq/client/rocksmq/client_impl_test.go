@@ -111,11 +111,11 @@ func TestClient_Subscribe(t *testing.T) {
 		SubscriptionInitialPosition: SubscriptionPositionLatest,
 	}
 	consumer3, err := client1.Subscribe(opt1)
-	assert.Error(t, err)
-	assert.Nil(t, consumer3)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer3)
 	consumer4, err := client1.Subscribe(opt1)
-	assert.Error(t, err)
-	assert.Nil(t, consumer4)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer4)
 
 	producer1, err := client1.CreateProducer(ProducerOptions{
 		Topic: newTopicName(),
