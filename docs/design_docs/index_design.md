@@ -5,11 +5,11 @@ update: 7.31.2021, by [Cai.Zhang](https://github.com/xiaocai2333)
 ## 8.0 Component Description
 
 IndexCoord is a component responsible for scheduling index construction tasks and maintaining index status.
-IndexCoord accepts requests from rootcoord to build indexes, delete indexes, and query index information.
+IndexCoord accepts requests from rootCoord to build indexes, delete indexes, and query index information.
 IndexCoord is responsible for assigning IndexBuildID to the request to build the index, and forwarding the
 request to build the index to IndexNode. IndexCoord records the status of the index, and the index file.
 
-The following figure shows the design of the indexcoord component:
+The following figure shows the design of the indexCoord component:
 
 ![indexcoord](graphs/indexcoord_design.png)
 
@@ -18,7 +18,7 @@ The following figure shows the design of the indexcoord component:
 Based on etcd service discovery, IndexCoord components, like other Milvus components, rely on etcd to implement
 service discovery. IndexCoord relies on the lease mechanism of etcd to sense the online and offline news of IndexNode.
 
-In addition to being used for service discovery, Milvus also uses etcd as a reliable meta storage, and writes all
+In addition to service discovery, Milvus also uses etcd as a reliable meta storage, and writes all
 persistent status information to etcd. The purpose is to restore a certain Milvus component to its original
 state after power off and restart.
 
