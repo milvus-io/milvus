@@ -85,6 +85,26 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
+	t.Run("test addQueryChannel has queryCollection", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		req := &queryPb.AddQueryChannelRequest{
+			Base:             genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			NodeID:           0,
+			CollectionID:     defaultCollectionID,
+			RequestChannelID: genQueryChannel(),
+			ResultChannelID:  genQueryResultChannel(),
+		}
+
+		status, err := node.AddQueryChannel(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
+
 	t.Run("test node is abnormal", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
@@ -123,6 +143,75 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 			CollectionID:     defaultCollectionID,
 			RequestChannelID: genQueryChannel(),
 			ResultChannelID:  genQueryResultChannel(),
+		}
+
+		status, err := node.AddQueryChannel(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
+	t.Run("test init global sealed segments", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := &queryPb.AddQueryChannelRequest{
+			Base:             genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			NodeID:           0,
+			CollectionID:     defaultCollectionID,
+			RequestChannelID: genQueryChannel(),
+			ResultChannelID:  genQueryResultChannel(),
+			GlobalSealedSegments: []*queryPb.SegmentInfo{{
+				SegmentID:    defaultSegmentID,
+				CollectionID: defaultCollectionID,
+				PartitionID:  defaultPartitionID,
+			}},
+		}
+
+		status, err := node.AddQueryChannel(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
+
+	t.Run("test init global sealed segments failed", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := &queryPb.AddQueryChannelRequest{
+			Base:             genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			NodeID:           0,
+			CollectionID:     defaultCollectionID,
+			RequestChannelID: genQueryChannel(),
+			ResultChannelID:  genQueryResultChannel(),
+			GlobalSealedSegments: []*queryPb.SegmentInfo{{
+				SegmentID:    defaultSegmentID,
+				CollectionID: 1000,
+				PartitionID:  defaultPartitionID,
+			}},
+		}
+
+		status, err := node.AddQueryChannel(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
+	t.Run("test seek error", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		position := &internalpb.MsgPosition{
+			ChannelName: genQueryChannel(),
+			MsgID:       []byte{1, 2, 3},
+			MsgGroup:    defaultSubName,
+			Timestamp:   0,
+		}
+
+		req := &queryPb.AddQueryChannelRequest{
+			Base:             genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			NodeID:           0,
+			CollectionID:     defaultCollectionID,
+			RequestChannelID: genQueryChannel(),
+			ResultChannelID:  genQueryResultChannel(),
+			SeekPosition:     position,
 		}
 
 		status, err := node.AddQueryChannel(ctx, req)
