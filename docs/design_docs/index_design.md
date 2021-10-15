@@ -95,8 +95,8 @@ IndexCoord adds or deletes the corresponding IndexNode information in NodeManage
 
 ### 8.3.5 watchMetaLoop
 
-`watchMetaLoop` is used to monitor whether the Meta in ETCD has been changed. When the Meta in the ETCD is monitored,
-the result of the Meta update is obtained from the ETCD, and the `Event.Kv.Version` of the update event is compared
+`watchMetaLoop` is used to monitor whether the Meta in etcd has been changed. When the Meta in the etcd is monitored,
+the result of the Meta update is obtained from the etcd, and the `Event.Kv.Version` of the update event is compared
 with the `revision` in the MetaTable. If the `Event.Kv.Version` is greater than the `revision` in the MetaTable,
 Explain that this update is initiated by IndexNode, and then update the MetaTable in IndexCoord. Since this update
 is initiated by IndexNode, it indicates that this IndexNode has completed this task, so update the load of this
@@ -126,16 +126,16 @@ in the MetaTable. Otherwise, it just cleans up the index file of the lower versi
 
 IndexNode is the execution node of index building tasks, and all index building tasks are forwarded to IndexNode by
 IndexCoordinate for execution. When IndexNode executes an index build request, it first reads IndexMeta information
-from ETCD, and checks whether the index task is marked for deletion when IndexCoordinate is forwarded to IndexNode.
+from etcd, and checks whether the index task is marked for deletion when IndexCoordinate is forwarded to IndexNode.
 If it is marked as deleted, then there is no need to actually build the index, just mark the index task status as
-completed, and then write it to ETCD. When IndexCoordinate perceives that the status corresponding to the index is
+completed, and then write it to etcd. When IndexCoordinate perceives that the status corresponding to the index is
 complete, it deletes the index task from the MetaTable. If it is checked that the index is not marked for deletion,
 then the index needs to be built. The original data must be loaded first when building the index. The original data
 is stored in MinIO/S3, and the storage path is notified by RootCoordinate in the index build request. After loading the
 original data, the data is deserialized into data blocks, and then cgo is called to build the index. When the index is
 built, the index data is serialized into data blocks, and then written into the file. The directory organization of the
 index file is "indexBuildID/IndexTaskVersion/partitionID/segmentID/key", where key corresponds to the serialized key
-of index data. After the index is built, record the index file directory in IndexMeta, and then write it to ETCD.
+of index data. After the index is built, record the index file directory in IndexMeta, and then write it to etcd.
 
 ## 8.5 API
 
@@ -168,8 +168,8 @@ type Meta struct {
 
 Meta is used to record the state of the index.
 
-- Revision: The number of times IndexMeta has been changed in ETCD. It's the same as Event.Kv.Version in ETCD.
-  When IndexCoord watches the IndexMeta in ETCD is changed, can compare `revision` and Event.Kv.Versionto determine
+- Revision: The number of times IndexMeta has been changed in etcd. It's the same as Event.Kv.Version in etcd.
+  When IndexCoord watches the IndexMeta in etcd is changed, can compare `revision` and Event.Kv.Versionto determine
   this modification of IndexMeta is caused by IndexCoord or IndexNode. If it is caused by IndexNode, the Meta in
   IndexCoord must be updated.
 
