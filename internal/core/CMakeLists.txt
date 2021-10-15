@@ -24,12 +24,10 @@ include( Utils )
 get_current_time( BUILD_TIME )
 message( STATUS "Build time = ${BUILD_TIME}" )
 
-get_build_type( TARGET  BUILD_TYPE
-                        DEFAULT "Release" )
+get_build_type( TARGET BUILD_TYPE DEFAULT "Release" )
 message( STATUS "Build type = ${BUILD_TYPE}" )
 
-get_milvus_version( TARGET  MILVUS_VERSION
-                            DEFAULT "2.0" )
+get_milvus_version( TARGET MILVUS_VERSION DEFAULT "2.0" )
 message( STATUS "Build version = ${MILVUS_VERSION}" )
 
 get_last_commit_id( LAST_COMMIT_ID )
@@ -52,6 +50,7 @@ set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 # self-installed dynamic libraries will be correctly linked by excutable
 set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" )
 set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
+
 # **************************** Dependencies ****************************
 include( CTest )
 include( BuildUtils )
@@ -68,6 +67,7 @@ find_package(OpenMP REQUIRED)
 if (OPENMP_FOUND)
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 endif()
+
 # **************************** Compiler arguments ****************************
 message( STATUS "Building Milvus CPU version" )
 
@@ -167,17 +167,15 @@ endif ()
 #
 # Validate and print out Milvus configuration options
 #
-
 config_summary()
 
 # **************************** Source files ****************************
-
 if ( BUILD_UNIT_TEST STREQUAL "ON" AND BUILD_COVERAGE STREQUAL "ON" )
     append_flags( CMAKE_CXX_FLAGS
-                    FLAGS
-                    "-fprofile-arcs"
-                    "-ftest-coverage"
-                    )
+                  FLAGS
+                        "-fprofile-arcs"
+                        "-ftest-coverage"
+                        )
 endif ()
 
 # Warning: add_subdirectory(src) must be after append_flags("-ftest-coverage"),
@@ -188,7 +186,6 @@ add_subdirectory( src )
 # Unittest lib
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
-
     add_subdirectory(unittest)
     add_subdirectory(bench)
 endif ()
@@ -196,31 +193,37 @@ endif ()
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
 
 # **************************** Install ****************************
-
 if ( NOT MILVUS_DB_PATH )
     set( MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}" )
 endif ()
 
 set( GPU_ENABLE "false" )
 
+# Install segcore
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
         DESTINATION include/segcore/
         FILES_MATCHING PATTERN "*_c.h"
 )
 
-install(FILES ${CMAKE_BINARY_DIR}/src/segcore/libmilvus_segcore.so
-        DESTINATION lib)
+install(
+        FILES ${CMAKE_BINARY_DIR}/src/segcore/libmilvus_segcore.so
+        DESTINATION lib
+)
 
+# Install indexbuilder
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
         DESTINATION include/indexbuilder/
         FILES_MATCHING PATTERN "*_c.h"
 )
 
-install(FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder.so
-        DESTINATION lib)
+install(
+        FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder.so
+        DESTINATION lib
+)
 
+# Install common
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         DESTINATION include/common/
