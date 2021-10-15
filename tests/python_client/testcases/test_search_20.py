@@ -2237,7 +2237,8 @@ class TestSearchBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
-        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type="IP", search_params=search_param)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type="IP",
+                                             search_params=search_param)
         connect.load_collection(collection)
         res = connect.search(collection, **query)
         assert len(res) == nq
@@ -2264,7 +2265,7 @@ class TestSearchBase:
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type=metric_type,
-                                          search_params=search_param)
+                                             search_params=search_param)
         if top_k > max_top_k:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, **query)
