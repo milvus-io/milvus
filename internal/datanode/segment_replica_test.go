@@ -52,6 +52,21 @@ func (kv *mockMinioKV) LoadWithPrefix(prefix string) ([]string, []string, error)
 	return []string{"0"}, []string{string(buffer)}, nil
 }
 
+type mockPkfilterMergeError struct {
+	kv.BaseKV
+}
+
+func (kv *mockPkfilterMergeError) LoadWithPrefix(prefix string) ([]string, []string, error) {
+	stats := &storage.Int64Stats{
+		FieldID: common.RowIDField,
+		Min:     0,
+		Max:     10,
+		BF:      bloom.NewWithEstimates(1, 0.0001),
+	}
+	buffer, _ := json.Marshal(stats)
+	return []string{"0"}, []string{string(buffer)}, nil
+}
+
 type mockMinioKVError struct {
 	kv.BaseKV
 }
@@ -513,10 +528,23 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 		assert.NotNil(to, err)
 	})
 
-	te.Run("Test_addNormalSegmentStatsError", func(to *testing.T) {
+	te.Run("Test_addSegmentStatsError", func(to *testing.T) {
 		sr, err := newReplica(context.Background(), rc, 1)
 		assert.Nil(to, err)
 		sr.minIOKV = &mockMinioKVStatsError{}
+
+		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
+		cp := &segmentCheckPoint{int64(10), *cpPos}
+		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
+		assert.NotNil(to, err)
+		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
+		assert.NotNil(to, err)
+	})
+
+	te.Run("Test_addSegmentPkfilterError", func(to *testing.T) {
+		sr, err := newReplica(context.Background(), rc, 1)
+		assert.Nil(to, err)
+		sr.minIOKV = &mockPkfilterMergeError{}
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
