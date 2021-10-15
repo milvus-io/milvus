@@ -143,3 +143,59 @@ def get_server_tag(deploy_params):
         # server_name = server["server_name"] if "server_name" in server else ""
         server_tag = server["server_tag"] if "server_tag" in server else ""
     return server_tag
+
+def search_param_analysis(vector_query, filter_query):
+
+    if "vector" in vector_query:
+        vector = vector_query["vector"]
+    else:
+        logger.debug("[search_param_analysis] vector not in vector_query")
+        return False
+
+    data = []
+    anns_field = ""
+    param = {}
+    limit = 1
+    if isinstance(vector, dict) and len(vector) == 1:
+        for key in vector:
+            anns_field = key
+            data = vector[key]["query"]
+            param = {"metric_type": vector[key]["metric_type"],
+                     "params": vector[key]["params"]}
+            limit = vector[key]["topk"]
+    else:
+        logger.debug("[search_param_analysis] vector not dict or len != 1: %s" % str(vector))
+        return False
+
+    if isinstance(filter_query, list) and len(filter_query) != 0 and "range" in filter_query[0]:
+        filter_range = filter_query[0]["range"]
+        if isinstance(filter_range, dict) and len(filter_range) == 1:
+            for key in filter_range:
+                field_name = filter_range[key]
+                expression = None
+                if 'GT' in filter_range[key]:
+                    exp1 = "%s > %s" % (field_name, str(filter_range[key]['GT']))
+                    expression = exp1
+                if 'LT' in filter_range[key]:
+                    exp2 = "%s < %s" % (field_name, str(filter_range[key]['LT']))
+                    if expression:
+                        expression = expression + ' && ' + exp2
+                    else:
+                        expression = exp2
+
+        else:
+            logger.debug("[search_param_analysis] filter_range not dict or len != 1: %s" % str(filter_range))
+            return False
+    else:
+        # logger.debug("[search_param_analysis] range not in filter_query: %s" % str(filter_query))
+        expression = None
+
+    result = {
+        "data": data,
+        "anns_field": anns_field,
+        "param": param,
+        "limit": limit,
+        "expression": expression
+    }
+    # logger.debug("[search_param_analysis] search_param_analysis: %s" % str(result))
+    return result
