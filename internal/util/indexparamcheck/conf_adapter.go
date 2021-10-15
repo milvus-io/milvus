@@ -106,7 +106,9 @@ const (
 	GPUMode   = "GPU"
 )
 
-var METRICS = []string{L2, IP}                                                             // const
+// METRICS is a set of all metrics types supported for float vector.
+var METRICS = []string{L2, IP} // const
+
 var BinIDMapMetrics = []string{HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE}   // const
 var BinIvfMetrics = []string{HAMMING, JACCARD, TANIMOTO}                                   // const
 var supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}        // const
