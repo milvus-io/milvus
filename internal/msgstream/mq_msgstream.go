@@ -116,6 +116,11 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 
 // Create consumer to receive message from channels
 func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
+	ms.AsConsumerWithPosition(channels, subName, mqclient.SubscriptionPositionEarliest)
+}
+
+// Create consumer to receive message from channels, with initial position
+func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -126,7 +131,7 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 				Topic:                       channel,
 				SubscriptionName:            subName,
 				Type:                        mqclient.KeyShared,
-				SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
+				SubscriptionInitialPosition: position,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
@@ -597,6 +602,10 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string)
 
 // AsConsumer subscribes channels as consumer for a MsgStream
 func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
+	ms.AsConsumerWithPosition(channels, subName, mqclient.SubscriptionPositionEarliest)
+}
+
+func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -607,7 +616,7 @@ func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 				Topic:                       channel,
 				SubscriptionName:            subName,
 				Type:                        mqclient.KeyShared,
-				SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
+				SubscriptionInitialPosition: position,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {

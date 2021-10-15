@@ -17,17 +17,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
 	"github.com/milvus-io/milvus/internal/msgstream"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
 
 type mockTimestampAllocatorInterface struct {
@@ -274,6 +270,9 @@ func (ms *simpleMockMsgStream) AsProducer(channels []string) {
 }
 
 func (ms *simpleMockMsgStream) AsConsumer(channels []string, subName string) {
+}
+
+func (ms *simpleMockMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 }
 
 func (ms *simpleMockMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 {

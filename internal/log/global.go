@@ -59,6 +59,39 @@ func Fatal(msg string, fields ...zap.Field) {
 	L().WithOptions(zap.AddCallerSkip(1)).Fatal(msg, fields...)
 }
 
+// RatedDebug print logs at debug level
+// it limit log print to avoid too many logs
+// return true if log successfully
+func RatedDebug(cost float64, msg string, fields ...zap.Field) bool {
+	if R().CheckCredit(cost) {
+		L().WithOptions(zap.AddCallerSkip(1)).Debug(msg, fields...)
+		return true
+	}
+	return false
+}
+
+// RatedInfo print logs at debug level
+// it limit log print to avoid too many logs
+// return true if log successfully
+func RatedInfo(cost float64, msg string, fields ...zap.Field) bool {
+	if R().CheckCredit(cost) {
+		L().WithOptions(zap.AddCallerSkip(1)).Info(msg, fields...)
+		return true
+	}
+	return false
+}
+
+// RatedWarn print logs at debug level
+// it limit log print to avoid too many logs
+// return true if log successfully
+func RatedWarn(cost float64, msg string, fields ...zap.Field) bool {
+	if R().CheckCredit(cost) {
+		L().WithOptions(zap.AddCallerSkip(1)).Warn(msg, fields...)
+		return true
+	}
+	return false
+}
+
 // With creates a child logger and adds structured context to it.
 // Fields added to the child don't affect the parent, and vice versa.
 func With(fields ...zap.Field) *zap.Logger {
