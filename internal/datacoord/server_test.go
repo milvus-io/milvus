@@ -867,7 +867,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Address: "localhost:7777",
 			NodeID:  0,
 		}
-		svr.cluster.Register(info)
+		err = svr.cluster.Register(info)
+		assert.Nil(t, err)
 
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
 			NodeID:   0,
@@ -930,7 +931,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Address: "localhost:7777",
 			NodeID:  0,
 		}
-		svr.cluster.Register(info)
+		err = svr.cluster.Register(info)
+		assert.Nil(t, err)
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
 			NodeID:   0,
 			PeerRole: "",
@@ -1007,7 +1009,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 			NodeID:  0,
 			Address: "localhost:7777",
 		}
-		svr.cluster.Register(node)
+		err = svr.cluster.Register(node)
+		assert.Nil(t, err)
 
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
 			NodeID:   0,
@@ -1349,7 +1352,8 @@ func TestHandleSessionEvent(t *testing.T) {
 	cluster := NewCluster(sessionManager, channelManager)
 	assert.Nil(t, err)
 
-	cluster.Startup(nil)
+	err = cluster.Startup(nil)
+	assert.Nil(t, err)
 	defer cluster.Close()
 
 	svr := newTestServer(t, nil, SetCluster(cluster))
@@ -1365,7 +1369,8 @@ func TestHandleSessionEvent(t *testing.T) {
 				Exclusive:  false,
 			},
 		}
-		svr.handleSessionEvent(context.Background(), evt)
+		err = svr.handleSessionEvent(context.Background(), evt)
+		assert.Nil(t, err)
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionAddEvent,
@@ -1376,7 +1381,8 @@ func TestHandleSessionEvent(t *testing.T) {
 				Exclusive:  false,
 			},
 		}
-		svr.handleSessionEvent(context.Background(), evt)
+		err = svr.handleSessionEvent(context.Background(), evt)
+		assert.Nil(t, err)
 		dataNodes := svr.cluster.GetSessions()
 		assert.EqualValues(t, 1, len(dataNodes))
 		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].info.Address)
@@ -1390,14 +1396,16 @@ func TestHandleSessionEvent(t *testing.T) {
 				Exclusive:  false,
 			},
 		}
-		svr.handleSessionEvent(context.Background(), evt)
+		err = svr.handleSessionEvent(context.Background(), evt)
+		assert.Nil(t, err)
 		dataNodes = svr.cluster.GetSessions()
 		assert.EqualValues(t, 0, len(dataNodes))
 	})
 
 	t.Run("nil evt", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			svr.handleSessionEvent(context.Background(), nil)
+			err = svr.handleSessionEvent(context.Background(), nil)
+			assert.Nil(t, err)
 		})
 	})
 }
