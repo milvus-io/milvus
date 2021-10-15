@@ -725,7 +725,6 @@ class TestInsertAsync:
         """
         nb = insert_count
         result = connect.insert(collection, ut.gen_entities(nb), _async=False)
-        # ids = future.result()
         connect.flush([collection])
         assert len(result.primary_keys) == nb
 
