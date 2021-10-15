@@ -1410,15 +1410,17 @@ func (st *searchTask) getChannels() ([]pChan, error) {
 		return nil, err
 	}
 
-	_, err = st.chMgr.getChannels(collID)
+	var channels []pChan
+	channels, err = st.chMgr.getChannels(collID)
 	if err != nil {
 		err := st.chMgr.createDMLMsgStream(collID)
 		if err != nil {
 			return nil, err
 		}
+		return st.chMgr.getChannels(collID)
 	}
 
-	return st.chMgr.getChannels(collID)
+	return channels, nil
 }
 
 func (st *searchTask) getVChannels() ([]vChan, error) {
@@ -1427,15 +1429,17 @@ func (st *searchTask) getVChannels() ([]vChan, error) {
 		return nil, err
 	}
 
-	_, err = st.chMgr.getChannels(collID)
+	var channels []vChan
+	channels, err = st.chMgr.getVChannels(collID)
 	if err != nil {
 		err := st.chMgr.createDMLMsgStream(collID)
 		if err != nil {
 			return nil, err
 		}
+		return st.chMgr.getVChannels(collID)
 	}
 
-	return st.chMgr.getVChannels(collID)
+	return channels, nil
 }
 
 func (st *searchTask) PreExecute(ctx context.Context) error {
@@ -2129,15 +2133,17 @@ func (qt *queryTask) getChannels() ([]pChan, error) {
 		return nil, err
 	}
 
-	_, err = qt.chMgr.getChannels(collID)
+	var channels []pChan
+	channels, err = qt.chMgr.getChannels(collID)
 	if err != nil {
 		err := qt.chMgr.createDMLMsgStream(collID)
 		if err != nil {
 			return nil, err
 		}
+		return qt.chMgr.getChannels(collID)
 	}
 
-	return qt.chMgr.getChannels(collID)
+	return channels, nil
 }
 
 func (qt *queryTask) getVChannels() ([]vChan, error) {
@@ -2146,15 +2152,17 @@ func (qt *queryTask) getVChannels() ([]vChan, error) {
 		return nil, err
 	}
 
-	_, err = qt.chMgr.getChannels(collID)
+	var channels []vChan
+	channels, err = qt.chMgr.getVChannels(collID)
 	if err != nil {
 		err := qt.chMgr.createDMLMsgStream(collID)
 		if err != nil {
 			return nil, err
 		}
+		return qt.chMgr.getVChannels(collID)
 	}
 
-	return qt.chMgr.getVChannels(collID)
+	return channels, nil
 }
 
 func IDs2Expr(fieldName string, ids []int64) string {
