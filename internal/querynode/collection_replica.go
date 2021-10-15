@@ -316,6 +316,7 @@ func (colReplica *collectionReplica) getPartitionByID(partitionID UniqueID) (*Pa
 	return colReplica.getPartitionByIDPrivate(partitionID)
 }
 
+// getPartitionByIDPrivate is the private function in collectionReplica, to get the partition
 func (colReplica *collectionReplica) getPartitionByIDPrivate(partitionID UniqueID) (*Partition, error) {
 	partition, ok := colReplica.partitions[partitionID]
 	if !ok {
