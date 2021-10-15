@@ -285,6 +285,7 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.querynode.GetComponentStates(ctx)
 }
 
+// AddQueryChannel adds query channel for QueryNode component.
 func (s *Server) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.AddQueryChannel(ctx, req)
