@@ -573,7 +573,10 @@ func TestGetFlushedSegments(t *testing.T) {
 }
 
 func TestService_WatchServices(t *testing.T) {
-	svr := newTestServer(t, nil)
+	factory := msgstream.NewPmsFactory()
+	svr, err := CreateServer(context.TODO(), factory)
+	assert.Nil(t, err)
+	svr.serverLoopWg.Add(1)
 
 	ech := make(chan *sessionutil.SessionEvent)
 	svr.eventCh = ech
@@ -596,6 +599,8 @@ func TestService_WatchServices(t *testing.T) {
 	flag = false
 	svr.eventCh = ech
 	ctx, cancel := context.WithCancel(context.Background())
+	svr.serverLoopWg.Add(1)
+
 	go func() {
 		svr.startWatchService(ctx)
 		flag = true
