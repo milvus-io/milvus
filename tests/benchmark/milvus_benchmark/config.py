@@ -41,7 +41,7 @@ DEFAULT_API_VERSION = 'chaos-mesh.org/v1alpha1'
 DEFAULT_GROUP = 'chaos-mesh.org'
 DEFAULT_VERSION = 'v1alpha1'
 
-# minio config
+# MinIO config
 MINIO_HOST = "milvus-test-minio.qa-milvus.svc.cluster.local"
 MINIO_PORT = 9000
 MINIO_ACCESS_KEY = "minioadmin"
