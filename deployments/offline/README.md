@@ -25,7 +25,7 @@ $ pip3 install -r requirements.txt
 $ python3 save_image.py --manifest docker-compose.yml
 ```
 
-#### If you install Milvus with **Helm**, use these command:
+#### If you install Milvus with **Helm**, use these commands:
 #### 1. Update Helm repo
 ```shell
 $ helm repo add milvus https://milvus-io.github.io/milvus-helm/
