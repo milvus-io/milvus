@@ -4,7 +4,7 @@ Data cooridnator(datacoord for short) is the component to organize DataNodes and
 
 ## Dependency
 
-- KV store: a kv store has all the meta info datacoord needs to operate. (ETCD)
+- KV store: a kv store has all the meta info datacoord needs to operate. (etcd)
 - Message stream: a message stream to communicate statistics information with data nodes. (Pulsar)
 - Root Coordinator: timestamp, id and meta source.
 - Data Node(s): could be an instance or a cluster, actual worker group handles data modification operations.
