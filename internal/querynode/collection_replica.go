@@ -326,6 +326,7 @@ func (colReplica *collectionReplica) getPartitionByIDPrivate(partitionID UniqueI
 	return partition, nil
 }
 
+// hasPartition returns true if collectionReplica has the partition, false otherwise
 func (colReplica *collectionReplica) hasPartition(partitionID UniqueID) bool {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
