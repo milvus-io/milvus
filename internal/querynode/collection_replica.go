@@ -333,6 +333,7 @@ func (colReplica *collectionReplica) hasPartition(partitionID UniqueID) bool {
 	return colReplica.hasPartitionPrivate(partitionID)
 }
 
+// hasPartitionPrivate is the private function in collectionReplica, to check if collectionReplica has the partition
 func (colReplica *collectionReplica) hasPartitionPrivate(partitionID UniqueID) bool {
 	_, ok := colReplica.partitions[partitionID]
 	return ok
