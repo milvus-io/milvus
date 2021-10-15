@@ -635,7 +635,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         target: test search with output fields
         method: search with non-exist output_field
-        expected: search success
+        expected: raise exception
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True)
@@ -2585,7 +2585,7 @@ class TestSearchBase:
     @pytest.mark.timeout(300)
     def test_search_concurrent_multithreads_single_connection(self, connect, args):
         """
-        target: test concurrent search with multiprocessess
+        target: test concurrent search with multi processes
         method: search with 10 processes, each process uses dependent connection
         expected: status ok and the returned vectors should be query_records
         """
