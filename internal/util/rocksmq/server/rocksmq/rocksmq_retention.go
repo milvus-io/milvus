@@ -33,14 +33,14 @@ var RocksmqRetentionTimeInMinutes int64
 // RocksmqRetentionSizeInMB is the size of retention
 var RocksmqRetentionSizeInMB int64
 
-// TickerTimeInSeconds is the time of expired check
-var TickerTimeInSeconds int64 = 6
-
 // Const value that used to convert unit
 const (
 	MB     = 2 << 20
 	MINUTE = 60
 )
+
+// TickerTimeInSeconds is the time of expired check, default 10 minutes
+var TickerTimeInSeconds int64 = 10 * MINUTE
 
 type topicPageInfo struct {
 	pageEndID   []UniqueID
