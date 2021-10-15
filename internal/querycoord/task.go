@@ -41,6 +41,7 @@ const (
 )
 
 const (
+	// MaxRetryNum is the maximum number of times that each task can be retried
 	MaxRetryNum = 5
 )
 
