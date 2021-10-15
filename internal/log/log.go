@@ -140,6 +140,7 @@ func S() *zap.SugaredLogger {
 	return _globalS.Load().(*zap.SugaredLogger)
 }
 
+// R returns utils.ReconfigurableRateLimiter.
 func R() *utils.ReconfigurableRateLimiter {
 	return _globalR.Load().(*utils.ReconfigurableRateLimiter)
 }
