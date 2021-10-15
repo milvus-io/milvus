@@ -969,7 +969,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful  RootCoord drop partition operations",
+      "description": "Successful RootCoord drop partition operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
