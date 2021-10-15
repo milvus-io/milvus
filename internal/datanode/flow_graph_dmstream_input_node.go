@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -47,11 +48,13 @@ func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNode
 
 	if seekPos != nil {
 		seekPos.ChannelName = pchannelName
-		log.Debug("datanode Seek", zap.String("channelName", seekPos.GetChannelName()))
+		start := time.Now()
+		log.Debug("datanode begin to seek: " + seekPos.GetChannelName())
 		err = insertStream.Seek([]*internalpb.MsgPosition{seekPos})
 		if err != nil {
 			return nil, err
 		}
+		log.Debug("datanode Seek successfully: "+seekPos.GetChannelName(), zap.Int64("elapse ", time.Since(start).Milliseconds()))
 	}
 
 	node := flowgraph.NewInputNode(insertStream, "dmInputNode", dmNodeConfig.maxQueueLength, dmNodeConfig.maxParallelism)

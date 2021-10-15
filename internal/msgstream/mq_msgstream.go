@@ -874,11 +874,6 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
 
-		//TODO: May cause problem
-		//if len(consumer.Chan()) == 0 {
-		//	return nil
-		//}
-
 		runLoop := true
 		for runLoop {
 			select {
