@@ -18,6 +18,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -60,8 +61,10 @@ func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
 	return make(chan *msgstream.MsgPack, 100)
 }
 
-func (mtm *mockTtMsgStream) AsProducer(channels []string)                  {}
-func (mtm *mockTtMsgStream) AsConsumer(channels []string, subName string)  {}
+func (mtm *mockTtMsgStream) AsProducer(channels []string)                 {}
+func (mtm *mockTtMsgStream) AsConsumer(channels []string, subName string) {}
+func (mtm *mockTtMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
+}
 func (mtm *mockTtMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {}
 func (mtm *mockTtMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 {
 	return make([][]int32, 0)

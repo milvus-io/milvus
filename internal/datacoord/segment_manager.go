@@ -393,8 +393,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 }
 
 // GetFlushableSegments get segment ids with Sealed State and flushable (meets flushPolicy)
-func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string,
-	t Timestamp) ([]UniqueID, error) {
+func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string, t Timestamp) ([]UniqueID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sp, _ := trace.StartSpanFromContext(ctx)

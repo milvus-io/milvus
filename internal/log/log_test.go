@@ -31,6 +31,7 @@ import (
 	"io/ioutil"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -127,4 +128,43 @@ func TestSampling(t *testing.T) {
 			<-drop
 		}
 	}
+}
+
+func TestRatedLog(t *testing.T) {
+	ts := newTestLogSpy(t)
+	conf := &Config{Level: "debug", DisableTimestamp: true}
+	logger, p, _ := InitTestLogger(ts, conf)
+	ReplaceGlobals(logger, p)
+
+	time.Sleep(time.Duration(1) * time.Second)
+	success := RatedDebug(1.0, "test")
+	assert.True(t, success)
+
+	time.Sleep(time.Duration(1) * time.Second)
+	success = RatedInfo(1.0, "test")
+	assert.True(t, success)
+
+	time.Sleep(time.Duration(1) * time.Second)
+	success = RatedWarn(1.0, "test")
+	assert.True(t, success)
+
+	time.Sleep(time.Duration(1) * time.Second)
+	success = RatedInfo(100.0, "test")
+	assert.False(t, success)
+
+	successNum := 0
+	for i := 0; i < 1000; i++ {
+		if RatedInfo(1.0, "test") {
+			successNum++
+		}
+		time.Sleep(time.Duration(1) * time.Millisecond)
+	}
+	// due to the rate limit, not all
+	assert.True(t, successNum < 1000)
+	assert.True(t, successNum > 10)
+
+	time.Sleep(time.Duration(3) * time.Second)
+	success = RatedInfo(3.0, "test")
+	assert.True(t, success)
+	Sync()
 }
