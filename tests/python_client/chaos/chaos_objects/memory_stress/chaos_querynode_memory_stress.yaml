@@ -1,0 +1,17 @@
+kind: StressChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-pod-memory-stress
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: chaos-testing
+      component: querynode
+  mode: one
+  stressors:
+    memory:
+      workers: 4
+      size: 1000MB
