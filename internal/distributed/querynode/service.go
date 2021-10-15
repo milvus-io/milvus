@@ -279,6 +279,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.querynode.GetStatisticsChannel(ctx)
 }
 
+// GetComponentStates gets the component states of QueryNode.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	// ignore ctx and in
 	return s.querynode.GetComponentStates(ctx)
