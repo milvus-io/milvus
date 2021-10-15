@@ -209,7 +209,11 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	watchPrefix := fmt.Sprintf("%s/%d", Params.ChannelWatchSubPath, node.NodeID)
 	evtChan := node.kvClient.WatchWithPrefix(watchPrefix)
 	// after watch, first check all exists nodes first
-	node.checkWatchedList()
+	err := node.checkWatchedList()
+	if err != nil {
+		log.Warn("StartWatchChannels failed", zap.Error(err))
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
