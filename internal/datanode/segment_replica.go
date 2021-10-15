@@ -310,7 +310,6 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 		checkPoint: *cp,
 		endPos:     &cp.pos,
 
-		//TODO silverxia, normal segments bloom filter and pk range should be loaded from serialized files
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 		minPK:    math.MaxInt64, // use max value, represents no value
 		maxPK:    math.MinInt64, // use min value represents no value
@@ -331,7 +330,10 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 		return err
 	}
 	for _, stat := range stats {
-		seg.pkFilter.Merge(stat.BF)
+		err = seg.pkFilter.Merge(stat.BF)
+		if err != nil {
+			return err
+		}
 		if seg.minPK > stat.Min {
 			seg.minPK = stat.Min
 		}
@@ -396,7 +398,10 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 		return err
 	}
 	for _, stat := range stats {
-		seg.pkFilter.Merge(stat.BF)
+		err = seg.pkFilter.Merge(stat.BF)
+		if err != nil {
+			return err
+		}
 		if seg.minPK > stat.Min {
 			seg.minPK = stat.Min
 		}
