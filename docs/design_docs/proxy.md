@@ -66,14 +66,14 @@ Proxy will forward the DdRequest to Root Coordinator. These requests include:
 	- GetIndexBuildProgress
 	- GetIndexState
 
-Proxy handles the DdRequest sequentially. Only when the request entered earlier was done, the next request can be handled.
-Proxy forwards these requests to Root Coordinator, waits for Root Coordinator returning the result and then returns the
-result or error message to clients.
+Proxy handles the DdRequest sequentially. When and only when the earlier entered requests are done, the next request
+would be handled. Proxy forwards these requests to Root Coordinator, waits until getting results from Root Coordinator, and then 
+returns to clients with results or errors.
 
 Milvus does not support transaction, but it should gurantee the deterministic execution of every operation. A timestamp
-is tagged on each request. When a request entered Milvus, Proxy will tag a timestamp for it. The timestamp was assigned
-by Root Coordinator. The component used to assign timestamp of Root Coordinator is called `Timestamp Oracle (tso)`, tso
-will ensure that the assigned timestamp is globally increasing.
+is tagged on each request. When a request enters Milvus, Proxy tags a timestamp that was assigned by Root Coordinator. 
+The component that assigns timestamp in Root Coordinator is called `Timestamp Oracle (TSO)`. TSO ensures that each 
+timestamp is globally increasing.
 
 Milvus 2.0 implements the unified Lambda architecture, which integrates the processing of the incremental and historical
 data. Compared with the Kappa architecture, Milvus 2.0 introduces log backfill, which stores log snapshots and indexes
