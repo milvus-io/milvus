@@ -1194,6 +1194,7 @@ class TestUtilityBase(TestcaseBase):
         method: calculate distance between entities from two partitions
         expected: distance calculated successfully
         """
+        log.info("Create connection")
         self._connect()
         nb = 10
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
@@ -1202,10 +1203,12 @@ class TestUtilityBase(TestcaseBase):
         params = {metric_field: metric, "sqrt": sqrt}
         vectors_l = vectors[0].loc[:, default_field_name]
         vectors_r = vectors[1].loc[:, default_field_name]
+        log.info("Extract entities from two partitions for distance calculating")
         op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
                 "partition": partitions[0].name, "field": default_field_name}
         op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
                 "partition": partitions[1].name, "field": default_field_name}
+        log.info("Calculate distance between entities from two partitions")
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.check_distance,
                                         check_items={"vectors_l": vectors_l,
