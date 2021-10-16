@@ -2,7 +2,8 @@ name: Pod Kill Chaos Test
 
 on:
   workflow_dispatch:
-
+  schedule:
+    - cron: "30 18 * * *"
 jobs:
   
   test-pod-kill-chaos:
