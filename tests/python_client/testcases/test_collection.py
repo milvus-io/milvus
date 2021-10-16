@@ -81,7 +81,7 @@ class TestCollectionParams(TestcaseBase):
         assert c_name in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_empty_name(self):
         """
         target: test collection with empty name
@@ -95,7 +95,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     @pytest.mark.parametrize("name", [[], 1, [1, "2", 3], (1,), {1: 1}, None])
     def test_collection_illegal_name(self, name):
         """
@@ -305,7 +305,7 @@ class TestCollectionParams(TestcaseBase):
                                                  check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     @pytest.mark.parametrize("name", [[], 1, (1,), {1: 1}, "12-s"])
     def test_collection_invalid_type_field(self, name):
         """
@@ -338,7 +338,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_none_field_name(self):
         """
         target: test field schema with None name
@@ -366,7 +366,7 @@ class TestCollectionParams(TestcaseBase):
                                                  check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_field_dtype_float_value(self):
         """
         target: test collection with float type
@@ -574,7 +574,7 @@ class TestCollectionParams(TestcaseBase):
         assert self.collection_wrap.primary_field.name == ct.default_int64_field_name
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_unsupported_primary_field(self, get_unsupported_primary_field):
         """
         target: test collection with unsupported primary field type
@@ -779,7 +779,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_vector_invalid_dim(self, get_invalid_dim):
         """
         target: test collection with invalid dimension
@@ -839,7 +839,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_none_desc(self):
         """
         target: test collection with none description
