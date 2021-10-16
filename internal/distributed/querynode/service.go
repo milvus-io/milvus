@@ -307,6 +307,7 @@ func (s *Server) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequ
 	return s.querynode.LoadSegments(ctx, req)
 }
 
+// ReleaseCollection releases the data of the specified collection in QueryNode.
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.ReleaseCollection(ctx, req)
