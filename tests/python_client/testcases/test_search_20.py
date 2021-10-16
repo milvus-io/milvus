@@ -2653,6 +2653,11 @@ class TestSearchDSL(object):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_vector_only(self, connect, collection):
+        """
+        target: test search normal scenario
+        method: search vector only
+        expected: search status ok, the length of result
+        """
         entities, ids = init_data(connect, collection)
         connect.load_collection(collection)
         res = connect.search(collection, **default_query)
