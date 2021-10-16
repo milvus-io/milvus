@@ -27,13 +27,12 @@ state after power off and restart.
 IndexCoordinate receives requests from RootCoordinate to build an index, delete an index, and query the status of an index.
 
 In Milvus, index building is performed asynchronously. When IndexCoordinate receives a request to build an index from
-RootCoordinate, it will first check whether the same index has been created according to the parameters. If the same
-index has been created, it will return the IndexBuildID of the existing task. Otherwise, assign a globally unique
-IndexBuildID to the task, then records the task in the MetaTable, and writes the MetaTable to the etcd, and then
-returns it to RootCoordinate. At this point, RootCoordinate already knows that it has successfully sent the task to
-IndexCoordinate. In fact, the index construction has not been completed yet. IndexCoordinate will have a background
-process to find all the index tasks that need to be allocated periodically, and then allocate them to IndexNode for
-actual execution.
+RootCoordinate, it will first check whether the same index has been created according to the index parameters. If yes, it would 
+return the IndexBuildID of the existing task. Otherwise, it would assign a globally unique IndexBuildID to the task, 
+record the task in the MetaTable, write the MetaTable to etcd, and then return the IndexBuildID to RootCoordinate.  
+RootCoordinate confirms the index building was generated successfully by the IndexBuildID. At this time, the index construction 
+is completed yet. IndexCoordinate starts a background process to find all the index tasks that need to be 
+allocated periodically, and then allocates them to IndexNode for actual execution.
 
 When IndexCoordinate receives a request to delete an index from RootCoordinate, IndexCoordinate traverses the MetaTable,
 marks the corresponding index task as deleted, and returns. It is not really deleted from the MetaTable at this time.
