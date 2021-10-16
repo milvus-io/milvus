@@ -344,6 +344,7 @@ func (colReplica *collectionReplica) getPartitionNum() int {
 	return len(colReplica.partitions)
 }
 
+// getSegmentIDs returns segment ids
 func (colReplica *collectionReplica) getSegmentIDs(partitionID UniqueID) ([]UniqueID, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
