@@ -600,6 +600,7 @@ func (rct *ReleaseCollectionTask) rollBack(ctx context.Context) []task {
 	return nil
 }
 
+// LoadPartitionTask will load all the data of this partition to query nodes
 type LoadPartitionTask struct {
 	*BaseTask
 	*querypb.LoadPartitionsRequest
