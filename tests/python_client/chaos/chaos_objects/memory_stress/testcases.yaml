@@ -1,12 +1,11 @@
-# Testcases All-in-one
-#   pod kill
+# Memory Stress Testcases All-in-one
+#   memory stress
 #     standalone
-#       3 pods(standalone-ha-blabla, etcd, minio)
+#       todo
 #     cluster-1-node
-#       11 pods(proxy, rootcoord, querynode, querycoord, datanode, datacoord,
-#               indexnode, indexcoord, pulsar, etcd, minio)
+#       11 pods(querynode, datanode, indexnode, pulsar, etcd, minio)
 #     cluster-n-nodes
-#       11 pods* n: kill one and kill all
+#       todo
 
 Collections:
   -
