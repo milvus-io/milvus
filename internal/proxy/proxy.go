@@ -326,6 +326,7 @@ func (node *Proxy) Start() error {
 	return nil
 }
 
+// Stop stops a proxy node.
 func (node *Proxy) Stop() error {
 	node.cancel()
 
