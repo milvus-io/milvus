@@ -426,6 +426,7 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	return nil
 }
 
+// Produce produces messages for topic and updates page infos for retention
 func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
