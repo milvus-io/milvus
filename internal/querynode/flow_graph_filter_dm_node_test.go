@@ -29,8 +29,8 @@ func getFilterDMNode(ctx context.Context) (*filterDmNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	streaming.replica.initExcludedSegments(defaultCollectionID)
 
+	streaming.replica.addExcludedSegments(defaultCollectionID, nil)
 	return newFilteredDmNode(streaming.replica, loadTypeCollection, defaultCollectionID, defaultPartitionID), nil
 }
 
@@ -130,7 +130,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
-		err = fg.replica.addExcludedSegments(defaultCollectionID, []*datapb.SegmentInfo{
+		fg.replica.addExcludedSegments(defaultCollectionID, []*datapb.SegmentInfo{
 			{
 				ID:           defaultSegmentID,
 				CollectionID: defaultCollectionID,
@@ -140,7 +140,6 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 				},
 			},
 		})
-		assert.NoError(t, err)
 		res := fg.filterInvalidInsertMessage(msg)
 		assert.Nil(t, res)
 	})

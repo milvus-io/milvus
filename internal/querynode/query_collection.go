@@ -20,13 +20,14 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -317,7 +318,23 @@ func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChange
 		if err != nil {
 			return err
 		}
-		// 2. delete growing segment because these segments are loaded
+		// 2. update excluded segment, cluster have been loaded sealed segments,
+		// so we need to avoid getting growing segment from flow graph.
+		q.streaming.replica.addExcludedSegments(segment.CollectionID, []*datapb.SegmentInfo{
+			{
+				ID:            segment.SegmentID,
+				CollectionID:  segment.CollectionID,
+				PartitionID:   segment.PartitionID,
+				InsertChannel: segment.ChannelID,
+				NumOfRows:     segment.NumRows,
+				// TODO: add status, remove query pb segment status, use common pb segment status?
+				DmlPosition: &internalpb.MsgPosition{
+					// use max timestamp to filter out dm messages
+					Timestamp: math.MaxInt64,
+				},
+			},
+		})
+		// 3. delete growing segment because these segments are loaded
 		hasGrowingSegment := q.streaming.replica.hasSegment(segment.SegmentID)
 		if hasGrowingSegment {
 			err = q.streaming.replica.removeSegment(segment.SegmentID)
