@@ -30,5 +30,6 @@ target_link_libraries(milvus_indexbuilder
         log
         dl
         pthread
+        lapack
         )
 
