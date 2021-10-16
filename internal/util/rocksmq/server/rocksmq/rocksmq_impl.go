@@ -391,6 +391,7 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) {
 	log.Debug("Rocksmq register consumer successfully ", zap.String("topic", consumer.Topic), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 }
 
+// DestroyConsumerGroup removes a consumer group from rocksdb_kv
 func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
