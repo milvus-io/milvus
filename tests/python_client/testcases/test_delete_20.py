@@ -127,6 +127,22 @@ class TestDeleteParams(TestcaseBase):
         assert collection_w.num_entities == 0
         assert collection_w.is_empty
 
+    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_not_existed_values(self):
+        """
+        target: test delete not existed values
+        method: delete data not in the collection
+        expected: raise exception
+        """
+        # init collection with tmp_nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        expr = f'{ct.default_int64_field_name} in {[tmp_nb]}'
+
+        # raise exception
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
+
 
 @pytest.mark.skip(reason="Waiting for development")
 class TestDeleteOperation(TestcaseBase):
