@@ -75,9 +75,8 @@ type ReplicaInterface interface {
 	getSegmentStatistics() []*internalpb.SegmentStats
 
 	// excluded segments
-	initExcludedSegments(collectionID UniqueID)
 	removeExcludedSegments(collectionID UniqueID)
-	addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) error
+	addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo)
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
 
 	getSegmentsMemSize() int64
@@ -504,15 +503,6 @@ func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.Segmen
 	return statisticData
 }
 
-func (colReplica *collectionReplica) initExcludedSegments(collectionID UniqueID) {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	if _, ok := colReplica.excludedSegments[collectionID]; !ok {
-		colReplica.excludedSegments[collectionID] = make([]*datapb.SegmentInfo, 0)
-	}
-}
-
 func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueID) {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -520,16 +510,15 @@ func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueI
 	delete(colReplica.excludedSegments, collectionID)
 }
 
-func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) error {
+func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
 	if _, ok := colReplica.excludedSegments[collectionID]; !ok {
-		return errors.New("addExcludedSegments failed, cannot found collection, id =" + fmt.Sprintln(collectionID))
+		colReplica.excludedSegments[collectionID] = make([]*datapb.SegmentInfo, 0)
 	}
 
 	colReplica.excludedSegments[collectionID] = append(colReplica.excludedSegments[collectionID], segmentInfos...)
-	return nil
 }
 
 func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error) {
