@@ -352,6 +352,7 @@ func (colReplica *collectionReplica) getSegmentIDs(partitionID UniqueID) ([]Uniq
 	return colReplica.getSegmentIDsPrivate(partitionID)
 }
 
+// getSegmentIDsByVChannel returns segment ids which virtual channel is vChannel
 func (colReplica *collectionReplica) getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
