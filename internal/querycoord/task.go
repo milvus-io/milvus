@@ -823,6 +823,7 @@ func (lpt *LoadPartitionTask) rollBack(ctx context.Context) []task {
 	return resultTasks
 }
 
+// ReleasePartitionTask will release all the data of this partition on query nodes
 type ReleasePartitionTask struct {
 	*BaseTask
 	*querypb.ReleasePartitionsRequest
