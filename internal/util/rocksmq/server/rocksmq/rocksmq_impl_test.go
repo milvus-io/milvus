@@ -586,7 +586,7 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = rmq.SeekToLatest(channelName, groupName)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 
 	pMsgs := make([]ProducerMessage, loopNum)
 	for i := 0; i < loopNum; i++ {

@@ -717,7 +717,8 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	if iter.Valid() {
 		iter.SeekToLast()
 	} else {
-		return fmt.Errorf("RocksMQ: can't get message key of channel %s", topicName)
+		// In this case there are no messages, so shouldn't return error
+		return nil
 	}
 	msgKey := iter.Key()
 	msgID, err := strconv.ParseInt(string(msgKey.Data())[FixedChannelNameLen+1:], 10, 64)
