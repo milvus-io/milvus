@@ -474,8 +474,10 @@ class TestCollectionSearchInvalid(TestcaseBase):
         target: test search with empty connection
         method: 1. search the empty collection before load
                 2. search the empty collection after load
+                3. search collection with data inserted but not load again
         expected: 1. raise exception if not loaded
                   2. return topk=0  if loaded
+                  3. return topk successfully
         """
         # 1. initialize without data
         collection_w = self.init_collection_general(prefix)[0]
@@ -499,11 +501,9 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 4. search with data inserted but not load again
         data = cf.gen_default_dataframe_data(nb=2000)
         insert_res, _ = collection_w.insert(data)
-        sleep(0.2)
-        # insert_ids = []
-        # insert_ids.extend(insert_res.primary_keys)
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,
+                            guarantee_timestamp=insert_res.timestamp + 1,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_res.primary_keys,
