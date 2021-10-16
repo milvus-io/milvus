@@ -297,6 +297,7 @@ func (s *Server) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQuer
 	return s.querynode.RemoveQueryChannel(ctx, req)
 }
 
+// WatchDmChannels watches the channels about data manipulation.
 func (s *Server) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.WatchDmChannels(ctx, req)
