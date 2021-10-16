@@ -26,8 +26,8 @@ parameters check, constraints check and etc. Dynamic check will check some relat
 search requests for example, Proxy should check if the related collection exists in Milvus.
 
 Also, Proxy will do some preprocessing for every request. Proxy will do little thing for some requests in the
-preprocessing stage and a lot more for other requests. Every object in Milvus will be assigned with a `ID`, such as 
-`CollectionID`, `PartitionID`, `IndexID`,  `SegmentID` and etc. Components in Milvus communicate with each other by the 
+preprocessing stage and a lot more for other requests. Every object in Milvus will be assigned with a `ID`, such as
+`CollectionID`, `PartitionID`, `IndexID`, `SegmentID` and etc. Components in Milvus communicate with each other by the
 ID of object, however, users only knows the object name. So as the user access layser of Milvus, Proxy should translate
 the object name into object ID. Also taking search request as example, Proxy should translate the `CollectionName` into
 `CollectionID` and then the Query Node will recognize the request. Proxy holds a cache that translate object name into
@@ -36,43 +36,41 @@ object id and dynamically updates the cache.
 #### 6.0 Service Discovery based on etcd
 
 As you know, Proxy depends on some other components. So how Proxy knows the other nodes' information such as host and port,
-it is also called how Milvus implements the service discovery mechanism? As a cloud-native vector database, Milvus uses 
-etcd to provide service registration and service discovery. Every node in Milvus registers its node information(including host, 
-port, ID etc) into etcd after startup. Nodes should specify the prefix and key of etcd when registration. Nodes with the 
-same type have the same prefix in etcd, while nodes with different types have different prefixes. Every key in etcd can be assigned with a lease, and you can specify the `time-to-live(ttl)` of the 
-lease. Milvus uses this mechanism to check if a node is online. When a node is healthy, it will continuously renew the 
+it is also called how Milvus implements the service discovery mechanism? As a cloud-native vector database, Milvus uses
+etcd to provide service registration and service discovery. Every node in Milvus registers its node information(including host,
+port, ID etc) into etcd after startup. Nodes should specify the prefix and key of etcd when registration. Nodes with the
+same type have the same prefix in etcd, while nodes with different types have different prefixes. Every key in etcd can be assigned with a lease, and you can specify the `time-to-live(ttl)` of the
+lease. Milvus uses this mechanism to check if a node is online. When a node is healthy, it will continuously renew the
 lease in etcd. Otherwise, if some exceptions occurred in a node, or a node stopped to renew the lease, etcd would delete
-the related node information. By using this mechanism, nodes in Milvus know if there are any other nodes going to be 
+the related node information. By using this mechanism, nodes in Milvus know if there are any other nodes going to be
 online or offline and synchronize the latest node information.
-
-
 
 #### 6.0 Interaction with Root Coordinator
 
 Proxy will forward the DdRequest to Root Coordinator. These requests include:
 
-	- CreateCollection
-	- DropCollection
-	- HasCollection
-	- DescribeCollection
-	- ShowCollections
-	- CreatePartition
-	- DropPartition
-	- HasPartition
-	- ShowPartitions
-	- CreateIndex
-	- DropIndex
-	- DescribeIndex
-	- GetIndexBuildProgress
-	- GetIndexState
+    - CreateCollection
+    - DropCollection
+    - HasCollection
+    - DescribeCollection
+    - ShowCollections
+    - CreatePartition
+    - DropPartition
+    - HasPartition
+    - ShowPartitions
+    - CreateIndex
+    - DropIndex
+    - DescribeIndex
+    - GetIndexBuildProgress
+    - GetIndexState
 
 Proxy handles the DdRequest sequentially. When and only when the earlier entered requests are done, the next request
-would be handled. Proxy forwards these requests to Root Coordinator, waits until getting results from Root Coordinator, and then 
+would be handled. Proxy forwards these requests to Root Coordinator, waits until getting results from Root Coordinator, and then
 returns to clients with results or errors.
 
 Milvus does not support transaction, but it should gurantee the deterministic execution of every operation. A timestamp
-is tagged on each request. When a request enters Milvus, Proxy tags a timestamp that was assigned by Root Coordinator. 
-The component that assigns timestamp in Root Coordinator is called `Timestamp Oracle (TSO)`. TSO ensures that each 
+is tagged on each request. When a request enters Milvus, Proxy tags a timestamp that was assigned by Root Coordinator.
+The component that assigns timestamp in Root Coordinator is called `Timestamp Oracle (TSO)`. TSO ensures that each
 timestamp is globally increasing.
 
 Milvus 2.0 implements the unified Lambda architecture, which integrates the processing of the incremental and historical
@@ -227,9 +225,9 @@ Collection and Partition.
 
 There are three main functions in taskScheduler:
 
-	- Schedule task
-	- Maintain the snapshot of timestamp statistics
-	- Receive the search results from stream and then distribute them to related task
+    - Schedule task
+    - Maintain the snapshot of timestamp statistics
+    - Receive the search results from stream and then distribute them to related task
 
 taskScheduler maintains three queues: ddQueue, dmQueue and dqQueue correspond to DdRequest, DmRequest, and DqRequest
 respectively. The interface of taskQueue is defined as follows:
@@ -366,7 +364,7 @@ writes the request to the DqRequestChannel, it will attach the ReqID, and the qu
 when writing the search result back to the DqResultChannel. taskScheduler will start a background coroutine to consume
 search result from DqResultChannel, and then distribute messages according to the ReqID in it. When several results of
 the same ReqID are collected and the termination condition is reached, these results will be passed to the blocking task
-coroutine which is  waiting. The waken task will reduce the search results and then send the final search result to
+coroutine which is waiting. The waken task will reduce the search results and then send the final search result to
 clients.
 
 ##### 6.6.2 channelsMgr
