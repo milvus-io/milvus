@@ -485,6 +485,7 @@ func (lct *LoadCollectionTask) rollBack(ctx context.Context) []task {
 	return resultTasks
 }
 
+// ReleaseCollectionTask will release all the data of this collection on query nodes
 type ReleaseCollectionTask struct {
 	*BaseTask
 	*querypb.ReleaseCollectionRequest
