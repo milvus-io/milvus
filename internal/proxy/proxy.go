@@ -368,6 +368,7 @@ func (node *Proxy) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
+// SetRootCoordClient set rootcoord client for proxy.
 func (node *Proxy) SetRootCoordClient(cli types.RootCoord) {
 	node.rootCoord = cli
 }
