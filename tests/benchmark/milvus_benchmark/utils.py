@@ -144,12 +144,13 @@ def get_server_tag(deploy_params):
         server_tag = server["server_tag"] if "server_tag" in server else ""
     return server_tag
 
+
 def search_param_analysis(vector_query, filter_query):
 
     if "vector" in vector_query:
         vector = vector_query["vector"]
     else:
-        logger.debug("[search_param_analysis] vector not in vector_query")
+        logger.error("[search_param_analysis] vector not in vector_query")
         return False
 
     data = []
@@ -164,7 +165,7 @@ def search_param_analysis(vector_query, filter_query):
                      "params": vector[key]["params"]}
             limit = vector[key]["topk"]
     else:
-        logger.debug("[search_param_analysis] vector not dict or len != 1: %s" % str(vector))
+        logger.error("[search_param_analysis] vector not dict or len != 1: %s" % str(vector))
         return False
 
     if isinstance(filter_query, list) and len(filter_query) != 0 and "range" in filter_query[0]:
@@ -184,7 +185,7 @@ def search_param_analysis(vector_query, filter_query):
                         expression = exp2
 
         else:
-            logger.debug("[search_param_analysis] filter_range not dict or len != 1: %s" % str(filter_range))
+            logger.error("[search_param_analysis] filter_range not dict or len != 1: %s" % str(filter_range))
             return False
     else:
         # logger.debug("[search_param_analysis] range not in filter_query: %s" % str(filter_query))
