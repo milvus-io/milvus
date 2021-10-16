@@ -202,3 +202,18 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.delete(tmp_expr)
         assert collection_w.num_entities == tmp_nb - 1
         assert collection_w.has_index()
+
+    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_query(self):
+        """
+        target: test delete and query
+        method: query entity after it was deleted
+        expected: query result is empty
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        # assert delete successfully
+        collection_w.delete(expr=tmp_expr)
+        res = collection_w.query(expr=tmp_expr)[0]
+        assert len(res) == 0
