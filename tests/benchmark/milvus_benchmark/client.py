@@ -336,7 +336,7 @@ class MilvusClient(object):
         logger.debug("Start warm up query")
         for i in range(times):
             params = util.search_param_analysis(vector_query, None)
-            result = self._milvus.search(self._collection_name, **params)
+            self._milvus.search(self._collection_name, **params)
 
             # self._milvus.search(self._collection_name, query)
         logger.debug("End warm up query")
