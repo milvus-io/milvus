@@ -303,6 +303,7 @@ func (s *Server) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChanne
 	return s.querynode.WatchDmChannels(ctx, req)
 }
 
+// LoadSegments loads the segments to search.
 func (s *Server) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.LoadSegments(ctx, req)
