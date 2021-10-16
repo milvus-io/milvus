@@ -338,6 +338,7 @@ func (colReplica *collectionReplica) hasPartitionPrivate(partitionID UniqueID) b
 	return ok
 }
 
+// getPartitionNum returns num of partitions
 func (colReplica *collectionReplica) getPartitionNum() int {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
