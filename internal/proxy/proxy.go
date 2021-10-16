@@ -282,6 +282,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 	}()
 }
 
+// Start starts a proxy node.
 func (node *Proxy) Start() error {
 	err := InitMetaCache(node.rootCoord)
 	if err != nil {
