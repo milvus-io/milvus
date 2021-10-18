@@ -12,8 +12,8 @@
 #include <gtest/gtest.h>
 #include <random>
 #include <string>
+
 #include "segcore/SegmentGrowing.h"
-#include "test_utils/DataGen.h"
 
 using namespace milvus;
 
