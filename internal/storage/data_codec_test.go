@@ -321,7 +321,7 @@ func TestDeleteCodec(t *testing.T) {
 	blob, err := deleteCodec.Serialize(1, 1, deleteData)
 	assert.Nil(t, err)
 
-	pid, sid, data, err := deleteCodec.Deserialize(blob)
+	pid, sid, data, err := deleteCodec.Deserialize([]*Blob{blob})
 	assert.Nil(t, err)
 	assert.Equal(t, pid, int64(1))
 	assert.Equal(t, sid, int64(1))
