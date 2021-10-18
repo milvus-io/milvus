@@ -27,6 +27,7 @@ class CustomResourceOperations(object):
         except ApiException as e:
             log.error("Exception when calling CustomObjectsApi->create_namespaced_custom_object: %s\n" % e)
             raise Exception(str(e))
+        return api_response
 
     def delete(self, metadata_name, raise_ex=True):
         """delete or uninstall a custom resource in k8s"""
