@@ -3,10 +3,10 @@ import time
 import logging
 import string
 import random
-from yaml import full_load, dump
+# from yaml import full_load, dump
 import yaml
 import tableprint as tp
-from pprint import pprint
+# from pprint import pprint
 import config
 
 logger = logging.getLogger("milvus_benchmark.utils")
