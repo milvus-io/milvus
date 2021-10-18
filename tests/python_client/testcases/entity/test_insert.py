@@ -200,7 +200,8 @@ class TestInsertBase:
     def test_insert_ids(self, connect, id_collection, insert_count):
         """
         target: test insert entities in collection, use customize ids
-        method: create collection and insert entities in it, check the ids returned and the collection length after entities inserted
+        method: create collection and insert entities in it, check the ids returned and
+                the collection length after entities inserted
         expected: the length of ids and the collection row count
         """
         nb = insert_count
@@ -219,7 +220,8 @@ class TestInsertBase:
     def test_insert_the_same_ids(self, connect, id_collection, insert_count):
         """
         target: test insert vectors in collection, use customize the same ids
-        method: create collection and insert vectors in it, check the ids returned and the collection length after vectors inserted
+        method: create collection and insert vectors in it, check the ids returned and
+                the collection length after vectors inserted
         expected: the length of ids and the collection row count
         """
         nb = insert_count
