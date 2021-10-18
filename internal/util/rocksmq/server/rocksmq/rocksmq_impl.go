@@ -704,6 +704,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	return nil
 }
 
+// SeekToLatest updates current id to the msg id of latest message
 func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
