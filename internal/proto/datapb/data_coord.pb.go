@@ -1329,7 +1329,7 @@ type SegmentInfo struct {
 	LastExpireTime uint64                  `protobuf:"varint,8,opt,name=last_expire_time,json=lastExpireTime,proto3" json:"last_expire_time,omitempty"`
 	StartPosition  *internalpb.MsgPosition `protobuf:"bytes,9,opt,name=start_position,json=startPosition,proto3" json:"start_position,omitempty"`
 	DmlPosition    *internalpb.MsgPosition `protobuf:"bytes,10,opt,name=dml_position,json=dmlPosition,proto3" json:"dml_position,omitempty"`
-	// binlogs consist of insert-binlogs and stats-binlogs
+	// binlogs consist of insert binlogs
 	Binlogs              []*FieldBinlog `protobuf:"bytes,11,rep,name=binlogs,proto3" json:"binlogs,omitempty"`
 	Statslogs            []*FieldBinlog `protobuf:"bytes,12,rep,name=statslogs,proto3" json:"statslogs,omitempty"`
 	Deltalogs            []string       `protobuf:"bytes,13,rep,name=deltalogs,proto3" json:"deltalogs,omitempty"`

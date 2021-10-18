@@ -196,7 +196,7 @@ message SegmentInfo {
   uint64 last_expire_time = 8;
   internal.MsgPosition start_position = 9;
   internal.MsgPosition dml_position = 10;
-  // binlogs consist of insert-binlogs and stats-binlogs
+  // binlogs consist of insert binlogs
   repeated FieldBinlog binlogs = 11;
   repeated FieldBinlog statslogs = 12;
   repeated string deltalogs = 13;
