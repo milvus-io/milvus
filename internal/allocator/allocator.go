@@ -31,21 +31,25 @@ const (
 	maxConcurrentRequests = 10000
 )
 
+// Request defines an interface which has Wait and Notify methods.
 type Request interface {
 	Wait() error
 	Notify(error)
 }
 
+// BaseRequest implements Request interface.
 type BaseRequest struct {
 	Done  chan error
 	Valid bool
 }
 
+// Wait is blocked until the request is allocated or an error occurs.
 func (req *BaseRequest) Wait() error {
 	err := <-req.Done
 	return err
 }
 
+// Notify is used to send error to the requester.
 func (req *BaseRequest) Notify(err error) {
 	req.Done <- err
 }
