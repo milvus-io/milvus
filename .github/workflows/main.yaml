@@ -72,5 +72,5 @@ jobs:
         uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt
+          files: ./go_coverage.txt,./lcov_output.info
           name: ubuntu-${{ matrix.ubuntu }}-unittests
