@@ -261,3 +261,57 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.delete(expr=tmp_expr)
         res = collection_w.query(expr=tmp_expr)[0]
         assert len(res) == 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_search(self):
+        """
+        target: test delete and search
+        method: search entities after it was deleted
+        expected: deleted entity is not in the search result
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, insert_data=True)[0]
+        entity, _ = collection_w.query(tmp_expr, output_fields=["%"])
+        default_search_exp = "int64 >= 0"
+        search_res, _ = collection_w.search(entity[ct.default_float_vec_field_name], ct.default_float_vec_field_name,
+                                            ct.default_search_params, limit=1)
+        # assert search results contains entity
+        # todo
+        del_res, _ = collection_w.delete(tmp_expr)
+        assert del_res.delete_cnt == 1
+        search_res_2, _ = collection_w.search(entity[ct.default_float_vec_field_name], ct.default_float_vec_field_name,
+                                              ct.default_search_params, limit=1)
+        # assert search result is not equal to entity
+        # todo
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_expr_repeated_values(self):
+        """
+        target: test delete with repeated values
+        method: 1.insert data with unique primary keys
+                2.delete with repeated values: 'id in [0, 0]'
+        expected: delete one entity
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        expr = f'{ct.default_int64_field_name} in {[0, 0, 0]}'
+        del_res, _ = collection_w.delete(expr)
+        assert del_res.delete_cnt == 1
+        assert collection_w.num_entities == tmp_nb - 1
+
+    def test_delete_duplicate_primary_keys(self):
+        """
+        target: test delete from duplicate primary keys
+        method: 1.insert data with dup ids
+                2.delete with repeated or not values
+        expected: delete all entities
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(nb=tmp_nb)
+        df[ct.default_int64_field_name] = 0
+        collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb
+        collection_w.load()
+        del_res, _ = collection_w.delete(tmp_expr)
+        assert del_res.delete_cnt == tmp_nb
+        assert collection_w.is_empty
