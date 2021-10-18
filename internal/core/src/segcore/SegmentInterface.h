@@ -28,11 +28,12 @@
 
 namespace milvus::segcore {
 
-// common interface of SegmentSealed and SegmentGrowing
-// used by C API
+// common interface of SegmentSealed and SegmentGrowing used by C API
 class SegmentInterface {
  public:
-    // fill results according to target_entries in plan
+    virtual void
+    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const = 0;
+
     virtual void
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
 
@@ -81,6 +82,9 @@ class SegmentInternalInterface : public SegmentInterface {
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup& placeholder_group,
            Timestamp timestamp) const override;
+
+    void
+    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const override;
 
     void
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const override;
