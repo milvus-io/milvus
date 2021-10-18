@@ -61,7 +61,7 @@ type insertBufferNode struct {
 	idAllocator  allocatorInterface
 
 	flushMap         sync.Map
-	flushChan        <-chan *flushMsg
+	flushChan        <-chan flushMsg
 	flushingSegCache *Cache
 
 	minIOKV kv.BaseKV
@@ -222,6 +222,8 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			zap.Int64("buffer limit", bd.(*BufferData).limit))
 	}
 
+	segmentsToFlush := make([]UniqueID, 0, len(seg2Upload)+1) //auto flush number + possible manual flush
+
 	// Auto Flush
 	finishCh := make(chan segmentFlushUnit, len(seg2Upload))
 	finishCnt := sync.WaitGroup{}
@@ -249,6 +251,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			}
 			finishCnt.Add(1)
 
+			segmentsToFlush = append(segmentsToFlush, segToFlush)
 			go flushSegment(collMeta, segToFlush, partitionID, collID,
 				&ibNode.flushMap, ibNode.minIOKV, finishCh, &finishCnt, ibNode, ibNode.idAllocator)
 		}
@@ -270,12 +273,13 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	// Manual Flush
 	select {
 	case fmsg := <-ibNode.flushChan:
+
 		currentSegID := fmsg.segmentID
 		log.Debug(". Receiving flush message",
 			zap.Int64("segmentID", currentSegID),
 			zap.Int64("collectionID", fmsg.collectionID),
 		)
-
+		segmentsToFlush = append(segmentsToFlush, currentSegID)
 		bd, ok := ibNode.insertBuffer.Load(currentSegID)
 
 		if !ok || bd.(*BufferData).size <= 0 { // Buffer empty
@@ -346,10 +350,11 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	}
 
 	res := flowGraphMsg{
-		deleteMessages: fgMsg.deleteMessages,
-		timeRange:      fgMsg.timeRange,
-		startPositions: fgMsg.startPositions,
-		endPositions:   fgMsg.endPositions,
+		deleteMessages:  fgMsg.deleteMessages,
+		timeRange:       fgMsg.timeRange,
+		startPositions:  fgMsg.startPositions,
+		endPositions:    fgMsg.endPositions,
+		segmentsToFlush: segmentsToFlush,
 	}
 
 	for _, sp := range spans {
@@ -884,7 +889,7 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return ibNode.replica.getCollectionAndPartitionID(segmentID)
 }
 
-func newInsertBufferNode(ctx context.Context, flushCh <-chan *flushMsg, saveBinlog func(*segmentFlushUnit) error,
+func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, saveBinlog func(*segmentFlushUnit) error,
 	flushingSegCache *Cache, config *nodeConfig) (*insertBufferNode, error) {
 
 	baseNode := BaseNode{}

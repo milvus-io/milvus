@@ -58,6 +58,10 @@ func (replica *mockReplica) filterSegments(channelName string, partitionID Uniqu
 	return results
 }
 
+func (replica *mockReplica) getCollectionID() UniqueID {
+	return 0
+}
+
 func (replica *mockReplica) getCollectionSchema(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
 	return &schemapb.CollectionSchema{}, nil
 }
@@ -78,7 +82,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			dn, err := newDeleteNode(test.ctx, make(chan *flushMsg), test.config)
+			dn, err := newDeleteNode(test.ctx, test.config)
 			assert.Nil(t, err)
 
 			assert.NotNil(t, dn)
@@ -160,8 +164,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		for _, test := range invalidInTests {
 			te.Run(test.desc, func(t *testing.T) {
-				flushCh := make(chan *flushMsg, 10)
-				dn := deleteNode{flushCh: flushCh}
+				dn := deleteNode{}
 				rt := dn.Operate(test.in)
 				assert.Empty(t, rt)
 			})
@@ -183,7 +186,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			vChannelName: chanName,
 		}
 
-		dn, err := newDeleteNode(context.Background(), make(chan *flushMsg), c)
+		dn, err := newDeleteNode(context.Background(), c)
 		assert.Nil(t, err)
 
 		results := dn.filterSegmentByPK(0, pks)
@@ -209,22 +212,16 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		Params.MetaRootPath = testPath
 		Params.DeleteBinlogRootPath = testPath
 
-		flushChan := make(chan *flushMsg, 100)
 		c := &nodeConfig{
 			replica:      replica,
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
-		delNode, err := newDeleteNode(ctx, flushChan, c)
+		delNode, err := newDeleteNode(ctx, c)
 		assert.Nil(te, err)
 
-		flushChan <- &flushMsg{
-			msgID:        1,
-			timestamp:    2000,
-			collectionID: UniqueID(1),
-		}
-
 		msg := GenFlowGraphDeleteMsg(pks, chanName)
+		msg.segmentsToFlush = segIDs
 		var fgMsg flowgraph.Msg = &msg
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 	})

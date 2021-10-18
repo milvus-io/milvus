@@ -97,7 +97,7 @@ type DataNode struct {
 
 	chanMut           sync.RWMutex
 	vchan2SyncService map[string]*dataSyncService // vchannel name
-	vchan2FlushChs    map[string]*flushChans      // vchannel name to flush channels
+	vchan2FlushChs    map[string]chan flushMsg    // vchannel name to flush channels
 
 	clearSignal  chan UniqueID // collection ID
 	segmentCache *Cache
@@ -111,14 +111,6 @@ type DataNode struct {
 	closer io.Closer
 
 	msFactory msgstream.Factory
-}
-
-type flushChans struct {
-	// Flush signal for insert buffer
-	insertBufferCh chan *flushMsg
-
-	// Flush signal for delete buffer
-	deleteBufferCh chan *flushMsg
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -136,7 +128,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		segmentCache: newCache(),
 
 		vchan2SyncService: make(map[string]*dataSyncService),
-		vchan2FlushChs:    make(map[string]*flushChans),
+		vchan2FlushChs:    make(map[string]chan flushMsg),
 		clearSignal:       make(chan UniqueID, 100),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -326,18 +318,15 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		zap.Int("Flushed Segment Number", len(vchan.GetFlushedSegments())),
 	)
 
-	flushChs := &flushChans{
-		insertBufferCh: make(chan *flushMsg, 100),
-		deleteBufferCh: make(chan *flushMsg, 100),
-	}
+	flushCh := make(chan flushMsg, 100)
 
-	dataSyncService, err := newDataSyncService(node.ctx, flushChs, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache)
+	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache)
 	if err != nil {
 		return err
 	}
 
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
-	node.vchan2FlushChs[vchan.GetChannelName()] = flushChs
+	node.vchan2FlushChs[vchan.GetChannelName()] = flushCh
 
 	log.Info("Start New dataSyncService",
 		zap.Int64("Collection ID", vchan.GetCollectionID()),
@@ -599,18 +588,12 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			return status, nil
 		}
 
-		insertFlushmsg := flushMsg{
+		flushChs <- flushMsg{
 			msgID:        req.Base.MsgID,
 			timestamp:    req.Base.Timestamp,
 			segmentID:    id,
 			collectionID: req.CollectionID,
 		}
-
-		// Copy flushMsg to a different address
-		deleteFlushMsg := insertFlushmsg
-
-		flushChs.insertBufferCh <- &insertFlushmsg
-		flushChs.deleteBufferCh <- &deleteFlushMsg
 	}
 
 	log.Debug("Flowgraph flushSegment tasks triggered",
