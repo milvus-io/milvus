@@ -12,6 +12,7 @@ tmp_nb = 100
 tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
 
 
+@pytest.mark.skip(reason="Delete function is not implemented")
 class TestDeleteParams(TestcaseBase):
     """
     Test case of delete interface
@@ -68,7 +69,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w.delete(None)
         log.debug(collection_w.num_entities)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr", [1, "12-s", "中文", [], ()])
     @pytest.mark.skip(reason="Delete function is not implemented")
     def test_delete_expr_non_string(self, expr):
@@ -138,6 +139,49 @@ class TestDeleteParams(TestcaseBase):
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
         expr = f'{ct.default_int64_field_name} in {[tmp_nb]}'
+
+        # raise exception
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_part_existed_values(self):
+        """
+        target: test delete with part not existed values
+        method: delete data part not in the collection
+        expected: not delete and entities
+        """
+        # init collection with tmp_nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        expr = f'{ct.default_int64_field_name} in {[0, tmp_nb]}'
+        res, _ = collection_w.delete(expr)
+        assert res.delete_count == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_expr_inconsistent_values(self):
+        """
+        target: test delete with inconsistent type values
+        method: delete with non-int64 type values
+        expected: raise exception
+        """
+        # init collection with tmp_nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        expr = f'{ct.default_int64_field_name} in {[0.0, 1.0]}'
+
+        # raise exception
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_expr_mix_values(self):
+        """
+        target: test delete with mix type values
+        method: delete with int64 and float values
+        expected: raise exception
+        """
+        # init collection with tmp_nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        expr = f'{ct.default_int64_field_name} in {[0, 1.0]}'
 
         # raise exception
         error = {ct.err_code: 0, ct.err_msg: "..."}
