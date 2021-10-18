@@ -146,6 +146,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
+	w.node.streaming.replica.initExcludedSegments(collectionID)
 	if hasCollectionInHistorical := w.node.historical.replica.hasCollection(collectionID); !hasCollectionInHistorical {
 		err := w.node.historical.replica.addCollection(collectionID, w.req.Schema)
 		if err != nil {
@@ -215,7 +216,11 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	for _, info := range w.req.Infos {
 		checkPointInfos = append(checkPointInfos, info.UnflushedSegments...)
 	}
-	w.node.streaming.replica.addExcludedSegments(collectionID, checkPointInfos)
+	err = w.node.streaming.replica.addExcludedSegments(collectionID, checkPointInfos)
+	if err != nil {
+		log.Warn(err.Error())
+		return err
+	}
 	log.Debug("watchDMChannel, add check points info done", zap.Any("collectionID", collectionID))
 
 	// create tSafe

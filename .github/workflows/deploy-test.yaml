@@ -25,7 +25,6 @@ jobs:
         with:
           python-version: 3.8
       - name: Run deploy test
-        timeout-minutes: 15
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
@@ -91,7 +90,6 @@ jobs:
           pip install --upgrade protobuf          
       
       - name: First Milvus Deployment
-        timeout-minutes: 15
         shell: bash
         working-directory: tests/python_client/deploy     
         run: |
@@ -120,7 +118,6 @@ jobs:
           helm uninstall deploy-testing
       
       - name: Seconde Milvus Deployment
-        timeout-minutes: 15
         shell: bash
         working-directory: tests/python_client/deploy     
         run: |
@@ -152,7 +149,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v2
         with:
-          name: helm-deploy-logs-${{ matrix.task }}
+          name: logs-${{ matrix.pod }}
           path: tests/python_client/deploy/k8s_logs       
           
 

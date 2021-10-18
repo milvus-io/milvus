@@ -56,7 +56,6 @@ func VerifyResponse(response interface{}, err error) error {
 	return nil
 }
 
-// FailResponse sets status to failed with reason
 func FailResponse(status *commonpb.Status, reason string) {
 	status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 	status.Reason = reason

@@ -31,25 +31,21 @@ import (
 
 	"errors"
 
-	"github.com/uber/jaeger-client-go/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
-var _globalL, _globalP, _globalS, _globalR atomic.Value
-var rateLimiter *utils.ReconfigurableRateLimiter
+var _globalL, _globalP, _globalS atomic.Value
 
 func init() {
 	l, p := newStdLogger()
 	_globalL.Store(l)
 	_globalP.Store(p)
+
 	s := _globalL.Load().(*zap.Logger).Sugar()
 	_globalS.Store(s)
-
-	r := utils.NewRateLimiter(1.0, 60.0)
-	_globalR.Store(r)
 }
 
 // InitLogger initializes a zap logger.
@@ -138,11 +134,6 @@ func L() *zap.Logger {
 // ReplaceGlobals. It's safe for concurrent use.
 func S() *zap.SugaredLogger {
 	return _globalS.Load().(*zap.SugaredLogger)
-}
-
-// R returns utils.ReconfigurableRateLimiter.
-func R() *utils.ReconfigurableRateLimiter {
-	return _globalR.Load().(*utils.ReconfigurableRateLimiter)
 }
 
 // ReplaceGlobals replaces the global Logger and SugaredLogger.

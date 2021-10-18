@@ -34,7 +34,6 @@ func TestMain(m *testing.M) {
 		log.Error("MkdirALl error for path", zap.Any("path", retentionPath))
 		return
 	}
-	atomic.StoreInt64(&TickerTimeInSeconds, 6)
 	code := m.Run()
 	os.Exit(code)
 }

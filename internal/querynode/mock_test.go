@@ -71,10 +71,7 @@ const (
 	defaultPartitionName  = "query-node-unittest-default-partition"
 )
 
-const (
-	defaultMsgLength = 100
-	defaultDelLength = 10
-)
+const defaultMsgLength = 100
 
 const (
 	buildID   = UniqueID(0)
@@ -684,27 +681,10 @@ func genSimpleTimestampFieldData() []Timestamp {
 	return times
 }
 
-func genSimpleTimestampDeletedPK() []Timestamp {
-	times := make([]Timestamp, defaultDelLength)
-	for i := 0; i < defaultDelLength; i++ {
-		times[i] = Timestamp(i)
-	}
-	times[0] = 1
-	return times
-}
-
 func genSimpleRowIDField() []IntPrimaryKey {
 	ids := make([]IntPrimaryKey, defaultMsgLength)
 	for i := 0; i < defaultMsgLength; i++ {
 		ids[i] = IntPrimaryKey(i)
-	}
-	return ids
-}
-
-func genSimpleDeleteID() []IntPrimaryKey {
-	ids := make([]IntPrimaryKey, defaultDelLength)
-	for i := 0; i < defaultDelLength; i++ {
-		ids[0] = IntPrimaryKey(i)
 	}
 	return ids
 }
@@ -741,21 +721,6 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 			Timestamps:     genSimpleTimestampFieldData(),
 			RowIDs:         genSimpleRowIDField(),
 			RowData:        rowData,
-		},
-	}, nil
-}
-
-func genSimpleDeleteMsg() (*msgstream.DeleteMsg, error) {
-	return &msgstream.DeleteMsg{
-		BaseMsg: genMsgStreamBaseMsg(),
-		DeleteRequest: internalpb.DeleteRequest{
-			Base:           genCommonMsgBase(commonpb.MsgType_Delete),
-			CollectionName: defaultCollectionName,
-			PartitionName:  defaultPartitionName,
-			CollectionID:   defaultCollectionID,
-			PartitionID:    defaultPartitionID,
-			PrimaryKeys:    genSimpleDeleteID(),
-			Timestamps:     genSimpleTimestampDeletedPK(),
 		},
 	}, nil
 }

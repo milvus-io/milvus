@@ -1,18 +1,13 @@
-// Licensed to the LF AI & Data foundation under one
-// or more contributor license agreements. See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership. The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 package datanode
 
@@ -52,21 +47,6 @@ func (kv *mockMinioKV) LoadWithPrefix(prefix string) ([]string, []string, error)
 		Min:     0,
 		Max:     10,
 		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
-	}
-	buffer, _ := json.Marshal(stats)
-	return []string{"0"}, []string{string(buffer)}, nil
-}
-
-type mockPkfilterMergeError struct {
-	kv.BaseKV
-}
-
-func (kv *mockPkfilterMergeError) LoadWithPrefix(prefix string) ([]string, []string, error) {
-	stats := &storage.Int64Stats{
-		FieldID: common.RowIDField,
-		Min:     0,
-		Max:     10,
-		BF:      bloom.NewWithEstimates(1, 0.0001),
 	}
 	buffer, _ := json.Marshal(stats)
 	return []string{"0"}, []string{string(buffer)}, nil
@@ -533,23 +513,10 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 		assert.NotNil(to, err)
 	})
 
-	te.Run("Test_addSegmentStatsError", func(to *testing.T) {
+	te.Run("Test_addNormalSegmentStatsError", func(to *testing.T) {
 		sr, err := newReplica(context.Background(), rc, 1)
 		assert.Nil(to, err)
 		sr.minIOKV = &mockMinioKVStatsError{}
-
-		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
-		cp := &segmentCheckPoint{int64(10), *cpPos}
-		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
-		assert.NotNil(to, err)
-		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
-		assert.NotNil(to, err)
-	})
-
-	te.Run("Test_addSegmentPkfilterError", func(to *testing.T) {
-		sr, err := newReplica(context.Background(), rc, 1)
-		assert.Nil(to, err)
-		sr.minIOKV = &mockPkfilterMergeError{}
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}

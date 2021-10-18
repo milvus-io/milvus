@@ -54,7 +54,6 @@ func (p *BaseParamTable) Init() {
 	})
 }
 
-// LoadCfgToMemory loads configurations from file into memory.
 func (p *BaseParamTable) LoadCfgToMemory() {
 	p.initEtcdConf()
 	p.initMetaRootPath()
