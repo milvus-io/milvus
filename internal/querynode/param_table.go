@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -82,19 +83,23 @@ type ParamTable struct {
 	UpdatedTime time.Time
 }
 
+// Params is a package scoped variable of type ParamTable.
 var Params ParamTable
 var once sync.Once
 
+// InitAlias initializes an alias for the QueryNode role.
 func (p *ParamTable) InitAlias(alias string) {
 	p.Alias = alias
 }
 
+// InitOnce is used to initialize configuration items, and it will only be called once.
 func (p *ParamTable) InitOnce() {
 	once.Do(func() {
 		p.Init()
 	})
 }
 
+// Init is used to initialize configuration items.
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 	if err := p.LoadYaml("advanced/query_node.yaml"); err != nil {
