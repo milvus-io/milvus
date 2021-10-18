@@ -48,8 +48,8 @@ Milvus' computing operations depend on CPU’s support for SIMD (Single Instruct
 
 Run the lscpu command to check if your CPU supports the SIMD instruction sets mentioned above:
 
-```
-lscpu | grep -e sse4_2 -e avx -e avx2 -e avx512
+```bash
+$ lscpu | grep -e sse4_2 -e avx -e avx2 -e avx512
 ```
 
 Check Wikipedia [CPU with AVX](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions#CPUs_with_AVX) for more details.
@@ -71,8 +71,8 @@ You can specify different OS for builder by setting `OS_NAME` which defaults to 
 To specify `centos7` builder, use these command:
 
 ```shell
-export OS_NAME=centos7
-build/builder.sh make
+$ export OS_NAME=centos7
+$ build/builder.sh make
 ```
 
 ## Dev Containers
@@ -109,23 +109,23 @@ milvus_pulsar_1    bin/pulsar standalone --no ...   Up
 `milvus_builder_1` is the docker of milvus dev, other containers are used as unit test dependencies. you can run compilation and unit test inside the container, enter it:
 
 ```shell
-docker exec -ti milvus_builder_1 bash
+$ docker exec -ti milvus_builder_1 bash
 ```
 
 Compile the project and run unit test, see details at the [DEVELOPMENT.md](../DEVELOPMENT.md)
 
 ```shell
-make all
+$ make all
 ```
 
 ```shell
-make unittest
+$ make unittest
 ```
 
 Stop Dev Container 
 
 ```shell
-./scripts/devcontainer.sh down
+$ ./scripts/devcontainer.sh down
 ```
 
 ## E2E Tests
@@ -133,22 +133,22 @@ Stop Dev Container
 Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
 
 ```shell
-cd deployments/docker/dev
-docker-compose up -d
-cd ../../../
-build/builder.sh /bin/bash -c "export ROCKSMQ_PATH='/tmp/milvus/rdb_data' && ./scripts/start_standalone.sh && cat"
+$ cd deployments/docker/dev
+$ docker-compose up -d
+$ cd ../../../
+$ build/builder.sh /bin/bash -c "export ROCKSMQ_PATH='/tmp/milvus/rdb_data' && ./scripts/start_standalone.sh && cat"
 ```
 or
 ```shell
-build/builder.sh /bin/bash -c "./scripts/start_cluster.sh && cat"
+$ build/builder.sh /bin/bash -c "./scripts/start_cluster.sh && cat"
 ```
 
 To run E2E tests, use these command:
 
 ```shell
-MILVUS_SERVICE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker-compose ps -q builder))
-cd tests/docker
-docker-compose run --rm pytest /bin/bash -c "pytest --host ${MILVUS_SERVICE_IP}"
+$ MILVUS_SERVICE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker-compose ps -q builder))
+$ cd tests/docker
+$ docker-compose run --rm pytest /bin/bash -c "pytest --host ${MILVUS_SERVICE_IP}"
 ```
 
 
@@ -208,7 +208,7 @@ Modify vscode go setups if necessary, the setting path is **code -> preference -
 Enable Code debug by remote debugging with dlv, you can enable debugging by run the following command inside your docker:
 
 ```shell
-cp /go/bin/dlv /go/bin/dlv-dap
+$ cp /go/bin/dlv /go/bin/dlv-dap
 ```
 
 ### Integrate goland with docker
