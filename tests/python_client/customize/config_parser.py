@@ -29,4 +29,7 @@ if __name__ == '__main__':
                    'spec.components.queryNode.replicas': 2,
                    'spec.components.queryNode.resources.limits.memory': '2048Mi'
                    }
+    # create_custom_resource(template_config, cus_configs)
+    # upgrade_custom_resource(cus_configs)
+    # delete_custom_resource(release_name)
     update_configs(cus_configs)
