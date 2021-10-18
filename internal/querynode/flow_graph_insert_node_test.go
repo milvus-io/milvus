@@ -12,11 +12,14 @@
 package querynode
 
 import (
+	"encoding/binary"
 	"sync"
 	"testing"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -230,9 +233,91 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 
 		msgInsertMsg, err := genSimpleInsertMsg()
 		assert.NoError(t, err)
+		msgDeleteMsg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
 		iMsg := insertMsg{
 			insertMessages: []*msgstream.InsertMsg{
 				msgInsertMsg,
+			},
+			deleteMessages: []*msgstream.DeleteMsg{
+				msgDeleteMsg,
+			},
+		}
+		msg := []flowgraph.Msg{&iMsg}
+		insertNode.Operate(msg)
+	})
+
+	t.Run("test invalid partitionID", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultVChannel,
+			segmentTypeGrowing,
+			true)
+		assert.NoError(t, err)
+
+		msgDeleteMsg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		msgDeleteMsg.PartitionID = common.InvalidPartitionID
+		assert.NoError(t, err)
+		iMsg := insertMsg{
+			deleteMessages: []*msgstream.DeleteMsg{
+				msgDeleteMsg,
+			},
+		}
+		msg := []flowgraph.Msg{&iMsg}
+		insertNode.Operate(msg)
+	})
+
+	t.Run("test collection partition not exist", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultVChannel,
+			segmentTypeGrowing,
+			true)
+		assert.NoError(t, err)
+
+		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg.CollectionID = 9999
+		msgDeleteMsg.PartitionID = -1
+		assert.NoError(t, err)
+		iMsg := insertMsg{
+			deleteMessages: []*msgstream.DeleteMsg{
+				msgDeleteMsg,
+			},
+		}
+		msg := []flowgraph.Msg{&iMsg}
+		insertNode.Operate(msg)
+	})
+
+	t.Run("test partition not exist", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		insertNode := newInsertNode(replica)
+
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultVChannel,
+			segmentTypeGrowing,
+			true)
+		assert.NoError(t, err)
+
+		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg.PartitionID = 9999
+		assert.NoError(t, err)
+		iMsg := insertMsg{
+			deleteMessages: []*msgstream.DeleteMsg{
+				msgDeleteMsg,
 			},
 		}
 		msg := []flowgraph.Msg{&iMsg}
@@ -254,12 +339,41 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 
 		msgInsertMsg, err := genSimpleInsertMsg()
 		assert.NoError(t, err)
+		msgDeleteMsg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
 		iMsg := insertMsg{
 			insertMessages: []*msgstream.InsertMsg{
 				msgInsertMsg,
+			},
+			deleteMessages: []*msgstream.DeleteMsg{
+				msgDeleteMsg,
 			},
 		}
 		msg := []flowgraph.Msg{&iMsg, &iMsg}
 		insertNode.Operate(msg)
 	})
+}
+
+func TestGetSegmentsByPKs(t *testing.T) {
+	buf := make([]byte, 8)
+	filter := bloom.NewWithEstimates(1000000, 0.01)
+	for i := 0; i < 3; i++ {
+		binary.BigEndian.PutUint64(buf, uint64(i))
+		filter.Add(buf)
+	}
+	segment := &Segment{
+		segmentID: 1,
+		pkFilter:  filter,
+	}
+	exist, err := filterSegmentsByPKs([]int64{0, 1, 2, 3, 4}, segment)
+	assert.Nil(t, err)
+	assert.True(t, exist)
+
+	exist, err = filterSegmentsByPKs([]int64{}, segment)
+	assert.Nil(t, err)
+	assert.False(t, exist)
+	_, err = filterSegmentsByPKs(nil, segment)
+	assert.NotNil(t, err)
+	_, err = filterSegmentsByPKs([]int64{0, 1, 2, 3, 4}, nil)
+	assert.NotNil(t, err)
 }

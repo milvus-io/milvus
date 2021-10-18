@@ -12,6 +12,8 @@
 package querynode
 
 import (
+	"encoding/binary"
+	"fmt"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
@@ -128,6 +130,82 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 	wg.Wait()
 
+	delData := &deleteData{
+		deleteIDs:        make(map[UniqueID][]int64),
+		deleteTimestamps: make(map[UniqueID][]Timestamp),
+		deleteOffset:     make(map[UniqueID]int64),
+	}
+	// 1. filter segment by bloom filter
+	for _, delMsg := range iMsg.deleteMessages {
+		var partitionIDs []UniqueID
+		var err error
+		if delMsg.PartitionID != -1 {
+			partitionIDs = []UniqueID{delMsg.PartitionID}
+		} else {
+			partitionIDs, err = iNode.replica.getPartitionIDs(delMsg.CollectionID)
+			if err != nil {
+				log.Warn(err.Error())
+				continue
+			}
+		}
+		resultSegmentIDs := make([]UniqueID, 0)
+		for _, partitionID := range partitionIDs {
+			segmentIDs, err := iNode.replica.getSegmentIDs(partitionID)
+			if err != nil {
+				log.Warn(err.Error())
+				continue
+			}
+			resultSegmentIDs = append(resultSegmentIDs, segmentIDs...)
+		}
+		for _, segmentID := range resultSegmentIDs {
+			segment, err := iNode.replica.getSegmentByID(segmentID)
+			if err != nil {
+				log.Warn(err.Error())
+				continue
+			}
+			exist, err := filterSegmentsByPKs(delMsg.PrimaryKeys, segment)
+			if err != nil {
+				log.Warn(err.Error())
+				continue
+			}
+			if exist {
+				offset := segment.segmentPreDelete(len(delMsg.PrimaryKeys))
+				if err != nil {
+					log.Warn(err.Error())
+					continue
+				}
+				delData.deleteIDs[segmentID] = append(delData.deleteIDs[segmentID], delMsg.PrimaryKeys...)
+				delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], delMsg.Timestamps...)
+				delData.deleteOffset[segmentID] = offset
+			}
+		}
+	}
+
+	// 2. do preDelete
+	for segmentID := range delData.deleteIDs {
+		var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
+		if err != nil {
+			log.Warn(err.Error())
+		}
+
+		var numOfRecords = len(delData.deleteIDs[segmentID])
+		if targetSegment != nil {
+			offset := targetSegment.segmentPreDelete(numOfRecords)
+			if err != nil {
+				log.Warn(err.Error())
+			}
+			delData.deleteOffset[segmentID] = offset
+			log.Debug("insertNode operator", zap.Int("delete size", numOfRecords), zap.Int64("delete offset", offset), zap.Int64("segment id", segmentID))
+		}
+	}
+
+	// 3. do delete
+	for segmentID := range delData.deleteIDs {
+		wg.Add(1)
+		go iNode.delete(delData, segmentID, &wg)
+	}
+	wg.Wait()
+
 	var res Msg = &serviceTimeMsg{
 		timeRange: iMsg.timeRange,
 	}
@@ -136,6 +214,22 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	return []Msg{res}
+}
+
+func filterSegmentsByPKs(pks []int64, segment *Segment) (bool, error) {
+	if pks == nil {
+		return false, fmt.Errorf("pks is nil when getSegmentsByPKs")
+	}
+	if segment == nil {
+		return false, fmt.Errorf("segments is nil when getSegmentsByPKs")
+	}
+	buf := make([]byte, 8)
+	for _, pk := range pks {
+		binary.BigEndian.PutUint64(buf, uint64(pk))
+		exist := segment.pkFilter.Test(buf)
+		return exist, nil
+	}
+	return false, nil
 }
 
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) {

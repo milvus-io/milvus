@@ -4696,6 +4696,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 	dt.DeleteRequest.CollectionID = collID
 
+	// If partitionName is not empty, partitionID will be set.
 	if len(dt.req.PartitionName) > 0 {
 		partName := dt.req.PartitionName
 		if err := ValidatePartitionTag(partName, true); err != nil {
@@ -4708,6 +4709,8 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		dt.DeleteRequest.PartitionID = partID
+	} else {
+		dt.DeleteRequest.PartitionID = common.InvalidPartitionID
 	}
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.CollectionName)
