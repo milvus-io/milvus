@@ -396,6 +396,7 @@ func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID 
 	return colReplica.addSegmentPrivate(segmentID, partitionID, seg)
 }
 
+// addSegmentPrivate is private function in collectionReplica, to add a new segment to collectionReplica
 func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, partitionID UniqueID, segment *Segment) error {
 	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
