@@ -325,6 +325,7 @@ func (s *Server) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmen
 	return s.querynode.ReleaseSegments(ctx, req)
 }
 
+// GetSegmentInfo gets the information of the specified segments in QueryNode.
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return s.querynode.GetSegmentInfo(ctx, req)
 }
