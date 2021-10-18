@@ -15,8 +15,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 25,
-  "iteration": 1634193433320,
+  "id": 27,
+  "iteration": 1634522772892,
   "links": [],
   "panels": [
     {
@@ -73,9 +73,10 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
@@ -130,9 +131,10 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
@@ -187,9 +189,10 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
@@ -244,9 +247,10 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
@@ -301,10 +305,10 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
-          "expr": "sum(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "expr": "sum(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -358,7 +362,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -412,7 +416,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -455,7 +459,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -464,7 +467,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -515,7 +517,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -616,7 +618,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -720,7 +722,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -777,7 +779,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "exemplar": true,
@@ -835,7 +837,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -892,7 +894,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -949,7 +951,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "exemplar": true,
@@ -969,7 +971,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful RootCoord drop partition operations",
+      "description": "Successful  RootCoord drop partition operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1007,7 +1009,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -1061,7 +1063,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -1071,14 +1073,14 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(rate(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m]))",
+          "expr": "sum(rate(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m]))",
+          "expr": "sum(rate(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
           "interval": "",
           "legendFormat": "success",
           "refId": "B"
@@ -1162,7 +1164,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -1205,7 +1207,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:109",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1214,7 +1215,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:110",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1265,7 +1265,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -1309,7 +1309,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:185",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1318,7 +1317,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:186",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1372,7 +1370,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -1429,7 +1427,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -1486,7 +1484,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_create_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -1543,7 +1541,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_create_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -1600,7 +1598,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_has_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -1657,7 +1655,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_has_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -1711,7 +1709,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -1812,7 +1810,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -1913,7 +1911,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -2017,7 +2015,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -2074,7 +2072,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -2131,7 +2129,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -2188,7 +2186,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -2245,7 +2243,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -2302,7 +2300,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -2356,7 +2354,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -2457,7 +2455,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -2558,7 +2556,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -2662,7 +2660,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -2719,7 +2717,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -2776,7 +2774,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -2833,7 +2831,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -2887,7 +2885,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -2984,7 +2982,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -3027,7 +3025,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:660",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3036,7 +3033,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:661",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3087,7 +3083,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -3130,7 +3126,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:584",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3139,7 +3134,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:585",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3207,7 +3201,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -3264,7 +3258,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -3321,7 +3315,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
@@ -3378,7 +3372,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "targets": [
         {
           "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
@@ -3432,7 +3426,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -3529,7 +3523,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -3630,7 +3624,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -3731,7 +3725,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -3827,7 +3821,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -3865,7 +3859,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:200",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3874,7 +3867,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:201",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3925,7 +3917,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4021,7 +4013,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4131,7 +4123,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4170,7 +4162,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:269",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4179,7 +4170,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:270",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4229,7 +4219,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4268,7 +4258,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:345",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4277,7 +4266,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:346",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4328,7 +4316,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4367,7 +4355,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:421",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4376,7 +4363,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:422",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4427,7 +4413,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4465,7 +4451,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:434",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4474,7 +4459,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:435",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4525,7 +4509,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4565,7 +4549,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:92",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4574,7 +4557,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:93",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4625,7 +4607,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4721,7 +4703,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4759,7 +4741,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:51",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4768,7 +4749,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:52",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4819,7 +4799,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4856,7 +4836,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4865,7 +4844,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4916,7 +4894,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -4954,7 +4932,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:455",
           "decimals": null,
           "format": "short",
           "label": null,
@@ -4964,7 +4941,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:456",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -5015,7 +4991,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -5111,7 +5087,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -5209,7 +5185,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -5307,7 +5283,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -5405,7 +5381,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -5503,7 +5479,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -5601,7 +5577,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.4",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -5640,7 +5616,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:204",
           "decimals": null,
           "format": "short",
           "label": null,
@@ -5650,7 +5625,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:205",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -5719,9 +5693,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": "test",
-          "value": "test"
+          "selected": false,
+          "text": "default",
+          "value": "default"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -5750,7 +5724,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "All",
           "value": "$__all"
         },
@@ -5846,5 +5820,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 159
+  "version": 4
 }
