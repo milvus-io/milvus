@@ -227,7 +227,7 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
 CProtoResult
 Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp) {
     try {
-        auto segment = (const milvus::segcore::SegmentInterface*)c_segment;
+        auto segment = (milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (const milvus::query::RetrievePlan*)c_plan;
         auto result = segment->Retrieve(plan, timestamp);
         return milvus::AllocCProtoResult(*result);

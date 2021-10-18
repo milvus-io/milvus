@@ -212,6 +212,12 @@ SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
 
+BitsetView
+SegmentSealedImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) {
+    // TODO(yukun)
+    return bitset;
+}
+
 void
 SegmentSealedImpl::vector_search(int64_t vec_count,
                                  query::SearchInfo search_info,
@@ -219,7 +225,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
                                  int64_t query_count,
                                  Timestamp timestamp,
                                  const BitsetView& bitset,
-                                 SearchResult& output) const {
+                                 SearchResult& output) {
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_offset = search_info.field_offset_;
     auto& field_meta = schema_->operator[](field_offset);

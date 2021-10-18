@@ -76,7 +76,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult&
 SearchResult
 SegmentInternalInterface::Search(const query::Plan* plan,
                                  const query::PlaceholderGroup& placeholder_group,
-                                 Timestamp timestamp) const {
+                                 Timestamp timestamp) {
     std::shared_lock lck(mutex_);
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this, timestamp, placeholder_group);
@@ -194,7 +194,7 @@ SegmentInternalInterface::BulkSubScript(FieldOffset field_offset, const SegOffse
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp timestamp) const {
+SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp timestamp) {
     std::shared_lock lck(mutex_);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);

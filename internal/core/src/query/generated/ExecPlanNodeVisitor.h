@@ -33,13 +33,13 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
  public:
     using RetType = SearchResult;
     using RetrieveRetType = RetrieveResult;
-    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
+    ExecPlanNodeVisitor(segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
     }
 
-    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment, Timestamp timestamp)
+    ExecPlanNodeVisitor(segcore::SegmentInterface& segment, Timestamp timestamp)
         : segment_(segment), timestamp_(timestamp) {
     }
 
@@ -72,7 +72,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
  private:
     // std::optional<RetType> ret_;
-    const segcore::SegmentInterface& segment_;
+    segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
     PlaceholderGroup placeholder_group_;
 

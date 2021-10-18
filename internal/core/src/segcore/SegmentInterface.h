@@ -37,10 +37,10 @@ class SegmentInterface {
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
 
     virtual SearchResult
-    Search(const query::Plan* Plan, const query::PlaceholderGroup& placeholder_group, Timestamp timestamp) const = 0;
+    Search(const query::Plan* Plan, const query::PlaceholderGroup& placeholder_group, Timestamp timestamp) = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) const = 0;
+    Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) = 0;
 
     virtual int64_t
     GetMemoryUsageInBytes() const = 0;
@@ -78,15 +78,13 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     SearchResult
-    Search(const query::Plan* Plan,
-           const query::PlaceholderGroup& placeholder_group,
-           Timestamp timestamp) const override;
+    Search(const query::Plan* Plan, const query::PlaceholderGroup& placeholder_group, Timestamp timestamp) override;
 
     void
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* plan, Timestamp timestamp) const override;
+    Retrieve(const query::RetrievePlan* plan, Timestamp timestamp) override;
 
     virtual std::string
     debug() const = 0;
@@ -99,7 +97,10 @@ class SegmentInternalInterface : public SegmentInterface {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
-                  SearchResult& output) const = 0;
+                  SearchResult& output) = 0;
+
+    virtual BitsetView
+    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) = 0;
 
     // count of chunk that has index available
     virtual int64_t

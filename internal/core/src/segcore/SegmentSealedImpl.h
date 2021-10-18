@@ -116,7 +116,10 @@ class SegmentSealedImpl : public SegmentSealed {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
-                  SearchResult& output) const override;
+                  SearchResult& output) override;
+
+    BitsetView
+    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) override;
 
     bool
     is_system_field_ready() const {

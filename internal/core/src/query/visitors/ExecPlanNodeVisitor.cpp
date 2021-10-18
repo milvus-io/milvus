@@ -29,7 +29,7 @@ namespace impl {
 class ExecPlanNodeVisitor : PlanNodeVisitor {
  public:
     using RetType = SearchResult;
-    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
+    ExecPlanNodeVisitor(segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
@@ -53,7 +53,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 
  private:
     // std::optional<RetType> ret_;
-    const segcore::SegmentInterface& segment_;
+    segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
     const PlaceholderGroup& placeholder_group_;
 
@@ -78,7 +78,7 @@ void
 ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     // TODO: optimize here, remove the dynamic cast
     assert(!ret_.has_value());
-    auto segment = dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
+    auto segment = dynamic_cast<segcore::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
     RetType ret;
     auto& ph = placeholder_group_.at(0);
@@ -110,7 +110,9 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         view = BitsetView((uint8_t*)boost_ext::get_data(bitset_holder), bitset_holder.size());
     }
 
-    segment->vector_search(active_count, node.search_info_, src_data, num_queries, MAX_TIMESTAMP, view, ret);
+    auto final_bitset = segment->get_filtered_bitmap(view, active_count, MAX_TIMESTAMP);
+
+    segment->vector_search(active_count, node.search_info_, src_data, num_queries, MAX_TIMESTAMP, final_bitset, ret);
 
     ret_ = ret;
 }
@@ -118,7 +120,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 void
 ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     assert(!retrieve_ret_.has_value());
-    auto segment = dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
+    auto segment = dynamic_cast<segcore::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "Support SegmentSmallIndex Only");
     RetrieveRetType ret;
 

@@ -115,11 +115,16 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
     return current;
 }
 
-const BitsetView
-SegmentGrowingImpl::get_filtered_bitmap(BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) {
+BitsetView
+SegmentGrowingImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    if (del_barrier == 0) {
+        return bitset;
+    }
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    AssertInfo(bitmap_holder, "bitmap_holder is null");
+    if (bitmap_holder == nullptr) {
+        return bitset;
+    }
     auto deleted_bitmap = bitmap_holder->bitmap_ptr;
     AssertInfo(deleted_bitmap->count() == bitset.u8size(), "Deleted bitmap count not equal to filtered bitmap count");
 
@@ -286,8 +291,7 @@ SegmentGrowingImpl::vector_search(int64_t vec_count,
                                   int64_t query_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
-                                  SearchResult& output) const {
-    // TODO(yukun): get final filtered bitmap
+                                  SearchResult& output) {
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_offset_)) {
         query::SearchOnSealed(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset,
