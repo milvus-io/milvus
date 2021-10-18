@@ -209,7 +209,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	return err
 }
 
-// Watch try to add the chanel to cluster. If the channel already exists, do nothing
+// Watch try to add the channel to cluster. If the channel already exists, do nothing
 func (c *ChannelManager) Watch(ch *channel) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
