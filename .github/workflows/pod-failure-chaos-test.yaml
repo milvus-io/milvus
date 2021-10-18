@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pod: [querynode]
+        pod: [queryNode]
     
     steps:
 
