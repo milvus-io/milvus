@@ -54,16 +54,19 @@ func (req *BaseRequest) Notify(err error) {
 	req.Done <- err
 }
 
+// IDRequest implements Request and is used to get global unique Identities.
 type IDRequest struct {
 	BaseRequest
 	id    UniqueID
 	count uint32
 }
 
+// SyncRequest embed BaseRequest and is used to force synchronize from RootCoordinator.
 type SyncRequest struct {
 	BaseRequest
 }
 
+// TickerChan defines an interface.
 type TickerChan interface {
 	Chan() <-chan time.Time
 	Close()
@@ -71,40 +74,51 @@ type TickerChan interface {
 	Reset()
 }
 
+// EmptyTicker implements TickerChan, but it will never issue a signal in Chan.
 type EmptyTicker struct {
 	tChan <-chan time.Time
 }
 
+// Chan return a read-only channel from which you can only receive time.Time type data.
+// As for EmptyTicker, you will never read data from Chan.
 func (t *EmptyTicker) Chan() <-chan time.Time {
 	return t.tChan
 }
 
+// Init do nothing.
 func (t *EmptyTicker) Init() {
 }
 
+// Reset do nothing.
 func (t *EmptyTicker) Reset() {
 }
 
+// Close do nothing.
 func (t *EmptyTicker) Close() {
 }
 
+// Ticker implements TickerChan and is a simple wrapper for time.TimeTicker.
 type Ticker struct {
 	ticker         *time.Ticker
 	UpdateInterval time.Duration
 }
 
+// Init initialize the inner member `ticker` whose type is a pointer to time.Ticker.
 func (t *Ticker) Init() {
 	t.ticker = time.NewTicker(t.UpdateInterval)
 }
 
+// Reset rests the inner member `ticker`.
 func (t *Ticker) Reset() {
 	t.ticker.Reset(t.UpdateInterval)
 }
 
+// Close closes the inner member `ticker`.
 func (t *Ticker) Close() {
 	t.ticker.Stop()
 }
 
+// Chan return a read-only channel from which you can only receive time.Time type data
 func (t *Ticker) Chan() <-chan time.Time {
 	return t.ticker.C
 }
