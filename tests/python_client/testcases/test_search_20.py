@@ -500,10 +500,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "limit": 0})
         # 4. search with data inserted but not load again
         data = cf.gen_default_dataframe_data(nb=2000)
+
         insert_res, _ = collection_w.insert(data)
+
+        sleep(1)
+
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,
-                            guarantee_timestamp=insert_res.timestamp + 1001,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_res.primary_keys,
@@ -2673,4 +2676,3 @@ class TestSearchDSL(object):
         query = {}
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
-
