@@ -384,6 +384,7 @@ func (colReplica *collectionReplica) getSegmentIDsPrivate(partitionID UniqueID) 
 }
 
 //----------------------------------------------------------------------------------------------------- segment
+// addSegment add a new segment to collectionReplica
 func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
