@@ -503,7 +503,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         insert_res, _ = collection_w.insert(data)
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,
-                            guarantee_timestamp=insert_res.timestamp + 1,
+                            guarantee_timestamp=insert_res.timestamp + 1001,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_res.primary_keys,
