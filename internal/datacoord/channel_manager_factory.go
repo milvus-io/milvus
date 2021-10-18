@@ -76,6 +76,7 @@ func NewConsistentHashChannelPolicyFactory(hashring *consistent.Consistent) *Con
 	}
 }
 
+// NewRegisterPolicy create a new register policy
 func (f *ConsistentHashChannelPolicyFactory) NewRegisterPolicy() RegisterPolicy {
 	return ConsistentHashRegisterPolicy(f.hashring)
 }
