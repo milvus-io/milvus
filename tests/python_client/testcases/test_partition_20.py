@@ -18,8 +18,8 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_default(self):
         """
         target: verify create a partition
-        method: 1. create a partition
-        expected: 1. create successfully
+        method: create a partition
+        expected: create successfully
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -42,8 +42,8 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_empty_name(self, partition_name):
         """
         target: verify create a partition with empty name
-        method: 1. create a partition with empty name
-        expected: 1. raise exception
+        method: create a partition with empty name
+        expected: raise exception
         """
         # create a collection
         collection_w = self.init_collection_wrap()
@@ -57,8 +57,8 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_empty_description(self):
         """
         target: verify create a partition with empty description
-        method: 1. create a partition with empty description
-        expected: 1. create successfully
+        method: create a partition with empty description
+        expected: create successfully
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -80,8 +80,8 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_max_description_length(self):
         """
         target: verify create a partition with 255 length name and 1024 length description
-        method: 1. create a partition with 255 length name and 1024 length description
-        expected: 1. create successfully
+        method: create a partition with 255 length name and 1024 length description
+        expected: create successfully
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -100,7 +100,7 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_dup_name(self):
         """
         target: verify create partitions with duplicate names
-        method: 1. create partitions with duplicate names
+        method: create partitions with duplicate names
         expected: 1. create successfully
                   2. the same partition returned with diff object ids
         """
@@ -123,8 +123,8 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_special_chars_description(self, description):
         """
         target: verify create a partition with special characters in description
-        method: 1. create a partition with special characters in description
-        expected: 1. create successfully
+        method: create a partition with special characters in description
+        expected: create successfully
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -145,7 +145,7 @@ class TestPartitionParams(TestcaseBase):
         target: verify create a partition with default name
         method: 1. get the _default partition
                 2. create a partition with _default name
-        expected: 1. the same partition returned
+        expected: the same partition returned
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -164,8 +164,8 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_max_length_name(self):
         """
         target: verify create a partition with max length(256) name
-        method: 1. create a partition with max length name
-        expected: 1. raise exception
+        method: create a partition with max length name
+        expected: raise exception
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -182,8 +182,8 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_invalid_name(self, partition_name):
         """
         target: verify create a partition with invalid name
-        method: 1. create a partition with invalid names
-        expected: 1. raise exception
+        method: create a partition with invalid names
+        expected: raise exception
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -199,8 +199,8 @@ class TestPartitionParams(TestcaseBase):
     def test_partition_none_collection(self):
         """
         target: verify create a partition with none collection
-        method: 1. create a partition with none collection
-        expected: 1. raise exception
+        method: create a partition with none collection
+        expected: raise exception
         """
         # create partition with collection is None
         partition_name = cf.gen_unique_str(prefix)
@@ -215,7 +215,7 @@ class TestPartitionParams(TestcaseBase):
         target: verify drop a partition in one collection
         method: 1. create a partition in one collection
                 2. drop the partition
-        expected: 1. drop successfully
+        expected: drop successfully
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -294,7 +294,7 @@ class TestPartitionParams(TestcaseBase):
         method: 1. create a collection and a partition
                 2. partition.insert(data)
                 3. insert data again
-        expected: 1. insert data successfully
+        expected: insert data successfully
         """
         nums = 10
         # create collection
@@ -331,7 +331,7 @@ class TestPartitionOperations(TestcaseBase):
         method: 1. create collection1
                 2. drop collection1
                 3. create partition in collection1
-        expected: 1. raise exception
+        expected: raise exception
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -350,7 +350,7 @@ class TestPartitionOperations(TestcaseBase):
         target: verify create partitions with same name in diff collections
         method: 1. create a partition in collection1
                 2. create a partition in collection2
-        expected: 1. create successfully
+        expected: create successfully
         """
         # create two collections
         collection_w1 = self.init_collection_wrap()
@@ -369,8 +369,8 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_multi_partitions_in_collection(self):
         """
         target: verify create multiple partitions in one collection
-        method: 1. create multiple partitions in one collection
-        expected: 1. create successfully
+        method: create multiple partitions in one collection
+        expected: create successfully
         """
         # create collection
         collection_w = self.init_collection_wrap()
@@ -388,7 +388,7 @@ class TestPartitionOperations(TestcaseBase):
         target: verify create maximum partitions
         method: 1. create maximum partitions
                 2. create one more partition
-        expected: 1. raise exception
+        expected: raise exception
         """
 
         threads_num = 8
