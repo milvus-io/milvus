@@ -89,7 +89,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		return nil
 	}
 
-	flushChan := make(chan *flushMsg, 100)
+	flushChan := make(chan flushMsg, 100)
 
 	c := &nodeConfig{
 		replica:      replica,
@@ -185,7 +185,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		return nil
 	}
 
-	flushChan := make(chan *flushMsg, 100)
+	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
 		replica:      replica,
 		msFactory:    msFactory,
@@ -196,7 +196,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	iBNode, err := newInsertBufferNode(ctx, flushChan, saveBinlog, newCache(), c)
 	require.NoError(t, err)
 
-	flushChan <- &flushMsg{
+	flushChan <- flushMsg{
 		msgID:        1,
 		timestamp:    2000,
 		segmentID:    UniqueID(1),
@@ -258,7 +258,7 @@ func TestFlushSegment(t *testing.T) {
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
-	flushChan := make(chan *flushMsg, 100)
+	flushChan := make(chan flushMsg, 100)
 	saveBinlog := func(*segmentFlushUnit) error {
 		return nil
 	}
@@ -382,7 +382,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		return nil
 	}
 
-	flushChan := make(chan *flushMsg, 100)
+	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
 		replica:      colRep,
 		msFactory:    msFactory,
@@ -513,7 +513,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		// assert.Equal(t, len(iBNode.insertBuffer.insertData), 1)
 		// assert.Equal(t, iBNode.insertBuffer.size(3), int32(50+16000))
 
-		flushChan <- &flushMsg{
+		flushChan <- flushMsg{
 			msgID:        3,
 			timestamp:    456,
 			segmentID:    UniqueID(1),
@@ -540,7 +540,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		// assert.Equal(t, len(iBNode.insertBuffer.insertData), 1)
 		// assert.Equal(t, iBNode.insertBuffer.size(3), int32(50+16000))
 
-		flushChan <- &flushMsg{
+		flushChan <- flushMsg{
 			msgID:        4,
 			timestamp:    567,
 			segmentID:    UniqueID(3),
@@ -620,7 +620,7 @@ func TestInsertBufferNode_getCollMetaBySegID(t *testing.T) {
 		return nil
 	}
 
-	flushChan := make(chan *flushMsg, 100)
+	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
 		replica:      replica,
 		msFactory:    msFactory,
@@ -680,7 +680,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		return nil
 	}
 
-	flushChan := make(chan *flushMsg, 100)
+	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
 		replica:      replica,
 		msFactory:    msFactory,

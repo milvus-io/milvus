@@ -137,7 +137,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			}
 
 			ds, err := newDataSyncService(ctx,
-				&flushChans{make(chan *flushMsg), make(chan *flushMsg)},
+				make(chan flushMsg),
 				replica,
 				NewAllocatorFactory(),
 				test.inMsgFactory,
@@ -202,7 +202,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	mockRootCoord := &RootCoordFactory{}
 	collectionID := UniqueID(1)
 
-	flushChan := &flushChans{make(chan *flushMsg, 100), make(chan *flushMsg, 100)}
+	flushChan := make(chan flushMsg, 100)
 	replica, err := newReplica(context.Background(), mockRootCoord, collectionID)
 	assert.Nil(t, err)
 

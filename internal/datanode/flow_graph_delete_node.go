@@ -47,7 +47,6 @@ type deleteNode struct {
 	delBuf      sync.Map // map[segmentID]*DelDataBuf
 	replica     Replica
 	idAllocator allocatorInterface
-	flushCh     <-chan *flushMsg
 	minIOKV     kv.BaseKV
 }
 
@@ -170,15 +169,10 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		dn.showDelBuf()
 	}
 
-	// handle manual flush
-	select {
-	case fmsg := <-dn.flushCh:
-		log.Debug("DeleteNode receives flush message", zap.Int64("collID", fmsg.collectionID))
-		dn.flushDelData(fmsg.collectionID, fgMsg.timeRange)
-
-		// clean dn.delBuf
-		dn.delBuf = sync.Map{}
-	default:
+	// handle flush
+	if len(fgMsg.segmentsToFlush) > 0 {
+		log.Debug("DeleteNode receives flush message", zap.Int64s("segIDs", fgMsg.segmentsToFlush))
+		dn.flushDelData(fgMsg.segmentsToFlush, fgMsg.timeRange)
 	}
 
 	for _, sp := range spans {
@@ -206,7 +200,12 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []int64) map[int64]
 	return result
 }
 
-func (dn *deleteNode) flushDelData(collID UniqueID, timeRange TimeRange) {
+func (dn *deleteNode) flushDelData(segIDs []UniqueID, timeRange TimeRange) {
+	segsToFlush := make(map[UniqueID]struct{}, len(segIDs))
+	for _, segID := range segIDs {
+		segsToFlush[segID] = struct{}{}
+	}
+	collID := dn.replica.getCollectionID()
 	schema, err := dn.replica.getCollectionSchema(collID, timeRange.timestampMax)
 	if err != nil {
 		log.Error("failed to get collection schema", zap.Error(err))
@@ -222,6 +221,9 @@ func (dn *deleteNode) flushDelData(collID UniqueID, timeRange TimeRange) {
 	// buffer data to binlogs
 	dn.delBuf.Range(func(k, v interface{}) bool {
 		segID := k.(int64)
+		if _, has := segsToFlush[segID]; !has {
+			return true
+		}
 		delDataBuf := v.(*DelDataBuf)
 		collID, partID, err := dn.replica.getCollectionAndPartitionID(segID)
 		if err != nil {
@@ -257,9 +259,13 @@ func (dn *deleteNode) flushDelData(collID UniqueID, timeRange TimeRange) {
 		}
 		log.Debug("save delete blobs to minIO successfully")
 	}
+	// only after success
+	for _, segID := range segIDs {
+		dn.delBuf.Delete(segID)
+	}
 }
 
-func newDeleteNode(ctx context.Context, flushCh <-chan *flushMsg, config *nodeConfig) (*deleteNode, error) {
+func newDeleteNode(ctx context.Context, config *nodeConfig) (*deleteNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)
@@ -281,7 +287,6 @@ func newDeleteNode(ctx context.Context, flushCh <-chan *flushMsg, config *nodeCo
 	return &deleteNode{
 		BaseNode: baseNode,
 		delBuf:   sync.Map{},
-		flushCh:  flushCh,
 		minIOKV:  minIOKV,
 
 		replica:     config.replica,
