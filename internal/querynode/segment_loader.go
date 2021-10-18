@@ -15,17 +15,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -182,6 +184,12 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 	if err != nil {
 		return err
 	}
+
+	log.Debug("loading bloom filter...")
+	err = loader.loadSegmentBloomFilter(segment)
+	if err != nil {
+		return err
+	}
 	for _, id := range indexedFieldIDs {
 		log.Debug("loading index...")
 		err = loader.indexLoader.loadIndex(segment, id)
@@ -296,7 +304,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		default:
 			return errors.New("unexpected field data type")
 		}
-		if fieldID == rootcoord.TimeStampField {
+		if fieldID == common.TimeStampField {
 			segment.setIDBinlogRowSizes(numRows)
 		}
 		totalNumRows := int64(0)
@@ -311,6 +319,39 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 	}
 
 	return nil
+}
+func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment) error {
+	// Todo: get path from etcd
+	p := path.Join("files/stats_log", JoinIDPath(segment.collectionID, segment.partitionID, segment.segmentID, common.RowIDField))
+	keys, values, err := loader.minioKV.LoadWithPrefix(p)
+	if err != nil {
+		return err
+	}
+	blobs := make([]*storage.Blob, 0)
+	for i := 0; i < len(keys); i++ {
+		blobs = append(blobs, &storage.Blob{Key: keys[i], Value: []byte(values[i])})
+	}
+
+	stats, err := storage.DeserializeStats(blobs)
+	if err != nil {
+		return err
+	}
+	for _, stat := range stats {
+		err = segment.pkFilter.Merge(stat.BF)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// JoinIDPath joins ids to path format.
+func JoinIDPath(ids ...UniqueID) string {
+	idStr := make([]string, len(ids))
+	for _, id := range ids {
+		idStr = append(idStr, strconv.FormatInt(id, 10))
+	}
+	return path.Join(idStr...)
 }
 
 func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {

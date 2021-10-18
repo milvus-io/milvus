@@ -50,6 +50,11 @@ const (
 	segmentTypeIndexing
 )
 
+const (
+	bloomFilterSize       uint    = 100000
+	maxBloomFalsePositive float64 = 0.005
+)
+
 type VectorFieldInfo struct {
 	fieldBinlog *datapb.FieldBinlog
 }
@@ -198,6 +203,8 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		onService:        onService,
 		indexInfos:       make(map[int64]*indexInfo),
 		vectorFieldInfos: make(map[UniqueID]*VectorFieldInfo),
+
+		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 	}
 
 	return segment
@@ -593,6 +600,13 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
+
+	for _, id := range *entityIDs {
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, uint64(id))
+		s.pkFilter.Add(b)
+	}
+
 	// Blobs to one big blob
 	var numOfRow = len(*entityIDs)
 	var sizeofPerRow = len((*records)[0].Value)
