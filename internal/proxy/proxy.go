@@ -282,6 +282,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 	}()
 }
 
+// Start starts a proxy node.
 func (node *Proxy) Start() error {
 	err := InitMetaCache(node.rootCoord)
 	if err != nil {
@@ -326,6 +327,7 @@ func (node *Proxy) Start() error {
 	return nil
 }
 
+// Stop stops a proxy node.
 func (node *Proxy) Stop() error {
 	node.cancel()
 
@@ -368,6 +370,7 @@ func (node *Proxy) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
+// SetRootCoordClient set rootcoord client for proxy.
 func (node *Proxy) SetRootCoordClient(cli types.RootCoord) {
 	node.rootCoord = cli
 }

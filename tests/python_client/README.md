@@ -40,19 +40,19 @@ To accommodate the variety of requirements, Milvus offers as much as four deploy
    2. Build the KinD environment, and execute CI Regression test cases automatically:
 
    ```shell
-   ./e2e-k8s.sh 
+   $ ./e2e-k8s.sh 
    ```
 
    - By default, KinD environment will be automatically cleaned up after the execution of the test case. If you need to keep the KinD environment:
 
    ```shell
-   ./e2e-k8s.sh --skip-cleanup
+   $ ./e2e-k8s.sh --skip-cleanup
    ```
 
    - Skip the automatic test case execution and keep the KinD environment:
 
    ```shell
-   ./e2e-k8s.sh --skip-cleanup --skip-test --manual
+   $ ./e2e-k8s.sh --skip-cleanup --skip-test --manual
    ```
 
 > Note: You need to log in to the containers of the test client to proceed manual execution and debugging of the test case.
@@ -60,13 +60,13 @@ To accommodate the variety of requirements, Milvus offers as much as four deploy
    - See more script parameters:
 
    ```shell
-   ./e2e-k8s.sh --help
+$ ./e2e-k8s.sh --help
    ```
 
    - Export cluster logs:
 
    ```shell
-   kind export logs .
+$ kind export logs .
    ```
 
 
@@ -79,14 +79,14 @@ We recommend using Python 3 (3.6 or higher), consistent with the version support
 
 1. Install the Python package prerequisite for the test, enter ***/milvus/tests/python_client/**, and execute:
 
-   ```python
-   pip install -r requirements.txt
+   ```bash
+   $ pip install -r requirements.txt
    ```
 
 2. The default test log path is **/tmp/ci_logs/** under the **config** directory. You can add environment variables to change the path before booting up test cases:
 
-   ```python
-   export CI_LOG_PATH=/tmp/ci_logs/test/
+   ```bash
+   $ export CI_LOG_PATH=/tmp/ci_logs/test/
    ```
 
 | **Log Level** | **Log File**      |
@@ -105,8 +105,8 @@ where `host` should be set as the IP address of the Milvus service, and `*.html`
 
 2. Enter **testcases** directory, run following command, which is consistent with the command under the pytest framework, to execute the test case:
 
-   ```python
-   python3 -W ignore -m pytest <test_file_name>
+   ```bash
+   $ python3 -W ignore -m pytest <test_file_name>
    ```
 
 ## An Introduction to Test Modules
@@ -175,15 +175,15 @@ This section specifies references while adding new test cases or framework tools
 > To create multiple partitions objects, call `self.init_partition_wrap()`, which returns the newly created partition objects. Call `self.partition_wrap` instead when you do not need multiple objects.
 
    ```python
-   # create partition  -Call the default initialization method
-   partition_w = self.init_partition_wrap()
-   assert partition_w.is_empty
+# create partition  -Call the default initialization method
+partition_w = self.init_partition_wrap()
+assert partition_w.is_empty
    ```
 
    ```python
-   # create partition    -Directly call the encapsulated object
-   self.partition_wrap.init_partition(collection=collection_name, name=partition_name)
-   assert self.partition_wrap.is_empty
+# create partition    -Directly call the encapsulated object
+self.partition_wrap.init_partition(collection=collection_name, name=partition_name)
+assert self.partition_wrap.is_empty
    ```
 
 - To test on the error or exception returned from interfaces:
@@ -191,8 +191,8 @@ This section specifies references while adding new test cases or framework tools
   - Input the expected error ID and message.
 
    ```python
-   # create partition with collection is None
-   self.partition_wrap.init_partition(collection=None, name=partition_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute"})
+  # create partition with collection is None
+  self.partition_wrap.init_partition(collection=None, name=partition_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute"})
    ```
 
 - To test on the normal value returned from interfaces:
@@ -200,8 +200,8 @@ This section specifies references while adding new test cases or framework tools
   - Input the expected result for test methods.
 
    ```python
-   # create partition
-   partition_w = self.init_partition_wrap(collection_w, partition_name, check_task=CheckTasks.check_partition_property, check_items={"name": partition_name, "description": description, "is_empty": True, "num_entities": 0})
+  # create partition
+  partition_w = self.init_partition_wrap(collection_w, partition_name, check_task=CheckTasks.check_partition_property, check_items={"name": partition_name, "description": description, "is_empty": True, "num_entities": 0})
    ```
 
 3. Adding test cases
@@ -231,7 +231,7 @@ This section specifies references while adding new test cases or framework tools
 - Tips
    - Case comments encompass three parts: object, test method, and expected result. You should specify each part.
    - Initialize the tested category in the setup method of the Base category in the **base/client_base.py** file, as shown below:
-   ```
+   ```python
    self.connection_wrap = ApiConnectionsWrapper()
    self.utility_wrap = ApiUtilityWrapper()
    self.collection_wrap = ApiCollectionWrapper()
@@ -241,7 +241,7 @@ This section specifies references while adding new test cases or framework tools
    self.field_schema_wrap = ApiFieldSchemaWrapper()
    ```
    - Pass the parameters with corresponding encapsulated methods when calling the interface you need to test on. As shown below, align all parameters with those in PyMilvus interfaces except for `check_task` and `check_items`.
-   ```
+   ```python
    def init_partition(self, collection, name, description="", check_task=None, check_items=None, **kwargs)
    ```
    - `check_task` is used to select the corresponding interface test method in the ResponseChecker check category in the **check/func_check.py** file. You can choose methods under the `CheckTasks` category in the **common/common_type.py** file.

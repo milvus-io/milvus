@@ -10,10 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "query/SubSearchResult.h"
-#include <vector>
 #include <queue>
 #include <random>
+#include <vector>
+
+#include "query/SubSearchResult.h"
 
 using namespace milvus;
 using namespace milvus::query;

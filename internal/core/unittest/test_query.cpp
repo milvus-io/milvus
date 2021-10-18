@@ -10,18 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "query/deprecated/ParserDeprecated.h"
-#include "query/Expr.h"
-#include "query/PlanNode.h"
-#include "query/generated/ExprVisitor.h"
-#include "query/generated/PlanNodeVisitor.h"
-#include "test_utils/DataGen.h"
-#include "query/generated/ShowPlanNodeVisitor.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
-#include "query/PlanImpl.h"
-#include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentSealed.h"
+
 #include "pb/schema.pb.h"
+#include "query/Expr.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/generated/ExprVisitor.h"
+#include "query/generated/ShowPlanNodeVisitor.h"
+#include "segcore/SegmentSealed.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus;
 using namespace milvus::query;

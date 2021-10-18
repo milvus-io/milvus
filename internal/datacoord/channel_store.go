@@ -20,10 +20,13 @@ const (
 
 var errUnknownOpType error = errors.New("unknown operation type")
 
+// ChannelOpType type alias uses int8 stands for Channel operation type
 type ChannelOpType int8
 
 const (
+	// Add const value for Add Channel operation type
 	Add ChannelOpType = iota
+	// Delete const value for Delete Channel operation type
 	Delete
 )
 

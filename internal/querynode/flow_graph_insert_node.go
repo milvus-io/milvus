@@ -35,6 +35,12 @@ type insertData struct {
 	insertOffset     map[UniqueID]int64
 }
 
+type deleteData struct {
+	deleteIDs        map[UniqueID][]int64
+	deleteTimestamps map[UniqueID][]Timestamp
+	deleteOffset     map[UniqueID]int64
+}
+
 func (iNode *insertNode) Name() string {
 	return "iNode"
 }
@@ -163,6 +169,32 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])),
 		zap.Int64("segmentID", segmentID))
 	wg.Done()
+}
+
+func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
+	defer wg.Done()
+	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
+	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
+	if err != nil {
+		log.Warn("Cannot find segment:", zap.Int64("segmentID", segmentID))
+		return
+	}
+
+	if targetSegment.segmentType != segmentTypeGrowing {
+		return
+	}
+
+	ids := deleteData.deleteIDs[segmentID]
+	timestamps := deleteData.deleteTimestamps[segmentID]
+	offset := deleteData.deleteOffset[segmentID]
+
+	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
+	if err != nil {
+		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
+		return
+	}
+
+	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
 }
 
 func newInsertNode(replica ReplicaInterface) *insertNode {

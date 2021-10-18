@@ -305,13 +305,18 @@ class MilvusClient(object):
     def query(self, vector_query, filter_query=None, collection_name=None, timeout=300):
         """ This method corresponds to the search method of milvus """
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
-        must_params = [vector_query]
-        if filter_query:
-            must_params.extend(filter_query)
-        query = {
-            "bool": {"must": must_params}
-        }
-        result = self._milvus.search(tmp_collection_name, query, timeout=timeout)
+
+        params = util.search_param_analysis(vector_query, filter_query)
+        params.update({"timeout": timeout})
+        result = self._milvus.search(tmp_collection_name, **params)
+
+        # must_params = [vector_query]
+        # if filter_query:
+        #     must_params.extend(filter_query)
+        # query = {
+        #     "bool": {"must": must_params}
+        # }
+        # result = self._milvus.search(tmp_collection_name, query, timeout=timeout)
         return result
 
     @time_wrapper
@@ -330,7 +335,10 @@ class MilvusClient(object):
         }
         logger.debug("Start warm up query")
         for i in range(times):
-            self._milvus.search(self._collection_name, query)
+            params = util.search_param_analysis(vector_query, None)
+            self._milvus.search(self._collection_name, **params)
+
+            # self._milvus.search(self._collection_name, query)
         logger.debug("End warm up query")
 
     @time_wrapper
@@ -343,7 +351,12 @@ class MilvusClient(object):
             "bool": {"must": must_params}
         }
         self.load_collection(tmp_collection_name)
-        result = self._milvus.search(tmp_collection_name, query, timeout=timeout)
+
+        params = util.search_param_analysis(vector_query, filter_query)
+        params.update({"timeout": timeout})
+        result = self._milvus.search(tmp_collection_name, **params)
+
+        # result = self._milvus.search(tmp_collection_name, query, timeout=timeout)
         return result
 
     def get_ids(self, result):

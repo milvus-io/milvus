@@ -20,12 +20,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/rootcoord"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/logutil"
+	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -360,8 +361,8 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		log.Error("new msg stream failed", zap.Error(err))
 		return
 	}
-	ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName},
-		Params.DataCoordSubscriptionName)
+	ttMsgStream.AsConsumerWithPosition([]string{Params.TimeTickChannelName},
+		Params.DataCoordSubscriptionName, mqclient.SubscriptionPositionLatest)
 	log.Debug("dataCoord create time tick channel consumer",
 		zap.String("timeTickChannelName", Params.TimeTickChannelName),
 		zap.String("subscriptionName", Params.DataCoordSubscriptionName))
@@ -402,6 +403,11 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 			if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
 				log.Warn("failed to expire allocations", zap.Error(err))
 				continue
+			}
+			physical, _ := tsoutil.ParseTS(ts)
+			if time.Since(physical).Minutes() > 1 {
+				// if lag behind, log every 1 mins about
+				log.RatedWarn(60.0, "Time tick lag behind for more than 1 minutes", zap.String("channel", ch), zap.Time("tt", physical))
 			}
 			segments, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
 			if err != nil {

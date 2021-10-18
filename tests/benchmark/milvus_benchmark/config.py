@@ -13,7 +13,7 @@ SERVER_HOST_DEFAULT = "127.0.0.1"
 SERVER_PORT_DEFAULT = 19530
 
 # milvus version, should be changed by manual
-SERVER_VERSION = "2.0.0-RC7"
+SERVER_VERSION = "2.0.0-RC8"
 DEFUALT_DEPLOY_MODE = "single"
 
 
@@ -41,7 +41,7 @@ DEFAULT_API_VERSION = 'chaos-mesh.org/v1alpha1'
 DEFAULT_GROUP = 'chaos-mesh.org'
 DEFAULT_VERSION = 'v1alpha1'
 
-# minio config
+# MinIO config
 MINIO_HOST = "milvus-test-minio.qa-milvus.svc.cluster.local"
 MINIO_PORT = 9000
 MINIO_ACCESS_KEY = "minioadmin"

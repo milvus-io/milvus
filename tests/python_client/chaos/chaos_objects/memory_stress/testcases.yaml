@@ -1,0 +1,21 @@
+# Memory Stress Testcases All-in-one
+#   memory stress
+#     standalone
+#       todo
+#     cluster-1-node
+#       11 pods(querynode, datanode, indexnode, pulsar, etcd, minio)
+#     cluster-n-nodes
+#       todo
+
+Collections:
+  -
+    testcase:
+      name: test_querynode_memory_stress
+      chaos: chaos_querynode_memory_stress.yaml
+      expectation:
+          cluster_1_node:
+            search: fail
+            query: fail
+          cluster_n_nodes:
+            search: degrade
+            query: degrade

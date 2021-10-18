@@ -391,6 +391,7 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) {
 	log.Debug("Rocksmq register consumer successfully ", zap.String("topic", consumer.Topic), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 }
 
+// DestroyConsumerGroup removes a consumer group from rocksdb_kv
 func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
@@ -426,6 +427,7 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	return nil
 }
 
+// Produce produces messages for topic and updates page infos for retention
 func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
@@ -717,7 +719,8 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	if iter.Valid() {
 		iter.SeekToLast()
 	} else {
-		return fmt.Errorf("RocksMQ: can't get message key of channel %s", topicName)
+		// In this case there are no messages, so shouldn't return error
+		return nil
 	}
 	msgKey := iter.Key()
 	msgID, err := strconv.ParseInt(string(msgKey.Data())[FixedChannelNameLen+1:], 10, 64)

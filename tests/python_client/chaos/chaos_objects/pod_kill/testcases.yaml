@@ -1,0 +1,135 @@
+# Testcases All-in-one
+#   pod kill
+#     standalone
+#       3 pods(standalone-ha-blabla, etcd, minio)
+#     cluster-1-node
+#       11 pods(proxy, rootcoord, querynode, querycoord, datanode, datacoord,
+#               indexnode, indexcoord, pulsar, etcd, minio)
+#     cluster-n-nodes
+#       11 pods* n: kill one and kill all
+
+Collections:
+  -
+    testcase:
+      name: test_querynode_podkill
+      chaos: chaos_querynode_podkill.yaml
+      expectation:
+          cluster_1_node:
+            search: fail
+            query: fail
+          cluster_n_nodes:
+            search: degrade
+            query: degrade
+  -
+    testcase:
+      name: test_querycoord_podkill
+      chaos: chaos_querycoord_podkill.yaml
+      expectation:
+        cluster_1_node:
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          search: degrade
+          query: degrade
+  -
+    testcase:
+      name: test_datanode_podkill
+      chaos: chaos_datanode_podkill.yaml
+      expectation:
+        cluster_1_node:
+          insert: succ
+          flush: fail
+        cluster_n_nodes:
+          insert: degrade
+  -
+    testcase:
+      name: test_datascoord_podkill
+      chaos: chaos_datacoord_podkill.yaml
+      expectation:
+        cluster_1_node:
+          insert: succ
+          flush: fail
+        cluster_n_nodes:
+          insert: degrade
+  -
+    testcase:
+      name: test_indexnode_podkill
+      chaos: chaos_indexnode_podkill.yaml
+      expectation:
+        cluster_1_node:
+          index: fail
+        cluster_n_nodes:
+          index: degrade
+  -
+    testcase:
+      name: test_indexcoord_podkill
+      chaos: chaos_indexcoord_podkill.yaml
+      expectation:
+        cluster_1_node:
+          index: fail
+        cluster_n_nodes:
+          insert: degrade
+  -
+    testcase:
+      name: test_proxy_podkill
+      chaos: chaos_proxy_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          insert: fail
+  -
+    testcase:
+      name: test_rootcoord_podkill
+      chaos: chaos_rootcoord_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          insert: degrade
+  -
+    testcase:
+      name: test_etcd_podkill
+      chaos: chaos_etcd_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_minio_podkill
+      chaos: chaos_minio_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_pulsar_podkill
+      chaos: chaos_pulsar_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail

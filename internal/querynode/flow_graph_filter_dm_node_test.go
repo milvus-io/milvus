@@ -29,8 +29,8 @@ func getFilterDMNode(ctx context.Context) (*filterDmNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	streaming.replica.initExcludedSegments(defaultCollectionID)
 
+	streaming.replica.addExcludedSegments(defaultCollectionID, nil)
 	return newFilteredDmNode(streaming.replica, loadTypeCollection, defaultCollectionID, defaultPartitionID), nil
 }
 
@@ -130,7 +130,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
-		err = fg.replica.addExcludedSegments(defaultCollectionID, []*datapb.SegmentInfo{
+		fg.replica.addExcludedSegments(defaultCollectionID, []*datapb.SegmentInfo{
 			{
 				ID:           defaultSegmentID,
 				CollectionID: defaultCollectionID,
@@ -140,7 +140,6 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 				},
 			},
 		})
-		assert.NoError(t, err)
 		res := fg.filterInvalidInsertMessage(msg)
 		assert.Nil(t, res)
 	})
@@ -164,6 +163,95 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 		msg.RowIDs = make([]IntPrimaryKey, 0)
 		msg.RowData = make([]*commonpb.Blob, 0)
 		res := fg.filterInvalidInsertMessage(msg)
+		assert.Nil(t, res)
+	})
+}
+
+func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	t.Run("delete valid test", func(t *testing.T) {
+		msg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		fg, err := getFilterDMNode(ctx)
+		assert.NoError(t, err)
+		res := fg.filterInvalidDeleteMessage(msg)
+		assert.NotNil(t, res)
+	})
+
+	t.Run("test delete no collection", func(t *testing.T) {
+		msg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		msg.CollectionID = UniqueID(1000)
+		fg, err := getFilterDMNode(ctx)
+		assert.NoError(t, err)
+		res := fg.filterInvalidDeleteMessage(msg)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test delete no partition", func(t *testing.T) {
+		msg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		msg.PartitionID = UniqueID(1000)
+		fg, err := getFilterDMNode(ctx)
+		assert.NoError(t, err)
+		fg.loadType = loadTypePartition
+		res := fg.filterInvalidDeleteMessage(msg)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test delete not target collection", func(t *testing.T) {
+		msg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		fg, err := getFilterDMNode(ctx)
+		assert.NoError(t, err)
+		fg.collectionID = UniqueID(1000)
+		res := fg.filterInvalidDeleteMessage(msg)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test delete not target partition", func(t *testing.T) {
+		msg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		fg, err := getFilterDMNode(ctx)
+		assert.NoError(t, err)
+		fg.loadType = loadTypePartition
+		fg.partitionID = UniqueID(1000)
+		res := fg.filterInvalidDeleteMessage(msg)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test delete released partition", func(t *testing.T) {
+		msg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		fg, err := getFilterDMNode(ctx)
+		assert.NoError(t, err)
+		col, err := fg.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.addReleasedPartition(defaultPartitionID)
+		res := fg.filterInvalidDeleteMessage(msg)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test delete misaligned messages", func(t *testing.T) {
+		msg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		fg, err := getFilterDMNode(ctx)
+		assert.NoError(t, err)
+		msg.Timestamps = make([]Timestamp, 0)
+		res := fg.filterInvalidDeleteMessage(msg)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test delete no data", func(t *testing.T) {
+		msg, err := genSimpleDeleteMsg()
+		assert.NoError(t, err)
+		fg, err := getFilterDMNode(ctx)
+		assert.NoError(t, err)
+		msg.Timestamps = make([]Timestamp, 0)
+		msg.PrimaryKeys = make([]IntPrimaryKey, 0)
+		res := fg.filterInvalidDeleteMessage(msg)
 		assert.Nil(t, res)
 	})
 }

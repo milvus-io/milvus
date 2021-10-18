@@ -279,31 +279,37 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.querynode.GetStatisticsChannel(ctx)
 }
 
+// GetComponentStates gets the component states of QueryNode.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	// ignore ctx and in
 	return s.querynode.GetComponentStates(ctx)
 }
 
+// AddQueryChannel adds query channel for QueryNode component.
 func (s *Server) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.AddQueryChannel(ctx, req)
 }
 
+// RemoveQueryChannel removes the query channel for QueryNode component.
 func (s *Server) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.RemoveQueryChannel(ctx, req)
 }
 
+// WatchDmChannels watches the channels about data manipulation.
 func (s *Server) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.WatchDmChannels(ctx, req)
 }
 
+// LoadSegments loads the segments to search.
 func (s *Server) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.LoadSegments(ctx, req)
 }
 
+// ReleaseCollection releases the data of the specified collection in QueryNode.
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.ReleaseCollection(ctx, req)
