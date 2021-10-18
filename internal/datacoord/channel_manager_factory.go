@@ -70,6 +70,7 @@ type ConsistentHashChannelPolicyFactory struct {
 	hashring *consistent.Consistent
 }
 
+// NewConsistentHashChannelPolicyFactory creates a new consistent hash policy factory instance
 func NewConsistentHashChannelPolicyFactory(hashring *consistent.Consistent) *ConsistentHashChannelPolicyFactory {
 	return &ConsistentHashChannelPolicyFactory{
 		hashring: hashring,
