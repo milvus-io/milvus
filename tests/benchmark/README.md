@@ -22,22 +22,31 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
 
    1. Set PYTHONPATH:
    
-      `export PYTHONPATH=/your/project/path/milvus_benchmark`
+      ```bash
+      $ export PYTHONPATH=/your/project/path/milvus_benchmark
+      ```
    
    2. Prepare data: 
    
       if we need to use the sift/deep dataset as the raw data input, we need to mount NAS and update `RAW_DATA_DIR` in `config.py`, the example mount command:
-        `sudo mount -t cifs -o username=test,vers=1.0 //172.16.70.249/test /test`
+   
+   ```bash
+      $ sudo mount -t cifs -o username=test,vers=1.0 //172.16.70.249/test /test
+   ```
    
    3. Install requirements:
-
-      `pip install -r requirements.txt`
-
+   
+      ```bash
+      $ pip install -r requirements.txt
+      ```
+   
    4. Install the [Python-SDK for milvus](https://github.com/milvus-io/pymilvus).
    
    5. Write test yaml and run with the yaml param:
    
-      `cd milvus_benchmark/ && python main.py --local --host=* --port=19530 --suite=suites/2_insert_data.yaml`
+      ```bash
+      $ cd milvus_benchmark/ && python main.py --local --host=* --port=19530 --suite=suites/2_insert_data.yaml
+      ```
 
 ### Test suite
 
@@ -48,7 +57,7 @@ Test suite yaml defines the test process, users need to add test suite yaml if a
 #### Example
 
 Take the test file `2_insert_data.yaml` as an example
-```
+```yaml
 insert_performance:
   collections:
      -
@@ -76,7 +85,7 @@ insert_performance:
 While using argo workflow as benchmark pipeline, the test suite is made of both `client` and `server` configmap, an example will be like this:
 
 `server`
-```
+```yaml
 kind: ConfigMap
 apiVersion: v1
 metadata:
@@ -103,7 +112,7 @@ data:
       deploy_mode: "cluster"
 ```
 `client`
-```
+```yaml
 kind: ConfigMap
 apiVersion: v1
 metadata:
@@ -144,9 +153,9 @@ There are several kinds of data types provided in benchmark:
 1. Insert from `local`: random generated vectors
 2. Insert from the file: the other data type such as `sift/deep`, the following list shows where the source data comes from, make sure to convert to `.npy` file format that can be loaded by `numpy`, and update the value of `RAW_DATA_DIR` in `config.py` to your own data path
 
-|  data type   | sift                           | deep  |
-|  ----        |                          ----  | ----  |
-|  url         | http://corpus-texmex.irisa.fr/ | https://github.com/erikbern/ann-benchmarks/
+| data type | sift                           | deep                                        |
+| --------- | ------------------------------ | ------------------------------------------- |
+| url       | http://corpus-texmex.irisa.fr/ | https://github.com/erikbern/ann-benchmarks/ |
 
 There are also many optional datasets could be used to test milvus, here is the reference: http://big-ann-benchmarks.com/index.html
 
@@ -159,7 +168,7 @@ Also, you should provide the field value of the source data file path `source_fi
 ### Conponents
 
 - `main.py`
-   
+  
    The entry file: parse the input params and initialize the other conponent: `metric`, `env`, `runner`
 
 - `metric`
@@ -208,18 +217,18 @@ Also, you should provide the field value of the source data file path `source_fi
 
 As the above section mentioned, we will collect the test metrics after test case run finished, here is the main metric field:
 ```
-   run_id      : each test suite will generate a run_id
-   mode        : run mode such as local
-   server      : describe server resource and server version
-   hardware    : server host
-   env         : server config
-   status      : run result
-   err_message : error msg when run failed
-   collection  : collection info
-   index       : index type and index params
-   search      : search params
-   run_params  : extra run params
-   metrics     : metric type and metric value
+run_id      : each test suite will generate a run_id
+mode        : run mode such as local
+server      : describe server resource and server version
+hardware    : server host
+env         : server config
+status      : run result
+err_message : error msg when run failed
+collection  : collection info
+index       : index type and index params
+search      : search params
+run_params  : extra run params
+metrics     : metric type and metric value
 ```
 
 ### How to visualize test result
@@ -229,7 +238,7 @@ As the metrics uploaded to the db (we use MongoDB currently), we suppose use Red
 For example, in order to find the most suitable insert batch size when preparing data with milvus, a benchmark test suite type named `bp_insert_performance` will run regularly, different `ni_per` in this suite yaml will be executed and the average response time and TPS (Number of rows inserted per second) will be collected.
 
 The query expression:
-```
+```json
 {
     "collection": "doc",
     "query": {
