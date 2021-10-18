@@ -272,8 +272,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		loadCollectionTask := &LoadCollectionTask{
-			BaseTask:              baseTask,
+		loadCollectionTask := &loadCollectionTask{
+			baseTask:              baseTask,
 			LoadCollectionRequest: &loadReq,
 			rootCoord:             scheduler.rootCoord,
 			dataCoord:             scheduler.dataCoord,
@@ -287,8 +287,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		loadPartitionTask := &LoadPartitionTask{
-			BaseTask:              baseTask,
+		loadPartitionTask := &loadPartitionTask{
+			baseTask:              baseTask,
 			LoadPartitionsRequest: &loadReq,
 			dataCoord:             scheduler.dataCoord,
 			cluster:               scheduler.cluster,
@@ -301,8 +301,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		releaseCollectionTask := &ReleaseCollectionTask{
-			BaseTask:                 baseTask,
+		releaseCollectionTask := &releaseCollectionTask{
+			baseTask:                 baseTask,
 			ReleaseCollectionRequest: &loadReq,
 			cluster:                  scheduler.cluster,
 			meta:                     scheduler.meta,
@@ -315,8 +315,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		releasePartitionTask := &ReleasePartitionTask{
-			BaseTask:                 baseTask,
+		releasePartitionTask := &releasePartitionTask{
+			baseTask:                 baseTask,
 			ReleasePartitionsRequest: &loadReq,
 			cluster:                  scheduler.cluster,
 		}
@@ -328,8 +328,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		loadSegmentTask := &LoadSegmentTask{
-			BaseTask:            baseTask,
+		loadSegmentTask := &loadSegmentTask{
+			baseTask:            baseTask,
 			LoadSegmentsRequest: &loadReq,
 			cluster:             scheduler.cluster,
 			meta:                scheduler.meta,
@@ -343,8 +343,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		releaseSegmentTask := &ReleaseSegmentTask{
-			BaseTask:               baseTask,
+		releaseSegmentTask := &releaseSegmentTask{
+			baseTask:               baseTask,
 			ReleaseSegmentsRequest: &loadReq,
 			cluster:                scheduler.cluster,
 		}
@@ -356,8 +356,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		watchDmChannelTask := &WatchDmChannelTask{
-			BaseTask:               baseTask,
+		watchDmChannelTask := &watchDmChannelTask{
+			baseTask:               baseTask,
 			WatchDmChannelsRequest: &loadReq,
 			cluster:                scheduler.cluster,
 			meta:                   scheduler.meta,
@@ -371,8 +371,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		watchQueryChannelTask := &WatchQueryChannelTask{
-			BaseTask:               baseTask,
+		watchQueryChannelTask := &watchQueryChannelTask{
+			baseTask:               baseTask,
 			AddQueryChannelRequest: &loadReq,
 			cluster:                scheduler.cluster,
 		}
@@ -384,8 +384,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		loadBalanceTask := &LoadBalanceTask{
-			BaseTask:           baseTask,
+		loadBalanceTask := &loadBalanceTask{
+			baseTask:           baseTask,
 			LoadBalanceRequest: &loadReq,
 			rootCoord:          scheduler.rootCoord,
 			dataCoord:          scheduler.dataCoord,

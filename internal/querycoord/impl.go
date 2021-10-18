@@ -144,8 +144,8 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
-	loadCollectionTask := &LoadCollectionTask{
-		BaseTask:              baseTask,
+	loadCollectionTask := &loadCollectionTask{
+		baseTask:              baseTask,
 		LoadCollectionRequest: req,
 		rootCoord:             qc.rootCoordClient,
 		dataCoord:             qc.dataCoordClient,
@@ -193,8 +193,8 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
-	releaseCollectionTask := &ReleaseCollectionTask{
-		BaseTask:                 baseTask,
+	releaseCollectionTask := &releaseCollectionTask{
+		baseTask:                 baseTask,
 		ReleaseCollectionRequest: req,
 		cluster:                  qc.cluster,
 		meta:                     qc.meta,
@@ -336,8 +336,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
-	loadPartitionTask := &LoadPartitionTask{
-		BaseTask:              baseTask,
+	loadPartitionTask := &loadPartitionTask{
+		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
 		dataCoord:             qc.dataCoordClient,
 		cluster:               qc.cluster,
@@ -407,8 +407,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 
 	req.PartitionIDs = toReleasedPartitions
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
-	releasePartitionTask := &ReleasePartitionTask{
-		BaseTask:                 baseTask,
+	releasePartitionTask := &releasePartitionTask{
+		baseTask:                 baseTask,
 		ReleasePartitionsRequest: req,
 		cluster:                  qc.cluster,
 	}

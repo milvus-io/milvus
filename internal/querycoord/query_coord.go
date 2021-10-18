@@ -238,8 +238,8 @@ func (qc *QueryCoord) watchNodeLoop() {
 		}
 
 		baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_nodeDown)
-		loadBalanceTask := &LoadBalanceTask{
-			BaseTask:           baseTask,
+		loadBalanceTask := &loadBalanceTask{
+			baseTask:           baseTask,
 			LoadBalanceRequest: loadBalanceSegment,
 			rootCoord:          qc.rootCoordClient,
 			dataCoord:          qc.dataCoordClient,
@@ -289,8 +289,8 @@ func (qc *QueryCoord) watchNodeLoop() {
 				}
 
 				baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_nodeDown)
-				loadBalanceTask := &LoadBalanceTask{
-					BaseTask:           baseTask,
+				loadBalanceTask := &loadBalanceTask{
+					baseTask:           baseTask,
 					LoadBalanceRequest: loadBalanceSegment,
 					rootCoord:          qc.rootCoordClient,
 					dataCoord:          qc.dataCoordClient,
