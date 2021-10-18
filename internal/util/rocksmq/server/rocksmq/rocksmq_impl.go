@@ -572,6 +572,10 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 	return nil
 }
 
+// Consume steps:
+// 1. Consume n messages from rocksdb
+// 2. Update current_id to the last consumed message
+// 3. Update ack informations in rocksdb
 func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error) {
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
