@@ -3,6 +3,7 @@ import time
 import logging
 import string
 import random
+from yaml.representer import SafeRepresenter
 from yaml import full_load, dump
 import yaml
 import tableprint as tp
@@ -40,7 +41,7 @@ def change_style(style, representer):
     return new_representer
 
 
-from yaml.representer import SafeRepresenter
+# from yaml.representer import SafeRepresenter
 
 # represent_str does handle some corner cases, so use that
 # instead of calling represent_scalar directly
