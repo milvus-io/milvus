@@ -374,6 +374,7 @@ func (colReplica *collectionReplica) getSegmentIDsByVChannel(partitionID UniqueI
 	return segmentIDsTmp, nil
 }
 
+// getSegmentIDsPrivate is private function in collectionReplica, it returns segment ids
 func (colReplica *collectionReplica) getSegmentIDsPrivate(partitionID UniqueID) ([]UniqueID, error) {
 	partition, err2 := colReplica.getPartitionByIDPrivate(partitionID)
 	if err2 != nil {
