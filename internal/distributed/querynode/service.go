@@ -315,6 +315,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	return s.querynode.ReleaseCollection(ctx, req)
 }
 
+// ReleasePartitions releases the data of the specified partitions in QueryNode.
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.ReleasePartitions(ctx, req)
