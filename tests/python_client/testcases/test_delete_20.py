@@ -187,6 +187,65 @@ class TestDeleteParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "..."}
         collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_delete_partition(self):
+        """
+        target: test delete from partition
+        method: delete with partition names
+        expected: verify partition entities is deleted
+        """
+        # init collection and partition
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+
+        # insert data to partition
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        partition_w.insert(df)
+        assert partition_w.num_entities == tmp_nb
+        collection_w.load()
+        del_res, _ = collection_w.delete(tmp_expr, partition_name=[partition_w.name])
+
+        # verify partition num entities
+        assert del_res.delete_cnt == 1
+        assert partition_w.num_entities == tmp_nb - 1
+        assert collection_w.num_entities == tmp_nb - 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_default_partition(self):
+        """
+        target: test delete from default partition
+        method: delete with partition names is _default
+        expected: assert delete successfully
+        """
+        # init collection with tmp_nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        del_res, _ = collection_w.delete(tmp_expr, partition_name=[ct.default_partition_name])
+        assert del_res.delete_cnt == 1
+        assert collection_w.num_entities == tmp_nb - 1
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_empty_partition_names(self):
+        """
+        target: test delete none partition
+        method: delete with None partition names
+        expected: delete from all partitions
+        """
+        # init collection and partition
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+
+        # insert data to partition
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        partition_w.insert(df)
+        collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb * 2
+        collection_w.load()
+        del_res, _ = collection_w.delete(tmp_expr, partition_name=[])
+
+        # verify partition num entities
+        assert del_res.delete_cnt == 0
+        assert collection_w.num_entities == tmp_nb
+
 
 @pytest.mark.skip(reason="Waiting for development")
 class TestDeleteOperation(TestcaseBase):
