@@ -451,7 +451,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []int64, chanName string) *msgs
 	return msg
 }
 
-func GenFlowGraphInsertMsg(chanName string) flowGraphMsg {
+func genFlowGraphInsertMsg(chanName string) flowGraphMsg {
 	timeRange := TimeRange{
 		timestampMin: 0,
 		timestampMax: math.MaxUint64,
@@ -481,7 +481,7 @@ func GenFlowGraphInsertMsg(chanName string) flowGraphMsg {
 	return *fgMsg
 }
 
-func GenFlowGraphDeleteMsg(pks []int64, chanName string) flowGraphMsg {
+func genFlowGraphDeleteMsg(pks []int64, chanName string) flowGraphMsg {
 	timeRange := TimeRange{
 		timestampMin: 0,
 		timestampMax: math.MaxUint64,

@@ -249,7 +249,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		delNode, err := newDeleteNode(ctx, fm, c)
 		assert.Nil(te, err)
 
-		msg := GenFlowGraphDeleteMsg(pks, chanName)
+		msg := genFlowGraphDeleteMsg(pks, chanName)
 		msg.segmentsToFlush = segIDs
 		// this will fail since ts = 0 will trigger mocked error
 		var fgMsg flowgraph.Msg = &msg
@@ -273,7 +273,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		delNode, err := newDeleteNode(ctx, fm, c)
 		assert.Nil(te, err)
 
-		msg := GenFlowGraphDeleteMsg(pks, chanName)
+		msg := genFlowGraphDeleteMsg(pks, chanName)
 		msg.segmentsToFlush = segIDs
 
 		msg.endPositions[0].Timestamp = 100 // set to normal timestamp
