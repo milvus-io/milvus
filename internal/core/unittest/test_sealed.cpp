@@ -9,24 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-//
-// Created by mike on 12/28/20.
-//
-#include "test_utils/DataGen.h"
 #include <gtest/gtest.h>
-#include <knowhere/index/vector_index/VecIndex.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <knowhere/index/vector_index/IndexIVF.h>
+
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "segcore/SegmentSealedImpl.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus;
-using namespace milvus::segcore;
 using namespace milvus::query;
+using namespace milvus::segcore;
 
-namespace {
 const int64_t ROW_COUNT = 100 * 1000;
-}
 
 TEST(Sealed, without_predicate) {
     using namespace milvus::query;
