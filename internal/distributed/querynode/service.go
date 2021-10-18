@@ -321,6 +321,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	return s.querynode.ReleasePartitions(ctx, req)
 }
 
+// ReleaseSegments releases the data of the specified segments in QueryNode.
 func (s *Server) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.querynode.ReleaseSegments(ctx, req)
