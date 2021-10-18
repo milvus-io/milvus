@@ -199,7 +199,7 @@ message SegmentInfo {
   // binlogs consist of insert binlogs
   repeated FieldBinlog binlogs = 11;
   repeated FieldBinlog statslogs = 12;
-  repeated string deltalogs = 13;
+  repeated DeltaLogInfo deltalogs = 13;
 }
 
 message SegmentStartPosition {
@@ -215,12 +215,22 @@ message SaveBinlogPathsRequest {
   repeated CheckPoint checkPoints = 5;
   repeated SegmentStartPosition start_positions = 6;
   bool flushed = 7;
+  repeated FieldBinlog field2StatslogPaths = 8;
+  repeated DeltaLogInfo deltalogs = 9;
 }
 
 message CheckPoint {
   int64 segmentID = 1;
   internal.MsgPosition position = 2;
   int64 num_of_rows = 3;
+}
+
+message DeltaLogInfo {
+  uint64 record_entries = 1;
+  uint64 timestamp_from = 2;
+  uint64 timestamp_to = 3;
+  string delta_log_path = 4;
+  int64 delta_log_size = 5; 
 }
 
 message DataNodeTtMsg {
