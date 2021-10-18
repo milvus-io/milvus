@@ -93,6 +93,11 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           kubectl get pod -n chaos-testing
+          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
+          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+          sleep 20s
+          nc -vz 127.0.0.1 19530
+
           python hello_milvus.py
 
       - name: Data Consist Test
@@ -110,6 +115,11 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           kubectl get pod -n chaos-testing
+          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9  
+          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+          sleep 20s
+          nc -vz 127.0.0.1 19530
+
           python hello_milvus.py
 
       - name: Export logs
