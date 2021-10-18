@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"encoding/binary"
+	"math"
 	"path"
 	"strconv"
 	"sync"
@@ -55,10 +56,21 @@ type deleteNode struct {
 type DelDataBuf struct {
 	delData *DeleteData
 	size    int64
+	tsFrom  Timestamp
+	tsTo    Timestamp
 }
 
 func (ddb *DelDataBuf) updateSize(size int64) {
 	ddb.size += size
+}
+
+func (ddb *DelDataBuf) updateTimeRange(tr TimeRange) {
+	if tr.timestampMin < ddb.tsFrom {
+		ddb.tsFrom = tr.timestampMin
+	}
+	if tr.timestampMax > ddb.tsTo {
+		ddb.tsTo = tr.timestampMax
+	}
 }
 
 func newDelDataBuf() *DelDataBuf {
@@ -66,7 +78,9 @@ func newDelDataBuf() *DelDataBuf {
 		delData: &DeleteData{
 			Data: make(map[string]int64),
 		},
-		size: 0,
+		size:   0,
+		tsFrom: math.MaxUint64,
+		tsTo:   0,
 	}
 }
 
@@ -78,7 +92,7 @@ func (dn *deleteNode) Close() {
 	log.Info("Flowgraph Delete Node closing")
 }
 
-func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg) error {
+func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) error {
 	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys))
 
 	segIDToPkMap := make(map[UniqueID][]int64)
@@ -115,6 +129,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg) error {
 
 		// store
 		delDataBuf.(*DelDataBuf).updateSize(int64(rows))
+		delDataBuf.(*DelDataBuf).updateTimeRange(tr)
 		dn.delBuf.Store(segID, delDataBuf)
 	}
 
@@ -159,7 +174,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	for _, msg := range fgMsg.deleteMessages {
-		if err := dn.bufferDeleteMsg(msg); err != nil {
+		if err := dn.bufferDeleteMsg(msg, fgMsg.timeRange); err != nil {
 			log.Error("buffer delete msg failed", zap.Error(err))
 		}
 	}
