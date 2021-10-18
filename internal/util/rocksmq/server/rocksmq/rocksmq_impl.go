@@ -668,6 +668,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	return consumerMessage, nil
 }
 
+// Seek updates the current id to the given msgID
 func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) error {
 	/* Step I: Check if key exists */
 	rmq.storeMu.Lock()
