@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCollectionTask {
@@ -48,6 +49,7 @@ func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *loadPart
 		},
 		CollectionID: defaultCollectionID,
 		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
 	loadPartitionTask := &loadPartitionTask{
@@ -648,6 +650,52 @@ func Test_RescheduleDmChannelsEndWithFail(t *testing.T) {
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 
 	waitTaskFinalState(loadCollectionTask, taskFailed)
+
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_assignInternalTask(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	schema := genCollectionSchema(defaultCollectionID, false)
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+	loadSegmentRequests := make([]*querypb.LoadSegmentsRequest, 0)
+	binlogs := make([]*datapb.FieldBinlog, 0)
+	binlogs = append(binlogs, &datapb.FieldBinlog{
+		FieldID: 0,
+		Binlogs: []string{funcutil.RandomString(1000)},
+	})
+	for id := 0; id < 10000; id++ {
+		segmentInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    UniqueID(id),
+			PartitionID:  defaultPartitionID,
+			CollectionID: defaultCollectionID,
+			BinlogPaths:  binlogs,
+		}
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadSegments,
+			},
+			NodeID: node1.queryNodeID,
+			Schema: schema,
+			Infos:  []*querypb.SegmentLoadInfo{segmentInfo},
+		}
+		loadSegmentRequests = append(loadSegmentRequests, req)
+	}
+
+	err = assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, false)
+	assert.Nil(t, err)
+
+	assert.NotEqual(t, 1, len(loadCollectionTask.getChildTask()))
 
 	queryCoord.Stop()
 	err = removeAllSession()
