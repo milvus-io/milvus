@@ -82,6 +82,7 @@ func (f *ConsistentHashChannelPolicyFactory) NewRegisterPolicy() RegisterPolicy 
 	return ConsistentHashRegisterPolicy(f.hashring)
 }
 
+// NewDeregisterPolicy create a new dereigster policy
 func (f *ConsistentHashChannelPolicyFactory) NewDeregisterPolicy() DeregisterPolicy {
 	return ConsistentHashDeregisterPolicy(f.hashring)
 }
