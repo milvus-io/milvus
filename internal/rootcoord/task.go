@@ -913,7 +913,7 @@ func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 	for _, i := range idx {
 		f, err := GetFieldSchemaByIndexID(&coll, typeutil.UniqueID(i.IndexID))
 		if err != nil {
-			log.Warn("get field schema by index id failed", zap.String("collection name", t.Req.CollectionName), zap.String("index name", t.Req.IndexName), zap.Error(err))
+			log.Warn("Get field schema by index id failed", zap.String("collection name", t.Req.CollectionName), zap.String("index name", t.Req.IndexName), zap.Error(err))
 			continue
 		}
 		desc := &milvuspb.IndexDescription{
