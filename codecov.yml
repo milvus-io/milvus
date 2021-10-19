@@ -37,3 +37,4 @@ ignore:
   - "*.md"
   - "docs/.*"
   - "**/*.pb.go"
+  - "**/*.proto"
