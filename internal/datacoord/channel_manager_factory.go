@@ -91,6 +91,7 @@ func (f *ConsistentHashChannelPolicyFactory) NewAssignPolicy() ChannelAssignPoli
 	return ConsistentHashChannelAssignPolicy(f.hashring)
 }
 
+// NewReassignPolicy creates a new reassign policy
 func (f *ConsistentHashChannelPolicyFactory) NewReassignPolicy() ChannelReassignPolicy {
 	return EmptyReassignPolicy
 }
