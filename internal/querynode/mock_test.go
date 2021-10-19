@@ -49,6 +49,7 @@ const (
 
 	defaultVecFieldName   = "vec"
 	defaultConstFieldName = "const"
+	defaultPKFieldName    = "pk"
 	defaultTopK           = int64(10)
 	defaultRoundDecimal   = int64(6)
 	defaultDim            = 128
@@ -108,6 +109,11 @@ var simpleConstField = constFieldParam{
 	dataType: schemapb.DataType_Int32,
 }
 
+var simplePKField = constFieldParam{
+	id:       102,
+	dataType: schemapb.DataType_Int64,
+}
+
 var uidField = constFieldParam{
 	id:       rowIDFieldID,
 	dataType: schemapb.DataType_Int64,
@@ -123,6 +129,16 @@ func genConstantField(param constFieldParam) *schemapb.FieldSchema {
 		FieldID:      param.id,
 		Name:         defaultConstFieldName,
 		IsPrimaryKey: false,
+		DataType:     param.dataType,
+	}
+	return field
+}
+
+func genPKField(param constFieldParam) *schemapb.FieldSchema {
+	field := &schemapb.FieldSchema{
+		FieldID:      param.id,
+		Name:         defaultPKFieldName,
+		IsPrimaryKey: true,
 		DataType:     param.dataType,
 	}
 	return field
@@ -284,13 +300,15 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 func genSimpleSegCoreSchema() *schemapb.CollectionSchema {
 	fieldVec := genFloatVectorField(simpleVecField)
 	fieldInt := genConstantField(simpleConstField)
+	fieldPK := genPKField(simplePKField)
 
 	schema := schemapb.CollectionSchema{ // schema for segCore
 		Name:   defaultCollectionName,
-		AutoID: true,
+		AutoID: false,
 		Fields: []*schemapb.FieldSchema{
 			fieldVec,
 			fieldInt,
+			fieldPK,
 		},
 	}
 	return &schema
@@ -578,6 +596,10 @@ func genCommonBlob(msgLength int, schema *schemapb.CollectionSchema) ([]*commonp
 			switch f.DataType {
 			case schemapb.DataType_Int32:
 				bs := make([]byte, 4)
+				binary.LittleEndian.PutUint32(bs, uint32(i))
+				rawData = append(rawData, bs...)
+			case schemapb.DataType_Int64:
+				bs := make([]byte, 8)
 				binary.LittleEndian.PutUint32(bs, uint32(i))
 				rawData = append(rawData, bs...)
 			case schemapb.DataType_FloatVector:

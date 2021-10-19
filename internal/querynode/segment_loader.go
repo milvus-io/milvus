@@ -322,8 +322,20 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 }
 func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment) error {
 	// Todo: get path from etcd
-	p := path.Join("files/stats_log", JoinIDPath(segment.collectionID, segment.partitionID, segment.segmentID, common.RowIDField))
-	keys, values, err := loader.minioKV.LoadWithPrefix(p)
+	collection, err := loader.historicalReplica.getCollectionByID(segment.collectionID)
+	if err != nil {
+		return err
+	}
+	pkField := int64(-1)
+	for _, field := range collection.schema.Fields {
+		if field.IsPrimaryKey {
+			pkField = field.FieldID
+			break
+		}
+	}
+
+	p := path.Join("files/stats_log", JoinIDPath(segment.collectionID, segment.partitionID, segment.segmentID, pkField))
+	keys, values, err := loader.minioKV.LoadWithPrefix(p + "/")
 	if err != nil {
 		return err
 	}

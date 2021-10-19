@@ -12,15 +12,20 @@
 package querynode
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"strconv"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
@@ -35,6 +40,7 @@ type insertData struct {
 	insertTimestamps map[UniqueID][]Timestamp
 	insertRecords    map[UniqueID][]*commonpb.Blob
 	insertOffset     map[UniqueID]int64
+	insertPKs        map[UniqueID][]int64
 }
 
 type deleteData struct {
@@ -66,6 +72,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		insertTimestamps: make(map[UniqueID][]Timestamp),
 		insertRecords:    make(map[UniqueID][]*commonpb.Blob),
 		insertOffset:     make(map[UniqueID]int64),
+		insertPKs:        make(map[UniqueID][]int64),
 	}
 
 	if iMsg == nil {
@@ -102,6 +109,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		iData.insertIDs[task.SegmentID] = append(iData.insertIDs[task.SegmentID], task.RowIDs...)
 		iData.insertTimestamps[task.SegmentID] = append(iData.insertTimestamps[task.SegmentID], task.Timestamps...)
 		iData.insertRecords[task.SegmentID] = append(iData.insertRecords[task.SegmentID], task.RowData...)
+		iData.insertPKs[task.SegmentID] = iNode.getPrimaryKeys(task)
 	}
 
 	// 2. do preInsert
@@ -119,6 +127,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 			iData.insertOffset[segmentID] = offset
 			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segmentID))
+			targetSegment.updateBloomFilter(iData.insertPKs[segmentID])
 		}
 	}
 
@@ -291,6 +300,82 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
 }
 
+func (iNode *insertNode) getPrimaryKeys(msg *msgstream.InsertMsg) []int64 {
+	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
+		log.Warn("misaligned messages detected")
+		return nil
+	}
+	collectionID := msg.GetCollectionID()
+
+	collection, err := iNode.replica.getCollectionByID(collectionID)
+	if err != nil {
+		log.Warn("collection cannot be found")
+		return nil
+	}
+
+	offset := 0
+	for _, field := range collection.schema.Fields {
+		if field.IsPrimaryKey {
+			break
+		}
+		switch field.DataType {
+		case schemapb.DataType_Bool:
+			offset++
+		case schemapb.DataType_Int8:
+			offset++
+		case schemapb.DataType_Int16:
+			offset += 2
+		case schemapb.DataType_Int32:
+			offset += 4
+		case schemapb.DataType_Int64:
+			offset += 8
+		case schemapb.DataType_Float:
+			offset += 4
+		case schemapb.DataType_Double:
+			offset += 8
+		case schemapb.DataType_FloatVector:
+			for _, t := range field.TypeParams {
+				if t.Key == "dim" {
+					dim, err := strconv.Atoi(t.Value)
+					if err != nil {
+						log.Error("strconv wrong on get dim", zap.Error(err))
+						break
+					}
+					offset += dim * 4
+					break
+				}
+			}
+		case schemapb.DataType_BinaryVector:
+			var dim int
+			for _, t := range field.TypeParams {
+				if t.Key == "dim" {
+					dim, err = strconv.Atoi(t.Value)
+					if err != nil {
+						log.Error("strconv wrong on get dim", zap.Error(err))
+						return nil
+					}
+					offset += dim / 8
+					break
+				}
+			}
+		}
+	}
+
+	blobReaders := make([]io.Reader, len(msg.RowData))
+	for i, blob := range msg.RowData {
+		blobReaders[i] = bytes.NewReader(blob.GetValue()[offset : offset+8])
+	}
+	pks := make([]int64, len(blobReaders))
+
+	for i, reader := range blobReaders {
+		err = binary.Read(reader, binary.LittleEndian, &pks[i])
+		if err != nil {
+			log.Warn("binary read blob value failed", zap.Error(err))
+		}
+	}
+
+	return pks
+}
 func newInsertNode(replica ReplicaInterface) *insertNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism

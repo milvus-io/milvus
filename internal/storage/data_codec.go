@@ -306,7 +306,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		statsWriter := &StatsWriter{}
 		switch field.DataType {
 		case schemapb.DataType_Int64:
-			err = statsWriter.StatsInt64(field.FieldID, singleData.(*Int64FieldData).Data)
+			err = statsWriter.StatsInt64(field.FieldID, field.IsPrimaryKey, singleData.(*Int64FieldData).Data)
 		}
 		if err != nil {
 			return nil, nil, err
