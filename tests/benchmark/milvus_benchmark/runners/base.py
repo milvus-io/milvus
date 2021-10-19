@@ -123,8 +123,10 @@ class BaseRunner(object):
             while i < (size // vectors_per_file):
                 vectors = []
                 if vectors_per_file >= ni:
+                    # Get the path of the specified file
                     file_name = utils.gen_file_name(i, dimension, data_type)
                     # logger.info("Load npy file: %s start" % file_name)
+                    # Load file content
                     data = np.load(file_name)
                     # logger.info("Load npy file: %s end" % file_name)
                     for j in range(vectors_per_file // ni):
