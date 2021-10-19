@@ -753,6 +753,7 @@ func (rmq *rocksmq) Notify(topicName, groupName string) {
 	}
 }
 
+// updateAckedInfo update acked informations for retention after consume
 func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, newID UniqueID, msgSize int64) error {
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
