@@ -159,6 +159,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, minIOKV, dsService.replica, func(pack *segmentFlushPack) error {
 		fieldInsert := []*datapb.FieldBinlog{}
 		fieldStats := []*datapb.FieldBinlog{}
+		deltaInfos := make([]*datapb.DeltaLogInfo, len(pack.deltaLogs))
 		checkPoints := []*datapb.CheckPoint{}
 		for k, v := range pack.insertLogs {
 			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
@@ -166,6 +167,10 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		for k, v := range pack.statsLogs {
 			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
 		}
+		for _, delData := range pack.deltaLogs {
+			deltaInfos = append(deltaInfos, &datapb.DeltaLogInfo{RecordEntries: uint64(delData.size), TimestampFrom: delData.tsFrom, TimestampTo: delData.tsTo, DeltaLogSize: delData.fileSize})
+		}
+
 		// only current segment checkpoint info,
 		updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
 		checkPoints = append(checkPoints, &datapb.CheckPoint{
@@ -187,10 +192,12 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 				Timestamp: 0, //TODO time stamp
 				SourceID:  Params.NodeID,
 			},
-			SegmentID:         pack.segmentID,
-			CollectionID:      dsService.collectionID,
-			Field2BinlogPaths: fieldInsert,
-			//TODO WIP add statslog and deltalog
+			SegmentID:           pack.segmentID,
+			CollectionID:        dsService.collectionID,
+			Field2BinlogPaths:   fieldInsert,
+			Field2StatslogPaths: fieldStats,
+			Deltalogs:           deltaInfos,
+
 			CheckPoints: checkPoints,
 
 			StartPositions: dsService.replica.listNewSegmentsStartPositions(),
