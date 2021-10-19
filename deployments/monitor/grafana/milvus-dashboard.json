@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1634544223689,
+  "iteration": 1634641352354,
   "links": [],
   "panels": [
     {
@@ -428,7 +428,8 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(rate(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+          "exemplar": true,
+          "expr": "sum(rate(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m]))",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
@@ -461,7 +462,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -470,7 +470,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -564,7 +563,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:88",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -573,7 +571,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:89",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1217,7 +1214,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:109",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1226,7 +1222,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:110",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1321,7 +1316,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:185",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1330,7 +1324,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:186",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -2037,6 +2030,7 @@
       "pluginVersion": "7.5.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
@@ -2152,6 +2146,7 @@
       "pluginVersion": "7.5.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
@@ -2325,6 +2320,7 @@
       "pluginVersion": "7.5.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
@@ -2685,6 +2681,7 @@
       "pluginVersion": "7.5.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
@@ -3047,7 +3044,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:660",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3056,7 +3052,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:661",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3150,7 +3145,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:584",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3159,7 +3153,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:585",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3288,7 +3281,8 @@
       "pluginVersion": "7.5.4",
       "targets": [
         {
-          "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+          "exemplar": true,
+          "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -3886,7 +3880,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:200",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -3895,7 +3888,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:201",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4191,7 +4183,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:269",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4200,7 +4191,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:270",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4289,7 +4279,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:345",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4298,7 +4287,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:346",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4388,7 +4376,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:421",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4397,7 +4384,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:422",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4458,10 +4444,11 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "rate(process_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m])",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{component}}: {{pod}}",
+          "legendFormat": "{{component}}:{{pod}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -4486,7 +4473,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:434",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4495,7 +4481,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:435",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4586,7 +4571,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:92",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4595,7 +4579,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:93",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4780,7 +4763,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:51",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4789,7 +4771,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:52",
           "format": "bytes",
           "label": null,
           "logBase": 1,
@@ -4877,7 +4858,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:164",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4886,7 +4866,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:165",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -4975,7 +4954,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:455",
           "decimals": null,
           "format": "short",
           "label": null,
@@ -4985,7 +4963,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:456",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -5661,7 +5638,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:204",
           "decimals": null,
           "format": "short",
           "label": null,
@@ -5671,7 +5647,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:205",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -5741,8 +5716,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "default",
-          "value": "default"
+          "text": "chaos-testing",
+          "value": "chaos-testing"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -5771,9 +5746,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
-          "text": "All",
-          "value": "$__all"
+          "selected": true,
+          "text": "milvus-8f85",
+          "value": "milvus-8f85"
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}, app_kubernetes_io_instance)",
@@ -5802,10 +5777,13 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
-          "selected": false,
-          "text": "None",
-          "value": ""
+          "selected": true,
+          "text": [
+            "milvus-8f85-datacoord-d9c8dfc6d-xnmct"
+          ],
+          "value": [
+            "milvus-8f85-datacoord-d9c8dfc6d-xnmct"
+          ]
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -5820,6 +5798,38 @@
         "query": {
           "query": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
           "refId": "prometheus-pod-Variable-Query"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": null,
+        "current": {
+          "isNone": true,
+          "selected": false,
+          "text": "None",
+          "value": ""
+        },
+        "datasource": "${datasource}",
+        "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , app_kubernetes_io_component)",
+        "description": null,
+        "error": null,
+        "hide": 2,
+        "includeAll": false,
+        "label": null,
+        "multi": true,
+        "name": "component",
+        "options": [],
+        "query": {
+          "query": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , app_kubernetes_io_component)",
+          "refId": "StandardVariableQuery"
         },
         "refresh": 2,
         "regex": "",
@@ -5867,5 +5877,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 21
+  "version": 28
 }
