@@ -57,7 +57,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	}
 
 	if reflect.ValueOf(c.server).IsNil() {
-		return nil, newError(0, "rmq server is nil")
+		return nil, newError(0, "Rmq server is nil")
 	}
 	// Create a topic in rocksmq, ignore if topic exists
 	err = c.server.CreateTopic(options.Topic)
@@ -72,7 +72,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	// Create a consumer
 	if reflect.ValueOf(c.server).IsNil() {
-		return nil, newError(0, "rmq server is nil")
+		return nil, newError(0, "Rmq server is nil")
 	}
 	if exist, con := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName); exist {
 		log.Debug("ConsumerGroup already existed", zap.Any("topic", options.Topic), zap.Any("SubscriptionName", options.SubscriptionName))
