@@ -412,6 +412,7 @@ func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, parti
 	return nil
 }
 
+// setSegment adds a segment to collectionReplica
 func (colReplica *collectionReplica) setSegment(segment *Segment) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
