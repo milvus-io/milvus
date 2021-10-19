@@ -981,7 +981,7 @@ func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return loadMsg, nil
 }
 
-<<<<<<< HEAD
+
 /////////////////////////////////////////SealedSegmentsChangeInfoMsg//////////////////////////////////////////
 
 // SealedSegmentsChangeInfoMsg is a message pack that contains sealed segments change info
