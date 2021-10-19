@@ -88,6 +88,8 @@ func (b Blob) GetValue() []byte {
 }
 
 type FieldData interface {
+	Length() int
+	Get(i int) interface{}
 }
 
 type BoolFieldData struct {
@@ -132,6 +134,28 @@ type FloatVectorFieldData struct {
 	Data    []float32
 	Dim     int
 }
+
+func (data *BoolFieldData) Length() int         { return len(data.Data) }
+func (data *Int8FieldData) Length() int         { return len(data.Data) }
+func (data *Int16FieldData) Length() int        { return len(data.Data) }
+func (data *Int32FieldData) Length() int        { return len(data.Data) }
+func (data *Int64FieldData) Length() int        { return len(data.Data) }
+func (data *FloatFieldData) Length() int        { return len(data.Data) }
+func (data *DoubleFieldData) Length() int       { return len(data.Data) }
+func (data *StringFieldData) Length() int       { return len(data.Data) }
+func (data *BinaryVectorFieldData) Length() int { return len(data.Data) }
+func (data *FloatVectorFieldData) Length() int  { return len(data.Data) }
+
+func (data *BoolFieldData) Get(i int) interface{}         { return data.Data[i] }
+func (data *Int8FieldData) Get(i int) interface{}         { return data.Data[i] }
+func (data *Int16FieldData) Get(i int) interface{}        { return data.Data[i] }
+func (data *Int32FieldData) Get(i int) interface{}        { return data.Data[i] }
+func (data *Int64FieldData) Get(i int) interface{}        { return data.Data[i] }
+func (data *FloatFieldData) Get(i int) interface{}        { return data.Data[i] }
+func (data *DoubleFieldData) Get(i int) interface{}       { return data.Data[i] }
+func (data *StringFieldData) Get(i int) interface{}       { return data.Data[i] }
+func (data *BinaryVectorFieldData) Get(i int) interface{} { return data.Data[i] }
+func (data *FloatVectorFieldData) Get(i int) interface{}  { return data.Data[i] }
 
 // why not binary.Size(data) directly? binary.Size(data) return -1
 // binary.Size returns how many bytes Write would generate to encode the value v, which

@@ -292,7 +292,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		case *storage.DoubleFieldData:
 			numRows = fieldData.NumRows
 			data = fieldData.Data
-		case storage.StringFieldData:
+		case *storage.StringFieldData:
 			numRows = fieldData.NumRows
 			data = fieldData.Data
 		case *storage.FloatVectorFieldData:
