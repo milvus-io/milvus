@@ -817,7 +817,7 @@ rpc DescribeIndex(DescribeIndexRequest) returns (common.Status){}
 
 **Description:**
 
-Get a index detailed info
+Get an index detailed info
 
 **Parameters:**
 
