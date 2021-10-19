@@ -101,6 +101,9 @@ class SegmentInternalInterface : public SegmentInterface {
                   const BitsetView& bitset,
                   SearchResult& output) const = 0;
 
+    virtual BitsetView
+    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const = 0;
+
     // count of chunk that has index available
     virtual int64_t
     num_chunk_index(FieldOffset field_offset) const = 0;
