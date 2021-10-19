@@ -10,13 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "utils/tools.h"
-#include "test_utils/DataGen.h"
-#include "segcore/TimestampIndex.h"
 #include <vector>
+
+#include "segcore/TimestampIndex.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
+
 TEST(TimestampIndex, Naive) {
     SUCCEED();
     std::vector<Timestamp> timestamps{
@@ -26,7 +26,6 @@ TEST(TimestampIndex, Naive) {
     TimestampIndex index;
     index.set_length_meta(lengths);
     index.build_with(timestamps.data(), timestamps.size());
-    int x = 1 + 1;
 
     auto guessed_slice = GenerateFakeSlices(timestamps.data(), timestamps.size(), 2);
     ASSERT_EQ(guessed_slice.size(), lengths.size());
