@@ -110,7 +110,9 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         view = BitsetView((uint8_t*)boost_ext::get_data(bitset_holder), bitset_holder.size());
     }
 
-    segment->vector_search(active_count, node.search_info_, src_data, num_queries, MAX_TIMESTAMP, view, ret);
+    auto final_bitset = segment->get_filtered_bitmap(view, active_count, MAX_TIMESTAMP);
+
+    segment->vector_search(active_count, node.search_info_, src_data, num_queries, MAX_TIMESTAMP, final_bitset, ret);
 
     ret_ = ret;
 }

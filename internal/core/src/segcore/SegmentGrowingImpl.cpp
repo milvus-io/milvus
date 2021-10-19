@@ -43,11 +43,11 @@ SegmentGrowingImpl::PreDelete(int64_t size) {
     return reserved_begin;
 }
 
-auto
+std::shared_ptr<DeletedRecord::TmpBitmap>
 SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
                                        Timestamp query_timestamp,
                                        int64_t insert_barrier,
-                                       bool force) -> std::shared_ptr<DeletedRecord::TmpBitmap> {
+                                       bool force) const {
     auto old = deleted_record_.get_lru_entry();
 
     if (!force || old->bitmap_ptr->count() == insert_barrier) {
@@ -115,10 +115,16 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
     return current;
 }
 
-const BitsetView
-SegmentGrowingImpl::get_filtered_bitmap(BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) {
+BitsetView
+SegmentGrowingImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    if (del_barrier == 0) {
+        return bitset;
+    }
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
+    if (bitmap_holder == nullptr) {
+        return bitset;
+    }
     AssertInfo(bitmap_holder, "bitmap_holder is null");
     auto deleted_bitmap = bitmap_holder->bitmap_ptr;
     AssertInfo(deleted_bitmap->count() == bitset.u8size(), "Deleted bitmap count not equal to filtered bitmap count");
