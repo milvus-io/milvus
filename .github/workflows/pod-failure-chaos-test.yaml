@@ -5,14 +5,14 @@ on:
 
 jobs:
   
-  test-pod-kill-chaos:
+  test-pod-failure-chaos:
    
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        pod: [queryNode]
+        pod: [querynode]
     
     steps:
 
@@ -52,7 +52,7 @@ jobs:
           helm repo add chaos-mesh https://charts.chaos-mesh.org
           helm search repo chaos-mesh
           kubectl create ns chaos-testing
-          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --version v0.5.3 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
+          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --version v2.0.2 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
           sleep 60s
           kubectl get po -n chaos-testing
       
@@ -60,9 +60,10 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
+          declare -A pod_map=( ["querynode"]="queryNode")
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
-          helm install --wait --timeout 360s milvus-chaos milvus/milvus --set ${{ matrix.pod }}.replicas=2 -f cluster-values.yaml  -n=chaos-testing
+          helm install --wait --timeout 360s milvus-chaos milvus/milvus --set ${pod_map[${{ matrix.pod }}]}.replicas=2 -f cluster-values.yaml  -n=chaos-testing
           kubectl get pods -n chaos-testing
           sleep 20s
           kubectl get pods -n chaos-testing
@@ -81,7 +82,8 @@ jobs:
         run: |
           # replace chaos object
           sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/pod_failure\/'/g" constants.py
-          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_podkill.yaml\'/g" constants.py
+          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_failure.yaml\'/g" constants.py
+          sed -i "s/CHAOS_DURATION =.*/CHAOS_DURATION = 80/g" constants.py
           cat constants.py
           pytest -s -v test_chaos.py --host 127.0.0.1
 
