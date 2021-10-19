@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
+// Client is the grpc client of QueryNode.
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
