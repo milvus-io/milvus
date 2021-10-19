@@ -19,10 +19,13 @@ package datanode
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/stretchr/testify/assert"
@@ -63,11 +66,33 @@ func (replica *mockReplica) getCollectionID() UniqueID {
 }
 
 func (replica *mockReplica) getCollectionSchema(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
+	if ts == 0 {
+		return nil, errors.New("mocked error")
+	}
 	return &schemapb.CollectionSchema{}, nil
 }
 
 func (replica *mockReplica) getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error) {
+	if segID == -1 {
+		return -1, -1, errors.New("mocked error")
+	}
 	return 0, 1, nil
+}
+
+func (replica *mockReplica) hasSegment(segID UniqueID, countFlushed bool) bool {
+	_, has := replica.newSegments[segID]
+	if has {
+		return true
+	}
+	_, has = replica.normalSegments[segID]
+	if has {
+		return true
+	}
+	if !countFlushed {
+		return false
+	}
+	_, has = replica.flushedSegments[segID]
+	return has
 }
 
 func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
@@ -82,7 +107,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			dn, err := newDeleteNode(test.ctx, test.config)
+			dn, err := newDeleteNode(test.ctx, nil, test.config)
 			assert.Nil(t, err)
 
 			assert.NotNil(t, dn)
@@ -179,6 +204,10 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		pks    = []int64{3, 17, 44, 190, 425}
 	)
 	replica := genMockReplica(segIDs, pks, chanName)
+	kv := memkv.NewMemoryKV()
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), kv, replica, func(*segmentFlushPack) error {
+		return nil
+	})
 	t.Run("Test get segment by primary keys", func(te *testing.T) {
 		c := &nodeConfig{
 			replica:      replica,
@@ -186,7 +215,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			vChannelName: chanName,
 		}
 
-		dn, err := newDeleteNode(context.Background(), c)
+		dn, err := newDeleteNode(context.Background(), fm, c)
 		assert.Nil(t, err)
 
 		results := dn.filterSegmentByPK(0, pks)
@@ -202,7 +231,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		}
 	})
 
-	t.Run("Test deleteNode Operate valid Msg", func(te *testing.T) {
+	t.Run("Test deleteNode Operate valid Msg with failure", func(te *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
@@ -217,12 +246,42 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
-		delNode, err := newDeleteNode(ctx, c)
+		delNode, err := newDeleteNode(ctx, fm, c)
 		assert.Nil(te, err)
 
 		msg := GenFlowGraphDeleteMsg(pks, chanName)
 		msg.segmentsToFlush = segIDs
+		// this will fail since ts = 0 will trigger mocked error
 		var fgMsg flowgraph.Msg = &msg
+		delNode.Operate([]flowgraph.Msg{fgMsg})
+	})
+	t.Run("Test deleteNode Operate valid Msg with failure", func(te *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		chanName := "datanode-test-FlowGraphDeletenode-operate"
+		testPath := "/test/datanode/root/meta"
+		assert.NoError(t, clearEtcd(testPath))
+		Params.MetaRootPath = testPath
+		Params.DeleteBinlogRootPath = testPath
+
+		c := &nodeConfig{
+			replica:      replica,
+			allocator:    NewAllocatorFactory(),
+			vChannelName: chanName,
+		}
+		delNode, err := newDeleteNode(ctx, fm, c)
+		assert.Nil(te, err)
+
+		msg := GenFlowGraphDeleteMsg(pks, chanName)
+		msg.segmentsToFlush = segIDs
+
+		msg.endPositions[0].Timestamp = 100 // set to normal timestamp
+		var fgMsg flowgraph.Msg = &msg
+		delNode.Operate([]flowgraph.Msg{fgMsg})
+
+		msg.deleteMessages = []*msgstream.DeleteMsg{}
+		// send again shall trigger empty buffer flush
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 	})
 }

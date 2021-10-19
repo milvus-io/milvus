@@ -52,10 +52,11 @@ type flushTaskRunner struct {
 	finishSignal chan struct{}
 
 	segmentID  UniqueID
-	insertLogs []string
-	statsLogs  []string
-	deltaLogs  []string
+	insertLogs map[UniqueID]string
+	statsLogs  map[UniqueID]string
+	deltaLogs  []*DelDataBuf
 	pos        *internalpb.MsgPosition
+	flushed    bool
 }
 
 // init initializes flushTaskRunner with provided actions and signal
@@ -68,8 +69,12 @@ func (t *flushTaskRunner) init(f notifyMetaFunc, postFunc taskPostFunc, signal <
 }
 
 // runFlushInsert executei flush insert task with once and retry
-func (t *flushTaskRunner) runFlushInsert(task flushInsertTask) {
+func (t *flushTaskRunner) runFlushInsert(task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, pos *internalpb.MsgPosition) {
 	t.insertOnce.Do(func() {
+		t.insertLogs = binlogs
+		t.statsLogs = statslogs
+		t.flushed = flushed
+		t.pos = pos
 		go func() {
 			err := errStart
 			for err != nil {
@@ -81,8 +86,9 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask) {
 }
 
 // runFlushDel execute flush delete task with once and retry
-func (t *flushTaskRunner) runFlushDel(task flushDeleteTask) {
+func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBuf) {
 	t.deleteOnce.Do(func() {
+		t.deltaLogs = []*DelDataBuf{deltaLogs}
 		go func() {
 			err := errStart
 			for err != nil {
@@ -99,24 +105,35 @@ func (t *flushTaskRunner) waitFinish(notifyFunc notifyMetaFunc, postFunc taskPos
 	t.Wait()
 	// wait previous task done
 	<-t.startSignal
-
-	notifyFunc(&segmentFlushPack{
-		segmentID:  t.segmentID,
-		insertLogs: t.insertLogs,
-		statsLogs:  t.statsLogs,
-		deltaLogs:  t.deltaLogs,
-		pos:        t.pos,
-	})
+	pack := t.getFlushPack()
+	err := errStart
+	for err != nil {
+		err = notifyFunc(pack)
+	}
 
 	// notify next task
 	close(t.finishSignal)
 	postFunc()
 }
 
+func (t *flushTaskRunner) getFlushPack() *segmentFlushPack {
+	pack := &segmentFlushPack{
+		segmentID:  t.segmentID,
+		insertLogs: t.insertLogs,
+		statsLogs:  t.statsLogs,
+		pos:        t.pos,
+		deltaLogs:  t.deltaLogs,
+		flushed:    t.flushed,
+	}
+
+	return pack
+}
+
 // newFlushTaskRunner create a usable task runner
-func newFlushTaskRunner() *flushTaskRunner {
+func newFlushTaskRunner(segmentID UniqueID) *flushTaskRunner {
 	t := &flushTaskRunner{
 		WaitGroup: sync.WaitGroup{},
+		segmentID: segmentID,
 	}
 	// insert & del
 	t.Add(2)

@@ -154,28 +154,6 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, ds)
 
-				// save binlog
-				fu := &segmentFlushUnit{
-					collID:     1,
-					segID:      100,
-					field2Path: map[UniqueID]string{100: "path1"},
-					checkPoint: map[UniqueID]segmentCheckPoint{100: {100, internalpb.MsgPosition{}}},
-				}
-
-				df.SaveBinlogPathError = true
-				err := ds.saveBinlog(fu)
-				assert.Error(t, err)
-
-				df.SaveBinlogPathError = false
-				df.SaveBinlogPathNotSucess = true
-				err = ds.saveBinlog(fu)
-				assert.Error(t, err)
-
-				df.SaveBinlogPathError = false
-				df.SaveBinlogPathNotSucess = false
-				err = ds.saveBinlog(fu)
-				assert.NoError(t, err)
-
 				// start
 				ds.fg = nil
 				ds.start()

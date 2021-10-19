@@ -23,7 +23,7 @@ import (
 )
 
 func TestFlushTaskRunner(t *testing.T) {
-	task := newFlushTaskRunner()
+	task := newFlushTaskRunner(1)
 	signal := make(chan struct{})
 
 	saveFlag := false
@@ -44,8 +44,8 @@ func TestFlushTaskRunner(t *testing.T) {
 	assert.False(t, saveFlag)
 	assert.False(t, nextFlag)
 
-	task.runFlushInsert(&emptyFlushTask{})
-	task.runFlushDel(&emptyFlushTask{})
+	task.runFlushInsert(&emptyFlushTask{}, nil, nil, false, nil)
+	task.runFlushDel(&emptyFlushTask{}, &DelDataBuf{})
 
 	assert.False(t, saveFlag)
 	assert.False(t, nextFlag)

@@ -20,17 +20,13 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"path"
 	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
@@ -44,11 +40,11 @@ type (
 // DeleteNode is to process delete msg, flush delete info into storage.
 type deleteNode struct {
 	BaseNode
-	channelName string
-	delBuf      sync.Map // map[segmentID]*DelDataBuf
-	replica     Replica
-	idAllocator allocatorInterface
-	minIOKV     kv.BaseKV
+	channelName  string
+	delBuf       sync.Map // map[segmentID]*DelDataBuf
+	replica      Replica
+	idAllocator  allocatorInterface
+	flushManager flushManager
 }
 
 // DelDataBuf buffers insert data, monitoring buffer size and limit
@@ -187,7 +183,22 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	// handle flush
 	if len(fgMsg.segmentsToFlush) > 0 {
 		log.Debug("DeleteNode receives flush message", zap.Int64s("segIDs", fgMsg.segmentsToFlush))
-		dn.flushDelData(fgMsg.segmentsToFlush, fgMsg.timeRange)
+		for _, segmentToFlush := range fgMsg.segmentsToFlush {
+			buf, ok := dn.delBuf.Load(segmentToFlush)
+			if !ok {
+				// send signal
+				dn.flushManager.flushDelData(nil, segmentToFlush, fgMsg.endPositions[0])
+			} else {
+				err := dn.flushManager.flushDelData(buf.(*DelDataBuf), segmentToFlush, fgMsg.endPositions[0])
+				if err != nil {
+					log.Warn("Failed to flush delete data", zap.Error(err))
+				} else {
+					// clean up
+					dn.delBuf.Delete(segmentToFlush)
+				}
+			}
+
+		}
 	}
 
 	for _, sp := range spans {
@@ -215,97 +226,18 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []int64) map[int64]
 	return result
 }
 
-func (dn *deleteNode) flushDelData(segIDs []UniqueID, timeRange TimeRange) {
-	segsToFlush := make(map[UniqueID]struct{}, len(segIDs))
-	for _, segID := range segIDs {
-		segsToFlush[segID] = struct{}{}
-	}
-	collID := dn.replica.getCollectionID()
-	schema, err := dn.replica.getCollectionSchema(collID, timeRange.timestampMax)
-	if err != nil {
-		log.Error("failed to get collection schema", zap.Error(err))
-		return
-	}
-
-	delCodec := storage.NewDeleteCodec(&etcdpb.CollectionMeta{
-		ID:     collID,
-		Schema: schema,
-	})
-
-	kvs := make(map[string]string)
-	// buffer data to binlogs
-	dn.delBuf.Range(func(k, v interface{}) bool {
-		segID := k.(int64)
-		if _, has := segsToFlush[segID]; !has {
-			return true
-		}
-		delDataBuf := v.(*DelDataBuf)
-		collID, partID, err := dn.replica.getCollectionAndPartitionID(segID)
-		if err != nil {
-			log.Error("failed to get collection ID and partition ID", zap.Error(err))
-			return false
-		}
-
-		blob, err := delCodec.Serialize(partID, segID, delDataBuf.delData)
-		if err != nil {
-			log.Error("failed to serialize delete data", zap.Error(err))
-			return false
-		}
-
-		// write insert binlog
-		logID, err := dn.idAllocator.allocID()
-		if err != nil {
-			log.Error("failed to alloc ID", zap.Error(err))
-			return false
-		}
-
-		blobKey, _ := dn.idAllocator.genKey(false, collID, partID, segID, logID)
-		blobPath := path.Join(Params.DeleteBinlogRootPath, blobKey)
-		kvs[blobPath] = string(blob.Value[:])
-		log.Debug("delete blob path", zap.String("path", blobPath))
-
-		return true
-	})
-
-	if len(kvs) > 0 {
-		err = dn.minIOKV.MultiSave(kvs)
-		if err != nil {
-			log.Error("failed to save minIO ..", zap.Error(err))
-		}
-		log.Debug("save delete blobs to minIO successfully")
-	}
-	// only after success
-	for _, segID := range segIDs {
-		dn.delBuf.Delete(segID)
-	}
-}
-
-func newDeleteNode(ctx context.Context, config *nodeConfig) (*deleteNode, error) {
+func newDeleteNode(ctx context.Context, fm flushManager, config *nodeConfig) (*deleteNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)
 
-	// MinIO
-	option := &miniokv.Option{
-		Address:           Params.MinioAddress,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSL,
-		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
-	}
-	minIOKV, err := miniokv.NewMinIOKV(ctx, option)
-	if err != nil {
-		return nil, err
-	}
-
 	return &deleteNode{
 		BaseNode: baseNode,
 		delBuf:   sync.Map{},
-		minIOKV:  minIOKV,
 
-		replica:     config.replica,
-		idAllocator: config.allocator,
-		channelName: config.vChannelName,
+		replica:      config.replica,
+		idAllocator:  config.allocator,
+		channelName:  config.vChannelName,
+		flushManager: fm,
 	}, nil
 }

@@ -441,7 +441,7 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 				description: "input seg 200 in normalSegments with numRows 200"},
 			{isvalidCase: false, normalSegID: 200, inSegID: 201, inNumRows: 200,
 				description: "input seg 201 not in normalSegments with numRows 200"},
-			{isvalidCase: false, flushedSegID: 300, inSegID: 300, inNumRows: 300,
+			{isvalidCase: true, flushedSegID: 300, inSegID: 300, inNumRows: 300,
 				description: "input seg 300 in flushedSegments"},
 			{isvalidCase: false, flushedSegID: 300, inSegID: 301, inNumRows: 300,
 				description: "input seg 301 not in flushedSegments"},
@@ -460,8 +460,10 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 				if test.normalSegID != 0 {
 					sr.normalSegments[test.normalSegID] = &Segment{}
 				}
-				if test.flushedSegID != 0 {
-					sr.flushedSegments[test.flushedSegID] = &Segment{}
+				if test.flushedSegID != 0 { // not update flushed num rows
+					sr.flushedSegments[test.flushedSegID] = &Segment{
+						numRows: test.inNumRows,
+					}
 				}
 
 				sr.updateStatistics(test.inSegID, test.inNumRows)

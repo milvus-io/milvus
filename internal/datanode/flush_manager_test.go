@@ -44,7 +44,7 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 
 	size := 1000
 	finish.Add(size)
-	q := newOrderFlushQueue(func(*segmentFlushPack) error {
+	q := newOrderFlushQueue(1, func(*segmentFlushPack) error {
 		counter.Inc()
 		finish.Done()
 		return nil
@@ -62,13 +62,13 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 	wg.Add(2 * size)
 	for i := 0; i < size; i++ {
 		go func(id []byte) {
-			q.enqueueDelFlush(&emptyFlushTask{}, &internalpb.MsgPosition{
+			q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &internalpb.MsgPosition{
 				MsgID: id,
 			})
 			wg.Done()
 		}(ids[i])
 		go func(id []byte) {
-			q.enqueueInsertFlush(&emptyFlushTask{}, &internalpb.MsgPosition{
+			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]string{}, map[UniqueID]string{}, false, &internalpb.MsgPosition{
 				MsgID: id,
 			})
 			wg.Done()
@@ -86,7 +86,7 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 	size := 1000
 	finish.Add(size)
 	resultList := make([][]byte, 0, size)
-	q := newOrderFlushQueue(func(pack *segmentFlushPack) error {
+	q := newOrderFlushQueue(1, func(pack *segmentFlushPack) error {
 		counter.Inc()
 		resultList = append(resultList, pack.pos.MsgID)
 		finish.Done()
@@ -104,10 +104,10 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(size)
 	for i := 0; i < size; i++ {
-		q.enqueueDelFlush(&emptyFlushTask{}, &internalpb.MsgPosition{
+		q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		q.enqueueInsertFlush(&emptyFlushTask{}, &internalpb.MsgPosition{
+		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]string{}, map[UniqueID]string{}, false, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -130,7 +130,7 @@ func TestRendezvousFlushManager(t *testing.T) {
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
-	m := NewRendezvousFlushManager(&allocator{}, kv, func(pack *segmentFlushPack) error {
+	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) error {
 		counter.Inc()
 		finish.Done()
 		return nil
@@ -149,7 +149,7 @@ func TestRendezvousFlushManager(t *testing.T) {
 		m.flushDelData(nil, 1, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		m.flushBufferData(nil, 1, &internalpb.MsgPosition{
+		m.flushBufferData(nil, 1, true, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -159,4 +159,26 @@ func TestRendezvousFlushManager(t *testing.T) {
 
 	assert.EqualValues(t, size, counter.Load())
 
+}
+
+func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
+	memkv := memkv.NewMemoryKV()
+	replica := newMockReplica()
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), memkv, replica, func(*segmentFlushPack) error {
+		return nil
+	})
+
+	// non exists segment
+	_, _, _, err := fm.getSegmentMeta(-1, &internalpb.MsgPosition{})
+	assert.Error(t, err)
+
+	replica.newSegments[-1] = &Segment{}
+	replica.newSegments[1] = &Segment{}
+
+	// injected get part/coll id error
+	_, _, _, err = fm.getSegmentMeta(-1, &internalpb.MsgPosition{})
+	assert.Error(t, err)
+	// injected get schema  error
+	_, _, _, err = fm.getSegmentMeta(1, &internalpb.MsgPosition{})
+	assert.Error(t, err)
 }

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -45,8 +46,7 @@ type dataSyncService struct {
 	clearSignal  chan<- UniqueID
 
 	flushingSegCache *Cache
-
-	saveBinlog func(fu *segmentFlushUnit) error
+	flushManager     flushManager
 }
 
 func newDataSyncService(ctx context.Context,
@@ -128,7 +128,6 @@ func (dsService *dataSyncService) close() {
 
 // initNodes inits a TimetickedFlowGraph
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
-	// TODO: add delete pipeline support
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
 	m := map[string]interface{}{
@@ -142,24 +141,43 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	saveBinlog := func(fu *segmentFlushUnit) error {
-		id2path := []*datapb.FieldBinlog{}
+	// MinIO
+	option := &miniokv.Option{
+		Address:           Params.MinioAddress,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSL,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
+	}
+
+	minIOKV, err := miniokv.NewMinIOKV(dsService.ctx, option)
+	if err != nil {
+		return err
+	}
+
+	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, minIOKV, dsService.replica, func(pack *segmentFlushPack) error {
+		fieldInsert := []*datapb.FieldBinlog{}
+		fieldStats := []*datapb.FieldBinlog{}
 		checkPoints := []*datapb.CheckPoint{}
-		for k, v := range fu.field2Path {
-			id2path = append(id2path, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
+		for k, v := range pack.insertLogs {
+			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
 		}
-		for k, v := range fu.checkPoint {
-			v := v
-			checkPoints = append(checkPoints, &datapb.CheckPoint{
-				SegmentID: k,
-				NumOfRows: v.numRows,
-				Position:  &v.pos,
-			})
+		for k, v := range pack.statsLogs {
+			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
 		}
+		// only current segment checkpoint info,
+		updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
+		checkPoints = append(checkPoints, &datapb.CheckPoint{
+			SegmentID: pack.segmentID,
+			NumOfRows: updates.GetNumRows(),
+			Position:  pack.pos,
+		})
+
 		log.Debug("SaveBinlogPath",
-			zap.Int64("SegmentID", fu.segID),
-			zap.Int64("CollectionID", fu.collID),
-			zap.Int("Length of Field2BinlogPaths", len(id2path)),
+			zap.Int64("SegmentID", pack.segmentID),
+			zap.Int64("CollectionID", dsService.collectionID),
+			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{
@@ -169,12 +187,14 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 				Timestamp: 0, //TODO time stamp
 				SourceID:  Params.NodeID,
 			},
-			SegmentID:         fu.segID,
-			CollectionID:      fu.collID,
-			Field2BinlogPaths: id2path,
-			CheckPoints:       checkPoints,
-			StartPositions:    fu.startPositions,
-			Flushed:           fu.flushed,
+			SegmentID:         pack.segmentID,
+			CollectionID:      dsService.collectionID,
+			Field2BinlogPaths: fieldInsert,
+			//TODO WIP add statslog and deltalog
+			CheckPoints: checkPoints,
+
+			StartPositions: dsService.replica.listNewSegmentsStartPositions(),
+			Flushed:        pack.flushed,
 		}
 		rsp, err := dsService.dataCoord.SaveBinlogPaths(dsService.ctx, req)
 		if err != nil {
@@ -184,9 +204,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
 		}
 		return nil
-	}
 
-	dsService.saveBinlog = saveBinlog
+	})
 
 	c := &nodeConfig{
 		msFactory:    dsService.msFactory,
@@ -209,7 +228,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	insertBufferNode, err = newInsertBufferNode(
 		dsService.ctx,
 		dsService.flushCh,
-		saveBinlog,
+		dsService.flushManager,
 		dsService.flushingSegCache,
 		c,
 	)
@@ -218,7 +237,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	var deleteNode Node
-	deleteNode, err = newDeleteNode(dsService.ctx, c)
+	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, c)
 	if err != nil {
 		return err
 	}
