@@ -391,7 +391,7 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment) error {
 	}
 
 	p := path.Join(Params.StatsBinlogRootPath, JoinIDPath(s.collectionID, s.partitionID, s.segmentID, pkField))
-	keys, values, err := replica.minIOKV.LoadWithPrefix(p)
+	keys, values, err := replica.minIOKV.LoadWithPrefix(p + "/")
 	if err != nil {
 		return err
 	}
