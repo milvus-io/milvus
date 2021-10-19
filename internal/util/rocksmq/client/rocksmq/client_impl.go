@@ -32,7 +32,7 @@ type client struct {
 
 func newClient(options ClientOptions) (*client, error) {
 	if options.Server == nil {
-		return nil, newError(InvalidConfiguration, "Server is nil")
+		return nil, newError(InvalidConfiguration, "options.Server is nil")
 	}
 
 	if options.Ctx == nil {
