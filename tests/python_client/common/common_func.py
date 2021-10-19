@@ -496,10 +496,11 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
     vectors = []
     binary_raw_vectors = []
     insert_ids = []
+    start = 0
     log.info("insert_data: inserting data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     for i in range(num):
-        default_data = gen_default_dataframe_data(nb // num, dim=dim)
+        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start)
         if is_binary:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim)
             binary_raw_vectors.extend(binary_raw_data)
@@ -510,6 +511,7 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
         insert_res = collection_w.insert(default_data, par[i].name)[0]
         insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)
+        start = start + nb // num
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     return collection_w, vectors, binary_raw_vectors, insert_ids
