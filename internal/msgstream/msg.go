@@ -981,6 +981,7 @@ func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return loadMsg, nil
 }
 
+<<<<<<< HEAD
 
 /////////////////////////////////////////SealedSegmentsChangeInfoMsg//////////////////////////////////////////
 
@@ -1039,6 +1040,8 @@ func (s *SealedSegmentsChangeInfoMsg) Unmarshal(input MarshalType) (TsMsg, error
 
 /////////////////////////////////////////DataNodeTtMsg//////////////////////////////////////////
 
+=======
+>>>>>>> parent of 59ac2c034 (Merge branch 'master' of https://github.com/Jellal-HT/milvus)
 =======
 >>>>>>> parent of 59ac2c034 (Merge branch 'master' of https://github.com/Jellal-HT/milvus)
 // DataNodeTtMsg is a message pack that contains datanode time tick
