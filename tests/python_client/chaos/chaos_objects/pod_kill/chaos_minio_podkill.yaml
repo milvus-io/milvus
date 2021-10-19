@@ -1,16 +1,21 @@
+kind: Schedule
 apiVersion: chaos-mesh.org/v1alpha1
-kind: PodChaos
 metadata:
   name: test-minio-podkill
   namespace: chaos-testing
 spec:
-  action: pod-kill
-  mode: all
-  selector:
-    namespaces:
-      - chaos-testing         # target namespace of milvus deployment
+  schedule: '*/5 * * * * *'
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid
+  historyLimit: 1
+  type: PodChaos
+  podChaos:
+    selector:
+      namespaces:
+        - chaos-testing
     labelSelectors:
       release: milvus-chaos
-      app: minio
-  scheduler:
-    cron: '@every 5s'
+      app: minio 
+    mode: one
+    action: pod-kill
+    gracePeriod: 0
