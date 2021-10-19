@@ -90,7 +90,7 @@ else
   if [[ "$VERBOSE" -eq 1 ]]; then
     echo "Using IMAGE_NAME: $IMAGE_NAME"
   fi
-  # add library/ if no /. (Which is _ aka official image like hub.docker.com/_/traefik)
+  # Add library/ if no /. (Which is _ aka official image like hub.docker.com/_/traefik)
   # Official images are in "library/"
   if [[ "$IMAGE_NAME" != *"/"* ]]; then
       IMAGE_NAME="library/$IMAGE_NAME"
@@ -120,7 +120,7 @@ function log() {
 # https://unix.stackexchange.com/questions/459367/using-shell-variables-for-command-options/459369#459369
 # https://unix.stackexchange.com/questions/444946/how-can-we-run-a-command-stored-in-a-variable/444949#444949
 # https://askubuntu.com/questions/674333/how-to-pass-an-array-as-function-argument/995110#995110
-# Maybe this? https://stackoverflow.com/questions/45948172/executing-a-curl-request-through-bash-script/45948289#45948289
+# Maybe https://stackoverflow.com/questions/45948172/executing-a-curl-request-through-bash-script/45948289#45948289
 # http://mywiki.wooledge.org/BashFAQ/050#I_only_want_to_pass_options_if_the_runtime_data_needs_them
 function do_curl_get () {
   local URL="$1"
@@ -151,13 +151,13 @@ CURL_URL="$REGISTRY_AUTH/token?service=${REGISTRY_SERVICE##*(//)}&scope=reposito
 do_curl_get "$CURL_URL" "${CURL_AUTH[@]}"
 AUTH=$(echo "$HTTP_BODY" | jq --raw-output .token)
 
-# Get Source Image ID
+# Get source image ID
 CURL_AUTH=( -H "Authorization: Bearer $AUTH" -H "Accept:application/vnd.docker.distribution.manifest.v2+json" )
 CURL_URL="$REGISTRY/$IMAGE_NAME/manifests/$IMAGE_TAG"
 do_curl_get "$CURL_URL" "${CURL_AUTH[@]}"
 IMAGE_ID_SOURCE="$(echo "$HTTP_BODY" |jq -r .config.digest)"
 
-# Get Tags
+# Get tags
 CURL_AUTH=( -H "Authorization: Bearer $AUTH" )
 CURL_URL="$REGISTRY/$IMAGE_NAME/tags/list"
 do_curl_get "$CURL_URL" "${CURL_AUTH[@]}"

@@ -79,7 +79,7 @@ func (gta *GlobalTSOAllocator) Initialize() error {
 	return gta.tso.InitTimestamp()
 }
 
-// SetLimitMaxlogic is to enable or disable the maximum limit on the logical part of the hybrid timestamp.
+// SetLimitMaxLogic is to enable or disable the maximum limit on the logical part of the hybrid timestamp.
 // When enabled, if the logical part of the hybrid timestamp exceeds the maximum limit,
 // GlobalTSOAllocator will sleep for a period and try to allocate the timestamp again.
 func (gta *GlobalTSOAllocator) SetLimitMaxLogic(flag bool) {

@@ -2409,8 +2409,8 @@ type SearchByIdRequest struct {
 	DbID                 int64             `protobuf:"varint,3,opt,name=dbID,proto3" json:"dbID,omitempty"`
 	CollectionID         int64             `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
 	PartitionIDs         []int64           `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
-	Dsl             	 string            `protobuf:"bytes,6,opt,name=dsl,proto3" json:"dsl,omitempty"`
-	DslType              commonpb.DslType `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
+	Dsl             	 string        `protobuf:"bytes,6,opt,name=dsl,proto3" json:"dsl,omitempty"`
+	DslType              commonpb.DslType  `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
 	SerializedExprPlan   []byte            `protobuf:"bytes,8,opt,name=serialized_expr_plan,json=serializedExprPlan,proto3" json:"serialized_expr_plan,omitempty"`
 	OutputFieldsId       []int64           `protobuf:"varint,9,rep,packed,name=output_fields_id,json=outputFieldsId,proto3" json:"output_fields_id,omitempty"`
 	TravelTimestamp      uint64            `protobuf:"varint,10,opt,name=travel_timestamp,json=travelTimestamp,proto3" json:"travel_timestamp,omitempty"`
@@ -2544,6 +2544,7 @@ func init() {
 	proto.RegisterType((*QueryNodeStats)(nil), "milvus.proto.internal.QueryNodeStats")
 	proto.RegisterType((*MsgPosition)(nil), "milvus.proto.internal.MsgPosition")
 	proto.RegisterType((*ChannelTimeTickMsg)(nil), "milvus.proto.internal.ChannelTimeTickMsg")
+	proto.RegisterType((*SearchByIdRequest)(nil), "milvus.proto.internal.SearchByIdRequest")
 }
 
 func init() { proto.RegisterFile("internal.proto", fileDescriptor_41f4a519b878ee3b) }

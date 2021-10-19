@@ -38,7 +38,7 @@ var RocksmqPageSize int64 = 2 << 30
 const (
 	DefaultMessageID        = "-1"
 	FixedChannelNameLen     = 320
-	RocksDBLRUCacheCapacity = 3 << 30
+	RocksDBLRUCacheCapacity = 512 * 1024 * 1024
 
 	kvSuffix = "_meta_kv"
 
@@ -108,6 +108,10 @@ func constructKey(metaName, topic string) (string, error) {
 	return metaName + topic + string(nameBytes), nil
 }
 
+func checkRetention() bool {
+	return RocksmqRetentionTimeInMinutes != -1 && RocksmqRetentionSizeInMB != -1
+}
+
 var topicMu sync.Map = sync.Map{}
 
 type rocksmq struct {
@@ -161,11 +165,17 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	}
 	rmq.retentionInfo = ri
 
-	rmq.retentionInfo.startRetentionInfo()
+	if checkRetention() {
+		rmq.retentionInfo.startRetentionInfo()
+	}
 
 	return rmq, nil
 }
 
+// Close step:
+// 1. Stop retention
+// 2. Destroy all consumer groups and topics
+// 3. Close rocksdb instance
 func (rmq *rocksmq) Close() {
 	rmq.stopRetention()
 	rmq.storeMu.Lock()
@@ -202,15 +212,16 @@ func (rmq *rocksmq) checkKeyExist(key string) bool {
 }
 
 func (rmq *rocksmq) CreateTopic(topicName string) error {
+	start := time.Now()
 	beginKey := topicName + "/begin_id"
 	endKey := topicName + "/end_id"
 
 	// Check if topic exist
 	if rmq.checkKeyExist(beginKey) || rmq.checkKeyExist(endKey) {
-		log.Debug("RocksMQ: " + beginKey + " or " + endKey + " existed.")
+		log.Warn("RocksMQ: " + beginKey + " or " + endKey + " existed.")
 		return nil
 	}
-
+	// TODO change rmq kv save logic into a batch
 	err := rmq.kv.Save(beginKey, "0")
 	if err != nil {
 		return err
@@ -256,20 +267,23 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	if err != nil {
 		return nil
 	}
+	rmq.retentionInfo.mutex.Lock()
+	defer rmq.retentionInfo.mutex.Unlock()
 	rmq.retentionInfo.topics = append(rmq.retentionInfo.topics, topicName)
-	rmq.retentionInfo.pageInfo.Store(topicName, &topicPageInfo{
-		pageEndID:   make([]UniqueID, 0),
-		pageMsgSize: map[UniqueID]int64{},
-	})
-	rmq.retentionInfo.lastRetentionTime.Store(topicName, timeNow)
-	rmq.retentionInfo.ackedInfo.Store(topicName, &topicAckedInfo{
-		ackedTs: map[UniqueID]int64{},
-	})
+	// rmq.retentionInfo.pageInfo.Store(topicName, &topicPageInfo{
+	// 	pageEndID:   make([]UniqueID, 0),
+	// 	pageMsgSize: map[UniqueID]int64{},
+	// })
+	// rmq.retentionInfo.lastRetentionTime.Store(topicName, timeNow)
+	// rmq.retentionInfo.ackedInfo.Store(topicName, &topicAckedInfo{
+	// 	ackedTs: map[UniqueID]int64{},
+	// })
+	log.Debug("Rocksmq create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
 func (rmq *rocksmq) DestroyTopic(topicName string) error {
-	log.Debug("In DestroyTopic")
+	start := time.Now()
 	beginKey := topicName + "/begin_id"
 	endKey := topicName + "/end_id"
 
@@ -309,10 +323,16 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	}
 
 	topicMu.Delete(topicName)
-	rmq.retentionInfo.ackedInfo.Delete(topicName)
-	rmq.retentionInfo.lastRetentionTime.Delete(topicName)
-	rmq.retentionInfo.pageInfo.Delete(topicName)
-
+	for i, name := range rmq.retentionInfo.topics {
+		if topicName == name {
+			rmq.retentionInfo.topics = append(rmq.retentionInfo.topics[:i], rmq.retentionInfo.topics[i+1:]...)
+			break
+		}
+	}
+	// rmq.retentionInfo.ackedInfo.Delete(topicName)
+	// rmq.retentionInfo.lastRetentionTime.Delete(topicName)
+	// rmq.retentionInfo.pageInfo.Delete(topicName)
+	log.Debug("Rocksmq destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
@@ -331,6 +351,7 @@ func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Cons
 }
 
 func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
+	start := time.Now()
 	key := constructCurrentID(topicName, groupName)
 	if rmq.checkKeyExist(key) {
 		log.Debug("RocksMQ: " + key + " existed.")
@@ -340,11 +361,14 @@ func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 	if err != nil {
 		return err
 	}
-
+	log.Debug("Rocksmq create consumer group successfully ", zap.String("topic", topicName),
+		zap.String("group", groupName),
+		zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
 func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) {
+	start := time.Now()
 	if vals, ok := rmq.consumers.Load(consumer.Topic); ok {
 		for _, v := range vals.([]*Consumer) {
 			if v.GroupName == consumer.GroupName {
@@ -359,9 +383,11 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) {
 		consumers[0] = consumer
 		rmq.consumers.Store(consumer.Topic, consumers)
 	}
+	log.Debug("Rocksmq register consumer successfully ", zap.String("topic", consumer.Topic), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 }
 
 func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
+	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
@@ -389,7 +415,9 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 			}
 		}
 	}
-
+	log.Debug("Rocksmq destroy consumer group successfully ", zap.String("topic", topicName),
+		zap.String("group", groupName),
+		zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
@@ -479,14 +507,14 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 
 	// Update message page info
 	// TODO(yukun): Should this be in a go routine
-	err = rmq.UpdatePageInfo(topicName, msgIDs, msgSizes)
+	err = rmq.updatePageInfo(topicName, msgIDs, msgSizes)
 	if err != nil {
 		return []UniqueID{}, err
 	}
 	return msgIDs, nil
 }
 
-func (rmq *rocksmq) UpdatePageInfo(topicName string, msgIDs []UniqueID, msgSizes map[UniqueID]int64) error {
+func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes map[UniqueID]int64) error {
 	msgSizeKey := MessageSizeTitle + topicName
 	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
 	if err != nil {
@@ -513,11 +541,11 @@ func (rmq *rocksmq) UpdatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 				return err
 			}
 
-			if pageInfo, ok := rmq.retentionInfo.pageInfo.Load(topicName); ok {
-				pageInfo.(*topicPageInfo).pageEndID = append(pageInfo.(*topicPageInfo).pageEndID, pageEndID)
-				pageInfo.(*topicPageInfo).pageMsgSize[pageEndID] = newPageSize
-				rmq.retentionInfo.pageInfo.Store(topicName, pageInfo)
-			}
+			// if pageInfo, ok := rmq.retentionInfo.pageInfo.Load(topicName); ok {
+			// 	pageInfo.(*topicPageInfo).pageEndID = append(pageInfo.(*topicPageInfo).pageEndID, pageEndID)
+			// 	pageInfo.(*topicPageInfo).pageMsgSize[pageEndID] = newPageSize
+			// 	rmq.retentionInfo.pageInfo.Store(topicName, pageInfo)
+			// }
 
 			// Update message size to 0
 			err = rmq.kv.Save(msgSizeKey, strconv.FormatInt(0, 10))
@@ -586,10 +614,13 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	for ; iter.Valid() && offset < n; iter.Next() {
 		key := iter.Key()
 		val := iter.Value()
+		strKey := string(key.Data())
+		key.Free()
 		offset++
-		msgID, err := strconv.ParseInt(string(key.Data())[FixedChannelNameLen+1:], 10, 64)
+		msgID, err := strconv.ParseInt(strKey[FixedChannelNameLen+1:], 10, 64)
 		if err != nil {
-			log.Debug("RocksMQ: parse int " + string(key.Data())[FixedChannelNameLen+1:] + " failed")
+			log.Debug("RocksMQ: parse int " + strKey[FixedChannelNameLen+1:] + " failed")
+			val.Free()
 			return nil, err
 		}
 		msg := ConsumerMessage{
@@ -604,7 +635,6 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 			copy(msg.Payload, origData)
 		}
 		consumerMessage = append(consumerMessage, msg)
-		key.Free()
 		val.Free()
 	}
 
@@ -622,7 +652,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	}
 
 	msgSize := len(consumerMessage[len(consumerMessage)-1].Payload)
-	go rmq.UpdateAckedInfo(topicName, groupName, newID, int64(msgSize))
+	go rmq.updateAckedInfo(topicName, groupName, newID, int64(msgSize))
 
 	return consumerMessage, nil
 }
@@ -633,13 +663,13 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	defer rmq.storeMu.Unlock()
 	key := constructCurrentID(topicName, groupName)
 	if !rmq.checkKeyExist(key) {
-		log.Debug("RocksMQ: channel " + key + " not exists")
+		log.Warn("RocksMQ: channel " + key + " not exists")
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
 	storeKey, err := combKey(topicName, msgID)
 	if err != nil {
-		log.Debug("RocksMQ: combKey(" + topicName + "," + strconv.FormatInt(msgID, 10) + ") failed")
+		log.Warn("RocksMQ: combKey(" + topicName + "," + strconv.FormatInt(msgID, 10) + ") failed")
 		return err
 	}
 
@@ -648,14 +678,14 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	val, err := rmq.store.Get(opts, []byte(storeKey))
 	defer val.Free()
 	if err != nil {
-		log.Debug("RocksMQ: get " + storeKey + " failed")
+		log.Warn("RocksMQ: get " + storeKey + " failed")
 		return err
 	}
 
 	/* Step II: Save current_id in kv */
 	err = rmq.kv.Save(key, strconv.FormatInt(msgID, 10))
 	if err != nil {
-		log.Debug("RocksMQ: save " + key + " failed")
+		log.Warn("RocksMQ: save " + key + " failed")
 		return err
 	}
 
@@ -708,7 +738,7 @@ func (rmq *rocksmq) Notify(topicName, groupName string) {
 	}
 }
 
-func (rmq *rocksmq) UpdateAckedInfo(topicName, groupName string, newID UniqueID, msgSize int64) error {
+func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, newID UniqueID, msgSize int64) error {
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
@@ -765,11 +795,11 @@ func (rmq *rocksmq) UpdateAckedInfo(topicName, groupName string, newID UniqueID,
 		if err != nil {
 			return err
 		}
-		if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
-			ackedInfo := info.(*topicAckedInfo)
-			ackedInfo.ackedTs[minBeginID] = ts
-			rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
-		}
+		// if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
+		// 	ackedInfo := info.(*topicAckedInfo)
+		// 	ackedInfo.ackedTs[minBeginID] = ts
+		// 	rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
+		// }
 		if minBeginID == newID {
 			// Means the begin_id of topic update to newID, so needs to update acked size
 			ackedSizeKey := AckedSizeTitle + topicName
@@ -786,11 +816,11 @@ func (rmq *rocksmq) UpdateAckedInfo(topicName, groupName string, newID UniqueID,
 			if err != nil {
 				return err
 			}
-			if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
-				ackedInfo := info.(*topicAckedInfo)
-				ackedInfo.ackedSize = ackedSize
-				rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
-			}
+			// if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
+			// 	ackedInfo := info.(*topicAckedInfo)
+			// 	ackedInfo.ackedSize = ackedSize
+			// 	rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
+			// }
 		}
 	}
 	return nil

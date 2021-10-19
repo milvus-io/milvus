@@ -13,14 +13,14 @@ You must install and configure Google Cloud SDK if you want to upload your relea
 
 ## Overview
 
-While it is possible to build Milvus using a local golang installation, we have a build process that runs in a Docker container. This simplifies initial set up and provides for a very consistent build and test environment.
+While it is possible to build Milvus using a local golang installation, we have a build process that runs in a Docker container. This simplifies initial set up and provides a very consistent build and test environment.
 
 
 ## Before You Begin
 
-Before building Milvus, you must check the eligibility of your Docker, Docker Compose, and hardware in line with Milvus' requirements.
+Before building Milvus, you must check the eligibility of Docker, Docker Compose, and hardware in line with Milvus' requirements.
 
-<details><summary>Check your Docker and Docker Compose version</summary>
+<details><summary>Check Docker and Docker Compose version</summary>
 
 <li>Docker version 19.03 or higher is required. </li>
 
@@ -51,6 +51,8 @@ Run the lscpu command to check if your CPU supports the SIMD instruction sets me
 ```
 lscpu | grep -e sse4_2 -e avx -e avx2 -e avx512
 ```
+
+Check Wikipedia [CPU with AVX](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions#CPUs_with_AVX) for more details.
 </details>
 
 
@@ -58,8 +60,8 @@ lscpu | grep -e sse4_2 -e avx -e avx2 -e avx512
 
 The following scripts are found in the [`build/`](.) directory. Note that all scripts must be run from the Milvus root directory.
 
-* [`build/builder.sh`](builder.sh): Run a command in a build docker container.  Common invocations:
-  * `build/builder.sh make` Build just linux binaries in the container.  Pass options and packages as necessary.
+* [`build/builder.sh`](builder.sh): Run a command in a build docker container. Common invocations:
+  * `build/builder.sh make` Build just linux binary in the container. Pass options and packages as necessary.
   * `build/builder.sh make verifiers`: Run all pre-submission verification check
   * `build/builder.sh make unittest`: Run all unit tests
   * `build/builder.sh make clean`: Clean up all the generated files
@@ -74,19 +76,19 @@ build/builder.sh make
 ```
 
 ## Dev Containers
-Users can also get into the dev containers for development.
+You can also get into the dev containers for development.
 
 Enter root path of Milvus project on your host machine, execute the following commands:
 
 ```shell
-$ ./scripts/devcontainer.sh up        # start Dev container
+$ ./scripts/devcontainer.sh up
 
-Creating network "milvus-distributed_milvus" with the default driver
-Creating milvus_jaeger_1 ... done
-Creating milvus_minio_1  ... done
-Creating milvus_pulsar_1 ... done
-Creating milvus_etcd_1   ... done
-Creating milvus_ubuntu_1 ... done
+Creating network "milvus-dev" with the default driver
+Creating milvus_jaeger_1  ... done
+Creating milvus_minio_1   ... done
+Creating milvus_pulsar_1  ... done
+Creating milvus_etcd_1    ... done
+Creating milvus_builder_1 ... done
 ```
 
 Check running state of Dev Container:
@@ -123,7 +125,7 @@ make unittest
 Stop Dev Container 
 
 ```shell
-./scripts/devcontainer.sh down        # close Dev container
+./scripts/devcontainer.sh down
 ```
 
 ## E2E Tests
@@ -203,7 +205,7 @@ Modify vscode go setups if necessary, the setting path is **code -> preference -
 
 ![image](../docs/imgs/settings.png)
 
-Enable Code debug by remot debugging with dlv, you can enable debugging by run the following command inside your docker:
+Enable Code debug by remote debugging with dlv, you can enable debugging by run the following command inside your docker:
 
 ```shell
 cp /go/bin/dlv /go/bin/dlv-dap

@@ -1,22 +1,22 @@
-import time
-import random
-import pdb
-import copy
-import threading
-import logging
-from multiprocessing import Pool, Process
-import pytest
-from utils.utils import *
-from common.constants import *
-
-field_name = default_float_vec_field_name
-default_single_query = {
-    "bool": {
-        "must": [
-            {"vector": {field_name: {"topk": 10, "metric_type":"L2", "query": gen_vectors(1, default_dim), "params": {"nprobe": 10}}}}
-        ]
-    }
-}
+# import time
+# import random
+# import pdb
+# import copy
+# import threading
+# import logging
+# from multiprocessing import Pool, Process
+# import pytest
+# from utils.utils import *
+# from common.constants import *
+#
+# field_name = default_float_vec_field_name
+# default_single_query = {
+#     "bool": {
+#         "must": [
+#             {"vector": {field_name: {"topk": 10, "metric_type":"L2", "query": gen_vectors(1, default_dim), "params": {"nprobe": 10}}}}
+#         ]
+#     }
+# }
 
 
 # class TestDeleteBase:

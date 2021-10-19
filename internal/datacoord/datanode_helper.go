@@ -25,6 +25,8 @@ type positionProvider interface {
 	GetVChanPositions(vchans []vchannel, seekFromStartPosition bool) ([]*datapb.VchannelInfo, error)
 }
 
+var _ positionProvider = (*dummyPosProvider)(nil)
+
 type dummyPosProvider struct{}
 
 //GetVChanPositions implements positionProvider
@@ -34,7 +36,7 @@ func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel, seekFromStartPos
 		pairs = append(pairs, &datapb.VchannelInfo{
 			CollectionID:      vchan.CollectionID,
 			ChannelName:       vchan.DmlChannel,
-			FlushedSegments:   []int64{},
+			FlushedSegments:   []*datapb.SegmentInfo{},
 			UnflushedSegments: []*datapb.SegmentInfo{},
 		})
 	}

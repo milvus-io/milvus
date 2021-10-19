@@ -1,22 +1,15 @@
-import time
-import pdb
-import threading
-import logging
-from multiprocessing import Pool, Process
 import pytest
 from utils.utils import *
-from common.constants import *
+from common.constants import default_entities
 from common.common_type import CaseLabel
 
 DELETE_TIMEOUT = 60
 default_single_query = {
-    "bool": {
-        "must": [
-            {"vector": {default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, default_dim),
-                                                       "metric_type": "L2", "params": {"nprobe": 10}}}}
-        ]
-    }
-}
+            "data": gen_vectors(1, default_dim),
+            "anns_field": default_float_vec_field_name,
+            "param": {"metric_type": "L2", "params": {"nprobe": 10}},
+            "limit": 10,
+        }
 
 
 class TestFlushBase:
@@ -182,7 +175,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(collection)
         assert res["row_count"] == len(result.primary_keys)
         connect.load_collection(collection)
-        res = connect.search(collection, default_single_query)
+        res = connect.search(collection, **default_single_query)
         logging.getLogger().debug(res)
         assert len(res) == 1
         assert len(res[0].ids) == 10
@@ -246,14 +239,14 @@ class TestFlushBase:
             connect.flush([collection])
         # query_vecs = [vectors[0], vectors[1], vectors[-1]]
         connect.load_collection(collection)
-        res = connect.search(collection, default_single_query)
+        res = connect.search(collection, **default_single_query)
         assert len(res) == 1
         assert len(res[0].ids) == 10
         assert len(res[0].distances) == 10
         logging.getLogger().debug(res)
         # assert res
 
-    # TODO: unable to set config 
+    # TODO: unable to set config
     @pytest.mark.tags(CaseLabel.L2)
     def _test_collection_count_during_flush(self, connect, collection, args):
         """
@@ -286,7 +279,7 @@ class TestFlushBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_flush_during_search(self, connect, collection, args):
         """
-        method: search at background, call `delete and flush`
+        method: search at background, call `flush`
         expected: no timeout
         """
         ids = []
@@ -296,13 +289,12 @@ class TestFlushBase:
             connect.flush([collection])
             ids.extend(tmp.primary_keys)
         nq = 10000
-        query, query_vecs = gen_query_vectors(default_float_vec_field_name, default_entities, default_top_k, nq)
+        query, _ = gen_search_vectors_params(default_float_vec_field_name, default_entities, default_top_k, nq)
         time.sleep(0.1)
         connect.load_collection(collection)
-        future = connect.search(collection, query, _async=True)
+        future = connect.search(collection, **query, _async=True)
         res = future.result()
         assert res
-        delete_ids = [ids[0], ids[-1]]
         connect.flush([collection])
         res_count = connect.get_collection_stats(collection, timeout=120)
         assert res_count["row_count"] == loops * default_nb
@@ -416,3 +408,4 @@ class TestCollectionNameInvalid(object):
             connect.flush()
         except Exception as e:
             assert e.args[0] == "Collection name list can not be None or empty"
+

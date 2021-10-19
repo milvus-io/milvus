@@ -98,6 +98,7 @@ type collectionReplica struct {
 	etcdKV *etcdkv.EtcdKV
 }
 
+// getSegmentsMemSize get the memory size in bytes of all the Segments
 func (colReplica *collectionReplica) getSegmentsMemSize() int64 {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
@@ -109,6 +110,7 @@ func (colReplica *collectionReplica) getSegmentsMemSize() int64 {
 	return memSize
 }
 
+// printReplica prints the collections, partitions and segments in the collectionReplica
 func (colReplica *collectionReplica) printReplica() {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -120,6 +122,7 @@ func (colReplica *collectionReplica) printReplica() {
 }
 
 //----------------------------------------------------------------------------------------------------- collection
+// getCollectionIDs gets all the collection ids in the collectionReplica
 func (colReplica *collectionReplica) getCollectionIDs() []UniqueID {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
@@ -130,6 +133,7 @@ func (colReplica *collectionReplica) getCollectionIDs() []UniqueID {
 	return collectionIDs
 }
 
+// addCollection creates a new collection and add it to collectionReplica
 func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -144,12 +148,14 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 	return nil
 }
 
+// removeCollection removes the collection from collectionReplica
 func (colReplica *collectionReplica) removeCollection(collectionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 	return colReplica.removeCollectionPrivate(collectionID)
 }
 
+// removeCollectionPrivate is the private function in collectionReplica, to remove collection from collectionReplica
 func (colReplica *collectionReplica) removeCollectionPrivate(collectionID UniqueID) error {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
@@ -168,12 +174,14 @@ func (colReplica *collectionReplica) removeCollectionPrivate(collectionID Unique
 	return nil
 }
 
+// getCollectionByID gets the collection which id is collectionID
 func (colReplica *collectionReplica) getCollectionByID(collectionID UniqueID) (*Collection, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 	return colReplica.getCollectionByIDPrivate(collectionID)
 }
 
+// getCollectionByIDPrivate is the private function in collectionReplica, to get collection from collectionReplica
 func (colReplica *collectionReplica) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
 	collection, ok := colReplica.collections[collectionID]
 	if !ok {
@@ -183,12 +191,14 @@ func (colReplica *collectionReplica) getCollectionByIDPrivate(collectionID Uniqu
 	return collection, nil
 }
 
+// hasCollection checks if collectionReplica has the collection which id is collectionID
 func (colReplica *collectionReplica) hasCollection(collectionID UniqueID) bool {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 	return colReplica.hasCollectionPrivate(collectionID)
 }
 
+// hasCollectionPrivate is the private function in collectionReplica, to check collection in collectionReplica
 func (colReplica *collectionReplica) hasCollectionPrivate(collectionID UniqueID) bool {
 	_, ok := colReplica.collections[collectionID]
 	return ok

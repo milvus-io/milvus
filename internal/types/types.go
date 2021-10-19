@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // TimeTickProvider is the interface all services implement
@@ -57,6 +58,27 @@ type DataNode interface {
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+}
+
+// DataNodeComponent is used by grpc server of DataNode
+type DataNodeComponent interface {
+	DataNode
+
+	// UpdateStateCode updates state code for DataNode
+	// State includes: Initializing, Healthy and Abnormal
+	UpdateStateCode(internalpb.StateCode)
+
+	// GetStateCode return state code for DataNode
+	GetStateCode() internalpb.StateCode
+
+	// SetRootCoord set RootCoord for DataNode
+	SetRootCoord(RootCoord) error
+
+	// SetDataCoord set DataCoord for DataNode
+	SetDataCoord(DataCoord) error
+
+	// SetNodeID set node id for DataNode
+	SetNodeID(typeutil.UniqueID)
 }
 
 // DataCoord is the interface `datacoord` package implements
@@ -106,9 +128,39 @@ type DataCoord interface {
 	// 	otherwise the Segment State and Start position information will be returned
 	// error is returned only when some communication issue occurs
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
+
+	// GetInsertBinlogPaths requests binlog paths for specified segment
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the segment id to query
+	//
+	// response struct `GetInsertBinlogPathsResponse` contains the fields list
+	// 	and corresponding binlog path list
+	// error is returned only when some communication issue occurs
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
+
+	// GetSegmentInfoChannel DEPRECATED
+	// legacy api to get SegmentInfo Channel name
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+
+	// GetCollectionStatistics requests collection statistics
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection id to query
+	//
+	// response struct `GetCollectionStatisticsResponse` contains the key-value list fields returning related data
+	// 	only row count for now
+	// error is returned only when some communication issue occurs
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
+
+	// GetParititonStatistics requests partition statistics
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection and partition id to query
+	//
+	// response struct `GetPartitionStatisticsResponse` contains the key-value list fields returning related data
+	// 	only row count for now
+	// error is returned only when some communication issue occurs
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
 	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
@@ -490,6 +542,33 @@ type QueryNode interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
+// QueryNodeComponent is used by grpc server of QueryNode
+type QueryNodeComponent interface {
+	QueryNode
+
+	// UpdateStateCode updates state code for QueryNode
+	//  `stateCode` is current statement of this query node, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
+
+	// SetRootCoord set RootCoord for QueryNode
+	// `rootCoord` is a client of root coordinator. Pass to segmentLoader.
+	//
+	// Return a generic error in status:
+	//     If the rootCoord is nil.
+	// Return nil in status:
+	//     The rootCoord is not nil.
+	SetRootCoord(rootCoord RootCoord) error
+
+	// SetIndexCoord set IndexCoord for QueryNode
+	//  `indexCoord` is a client of index coordinator. Pass to segmentLoader.
+	//
+	// Return a generic error in status:
+	//     If the indexCoord is nil.
+	// Return nil in status:
+	//     The indexCoord is not nil.
+	SetIndexCoord(indexCoord IndexCoord) error
+}
+
 // QueryCoord is the interface `querycoord` package implements
 type QueryCoord interface {
 	Component
@@ -506,4 +585,31 @@ type QueryCoord interface {
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+}
+
+// QueryCoordComponent is used by grpc server of QueryCoord
+type QueryCoordComponent interface {
+	QueryCoord
+
+	// UpdateStateCode updates state code for QueryCoord
+	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
+
+	// SetDataCoord set DataCoord for QueryCoord
+	// `dataCoord` is a client of data coordinator.
+	//
+	// Return a generic error in status:
+	//     If the dataCoord is nil.
+	// Return nil in status:
+	//     The dataCoord is not nil.
+	SetDataCoord(dataCoord DataCoord) error
+
+	// SetRootCoord set RootCoord for QueryCoord
+	// `rootCoord` is a client of root coordinator.
+	//
+	// Return a generic error in status:
+	//     If the rootCoord is nil.
+	// Return nil in status:
+	//     The rootCoord is not nil.
+	SetRootCoord(rootCoord RootCoord) error
 }

@@ -418,8 +418,8 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_drop_default_partition(self):
         """
         target: verify drop the _default partition
-        method: 1. drop the _default partition
-        expected: 1. raise exception
+        method: drop the _default partition
+        expected: raise exception
         """
         # create collection
         collection_w = self.init_collection_wrap()

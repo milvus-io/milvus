@@ -9,8 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-// Package grpcdatacoordclient contains grpc interfaces of datacoord
-package grpcdatacoordclient
+// Package grpcdatacoord implements grpc server for datacoord
+package grpcdatacoord
 
 import (
 	"context"
@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/logutil"
+	"github.com/milvus-io/milvus/internal/types"
 
 	"go.uber.org/zap"
 
@@ -45,7 +46,7 @@ type Server struct {
 	cancel context.CancelFunc
 
 	wg        sync.WaitGroup
-	dataCoord *datacoord.Server
+	dataCoord types.DataCoord
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server

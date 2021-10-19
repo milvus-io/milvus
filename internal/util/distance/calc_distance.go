@@ -158,7 +158,7 @@ func ValidateBinaryArrayLength(dim int64, length int) error {
 	return nil
 }
 
-// Count 1 of uint8
+// CountOne count 1 of uint8
 // For 00000010, return 1
 // Fro 11111111, return 8
 func CountOne(n uint8) int32 {
@@ -170,7 +170,7 @@ func CountOne(n uint8) int32 {
 	return count
 }
 
-// HAMMING distance
+// CalcHamming calculate HAMMING distance
 func CalcHamming(dim int64, left []byte, lIndex int64, right []byte, rIndex int64) int32 {
 	singleBitLen := SingleBitLen(dim)
 	numBytes := singleBitLen / 8

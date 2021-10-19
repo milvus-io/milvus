@@ -20,7 +20,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto topK = search_dataset.topk;
     auto dim = search_dataset.dim;
     auto metric_type = search_dataset.metric_type;
-
+    auto round_decimal = search_dataset.round_decimal;
     auto dataset = knowhere::GenDataset(num_queries, dim, search_dataset.query_data);
 
     // NOTE: VecIndex Query API forget to add const qualifier
@@ -31,9 +31,10 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto dis = ans->Get<float*>(milvus::knowhere::meta::DISTANCE);
     auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
-    SubSearchResult sub_qr(num_queries, topK, metric_type);
+    SubSearchResult sub_qr(num_queries, topK, metric_type, round_decimal);
     std::copy_n(dis, num_queries * topK, sub_qr.get_values());
     std::copy_n(uids, num_queries * topK, sub_qr.get_labels());
+    sub_qr.round_values();
     return sub_qr;
 }
 

@@ -141,21 +141,23 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		return status, err
 	}
 
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
 	loadCollectionTask := &LoadCollectionTask{
-		BaseTask: BaseTask{
-			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(qc.loopCtx),
-			triggerCondition: querypb.TriggerCondition_grpcRequest,
-		},
+		BaseTask:              baseTask,
 		LoadCollectionRequest: req,
 		rootCoord:             qc.rootCoordClient,
 		dataCoord:             qc.dataCoordClient,
 		cluster:               qc.cluster,
 		meta:                  qc.meta,
 	}
-	qc.scheduler.Enqueue([]task{loadCollectionTask})
+	err := qc.scheduler.Enqueue(loadCollectionTask)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, err
+	}
 
-	err := loadCollectionTask.WaitToFinish()
+	err = loadCollectionTask.WaitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -188,20 +190,22 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		return status, nil
 	}
 
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
 	releaseCollectionTask := &ReleaseCollectionTask{
-		BaseTask: BaseTask{
-			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(qc.loopCtx),
-			triggerCondition: querypb.TriggerCondition_grpcRequest,
-		},
+		BaseTask:                 baseTask,
 		ReleaseCollectionRequest: req,
 		cluster:                  qc.cluster,
 		meta:                     qc.meta,
 		rootCoord:                qc.rootCoordClient,
 	}
-	qc.scheduler.Enqueue([]task{releaseCollectionTask})
+	err := qc.scheduler.Enqueue(releaseCollectionTask)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, err
+	}
 
-	err := releaseCollectionTask.WaitToFinish()
+	err = releaseCollectionTask.WaitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -329,20 +333,22 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		req.PartitionIDs = partitionIDsToLoad
 	}
 
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
 	loadPartitionTask := &LoadPartitionTask{
-		BaseTask: BaseTask{
-			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(qc.loopCtx),
-			triggerCondition: querypb.TriggerCondition_grpcRequest,
-		},
+		BaseTask:              baseTask,
 		LoadPartitionsRequest: req,
 		dataCoord:             qc.dataCoordClient,
 		cluster:               qc.cluster,
 		meta:                  qc.meta,
 	}
-	qc.scheduler.Enqueue([]task{loadPartitionTask})
+	err := qc.scheduler.Enqueue(loadPartitionTask)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, err
+	}
 
-	err := loadPartitionTask.WaitToFinish()
+	err = loadPartitionTask.WaitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -398,18 +404,20 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	}
 
 	req.PartitionIDs = toReleasedPartitions
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
 	releasePartitionTask := &ReleasePartitionTask{
-		BaseTask: BaseTask{
-			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(qc.loopCtx),
-			triggerCondition: querypb.TriggerCondition_grpcRequest,
-		},
+		BaseTask:                 baseTask,
 		ReleasePartitionsRequest: req,
 		cluster:                  qc.cluster,
 	}
-	qc.scheduler.Enqueue([]task{releasePartitionTask})
+	err := qc.scheduler.Enqueue(releasePartitionTask)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, err
+	}
 
-	err := releasePartitionTask.WaitToFinish()
+	err = releasePartitionTask.WaitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()

@@ -27,6 +27,7 @@ type (
 
 type flowGraphMsg struct {
 	insertMessages []*msgstream.InsertMsg
+	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
 	startPositions []*internalpb.MsgPosition
 	endPositions   []*internalpb.MsgPosition
@@ -36,6 +37,7 @@ func (fgMsg *flowGraphMsg) TimeTick() Timestamp {
 	return fgMsg.timeRange.timestampMax
 }
 
+// flush Msg is used in flowgraph insertBufferNode to flush the given segment
 type flushMsg struct {
 	msgID        UniqueID
 	timestamp    Timestamp

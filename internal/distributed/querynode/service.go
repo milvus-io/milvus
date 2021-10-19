@@ -45,7 +45,7 @@ import (
 type UniqueID = typeutil.UniqueID
 
 type Server struct {
-	querynode   qn.Base
+	querynode   types.QueryNodeComponent
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -257,12 +257,6 @@ func (s *Server) SetRootCoord(rootCoord types.RootCoord) error {
 
 func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {
 	return s.querynode.SetIndexCoord(indexCoord)
-}
-
-// SetClient sets the IndexNode's instance.
-func (s *Server) SetClient(queryNodeClient qn.Base) error {
-	s.querynode = queryNodeClient
-	return nil
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {

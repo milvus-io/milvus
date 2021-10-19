@@ -45,13 +45,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-type Base interface {
-	types.QueryNode
+// make sure QueryNode implements types.QueryNode
+var _ types.QueryNode = (*QueryNode)(nil)
 
-	UpdateStateCode(code internalpb.StateCode)
-	SetRootCoord(rc types.RootCoord) error
-	SetIndexCoord(index types.IndexCoord) error
-}
+// make sure QueryNode implements types.QueryNodeComponent
+var _ types.QueryNodeComponent = (*QueryNode)(nil)
 
 // QueryNode communicates with outside services and union all
 // services in querynode package.
@@ -230,9 +228,6 @@ func (node *QueryNode) Stop() error {
 	}
 	if node.streaming != nil {
 		node.streaming.close()
-	}
-	if node.queryService != nil {
-		node.queryService.close()
 	}
 	if node.queryService != nil {
 		node.queryService.close()

@@ -468,7 +468,7 @@ func TestIndexCodec(t *testing.T) {
 	blobsInput, err := indexCodec.Serialize(blobs, indexParams, "index_test_name", 1234)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 4, len(blobsInput))
-	assert.EqualValues(t, IndexParamsFile, blobsInput[3].Key)
+	assert.EqualValues(t, IndexParamsKey, blobsInput[3].Key)
 	blobsOutput, indexParamsOutput, indexName, indexID, err := indexCodec.Deserialize(blobsInput)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 3, len(blobsOutput))

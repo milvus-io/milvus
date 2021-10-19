@@ -325,6 +325,13 @@ func (ms *simpleMockMsgStream) Produce(pack *msgstream.MsgPack) error {
 	return nil
 }
 
+func (ms *simpleMockMsgStream) ProduceMark(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+	defer ms.increaseMsgCount(1)
+	ms.msgChan <- pack
+
+	return map[string][]msgstream.MessageID{}, nil
+}
+
 func (ms *simpleMockMsgStream) Broadcast(pack *msgstream.MsgPack) error {
 	return nil
 }

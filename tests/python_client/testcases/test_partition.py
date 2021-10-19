@@ -127,9 +127,10 @@ class TestCreateBase:
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag(self, connect, id_collection):
         """
-        target: test create partition, and insert vectors, check status returned
-        method: call function: create_partition
-        expected: status ok
+        target: test create partition, and insert vectors to specific partition
+        method: 1. create_partition
+                2. insert data with partition name specified
+        expected: insert data successfully
         """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
@@ -139,9 +140,10 @@ class TestCreateBase:
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag_not_existed(self, connect, collection):
         """
-        target: test create partition, and insert vectors, check status returned
-        method: call function: create_partition
-        expected: status not ok
+        target: try to insert data into a non existing partition
+        method: 1. create a partition in a collection
+                2. try to insert data into non existing partition
+        expected: raise an exception
         """
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)

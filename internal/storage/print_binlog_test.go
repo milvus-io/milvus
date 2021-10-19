@@ -59,6 +59,8 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
+	sizeTotal := 20000000
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	err = w.Close()
 	assert.Nil(t, err)
 	buf, err := w.GetBuffer()

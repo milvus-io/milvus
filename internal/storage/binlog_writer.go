@@ -23,12 +23,17 @@ import (
 type BinlogType int32
 
 const (
+	// InsertBinlog BinlogType for insert data
 	InsertBinlog BinlogType = iota
+	// DeleteBinlog BinlogType for delete data
 	DeleteBinlog
+	// DDLBinlog BinlogType for DDL
 	DDLBinlog
+	// IndexFileBinlog BinlogType for index
 	IndexFileBinlog
 )
 const (
+	// MagicNumber used in binlog
 	MagicNumber int32 = 0xfffabc
 )
 
@@ -65,6 +70,7 @@ func (writer *baseBinlogWriter) GetRowNums() (int32, error) {
 	return int32(length), nil
 }
 
+// GetBinlogType returns writer's binlogType
 func (writer *baseBinlogWriter) GetBinlogType() BinlogType {
 	return writer.binlogType
 }
@@ -220,10 +226,12 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	return event, nil
 }
 
+// IndexFileBinlogWriter is an object to write binlog file which saves index files
 type IndexFileBinlogWriter struct {
 	baseBinlogWriter
 }
 
+// NextIndexFileEventWriter return next available EventWriter
 func (writer *IndexFileBinlogWriter) NextIndexFileEventWriter() (*indexFileEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -289,6 +297,7 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 	}
 }
 
+// NewIndexFileBinlogWriter returns a new IndexFileBinlogWriter with provided parameters
 func NewIndexFileBinlogWriter(
 	indexBuildID UniqueID,
 	version int64,

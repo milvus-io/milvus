@@ -61,6 +61,7 @@ const (
 	TopKKey                         = "topk"
 	MetricTypeKey                   = "metric_type"
 	SearchParamsKey                 = "params"
+	RoundDecimalKey                 = "round_decimal"
 	HasCollectionTaskName           = "HasCollectionTask"
 	DescribeCollectionTaskName      = "DescribeCollectionTask"
 	GetCollectionStatisticsTaskName = "GetCollectionStatisticsTask"
@@ -1528,11 +1529,20 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return errors.New(SearchParamsKey + " not found in search_params")
 		}
+		roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, st.query.SearchParams)
+		if err != nil {
+			return errors.New(RoundDecimalKey + "not found in search_params")
+		}
+		roundDeciaml, err := strconv.Atoi(roundDecimalStr)
+		if err != nil {
+			return errors.New(RoundDecimalKey + " " + roundDecimalStr + " is not invalid")
+		}
 
 		queryInfo := &planpb.QueryInfo{
 			Topk:         int64(topK),
 			MetricType:   metricType,
 			SearchParams: searchParams,
+			RoundDecimal: int64(roundDeciaml),
 		}
 
 		log.Debug("create query plan",
@@ -2626,10 +2636,11 @@ func (dct *describeCollectionTask) PreExecute(ctx context.Context) error {
 	dct.Base.MsgType = commonpb.MsgType_DescribeCollection
 	dct.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(dct.CollectionName); err != nil {
-		return err
+	if dct.CollectionID != 0 && len(dct.CollectionName) == 0 {
+		return nil
 	}
-	return nil
+
+	return ValidateCollectionName(dct.CollectionName)
 }
 
 func (dct *describeCollectionTask) Execute(ctx context.Context) error {
@@ -4580,9 +4591,14 @@ func (rpt *releasePartitionsTask) PostExecute(ctx context.Context) error {
 
 type deleteTask struct {
 	Condition
-	*milvuspb.DeleteRequest
-	ctx    context.Context
-	result *milvuspb.MutationResult
+	*internalpb.DeleteRequest
+	ctx       context.Context
+	req       *milvuspb.DeleteRequest
+	result    *milvuspb.MutationResult
+	chMgr     channelsMgr
+	chTicker  channelsTimeTicker
+	vChannels []vChan
+	pChannels []pChan
 }
 
 func (dt *deleteTask) TraceCtx() context.Context {
@@ -4618,28 +4634,155 @@ func (dt *deleteTask) SetTs(ts Timestamp) {
 }
 
 func (dt *deleteTask) OnEnqueue() error {
-	dt.Base = &commonpb.MsgBase{}
+	dt.DeleteRequest.Base = &commonpb.MsgBase{}
 	return nil
+}
+
+func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res []int64, err error) {
+	if len(expr) == 0 {
+		log.Warn("empty expr")
+		return
+	}
+
+	plan, err := CreateExprPlan(schema, expr)
+	if err != nil {
+		return res, fmt.Errorf("failed to create expr plan, expr = %s", expr)
+	}
+
+	// delete request only support expr "id in [a, b]"
+	termExpr, ok := plan.Node.(*planpb.PlanNode_Predicates).Predicates.Expr.(*planpb.Expr_TermExpr)
+	if !ok {
+		return res, fmt.Errorf("invalid plan node type")
+	}
+
+	for _, v := range termExpr.TermExpr.Values {
+		res = append(res, v.GetInt64Val())
+	}
+
+	return res, nil
 }
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	dt.Base.MsgType = commonpb.MsgType_Delete
 	dt.Base.SourceID = Params.ProxyID
 
-	collName := dt.CollectionName
+	dt.result = &milvuspb.MutationResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IDs: &schemapb.IDs{
+			IdField: nil,
+		},
+		Timestamp: dt.BeginTs(),
+	}
+
+	collName := dt.req.CollectionName
 	if err := ValidateCollectionName(collName); err != nil {
+		log.Error("Invalid collection name", zap.String("collectionName", collName))
+		return err
+	}
+	collID, err := globalMetaCache.GetCollectionID(ctx, collName)
+	if err != nil {
+		log.Debug("Failed to get collection id", zap.String("collectionName", collName))
+		return err
+	}
+	dt.DeleteRequest.CollectionID = collID
+
+	if len(dt.req.PartitionName) > 0 {
+		partName := dt.req.PartitionName
+		if err := ValidatePartitionTag(partName, true); err != nil {
+			log.Error("Invalid partition name", zap.String("partitionName", partName))
+			return err
+		}
+		partID, err := globalMetaCache.GetPartitionID(ctx, collName, partName)
+		if err != nil {
+			log.Debug("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName))
+			return err
+		}
+		dt.DeleteRequest.PartitionID = partID
+	}
+
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.CollectionName)
+	if err != nil {
+		log.Error("Failed to get collection schema", zap.String("collectionName", dt.req.CollectionName))
 		return err
 	}
 
-	partitionTag := dt.PartitionName
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	primaryKeys, err := getPrimaryKeysFromExpr(schema, dt.req.Expr)
+	if err != nil {
+		log.Error("Failed to get primary keys from expr", zap.Error(err))
 		return err
 	}
+	log.Debug("get primary keys from expr", zap.Any("primary keys", dt.DeleteRequest.PrimaryKeys))
+	dt.DeleteRequest.PrimaryKeys = primaryKeys
+
+	// set result
+	dt.result.IDs.IdField = &schemapb.IDs_IntId{
+		IntId: &schemapb.LongArray{
+			Data: primaryKeys,
+		},
+	}
+	dt.result.DeleteCnt = int64(len(primaryKeys))
+
+	dt.DeleteRequest.Timestamp = dt.BeginTs()
 
 	return nil
 }
 
 func (dt *deleteTask) Execute(ctx context.Context) (err error) {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(dt.ctx, "Proxy-Delete-Execute")
+	defer sp.Finish()
+
+	var tsMsg msgstream.TsMsg = &msgstream.DeleteMsg{
+		DeleteRequest: *dt.DeleteRequest,
+		BaseMsg: msgstream.BaseMsg{
+			Ctx:            ctx,
+			HashValues:     []uint32{uint32(Params.ProxyID)},
+			BeginTimestamp: dt.BeginTs(),
+			EndTimestamp:   dt.EndTs(),
+		},
+	}
+	msgPack := msgstream.MsgPack{
+		BeginTs: dt.BeginTs(),
+		EndTs:   dt.EndTs(),
+		Msgs:    make([]msgstream.TsMsg, 1),
+	}
+	msgPack.Msgs[0] = tsMsg
+
+	collID := dt.DeleteRequest.CollectionID
+	stream, err := dt.chMgr.getDMLStream(collID)
+	if err != nil {
+		err = dt.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			dt.result.Status.Reason = err.Error()
+			return err
+		}
+		channels, err := dt.chMgr.getChannels(collID)
+		if err == nil {
+			for _, pchan := range channels {
+				err := dt.chTicker.addPChan(pchan)
+				if err != nil {
+					log.Warn("failed to add pchan to channels time ticker",
+						zap.Error(err),
+						zap.String("pchan", pchan))
+				}
+			}
+		}
+		stream, err = dt.chMgr.getDMLStream(collID)
+		if err != nil {
+			dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			dt.result.Status.Reason = err.Error()
+			return err
+		}
+	}
+
+	err = stream.Produce(&msgPack)
+	if err != nil {
+		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		dt.result.Status.Reason = err.Error()
+		return err
+	}
 	return nil
 }
 

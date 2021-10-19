@@ -12,6 +12,7 @@
 package memkv
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 
@@ -195,4 +196,19 @@ func (kv *MemoryKV) RemoveWithPrefix(key string) error {
 		kv.tree.Delete(item)
 	}
 	return nil
+}
+
+// item already in memory, just slice the value.
+func (kv *MemoryKV) LoadPartial(key string, start, end int64) ([]byte, error) {
+	value, err := kv.Load(key)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case 0 <= start && start < end && end <= int64(len(value)):
+		return []byte(value[start:end]), nil
+	default:
+		return nil, fmt.Errorf("invalid range specified: start=%d end=%d",
+			start, end)
+	}
 }

@@ -14,6 +14,7 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"testing"
 	"time"
 	"unsafe"
@@ -52,6 +53,23 @@ func TestDescriptorEvent(t *testing.T) {
 	var buf bytes.Buffer
 
 	err := desc.Write(&buf)
+	assert.NotNil(t, err)
+
+	sizeTotal := 20 // not important
+	desc.AddExtra(originalSizeKey, sizeTotal)
+
+	// original size not in string format
+	err = desc.Write(&buf)
+	assert.NotNil(t, err)
+
+	desc.AddExtra(originalSizeKey, "not in int format")
+
+	err = desc.Write(&buf)
+	assert.NotNil(t, err)
+
+	desc.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+
+	err = desc.Write(&buf)
 	assert.Nil(t, err)
 
 	buffer := buf.Bytes()

@@ -14,6 +14,7 @@ package miniokv
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"sync"
 
 	"io"
@@ -243,6 +244,31 @@ func (kv *MinIOKV) MultiRemove(keys []string) error {
 		}
 	}
 	return resultErr
+}
+
+func (kv *MinIOKV) LoadPartial(key string, start, end int64) ([]byte, error) {
+	switch {
+	case start < 0 || end < 0:
+		return nil, fmt.Errorf("invalid range specified: start=%d end=%d",
+			start, end)
+	case start >= end:
+		return nil, fmt.Errorf("invalid range specified: start=%d end=%d",
+			start, end)
+	}
+
+	opts := minio.GetObjectOptions{}
+	err := opts.SetRange(start, end-1)
+	if err != nil {
+		return nil, err
+	}
+
+	object, err := kv.minioClient.GetObject(kv.ctx, kv.bucketName, key, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer object.Close()
+
+	return ioutil.ReadAll(object)
 }
 
 func (kv *MinIOKV) Close() {

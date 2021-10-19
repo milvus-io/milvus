@@ -134,6 +134,8 @@ enum MsgType {
     WatchQueryChannels = 510;
     RemoveQueryChannels = 511;
     SearchById = 512;
+    SealedSegmentsChangeInfo = 512;
+    SearchById = 513;
 
     /* DATA SERVICE */
     SegmentInfo = 600;

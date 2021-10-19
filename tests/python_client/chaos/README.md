@@ -15,6 +15,7 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 
 ## Test Scenarios
 ### Milvus in cluster mode
+#### pod kill
 1. root coordinator pod is killed
    
 2. proxy pod is killed
@@ -32,6 +33,9 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 8. query node pod is killed
 
 9. minio pod is killed
+#### pod network partition
+
+two direction(to and from) network isolation between a pod and the rest of the pods
 
 ### Milvus in standalone mode
 1. standalone pod is killed
@@ -66,14 +70,17 @@ Run multiple test scenario in a category manually(take network partition chaos f
 
    pytest test_chaos.py --host ${Milvus_IP} -v
    ```
+### Github Action
+* [Pod Kill Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/pod-kill-chaos-test.yaml)
+* [Network Partition Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/network-partition-chaos-test.yaml)
 
 ### Nightly 
 still in planning 
 
 ### Todo
-* pod_failure
-* container_kill
-* network attack
+- [ ] pod_failure
+- [ ] container_kill
+- [x] network attack
 
 ## How to contribute
 * Get familiar with chaos engineering and [Chaos Mesh](https://chaos-mesh.org)

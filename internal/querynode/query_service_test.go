@@ -241,4 +241,7 @@ func TestQueryService_addQueryCollection(t *testing.T) {
 	err = qs.addQueryCollection(invalidCollectionID)
 	assert.Error(t, err)
 	assert.Len(t, qs.queryCollections, 1)
+
+	qs.close()
+	assert.Len(t, qs.queryCollections, 0)
 }

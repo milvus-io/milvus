@@ -6,8 +6,8 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
 
 - Test cases in `milvus_benchmark` can be organized with `yaml`
 - Test can run with local mode or helm mode
-   - local: install and start your local server, and pass the host/port param when start the tests
-   - helm: install the server by helm, which will manage the milvus in k8s cluster, and you can interagte the test stage into argo workflow or jenkins pipeline
+   - local: install and start your local server, and pass the host/port param when starting the tests
+   - helm: install the server by helm, which will manage the milvus in k8s cluster, and you can integrate the test stage into argo workflow or jenkins pipeline
    
 ### Usage
 
@@ -133,11 +133,11 @@ data:
 
 ## Overview of the benchmark
 
-### Conponents
+### Components
 
 - `main.py`
    
-   The entry file: parse the input params and initialize the other conponent: `metric`, `env`, `runner`
+   The entry file: parse the input params and initialize the other components: `metric`, `env`, `runner`
 
 - `metric`
 
