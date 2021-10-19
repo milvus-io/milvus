@@ -1,16 +1,22 @@
+kind: Schedule
 apiVersion: chaos-mesh.org/v1alpha1
-kind: PodChaos
 metadata:
-  name: test-proxy-podkill
+  name: test-pulsar-podkill
   namespace: chaos-testing
 spec:
-  action: pod-kill
-  mode: all
-  selector:
-    namespaces:
-      - chaos-testing         # target namespace of milvus deployment
+  schedule: '*/5 * * * * *'
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid
+  historyLimit: 1
+  type: PodChaos
+  podChaos:
+    selector:
+      namespaces:
+        - chaos-testing
     labelSelectors:
-      release: chaos-testing
+      release: milvus-chaos
       app: pulsar
-  scheduler:
-    cron: '@every 5s'
+    mode: one
+    action: pod-kill
+    gracePeriod: 0
+
