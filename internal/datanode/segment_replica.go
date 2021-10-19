@@ -559,6 +559,11 @@ func (replica *SegmentReplica) getSegmentStatisticsUpdates(segID UniqueID) (*int
 		return updates, nil
 	}
 
+	if seg, ok := replica.flushedSegments[segID]; ok {
+		updates.NumRows = seg.numRows
+		return updates, nil
+	}
+
 	return nil, fmt.Errorf("Error, there's no segment %v", segID)
 }
 
