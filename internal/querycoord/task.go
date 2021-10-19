@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -1761,13 +1762,23 @@ func assignInternalTask(ctx context.Context,
 	log.Debug("assignInternalTask: watch request to node", zap.Any("request map", watchRequest2Nodes), zap.Int64("collectionID", collectionID))
 
 	watchQueryChannelInfo := make(map[int64]bool)
-	node2Segments := make(map[int64]*querypb.LoadSegmentsRequest)
+	node2Segments := make(map[int64][]*querypb.LoadSegmentsRequest)
+	sizeCounts := make(map[int64]int)
 	for index, nodeID := range segment2Nodes {
 		if _, ok := node2Segments[nodeID]; !ok {
-			node2Segments[nodeID] = loadSegmentRequests[index]
-		} else {
-			node2Segments[nodeID].Infos = append(node2Segments[nodeID].Infos, loadSegmentRequests[index].Infos...)
+			node2Segments[nodeID] = make([]*querypb.LoadSegmentsRequest, 0)
+			node2Segments[nodeID] = append(node2Segments[nodeID], loadSegmentRequests[index])
+			sizeCounts[nodeID] = 0
 		}
+		sizeOfReq := getSizeOfLoadSegmentReq(loadSegmentRequests[index])
+		if sizeCounts[nodeID]+sizeOfReq > 2097152 {
+			node2Segments[nodeID] = append(node2Segments[nodeID], loadSegmentRequests[index])
+			sizeCounts[nodeID] = 0
+		}
+		lastReq := node2Segments[nodeID][len(node2Segments[nodeID])-1]
+		lastReq.Infos = append(lastReq.Infos, loadSegmentRequests[index].Infos...)
+		sizeCounts[nodeID] += sizeOfReq
+
 		if cluster.hasWatchedQueryChannel(parentTask.traceCtx(), nodeID, collectionID) {
 			watchQueryChannelInfo[nodeID] = true
 			continue
@@ -1782,20 +1793,22 @@ func assignInternalTask(ctx context.Context,
 		watchQueryChannelInfo[nodeID] = false
 	}
 
-	for nodeID, loadSegmentsReq := range node2Segments {
-		ctx = opentracing.ContextWithSpan(context.Background(), sp)
-		loadSegmentsReq.NodeID = nodeID
-		baseTask := newBaseTask(ctx, parentTask.getTriggerCondition())
-		baseTask.setParentTask(parentTask)
-		loadSegmentTask := &loadSegmentTask{
-			baseTask:            baseTask,
-			LoadSegmentsRequest: loadSegmentsReq,
-			meta:                meta,
-			cluster:             cluster,
-			excludeNodeIDs:      []int64{},
+	for nodeID, loadSegmentsReqs := range node2Segments {
+		for _, req := range loadSegmentsReqs {
+			ctx = opentracing.ContextWithSpan(context.Background(), sp)
+			req.NodeID = nodeID
+			baseTask := newBaseTask(ctx, parentTask.getTriggerCondition())
+			baseTask.setParentTask(parentTask)
+			loadSegmentTask := &loadSegmentTask{
+				baseTask:            baseTask,
+				LoadSegmentsRequest: req,
+				meta:                meta,
+				cluster:             cluster,
+				excludeNodeIDs:      []int64{},
+			}
+			parentTask.addChildTask(loadSegmentTask)
+			log.Debug("assignInternalTask: add a loadSegmentTask childTask", zap.Any("task", loadSegmentTask))
 		}
-		parentTask.addChildTask(loadSegmentTask)
-		log.Debug("assignInternalTask: add a loadSegmentTask childTask", zap.Any("task", loadSegmentTask))
 	}
 
 	for index, nodeID := range watchRequest2Nodes {
@@ -1845,4 +1858,31 @@ func assignInternalTask(ctx context.Context,
 		}
 	}
 	return nil
+}
+
+func getSizeOfLoadSegmentReq(req *querypb.LoadSegmentsRequest) int {
+	var totalSize = 0
+	totalSize += int(reflect.ValueOf(*req).Type().Size())
+	for _, info := range req.Infos {
+		totalSize += int(reflect.ValueOf(*info).Type().Size())
+		for _, FieldBinlog := range info.BinlogPaths {
+			totalSize += int(reflect.ValueOf(*FieldBinlog).Type().Size())
+			for _, path := range FieldBinlog.Binlogs {
+				totalSize += len(path)
+			}
+		}
+	}
+
+	totalSize += len(req.Schema.Name) + len(req.Schema.Description) + int(reflect.ValueOf(*req.Schema).Type().Size())
+	for _, fieldSchema := range req.Schema.Fields {
+		totalSize += len(fieldSchema.Name) + len(fieldSchema.Description) + int(reflect.ValueOf(*fieldSchema).Type().Size())
+		for _, typeParam := range fieldSchema.TypeParams {
+			totalSize += len(typeParam.Key) + len(typeParam.Value)
+		}
+		for _, indexParam := range fieldSchema.IndexParams {
+			totalSize += len(indexParam.Key) + len(indexParam.Value)
+		}
+	}
+
+	return totalSize
 }
