@@ -311,7 +311,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	// set segment to SegmentState_Flushing and save binlogs and checkpoints
 	err := s.meta.UpdateFlushSegmentsInfo(req.GetSegmentID(), req.GetFlushed(),
-		req.GetField2BinlogPaths(), req.GetCheckPoints(), req.GetStartPositions())
+		req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(),
+		req.GetCheckPoints(), req.GetStartPositions())
 	if err != nil {
 		log.Error("save binlog and checkpoints failed",
 			zap.Int64("segmentID", req.GetSegmentID()),
