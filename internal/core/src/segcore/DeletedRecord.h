@@ -60,6 +60,7 @@ struct DeletedRecord {
     AckResponder ack_responder_;
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<idx_t> uids_;
+    int64_t record_size_ = 0;
 
  private:
     std::shared_ptr<TmpBitmap> lru_;

@@ -47,6 +47,12 @@ typedef struct CLoadFieldDataInfo {
     int64_t row_count;
 } CLoadFieldDataInfo;
 
+typedef struct CLoadDeletedRecordInfo {
+    void* timestamps;
+    void* primary_keys;
+    int64_t row_count;
+} CLoadDeletedRecordInfo;
+
 typedef struct CProtoResult {
     CStatus status;
     CProto proto;
