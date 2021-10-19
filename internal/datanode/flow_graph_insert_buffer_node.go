@@ -550,6 +550,10 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 
 				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 			}
+			if field.IsPrimaryKey {
+				// update segment pk filter
+				ibNode.replica.updateSegmentPKRange(currentSegID, fieldData.Data)
+			}
 
 		case schemapb.DataType_Float:
 			if _, ok := idata.Data[field.FieldID]; !ok {
@@ -598,8 +602,6 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	// store current endPositions as Segment->EndPostion
 	ibNode.replica.updateSegmentEndPosition(currentSegID, endPos)
 
-	// update segment pk filter
-	ibNode.replica.updateSegmentPKRange(currentSegID, msg.GetRowIDs())
 	return nil
 }
 

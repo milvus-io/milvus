@@ -105,7 +105,8 @@ func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	}
 	objectsValues, err := kv.MultiLoad(objectsKeys)
 	if err != nil {
-		log.Debug("MinIO", zap.String("cannot load value with prefix:%s", key))
+		log.Error(fmt.Sprintf("MinIO load with prefix error. path = %s", key), zap.Error(err))
+		return nil, nil, err
 	}
 
 	return objectsKeys, objectsValues, nil
