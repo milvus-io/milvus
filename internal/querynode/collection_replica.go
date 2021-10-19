@@ -423,6 +423,7 @@ func (colReplica *collectionReplica) setSegment(segment *Segment) error {
 	return colReplica.addSegmentPrivate(segment.segmentID, segment.partitionID, segment)
 }
 
+// removeSegment removes a segment from collectionReplica
 func (colReplica *collectionReplica) removeSegment(segmentID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
