@@ -737,6 +737,7 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	return err
 }
 
+// Notify sends a mutex in MsgMutex channel to tell consumers to consume
 func (rmq *rocksmq) Notify(topicName, groupName string) {
 	if vals, ok := rmq.consumers.Load(topicName); ok {
 		for _, v := range vals.([]*Consumer) {
