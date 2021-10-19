@@ -246,8 +246,11 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		segmentsToFlush = append(segmentsToFlush, currentSegID)
 		bd, ok := ibNode.insertBuffer.Load(currentSegID)
 		var err error
-		buf := bd.(*BufferData)
-		if !ok || buf.size <= 0 { // Buffer empty
+		var buf *BufferData
+		if ok {
+			buf = bd.(*BufferData)
+		}
+		if buf == nil || buf.size <= 0 { // Buffer empty
 			log.Debug(".. Buffer empty ...")
 			err = ibNode.flushManager.flushBufferData(nil, currentSegID, true, endPositions[0])
 		} else { // Buffer not empty
