@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -36,6 +37,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+)
+
+const (
+	queryMetaPrefix    = "querycoord-meta"
+	querySegmentPrefix = queryMetaPrefix + "/s"
 )
 
 // Timestamp is an alias for the Int64 type
@@ -145,6 +151,9 @@ func (qc *QueryCoord) Start() error {
 
 	qc.loopWg.Add(1)
 	go qc.watchMetaLoop()
+
+	qc.loopWg.Add(1)
+	go qc.watchSegmentLoop()
 
 	go qc.session.LivenessCheck(qc.loopCtx, func() {
 		qc.Stop()
@@ -337,6 +346,72 @@ func (qc *QueryCoord) watchMetaLoop() {
 					qc.meta.setSegmentInfo(segmentID, segmentInfo)
 				case mvccpb.DELETE:
 					//TODO::
+				}
+			}
+		}
+	}
+
+}
+
+func (qc *QueryCoord) watchSegmentLoop() {
+	ctx, cancel := context.WithCancel(qc.loopCtx)
+
+	defer cancel()
+	defer qc.loopWg.Done()
+	log.Debug("query coordinator start watch segment loop")
+
+	watchChan := qc.kvClient.WatchWithPrefix(querySegmentPrefix)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case resp := <-watchChan:
+			log.Debug("segment meta from dataCoord updated.")
+			for _, event := range resp.Events {
+				segmentInfo := &datapb.SegmentInfo{}
+				err := proto.Unmarshal(event.Kv.Value, segmentInfo)
+				if err != nil {
+					log.Error("watchSegmentLoop failed", zap.Any("error", err.Error()))
+				}
+				switch event.Type {
+				case mvccpb.PUT:
+					if segmentInfo.State == commonpb.SegmentState_Flushed {
+						log.Debug("Flushed segment received",
+							zap.Any("collectionID", segmentInfo.CollectionID),
+							zap.Any("partitionID", segmentInfo.PartitionID),
+							zap.Any("segmentID", segmentInfo.ID),
+							zap.Any("channel", segmentInfo.InsertChannel),
+						)
+
+						baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_handoff)
+						handoffTask := &handoffTask{
+							baseTask:    baseTask,
+							SegmentInfo: segmentInfo,
+							cluster:     qc.cluster,
+							meta:        qc.meta,
+						}
+						err = qc.scheduler.Enqueue(handoffTask)
+						if err != nil {
+							log.Warn("handoffTask enqueue failed", zap.Error(err))
+							break
+						}
+
+						err = handoffTask.waitToFinish()
+						if err != nil {
+							log.Warn("handoffTask waitToFinish failed", zap.Error(err))
+							break
+						}
+
+						log.Debug("handoffTask completed",
+							zap.Any("collectionID", segmentInfo.CollectionID),
+							zap.Any("partitionID", segmentInfo.PartitionID),
+							zap.Any("segmentID", segmentInfo.ID),
+							zap.Any("channel", segmentInfo.InsertChannel),
+						)
+					}
+				default:
+					// do nothing
 				}
 			}
 		}

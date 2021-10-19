@@ -1368,7 +1368,48 @@ func (wqt *watchQueryChannelTask) postExecute(context.Context) error {
 	return nil
 }
 
+//****************************handoff task********************************//
 type handoffTask struct {
+	*baseTask
+	*datapb.SegmentInfo
+	cluster Cluster
+	meta    Meta
+}
+
+func (h *handoffTask) msgBase() *commonpb.MsgBase {
+	// TODO: imp
+	return nil
+}
+
+func (h *handoffTask) marshal() ([]byte, error) {
+	// TODO: imp
+	return nil, nil
+}
+
+func (h *handoffTask) msgType() commonpb.MsgType {
+	// TODO: imp
+	return 0
+}
+
+func (h *handoffTask) timestamp() Timestamp {
+	// TODO: imp
+	return 0
+}
+
+func (h *handoffTask) preExecute(context.Context) error {
+	// TODO: imp
+	return nil
+}
+
+func (h *handoffTask) execute(ctx context.Context) error {
+	// TODO: imp
+	return nil
+}
+
+func (h *handoffTask) postExecute(context.Context) error {
+	// TODO: imp
+	h.baseTask.setResultInfo(nil)
+	return nil
 }
 
 type loadBalanceTask struct {

@@ -26,6 +26,8 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
@@ -217,5 +219,48 @@ func TestWatchNodeLoop(t *testing.T) {
 		queryCoord.Stop()
 		err = removeAllSession()
 		assert.Nil(t, err)
+	})
+}
+
+func TestWatchSegmentLoop(t *testing.T) {
+	baseCtx := context.Background()
+
+	genSegmentInfo := func() *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:            UniqueID(0),
+			CollectionID:  UniqueID(1),
+			PartitionID:   UniqueID(2),
+			InsertChannel: "TestWatchSegmentLoop-channel",
+			State:         commonpb.SegmentState_Flushed,
+		}
+	}
+
+	saveSegmentInfoToETCD := func() error {
+		etcd, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		if err != nil {
+			return err
+		}
+		info := genSegmentInfo()
+		key := querySegmentPrefix + "/segment-0"
+		value, err := proto.Marshal(info)
+		if err != nil {
+			return err
+		}
+		return etcd.Save(key, string(value))
+	}
+
+	t.Run("Test WatchSegmentLoop", func(t *testing.T) {
+		refreshParams()
+
+		queryCoord, err := startQueryCoord(baseCtx)
+		assert.NoError(t, err)
+
+		err = saveSegmentInfoToETCD()
+		assert.NoError(t, err)
+
+		time.Sleep(100 * time.Millisecond)
+
+		err = queryCoord.Stop()
+		assert.NoError(t, err)
 	})
 }
