@@ -97,6 +97,7 @@ func (f *ConsistentHashChannelPolicyFactory) NewReassignPolicy() ChannelReassign
 	return EmptyReassignPolicy
 }
 
+// NewBgChecker creates a new background checker
 func (f *ConsistentHashChannelPolicyFactory) NewBgChecker() ChannelBGChecker {
 	return EmptyBgChecker
 }
