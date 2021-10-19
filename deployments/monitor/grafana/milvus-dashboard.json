@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1634641352354,
+  "iteration": 1634641352362,
   "links": [],
   "panels": [
     {
@@ -3339,7 +3339,8 @@
       "pluginVersion": "7.5.4",
       "targets": [
         {
-          "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+          "exemplar": true,
+          "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -3396,7 +3397,8 @@
       "pluginVersion": "7.5.4",
       "targets": [
         {
-          "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+          "exemplar": true,
+          "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -5716,8 +5718,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "chaos-testing",
-          "value": "chaos-testing"
+          "text": "default",
+          "value": "default"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -5746,9 +5748,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": "milvus-8f85",
-          "value": "milvus-8f85"
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}, app_kubernetes_io_instance)",
@@ -5777,13 +5779,10 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": [
-            "milvus-8f85-datacoord-d9c8dfc6d-xnmct"
-          ],
-          "value": [
-            "milvus-8f85-datacoord-d9c8dfc6d-xnmct"
-          ]
+          "isNone": true,
+          "selected": false,
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -5844,7 +5843,7 @@
     ]
   },
   "time": {
-    "from": "now-5m",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {
@@ -5877,5 +5876,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 28
+  "version": 32
 }
