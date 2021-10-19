@@ -366,9 +366,6 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 		//	zap.Any("collectionID", collectionID),
 		//	zap.Int64("msgID", msg.ID()),
 		//)
-	case commonpb.MsgType_SearchById:
-		collectionID = msg.(*msgstream.SearchByIdMsg).CollectionID
-		msgTypeStr = "searchById"
 	default:
 		err := fmt.Errorf("receive invalid msgType = %d", msgType)
 		return err
@@ -452,8 +449,6 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 		err = q.retrieve(msg)
 	case commonpb.MsgType_Search:
 		err = q.search(msg)
-	case commonpb.MsgType_SearchById:
-		err = q.searchById(msg)
 	default:
 		err = fmt.Errorf("receive invalid msgType = %d", msgType)
 		return err
@@ -1211,6 +1206,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	return nil
 }
 
+<<<<<<< HEAD
 func (q *queryCollection) SearchByID(msg queryMsg) error {
 	searchByIdMsg := msg.(*msgstream.SearchByIdMsg)
 	retrieveMsg := &msgstream.RetrieveMsg{
@@ -1348,6 +1344,8 @@ func (q *queryCollection) SearchByID(msg queryMsg) error {
 	return err
 }
 
+=======
+>>>>>>> parent of 8f73ba90a (go file)
 func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, error) {
 	if pks == nil {
 		return nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
