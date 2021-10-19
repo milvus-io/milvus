@@ -138,7 +138,7 @@ class TestChaos(TestChaosBase):
         cc.reset_counting(self.health_checkers)
 
         # wait 40s
-        sleep(constants.WAIT_PER_OP * 4)
+        sleep(constants.CHAOS_DURATION)
 
         for k, t in self.checker_threads.items():
             log.info(f"10s later: Thread {k} is_alive(): {t.is_alive()}")
