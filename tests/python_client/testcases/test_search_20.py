@@ -1082,7 +1082,7 @@ class TestCollectionSearch(TestcaseBase):
         # 3. insert new data
         nb_new = 300
         insert_ids_new = cf.insert_data(collection_w, nb_new,
-                                        auto_id=auto_id, dim=dim)[3]
+                                        auto_id=auto_id, dim=dim, insert_offset=nb_old)[3]
         insert_ids.extend(insert_ids_new)
         # gracefulTime is default as 1s which allows data
         # could not be searched instantly in gracefulTime
