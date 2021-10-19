@@ -277,17 +277,3 @@ message ChannelTimeTickMsg {
   repeated uint64 timestamps = 3;
   uint64 default_timestamp = 4;
 }
-
-message SearchByIdRequest {
-  common.MsgBase base = 1;
-  string result_channelID = 2;
-  int64 dbID = 3;
-  int64 collectionID = 4;
-  repeated int64 partitionIDs = 5;
-  string dsl = 6;
-  common.DslType dsl_type = 7;
-  bytes serialized_expr_plan = 8;
-  repeated int64 output_fields_id = 9;
-  uint64 travel_timestamp = 10;
-  uint64 guarantee_timestamp = 11;
-}
