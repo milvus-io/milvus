@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 // MsgType is an alias ofo commonpb.MsgType
@@ -982,6 +981,7 @@ func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return loadMsg, nil
 }
 
+<<<<<<< HEAD
 /////////////////////////////////////////SealedSegmentsChangeInfoMsg//////////////////////////////////////////
 
 // SealedSegmentsChangeInfoMsg is a message pack that contains sealed segments change info
@@ -1039,6 +1039,8 @@ func (s *SealedSegmentsChangeInfoMsg) Unmarshal(input MarshalType) (TsMsg, error
 
 /////////////////////////////////////////DataNodeTtMsg//////////////////////////////////////////
 
+=======
+>>>>>>> parent of 59ac2c034 (Merge branch 'master' of https://github.com/Jellal-HT/milvus)
 // DataNodeTtMsg is a message pack that contains datanode time tick
 type DataNodeTtMsg struct {
 	BaseMsg

@@ -32,7 +32,6 @@ using PlanNodePtr = std::unique_ptr<PlanNode>;
 
 struct SearchInfo {
     int64_t topk_;
-    int64_t round_decimal_;
     FieldOffset field_offset_;
     MetricType metric_type_;
     nlohmann::json search_params_;

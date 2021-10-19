@@ -6,6 +6,7 @@ Binlog is stored in a columnar storage format, every column in schema is stored 
 Timestamp, schema, row id and primary key allocated by system are four special columns.
 Schema column records the DDL of the collection.
 
+
 ## Event format
 
 Binlog file consists of 4 bytes magic number and a series of events. The first event must be descriptor event.
@@ -27,6 +28,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 |        | variable part              |                                                                     |
 +=====================================+=====================================================================+
 ```
+
 
 ### 8.2 Descriptor Event format
 
@@ -62,24 +64,6 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 +=====================================+=====================================================================|
 ```
 
-`ExtraBytes` is in json format.
-
-`ExtraBytes` stores the extra information of the binlog file.
-
-In binlog file, we have stored many common fields in fixed part, such as `CollectionID`, `PartitionID` and etc.
-
-However, different binlog files have some other different information which differs from each other.
-
-So, `ExtraBytes` was designed to store these different information.
-
-For example, for index binlog file, we will store `indexID`, `indexBuildID`, `indexID` and other index-related
-information to `ExtraBytes`.
-
-In addition, `ExtraBytes` was also designed to extend binlog. Then we can add new features to binlog file without
-breaking the compatibility.
-
-For example, we can store the memory size of original content(before encode) to `ExtraBytes`.
-The key in `ExtraBytes` is `original_size`. For now, `original_size` is required, not optional.
 
 ### 8.3 Type code
 
@@ -101,6 +85,7 @@ DELETE_EVENT 只能用于 primary key 的 binlog 文件（目前只有按照 pri
 
 CREATE_COLLECTION_EVENT、DROP_COLLECTION_EVENT、CREATE_PARTITION_EVENT、DROP_PARTITION_EVENT 只出现在 DDL binlog 文件
 
+
 ### 8.4 Event data part
 
 ```
@@ -111,6 +96,8 @@ INSERT_EVENT:
 | event  | fixed  |  StartTimestamp      x : 8   | min timestamp in this event                              |
 | data   | part   +------------------------------+----------------------------------------------------------+
 |        |        |  EndTimestamp      x+8 : 8   | max timestamp in this event                              |
+|        |        +------------------------------+----------------------------------------------------------+
+|        |        |  reserved         x+16 : y   | reserved part                                            |
 |        +--------+------------------------------+----------------------------------------------------------+
 |        |variable|  parquet payload             | payload in parquet format                                |
 |        |part    |                              |                                                          |
@@ -119,38 +106,45 @@ INSERT_EVENT:
 other events are similar with INSERT_EVENT
 ```
 
+
 ### 8.5 Example
 
 Schema
 
-​ string | int | float(optional) | vector(512)
+​	string | int | float(optional) | vector(512)
+
+
 
 Request:
 
-​ InsertRequest rows(1W)
+​	InsertRequest  rows(1W)
 
-​ DeleteRequest pk=1
+​	DeleteRequest pk=1
 
-​ DropPartition partitionTag="abc"
+​	DropPartition partitionTag="abc"
+
+
 
 insert binlogs:
 
-​ rowid, pk, ts, string, int, float, vector 6 files
+​	rowid, pk, ts, string, int, float, vector 6 files
 
-​ all events are INSERT_EVENT
-​ float column file contains some NULL value
+​	all events are INSERT_EVENT
+​	float column file contains some NULL value
 
 delete binlogs:
 
-​ pk, ts 2 files
+​	pk, ts 2 files
 
-​ pk's events are DELETE_EVENT, ts's events are INSERT_EVENT
+​	pk's events are DELETE_EVENT, ts's events are INSERT_EVENT
 
 DDL binlogs:
 
-​ ddl, ts
+​	ddl, ts
 
-​ ddl's event is DROP_PARTITION_EVENT, ts's event is INSERT_EVENT
+​	ddl's event is DROP_PARTITION_EVENT, ts's event is INSERT_EVENT
+
+
 
 C++ interface
 

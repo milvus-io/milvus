@@ -1,6 +1,6 @@
 # Create Collections
 
-`Milvus 2.0` uses `Collection` to represent a set of data, like `Table` in a traditional database. Users can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `CreateCollection`, at the end of this article, you should know which components are involved in `CreateCollection`.
+`Milvus 2.0` use `Collection` to represent a set of data, like `Table` in a traditional database. Users can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `CreateCollection`, at the end of this article, you should know which components are involved in `CreateCollection`.
 
 
 The execution flow of `CreateCollection` is shown in the following figure:
@@ -40,7 +40,7 @@ message CollectionSchema {
 
 ```
 
-1. When received the `CreateCollection` request, the `Proxy` would wrap this request into `CreateCollectionTask`, and pushes this task into `DdTaskQueue` queue. After that, `Proxy` would call method of `WatiToFinish`  to wait until the task is finished.
+1. When received the `CreateCollection` request, the `Proxy` would wraps this request into `CreateCollectionTask`, and pushes this task into `DdTaskQueue` queue. After that, `Proxy` would call method of `WatiToFinish`  to wait until the task is finished.
 ```go
 type task interface {
 	TraceCtx() context.Context

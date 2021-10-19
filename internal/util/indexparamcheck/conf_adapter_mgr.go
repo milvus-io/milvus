@@ -20,7 +20,6 @@ type ConfAdapterMgr interface {
 	GetAdapter(indexType string) (ConfAdapter, error)
 }
 
-// ConfAdapterMgrImpl implements ConfAdapter
 type ConfAdapterMgrImpl struct {
 	init     bool
 	adapters map[IndexType]ConfAdapter

@@ -29,7 +29,7 @@ type RocksdbKV struct {
 
 const (
 	// LRUCacheSize is the lru cache size of rocksdb, default 3 << 30
-	LRUCacheSize = 512 * 1024 * 1024
+	LRUCacheSize = 3 << 30
 )
 
 // NewRocksdbKV returns a rockskv object
@@ -39,7 +39,6 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 	}
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetCacheIndexAndFilterBlocks(true)
-	bbto.SetPinL0FilterAndIndexBlocksInCache(true)
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(LRUCacheSize))
 	opts := gorocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)

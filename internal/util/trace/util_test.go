@@ -81,9 +81,8 @@ func caller(ctx context.Context) error {
 		}
 
 		if err != nil {
-			LogError(sp, err)
 			sp.Finish()
-			return nil
+			return LogError(sp, err)
 		}
 
 		sp.Finish()

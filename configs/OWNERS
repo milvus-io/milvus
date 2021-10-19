@@ -1,8 +1,9 @@
 # order by contributions
 reviewers:
   - bigsheeper
-  - czs007
+  - FluorineDog
   - XuanYang-cn
+  - zhenshan.cao
 
 approvers:
   - pr-inspection

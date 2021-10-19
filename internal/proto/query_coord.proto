@@ -175,8 +175,6 @@ message AddQueryChannelRequest {
   int64 collectionID = 3;
   string request_channelID = 4;
   string result_channelID = 5;
-  repeated int64 global_sealed_segmentID = 6;
-  internal.MsgPosition seek_position = 7;
 }
 
 message RemoveQueryChannelRequest {
@@ -304,13 +302,4 @@ message LoadBalanceRequest {
   common.MsgBase base = 1;
   repeated int64 source_nodeIDs = 2;
   TriggerCondition balance_reason = 3;
-}
-
-//---------------- common query proto -----------------
-message SealedSegmentsChangeInfo {
-  common.MsgBase base = 1;
-  int64 online_nodeID = 2;
-  repeated SegmentInfo online_segments = 3;
-  int64 offline_nodeID = 4;
-  repeated SegmentInfo offline_segments = 5;
 }

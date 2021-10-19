@@ -190,17 +190,9 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	var deleteNode Node
-	deleteNode, err = newDeleteNode(
-		dsService.ctx,
-		dsService.replica,
-		dsService.idAllocator,
-		dsService.flushChs.deleteBufferCh,
-		vchanInfo.GetChannelName(),
-	)
-	if err != nil {
-		return err
-	}
+	dn := newDeleteNode(dsService.replica, vchanInfo.GetChannelName(), dsService.flushChs.deleteBufferCh)
+
+	var deleteNode Node = dn
 
 	// recover segment checkpoints
 	for _, us := range vchanInfo.GetUnflushedSegments() {
@@ -221,32 +213,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("NumOfRows", us.GetNumOfRows()),
 		)
 
-		err = dsService.replica.addNormalSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel(),
+		dsService.replica.addNormalSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel(),
 			us.GetNumOfRows(), &segmentCheckPoint{us.GetNumOfRows(), *us.GetDmlPosition()})
-		if err != nil {
-			return err
-		}
-	}
-
-	for _, fs := range vchanInfo.GetFlushedSegments() {
-		if fs.CollectionID != dsService.collectionID ||
-			fs.GetInsertChannel() != vchanInfo.ChannelName {
-			log.Warn("Collection ID or ChannelName not compact",
-				zap.Int64("Wanted ID", dsService.collectionID),
-				zap.Int64("Actual ID", fs.CollectionID),
-				zap.String("Wanted Channel Name", vchanInfo.ChannelName),
-				zap.String("Actual Channel Name", fs.GetInsertChannel()),
-			)
-			continue
-		}
-
-		log.Info("Recover Segment NumOfRows form checkpoints",
-			zap.String("InsertChannel", fs.GetInsertChannel()),
-			zap.Int64("SegmentID", fs.GetID()),
-			zap.Int64("NumOfRows", fs.GetNumOfRows()),
-		)
-		dsService.replica.addFlushedSegment(fs.GetID(), fs.CollectionID, fs.PartitionID, fs.GetInsertChannel(),
-			fs.GetNumOfRows())
 	}
 
 	dsService.fg.AddNode(dmStreamNode)

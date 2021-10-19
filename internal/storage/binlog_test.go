@@ -56,8 +56,6 @@ func TestInsertBinlog(t *testing.T) {
 	w.SetEventTimeStamp(1000, 2000)
 
 	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
-	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -148,15 +146,7 @@ func TestInsertBinlog(t *testing.T) {
 		multiBytes[i] = singleByte
 		pos++
 	}
-	var extra map[string]interface{}
-	err = json.Unmarshal(multiBytes, &extra)
-	assert.NoError(t, err)
-	testExtra, ok := extra["test"]
-	assert.True(t, ok)
-	assert.Equal(t, "testExtra", fmt.Sprintf("%v", testExtra))
-	size, ok := extra[originalSizeKey]
-	assert.True(t, ok)
-	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", size))
+	assert.Equal(t, string(multiBytes), "{\"test\":\"testExtra\"}")
 
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
@@ -303,8 +293,6 @@ func TestDeleteBinlog(t *testing.T) {
 	w.SetEventTimeStamp(1000, 2000)
 
 	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
-	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -395,15 +383,7 @@ func TestDeleteBinlog(t *testing.T) {
 		multiBytes[i] = singleByte
 		pos++
 	}
-	var extra map[string]interface{}
-	err = json.Unmarshal(multiBytes, &extra)
-	assert.NoError(t, err)
-	testExtra, ok := extra["test"]
-	assert.True(t, ok)
-	assert.Equal(t, "testExtra", fmt.Sprintf("%v", testExtra))
-	size, ok := extra[originalSizeKey]
-	assert.True(t, ok)
-	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", size))
+	assert.Equal(t, string(multiBytes), "{\"test\":\"testExtra\"}")
 
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
@@ -550,8 +530,6 @@ func TestDDLBinlog1(t *testing.T) {
 	w.SetEventTimeStamp(1000, 2000)
 
 	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
-	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -642,15 +620,7 @@ func TestDDLBinlog1(t *testing.T) {
 		multiBytes[i] = singleByte
 		pos++
 	}
-	var extra map[string]interface{}
-	err = json.Unmarshal(multiBytes, &extra)
-	assert.NoError(t, err)
-	testExtra, ok := extra["test"]
-	assert.True(t, ok)
-	assert.Equal(t, "testExtra", fmt.Sprintf("%v", testExtra))
-	size, ok := extra[originalSizeKey]
-	assert.True(t, ok)
-	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", size))
+	assert.Equal(t, string(multiBytes), "{\"test\":\"testExtra\"}")
 
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
@@ -797,8 +767,6 @@ func TestDDLBinlog2(t *testing.T) {
 	w.SetEventTimeStamp(1000, 2000)
 
 	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
-	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -889,15 +857,7 @@ func TestDDLBinlog2(t *testing.T) {
 		multiBytes[i] = singleByte
 		pos++
 	}
-	var extra map[string]interface{}
-	err = json.Unmarshal(multiBytes, &extra)
-	assert.NoError(t, err)
-	testExtra, ok := extra["test"]
-	assert.True(t, ok)
-	assert.Equal(t, "testExtra", fmt.Sprintf("%v", testExtra))
-	size, ok := extra[originalSizeKey]
-	assert.True(t, ok)
-	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", size))
+	assert.Equal(t, string(multiBytes), "{\"test\":\"testExtra\"}")
 
 	//start of e1
 	assert.Equal(t, pos, int(descNxtPos))
@@ -1042,9 +1002,6 @@ func TestIndexFileBinlog(t *testing.T) {
 
 	w.SetEventTimeStamp(timestamp, timestamp)
 
-	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
-
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
 	err = w.Close()
@@ -1137,7 +1094,6 @@ func TestIndexFileBinlog(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%v", indexName), fmt.Sprintf("%v", j["indexName"]))
 	assert.Equal(t, fmt.Sprintf("%v", indexID), fmt.Sprintf("%v", j["indexID"]))
 	assert.Equal(t, fmt.Sprintf("%v", key), fmt.Sprintf("%v", j["key"]))
-	assert.Equal(t, fmt.Sprintf("%v", sizeTotal), fmt.Sprintf("%v", j[originalSizeKey]))
 
 	// NextIndexFileBinlogWriter after close
 	_, err = w.NextIndexFileEventWriter()
@@ -1188,10 +1144,6 @@ func TestNewBinlogReaderError(t *testing.T) {
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
-
-	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
-
 	err = w.Close()
 	assert.Nil(t, err)
 
@@ -1218,9 +1170,6 @@ func TestNewBinlogWriterTsError(t *testing.T) {
 	err = w.Close()
 	assert.NotNil(t, err)
 
-	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
-
 	w.SetEventTimeStamp(1000, 0)
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -1241,10 +1190,6 @@ func TestInsertBinlogWriterCloseError(t *testing.T) {
 	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 	e1, err := insertWriter.NextInsertEventWriter()
 	assert.Nil(t, err)
-
-	sizeTotal := 2000000
-	insertWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
-
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
 	e1.SetEventTimestamp(100, 200)
@@ -1261,8 +1206,6 @@ func TestDeleteBinlogWriteCloseError(t *testing.T) {
 	deleteWriter := NewDeleteBinlogWriter(schemapb.DataType_Int64, 10, 1, 1)
 	e1, err := deleteWriter.NextDeleteEventWriter()
 	assert.Nil(t, err)
-	sizeTotal := 2000000
-	deleteWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
 	e1.SetEventTimestamp(100, 200)
@@ -1279,10 +1222,6 @@ func TestDDBinlogWriteCloseError(t *testing.T) {
 	ddBinlogWriter := NewDDLBinlogWriter(schemapb.DataType_Int64, 10)
 	e1, err := ddBinlogWriter.NextCreateCollectionEventWriter()
 	assert.Nil(t, err)
-
-	sizeTotal := 2000000
-	ddBinlogWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
-
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
 	e1.SetEventTimestamp(100, 200)
@@ -1364,8 +1303,6 @@ var _ EventWriter = (*testEvent)(nil)
 
 func TestWriterListError(t *testing.T) {
 	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
-	sizeTotal := 2000000
-	insertWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	errorEvent := &testEvent{}
 	insertWriter.eventWriters = append(insertWriter.eventWriters, errorEvent)
 	insertWriter.SetEventTimeStamp(1000, 2000)

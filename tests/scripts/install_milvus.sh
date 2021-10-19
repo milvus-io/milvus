@@ -42,13 +42,19 @@ fi
 
 if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
   TMP_DIR="$(mktemp -d)"
-  git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
+  if [[ "${MILVUS_PR_CI}" == "true" ]]; then
+    # pr ci only use milvus-helm version: 2.1.22
+    git clone  -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
+    cd "${TMP_DIR}" && git checkout -b milvus-2.1.22 milvus-2.1.22 && cd -
+  else
+    git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
+  fi
   MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus"
 fi
 
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true
 
-if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
+if [[ "${MILVUS_PR_CI}" == "true" ]]; then
   helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
                                --set image.all.repository="${MILVUS_IMAGE_REPO}" \
                                --set image.all.tag="${MILVUS_IMAGE_TAG}" \
@@ -58,17 +64,31 @@ if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
                                --namespace "${MILVUS_HELM_NAMESPACE}" \
                                "${MILVUS_HELM_RELEASE_NAME}" \
                                ${@:-} "${MILVUS_HELM_CHART_PATH}"
+
 else
-  helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
-                               --set image.all.repository="${MILVUS_IMAGE_REPO}" \
-                               --set image.all.tag="${MILVUS_IMAGE_TAG}" \
-                               --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
-                               --set cluster.enabled="${MILVUS_CLUSTER_ENABLED}" \
-                               --set pulsar.enabled=false \
-                               --set minio.mode=standalone \
-                               --set etcd.replicaCount=1 \
-                               --set service.type="${MILVUS_SERVICE_TYPE}" \
-                               --namespace "${MILVUS_HELM_NAMESPACE}" \
-                               "${MILVUS_HELM_RELEASE_NAME}" \
-                               ${@:-} "${MILVUS_HELM_CHART_PATH}"
+  if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
+    helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
+                                 --set image.all.repository="${MILVUS_IMAGE_REPO}" \
+                                 --set image.all.tag="${MILVUS_IMAGE_TAG}" \
+                                 --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
+                                 --set cluster.enabled="${MILVUS_CLUSTER_ENABLED}" \
+                                 --set service.type="${MILVUS_SERVICE_TYPE}" \
+                                 --namespace "${MILVUS_HELM_NAMESPACE}" \
+                                 "${MILVUS_HELM_RELEASE_NAME}" \
+                                 ${@:-} "${MILVUS_HELM_CHART_PATH}"
+  else
+    helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
+                                 --set image.all.repository="${MILVUS_IMAGE_REPO}" \
+                                 --set image.all.tag="${MILVUS_IMAGE_TAG}" \
+                                 --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
+                                 --set cluster.enabled="${MILVUS_CLUSTER_ENABLED}" \
+                                 --set pulsar.enabled=false \
+                                 --set minio.mode=standalone \
+                                 --set etcd.replicaCount=1 \
+                                 --set service.type="${MILVUS_SERVICE_TYPE}" \
+                                 --namespace "${MILVUS_HELM_NAMESPACE}" \
+                                 "${MILVUS_HELM_RELEASE_NAME}" \
+                                 ${@:-} "${MILVUS_HELM_CHART_PATH}"
+  fi
+
 fi

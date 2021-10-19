@@ -57,7 +57,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	retrieveResultMsg := RetrieveResultMsg{}
 	searchByIdMsg := SearchByIdMsg{}
 	timeTickMsg := TimeTickMsg{}
-	searchByIdMsg := SearchByIdMsg{}
 	createCollectionMsg := CreateCollectionMsg{}
 	dropCollectionMsg := DropCollectionMsg{}
 	createPartitionMsg := CreatePartitionMsg{}
@@ -66,7 +65,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	segmentStatisticsMsg := SegmentStatisticsMsg{}
 	loadBalanceSegmentsMsg := LoadBalanceSegmentsMsg{}
 	dataNodeTtMsg := DataNodeTtMsg{}
-	sealedSegmentsChangeInfoMsg := SealedSegmentsChangeInfoMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -76,7 +74,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_SearchResult] = searchResultMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_SearchById] = searchByIdMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Retrieve] = retrieveMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_SearchById] = searchByIdMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_RetrieveResult] = retrieveResultMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_TimeTick] = timeTickMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_QueryNodeStats] = queryNodeSegStatsMsg.Unmarshal
@@ -87,7 +84,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_SegmentStatistics] = segmentStatisticsMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_LoadBalanceSegments] = loadBalanceSegmentsMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DataNodeTt] = dataNodeTtMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_SealedSegmentsChangeInfo] = sealedSegmentsChangeInfoMsg.Unmarshal
 
 	return p
 }

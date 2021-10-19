@@ -1353,51 +1353,26 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 }
 
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Delete")
-	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
-	log.Info("Delete request begin", zap.String("traceID", traceID))
-	defer log.Info("Delete request end", zap.String("traceID", traceID))
-
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
 			Status: unhealthyStatus(),
 		}, nil
 	}
 
-	deleteReq := &milvuspb.DeleteRequest{
-		DbName:         request.DbName,
-		CollectionName: request.CollectionName,
-		PartitionName:  request.PartitionName,
-		Expr:           request.Expr,
-	}
-
 	dt := &deleteTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       deleteReq,
-		DeleteRequest: &internalpb.DeleteRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_Delete,
-				SourceID: Params.ProxyID,
-			},
-			CollectionName: request.CollectionName,
-			PartitionName:  request.PartitionName,
-		},
-		chMgr:    node.chMgr,
-		chTicker: node.chTicker,
+		ctx:           ctx,
+		Condition:     NewTaskCondition(ctx),
+		DeleteRequest: request,
 	}
 
-	log.Debug("Delete request enqueue",
+	log.Debug("Delete enqueue",
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
 		zap.String("expr", request.Expr))
-
-	// MsgID will be set by Enqueue()
-	if err := node.sched.dmQueue.Enqueue(dt); err != nil {
-		log.Error("Failed to enqueue delete task: "+err.Error(), zap.String("traceID", traceID))
+	err := node.sched.dmQueue.Enqueue(dt)
+	if err != nil {
 		return &milvuspb.MutationResult{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1406,7 +1381,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	log.Debug("Delete request detail",
+	log.Debug("Delete",
 		zap.String("role", Params.RoleName),
 		zap.Int64("msgID", dt.Base.MsgID),
 		zap.Uint64("timestamp", dt.Base.Timestamp),
@@ -1414,9 +1389,20 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
 		zap.String("expr", request.Expr))
+	defer func() {
+		log.Debug("Delete Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", dt.Base.MsgID),
+			zap.Uint64("timestamp", dt.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("partition", request.PartitionName),
+			zap.String("expr", request.Expr))
+	}()
 
-	if err := dt.WaitToFinish(); err != nil {
-		log.Error("Failed to execute delete task in task scheduler: "+err.Error(), zap.String("traceID", traceID))
+	err = dt.WaitToFinish()
+	if err != nil {
 		return &milvuspb.MutationResult{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

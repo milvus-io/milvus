@@ -1,4 +1,8 @@
+
+
 ## 9. Data Service
+
+
 
 #### 9.1 Overview
 
@@ -28,7 +32,9 @@ type DataCoord interface {
 }
 ```
 
-- _MsgBase_
+
+
+* *MsgBase*
 
 ```go
 type MsgBase struct {
@@ -39,7 +45,7 @@ type MsgBase struct {
 }
 ```
 
-- _Flush_
+* *Flush*
 
 ```go
 type FlushRequest struct {
@@ -49,7 +55,7 @@ type FlushRequest struct {
 }
 ```
 
-- _AssignSegmentID_
+* *AssignSegmentID*
 
 ```go
 type SegmentIDRequest struct {
@@ -60,9 +66,9 @@ type SegmentIDRequest struct {
 }
 
 type AssignSegmentIDRequest struct {
-	NodeID               int64
-	PeerRole             string
-	SegmentIDRequests    []*SegmentIDRequest
+	NodeID               int64               
+	PeerRole             string              
+	SegmentIDRequests    []*SegmentIDRequest 
 }
 
 type SegIDAssignment struct {
@@ -81,12 +87,13 @@ type AssignSegmentIDResponse struct {
 }
 ```
 
-- _GetSegmentStates_
+
+* *GetSegmentStates*
 
 ```go
 type GetSegmentStatesRequest struct {
-	Base                 *commonpb.MsgBase
-	SegmentIDs           []int64
+	Base                 *commonpb.MsgBase 
+	SegmentIDs           []int64           
 }
 
 type SegmentState int32
@@ -114,7 +121,7 @@ type GetSegmentStatesResponse struct {
 }
 ```
 
-- _GetInsertBinlogPaths_
+* *GetInsertBinlogPaths*
 
 ```go
 type GetInsertBinlogPathsRequest struct {
@@ -129,7 +136,7 @@ type GetInsertBinlogPathsResponse struct {
 }
 ```
 
-- _GetCollectionStatistics_
+* *GetCollectionStatistics*
 
 ```go
 type GetCollectionStatisticsRequest struct {
@@ -144,7 +151,7 @@ type GetCollectionStatisticsResponse struct {
 }
 ```
 
-- _GetPartitionStatistics_
+* *GetPartitionStatistics*
 
 ```go
 type GetPartitionStatisticsRequest struct {
@@ -160,7 +167,7 @@ type GetPartitionStatisticsResponse struct {
 }
 ```
 
-- _GetSegmentInfo_
+* *GetSegmentInfo*
 
 ```go
 type GetSegmentInfoRequest  struct{
@@ -169,16 +176,16 @@ type GetSegmentInfoRequest  struct{
 }
 
 type SegmentInfo struct {
-	ID                   int64
-	CollectionID         int64
-	PartitionID          int64
-	InsertChannel        string
-	NumOfRows            int64
-	State                commonpb.SegmentState
-	DmlPosition          *internalpb.MsgPosition
-	MaxRowNum            int64
-	LastExpireTime       uint64
-	StartPosition        *internalpb.MsgPosition
+	ID                   int64                   
+	CollectionID         int64                   
+	PartitionID          int64                   
+	InsertChannel        string                  
+	NumOfRows            int64                   
+	State                commonpb.SegmentState   
+	DmlPosition          *internalpb.MsgPosition 
+	MaxRowNum            int64                   
+	LastExpireTime       uint64                  
+	StartPosition        *internalpb.MsgPosition 
 }
 
 type GetSegmentInfoResponse  struct{
@@ -187,58 +194,60 @@ type GetSegmentInfoResponse  struct{
 }
 ```
 
-- _GetRecoveryInfo_
+* *GetRecoveryInfo*
 
 ```go
 type GetRecoveryInfoRequest struct {
-	Base                 *commonpb.MsgBase
-	CollectionID         int64
-	PartitionID          int64
+	Base                 *commonpb.MsgBase 
+	CollectionID         int64             
+	PartitionID          int64             
 }
 
 
 type VchannelInfo struct {
-	CollectionID         int64
-	ChannelName          string
-	SeekPosition         *internalpb.MsgPosition
-	UnflushedSegments    []*SegmentInfo
-	FlushedSegments      []int64
+	CollectionID         int64                   
+	ChannelName          string                  
+	SeekPosition         *internalpb.MsgPosition 
+	UnflushedSegments    []*SegmentInfo          
+	FlushedSegments      []int64                 
 }
 
 type SegmentBinlogs struct {
-	SegmentID            int64
-	FieldBinlogs         []*FieldBinlog
+	SegmentID            int64          
+	FieldBinlogs         []*FieldBinlog 
 }
 
 type GetRecoveryInfoResponse struct {
-	Status               *commonpb.Status
-	Channels             []*VchannelInfo
-	Binlogs              []*SegmentBinlogs
+	Status               *commonpb.Status  
+	Channels             []*VchannelInfo   
+	Binlogs              []*SegmentBinlogs 
 }
 ```
 
-- _SaveBinlogPaths_
-
+* *SaveBinlogPaths*
 ```go
 type SegmentStartPosition struct {
-	StartPosition        *internalpb.MsgPosition
-	SegmentID            int64
+	StartPosition        *internalpb.MsgPosition 
+	SegmentID            int64                   
 }
 
 type SaveBinlogPathsRequest struct {
-	Base                 *commonpb.MsgBase
-	SegmentID            int64
-	CollectionID         int64
-	Field2BinlogPaths    []*ID2PathList
-	CheckPoints          []*CheckPoint
-	StartPositions       []*SegmentStartPosition
-	Flushed              bool
+	Base                 *commonpb.MsgBase       
+	SegmentID            int64                   
+	CollectionID         int64                   
+	Field2BinlogPaths    []*ID2PathList          
+	CheckPoints          []*CheckPoint           
+	StartPositions       []*SegmentStartPosition 
+	Flushed              bool                    
 }
 ```
 
+
+
+
 #### 9.3 Insert Channel
 
-- _InsertMsg_
+* *InsertMsg*
 
 ```go
 type InsertRequest struct {
@@ -262,6 +271,8 @@ type InsertMsg struct {
 }
 ```
 
+
+
 #### 9.4 Data Node Interface
 
 ```go
@@ -273,7 +284,7 @@ type DataNode interface {
 }
 ```
 
-- _WatchDmChannels_
+* *WatchDmChannels*
 
 ```go
 type WatchDmChannelRequest struct {
@@ -282,7 +293,7 @@ type WatchDmChannelRequest struct {
 }
 ```
 
-- _FlushSegments_
+* *FlushSegments*
 
 ```go
 type FlushSegmentsRequest struct {
@@ -293,9 +304,10 @@ type FlushSegmentsRequest struct {
 }
 ```
 
+
 #### 9.5 SegmentStatistics Update Channel
 
-- _SegmentStatisticsMsg_
+* *SegmentStatisticsMsg*
 
 ```go
 type SegmentStatisticsUpdates struct {
@@ -319,10 +331,9 @@ type SegmentStatisticsMsg struct {
 }
 
 ```
-
 #### 9.6 DataNode Time Tick Channel
 
-- _DataNode Tt Msg_
+* *DataNode Tt Msg*
 
 ```go
 message DataNodeTtMsg {
@@ -331,3 +342,4 @@ message DataNodeTtMsg {
     Timestamp   uint64
 }
 ```
+

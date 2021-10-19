@@ -9,7 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-// Package datacoord contains core functions in datacoord
 package datacoord
 
 import (
@@ -53,7 +52,7 @@ func newMeta(kv kv.TxnKV) (*meta, error) {
 	return mt, nil
 }
 
-// reloadFromKV load meta from KV storage
+// realodFromKV load meta from KV storage
 func (m *meta) reloadFromKV() error {
 	_, values, err := m.client.LoadWithPrefix(segmentPrefix)
 	if err != nil {

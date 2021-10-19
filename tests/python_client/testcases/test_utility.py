@@ -201,7 +201,7 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        df = cf.gen_default_dataframe_data()
+        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
         self.collection_wrap.load()
         error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(invalid_c_name)}
@@ -216,7 +216,7 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        df = cf.gen_default_dataframe_data()
+        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
         self.collection_wrap.load()
         error = {ct.err_code: 1, ct.err_msg: "describe collection failed: can't find collection"}
@@ -976,14 +976,11 @@ class TestUtilityBase(TestcaseBase):
         method: calculated distance with default sqrt
         expected: distance calculated successfully
         """
-        log.info("Creating connection")
         self._connect()
-        log.info("Creating vectors for distance calculation")
         vectors_l = cf.gen_vectors(default_nb, default_dim)
         vectors_r = cf.gen_vectors(default_nb, default_dim)
         op_l = {"float_vectors": vectors_l}
         op_r = {"float_vectors": vectors_r}
-        log.info("Calculating distance for generated vectors within default sqrt")
         params = {metric_field: metric}
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.check_distance,
@@ -998,14 +995,11 @@ class TestUtilityBase(TestcaseBase):
         method: calculated distance with default metric
         expected: distance calculated successfully
         """
-        log.info("Creating connection")
         self._connect()
-        log.info("Creating vectors for distance calculation")
         vectors_l = cf.gen_vectors(default_nb, default_dim)
         vectors_r = cf.gen_vectors(default_nb, default_dim)
         op_l = {"float_vectors": vectors_l}
         op_r = {"float_vectors": vectors_r}
-        log.info("Calculating distance for generated vectors within default metric")
         params = {"sqrt": sqrt}
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.check_distance,
@@ -1020,15 +1014,12 @@ class TestUtilityBase(TestcaseBase):
         method: calculate distance between binary vectors
         expected: distance calculated successfully
         """
-        log.info("Creating connection")
         self._connect()
-        log.info("Creating vectors for distance calculation")
         nb = 10
         raw_vectors_l, vectors_l = cf.gen_binary_vectors(nb, default_dim)
         raw_vectors_r, vectors_r = cf.gen_binary_vectors(nb, default_dim)
         op_l = {"bin_vectors": vectors_l}
         op_r = {"bin_vectors": vectors_r}
-        log.info("Calculating distance for binary vectors")
         params = {metric_field: metric_binary}
         vectors_l = raw_vectors_l
         vectors_r = raw_vectors_r
@@ -1045,7 +1036,6 @@ class TestUtilityBase(TestcaseBase):
         method: both left and right vectors are from collection
         expected: distance calculated successfully
         """
-        log.info("Creating connection")
         self._connect()
         nb = 10
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
@@ -1055,12 +1045,10 @@ class TestUtilityBase(TestcaseBase):
         vectors_r = []
         for i in range(middle):
             vectors_r.append(vectors[middle + i])
-        log.info("Creating vectors from collections for distance calculation")
         op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
                 "field": default_field_name}
         op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
                 "field": default_field_name}
-        log.info("Creating vectors for entities")
         params = {metric_field: metric, "sqrt": sqrt}
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.check_distance,
@@ -1076,22 +1064,18 @@ class TestUtilityBase(TestcaseBase):
         method: calculated distance between entities from two collections
         expected: distance calculated successfully
         """
-        log.info("Creating connection")
         self._connect()
         nb = 10
         prefix_1 = "utility_distance"
-        log.info("Creating two collections")
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
         collection_w_1, vectors_1, _, insert_ids_1 = self.init_collection_general(prefix_1, True, nb)
         vectors_l = vectors[0].loc[:, default_field_name]
         vectors_r = vectors_1[0].loc[:, default_field_name]
-        log.info("Extracting entities form collections for distance calculating")
         op_l = {"ids": insert_ids, "collection": collection_w.name,
                 "field": default_field_name}
         op_r = {"ids": insert_ids_1, "collection": collection_w_1.name,
                 "field": default_field_name}
         params = {metric_field: metric, "sqrt": sqrt}
-        log.info("Calculating distance for entities from two collections")
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.check_distance,
                                         check_items={"vectors_l": vectors_l,

@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-// Mock is an alternative to IndexNode, it will return specific results based on specific parameters.
 type Mock struct {
 	Build   bool
 	Failure bool
@@ -46,7 +45,6 @@ type Mock struct {
 	buildIndex chan *indexpb.CreateIndexRequest
 }
 
-// Init initializes the Mock of IndexNode. If the internal member `Err` is True, return an error.
 func (inm *Mock) Init() error {
 	if inm.Err {
 		return errors.New("IndexNode init failed")
@@ -148,7 +146,6 @@ func (inm *Mock) buildIndexTask() {
 	}
 }
 
-// Start starts the Mock of IndexNode. If the internal member `Err` is true, it will return an error.
 func (inm *Mock) Start() error {
 	if inm.Err {
 		return errors.New("IndexNode start failed")
@@ -158,7 +155,6 @@ func (inm *Mock) Start() error {
 	return nil
 }
 
-// Stop stops the Mock of IndexNode. If the internal member `Err` is true, it will return an error.
 func (inm *Mock) Stop() error {
 	if inm.Err {
 		return errors.New("IndexNode stop failed")
@@ -169,7 +165,6 @@ func (inm *Mock) Stop() error {
 	return nil
 }
 
-// Register registers an IndexNode role in ETCD, if the internal member `Err` is true, it will return an error.
 func (inm *Mock) Register() error {
 	if inm.Err {
 		return errors.New("IndexNode register failed")
@@ -182,8 +177,6 @@ func (inm *Mock) Register() error {
 	return nil
 }
 
-// GetComponentStates gets the component states of the mocked IndexNode, if the internal member `Err` is true, it will return an error,
-// and the state is `StateCode_Abnormal`. Under normal circumstances the state is `StateCode_Healthy`.
 func (inm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	if inm.Err {
 		return &internalpb.ComponentStates{
@@ -205,7 +198,6 @@ func (inm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	}, nil
 }
 
-// GetStatisticsChannel gets the statistics channel of the mocked IndexNode, if the internal member `Err` is true, it will return an error.
 func (inm *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	if inm.Err {
 		return &milvuspb.StringResponse{
@@ -222,7 +214,6 @@ func (inm *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	}, nil
 }
 
-// GetTimeTickChannel gets the time tick channel of the mocked IndexNode, if the internal member `Err` is true, it will return an error.
 func (inm *Mock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	if inm.Err {
 		return &milvuspb.StringResponse{
@@ -239,9 +230,6 @@ func (inm *Mock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 	}, nil
 }
 
-// CreateIndex receives a building index request, and return success, if the internal member `Build` is true,
-// the indexing task will be executed. If the internal member `Err` is true, it will return an error.
-// If the internal member `Failure` is true, the indexing task will be executed and the index state is Failed.
 func (inm *Mock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	if inm.Build {
 		inm.buildIndex <- req
@@ -258,7 +246,6 @@ func (inm *Mock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}, nil
 }
 
-// GetMetrics gets the metrics of mocked IndexNode, if the internal member `Failure` is true, it will return an error.
 func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if inm.Err {
 		return &milvuspb.GetMetricsResponse{

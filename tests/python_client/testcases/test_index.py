@@ -22,7 +22,7 @@ uid = "test_index"
 BUILD_TIMEOUT = 300
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
-# query = gen_search_vectors_params(field_name, default_entities, default_top_k, 1)
+query, query_vecs = gen_query_vectors(field_name, default_entities, default_top_k, 1)
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
@@ -263,7 +263,6 @@ class TestIndexOperation(TestcaseBase):
         pass
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.tags(CaseLabel.L1)
     def test_index_drop_index(self):
         """
         target: test index.drop
@@ -502,9 +501,9 @@ class TestIndexBase:
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        params, _ = gen_search_vectors_params(field_name, default_entities, default_top_k, nq, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq, search_params=search_param)
         connect.load_collection(collection)
-        res = connect.search(collection, **params)
+        res = connect.search(collection, query)
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -702,9 +701,8 @@ class TestIndexBase:
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        params, _ = gen_search_vectors_params(field_name, default_entities, default_top_k, nq,
-                                              metric_type=metric_type, search_params=search_param)
-        res = connect.search(collection, **params)
+        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq, metric_type=metric_type, search_params=search_param)
+        res = connect.search(collection, query)
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -1046,11 +1044,10 @@ class TestIndexBinary:
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         connect.load_collection(binary_collection)
+        query, vecs = gen_query_vectors(binary_field_name, default_binary_entities, default_top_k, nq, metric_type="JACCARD")
         search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
-        params, _ = gen_search_vectors_params(binary_field_name, default_binary_entities, default_top_k, nq,
-                                              search_params=search_param, metric_type="JACCARD")
-        logging.getLogger().info(params)
-        res = connect.search(binary_collection, **params)
+        logging.getLogger().info(search_param)
+        res = connect.search(binary_collection, query, search_params=search_param)
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)

@@ -18,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -60,31 +59,6 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 		remoteCM,
 		false)
 	return queryCollection, err
-}
-
-func genSimpleSegmentInfo() *querypb.SegmentInfo {
-	return &querypb.SegmentInfo{
-		SegmentID:    defaultSegmentID,
-		CollectionID: defaultCollectionID,
-		PartitionID:  defaultPartitionID,
-	}
-}
-
-func genSimpleSealedSegmentsChangeInfo() *querypb.SealedSegmentsChangeInfo {
-	return &querypb.SealedSegmentsChangeInfo{
-		Base:            genCommonMsgBase(commonpb.MsgType_SealedSegmentsChangeInfo),
-		OnlineNodeID:    Params.QueryNodeID,
-		OnlineSegments:  []*querypb.SegmentInfo{},
-		OfflineNodeID:   Params.QueryNodeID,
-		OfflineSegments: []*querypb.SegmentInfo{},
-	}
-}
-
-func genSimpleSealedSegmentsChangeInfoMsg() *msgstream.SealedSegmentsChangeInfoMsg {
-	return &msgstream.SealedSegmentsChangeInfoMsg{
-		BaseMsg:                  genMsgStreamBaseMsg(),
-		SealedSegmentsChangeInfo: *genSimpleSealedSegmentsChangeInfo(),
-	}
 }
 
 func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) {
@@ -154,7 +128,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	for i := 0; i < dim; i++ {
 		vec[i] = rand.Float32()
 	}
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
 	var searchRawData1 []byte
 	var searchRawData2 []byte
 	for i, ele := range vec {
@@ -329,15 +303,6 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 				SegmentIDs: []UniqueID{defaultSegmentID},
 			},
 		}
-		runConsumeQuery(msg)
-	})
-
-	t.Run("consume SimpleSealedSegmentsChangeInfoMsg", func(t *testing.T) {
-		// test is success if it doesn't block
-		msg := genSimpleSealedSegmentsChangeInfoMsg()
-		simpleInfo := genSimpleSegmentInfo()
-		simpleInfo.CollectionID = 1000
-		msg.OnlineSegments = append(msg.OnlineSegments, simpleInfo)
 		runConsumeQuery(msg)
 	})
 
@@ -665,58 +630,4 @@ func TestQueryCollection_AddPopUnsolvedMsg(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		assert.EqualValues(t, i, unsolved[i].ID())
 	}
-}
-
-func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.TODO())
-
-	t.Run("test adjustByChangeInfo", func(t *testing.T) {
-		qc, err := genSimpleQueryCollection(ctx, cancel)
-		assert.Nil(t, err)
-
-		info := genSimpleSealedSegmentsChangeInfoMsg()
-
-		// test online
-		info.OnlineSegments = append(info.OnlineSegments, genSimpleSegmentInfo())
-		err = qc.adjustByChangeInfo(info)
-		assert.NoError(t, err)
-		ids := qc.globalSegmentManager.getGlobalSegmentIDs()
-		assert.Len(t, ids, 1)
-
-		// test offline
-		info.OnlineSegments = make([]*querypb.SegmentInfo, 0)
-		info.OfflineSegments = append(info.OfflineSegments, genSimpleSegmentInfo())
-		err = qc.adjustByChangeInfo(info)
-		assert.NoError(t, err)
-		ids = qc.globalSegmentManager.getGlobalSegmentIDs()
-		assert.Len(t, ids, 0)
-	})
-
-	t.Run("test mismatch collectionID when adjustByChangeInfo", func(t *testing.T) {
-		qc, err := genSimpleQueryCollection(ctx, cancel)
-		assert.Nil(t, err)
-
-		info := genSimpleSealedSegmentsChangeInfoMsg()
-
-		// test online
-		simpleInfo := genSimpleSegmentInfo()
-		simpleInfo.CollectionID = 1000
-		info.OnlineSegments = append(info.OnlineSegments, simpleInfo)
-		err = qc.adjustByChangeInfo(info)
-		assert.Error(t, err)
-	})
-
-	t.Run("test no segment when adjustByChangeInfo", func(t *testing.T) {
-		qc, err := genSimpleQueryCollection(ctx, cancel)
-		assert.Nil(t, err)
-
-		err = qc.historical.replica.removeSegment(defaultSegmentID)
-		assert.NoError(t, err)
-
-		info := genSimpleSealedSegmentsChangeInfoMsg()
-		info.OfflineSegments = append(info.OfflineSegments, genSimpleSegmentInfo())
-
-		err = qc.adjustByChangeInfo(info)
-		assert.Error(t, err)
-	})
 }

@@ -133,10 +133,8 @@ codecov-cpp: build-cpp-with-unittest
 	@echo "Running cpp coverage..."
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
-# Package docker image locally.
-# TODO: fix error occur at starting up
-docker: install
-	./build/build_image.sh
+#TODO: build each component to docker
+docker: verifiers
 
 # Build each component and install binary to $GOPATH/bin.
 install: all

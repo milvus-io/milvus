@@ -34,7 +34,6 @@ func NewRmqClient(opts rocksmq.ClientOptions) (*rmqClient, error) {
 	return &rmqClient{client: c}, nil
 }
 
-// CreateProducer creates a producer for rocksmq client
 func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	rmqOpts := rocksmq.ProducerOptions{Topic: options.Topic}
 	pp, err := rc.client.CreateProducer(rmqOpts)
@@ -45,7 +44,6 @@ func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	return &rp, nil
 }
 
-// Subscribe subscribes a consumer in rmq client
 func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	receiveChannel := make(chan rocksmq.ConsumerMessage, options.BufSize)
 
@@ -64,13 +62,11 @@ func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	return rConsumer, nil
 }
 
-// EarliestMessageID returns the earliest message ID for rmq client
 func (rc *rmqClient) EarliestMessageID() MessageID {
 	rID := rocksmq.EarliestMessageID()
 	return &rmqID{messageID: rID}
 }
 
-// StringToMsgID converts string id to MessageID
 func (rc *rmqClient) StringToMsgID(id string) (MessageID, error) {
 	rID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {

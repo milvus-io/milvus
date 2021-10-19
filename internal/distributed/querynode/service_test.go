@@ -33,29 +33,25 @@ type MockQueryNode struct {
 	states     *internalpb.ComponentStates
 	status     *commonpb.Status
 	err        error
-	initErr    error
-	startErr   error
-	regErr     error
-	stopErr    error
 	strResp    *milvuspb.StringResponse
 	infoResp   *querypb.GetSegmentInfoResponse
 	metricResp *milvuspb.GetMetricsResponse
 }
 
 func (m *MockQueryNode) Init() error {
-	return m.initErr
+	return m.err
 }
 
 func (m *MockQueryNode) Start() error {
-	return m.startErr
+	return m.err
 }
 
 func (m *MockQueryNode) Stop() error {
-	return m.stopErr
+	return m.err
 }
 
 func (m *MockQueryNode) Register() error {
-	return m.regErr
+	return m.err
 }
 
 func (m *MockQueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
@@ -198,7 +194,8 @@ func Test_NewServer(t *testing.T) {
 		infoResp:   &querypb.GetSegmentInfoResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 		metricResp: &milvuspb.GetMetricsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 	}
-	qns.querynode = mqn
+	err = qns.SetClient(mqn)
+	assert.Nil(t, err)
 
 	t.Run("Run", func(t *testing.T) {
 		qns.rootCoord = &MockRootCoord{}
@@ -304,37 +301,19 @@ func Test_Run(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, qns)
 
-	qns.querynode = &MockQueryNode{}
-	qns.indexCoord = &MockIndexCoord{}
 	qns.rootCoord = &MockRootCoord{initErr: errors.New("Failed")}
+	qns.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { err = qns.Run() })
 
 	qns.rootCoord = &MockRootCoord{startErr: errors.New("Failed")}
+	qns.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { err = qns.Run() })
 
-	qns.querynode = &MockQueryNode{}
 	qns.rootCoord = &MockRootCoord{}
 	qns.indexCoord = &MockIndexCoord{initErr: errors.New("Failed")}
 	assert.Panics(t, func() { err = qns.Run() })
 
+	qns.rootCoord = &MockRootCoord{}
 	qns.indexCoord = &MockIndexCoord{startErr: errors.New("Failed")}
 	assert.Panics(t, func() { err = qns.Run() })
-
-	qns.indexCoord = &MockIndexCoord{}
-	qns.rootCoord = &MockRootCoord{}
-	qns.querynode = &MockQueryNode{initErr: errors.New("Failed")}
-	err = qns.Run()
-	assert.Error(t, err)
-
-	qns.querynode = &MockQueryNode{startErr: errors.New("Failed")}
-	err = qns.Run()
-	assert.Error(t, err)
-
-	qns.querynode = &MockQueryNode{regErr: errors.New("Failed")}
-	err = qns.Run()
-	assert.Error(t, err)
-
-	qns.querynode = &MockQueryNode{stopErr: errors.New("Failed")}
-	err = qns.Stop()
-	assert.Error(t, err)
 }

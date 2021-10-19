@@ -1,8 +1,12 @@
+
+
 ## 7. Query Coordinator
 
 #### 7.1 Overview
 
 <img src="./figs/query_coord.png" width=500>
+
+
 
 #### 7.2 Query Coordinator Interface
 
@@ -24,7 +28,9 @@ type QueryCoord interface {
 }
 ```
 
-- _MsgBase_
+
+
+* *MsgBase*
 
 ```go
 type MsgBase struct {
@@ -35,7 +41,7 @@ type MsgBase struct {
 }
 ```
 
-- _ShowCollections_
+* *ShowCollections*
 
 ```go
 type ShowCollectionRequest struct {
@@ -51,7 +57,7 @@ type ShowCollectionResponse struct {
 }
 ```
 
-- _LoadCollection_
+* *LoadCollection*
 
 ```go
 type LoadCollectionRequest struct {
@@ -62,7 +68,7 @@ type LoadCollectionRequest struct {
 }
 ```
 
-- _ReleaseCollection_
+* *ReleaseCollection*
 
 ```go
 type ReleaseCollectionRequest struct {
@@ -72,7 +78,7 @@ type ReleaseCollectionRequest struct {
 }
 ```
 
-- _ShowPartitions_
+* *ShowPartitions*
 
 ```go
 type ShowPartitionRequest struct {
@@ -89,7 +95,7 @@ type ShowPartitionResponse struct {
 }
 ```
 
-- _GetPartitionStates_
+* *GetPartitionStates*
 
 ```go
 type PartitionState = int
@@ -122,7 +128,7 @@ type PartitionStatesResponse struct {
 }
 ```
 
-- _LoadPartitions_
+* *LoadPartitions*
 
 ```go
 type LoadPartitonRequest struct {
@@ -134,7 +140,7 @@ type LoadPartitonRequest struct {
 }
 ```
 
-- _ReleasePartitions_
+* *ReleasePartitions*
 
 ```go
 type ReleasePartitionRequest struct {
@@ -145,7 +151,7 @@ type ReleasePartitionRequest struct {
 }
 ```
 
-- _CreateQueryChannel_
+* *CreateQueryChannel*
 
 ```go
 type CreateQueryChannelResponse struct {
@@ -155,7 +161,7 @@ type CreateQueryChannelResponse struct {
 }
 ```
 
-- _GetSegmentInfo_ \*
+* *GetSegmentInfo* *
 
 ```go
 type GetSegmentInfoRequest struct {
@@ -181,7 +187,7 @@ type GetSegmentInfoResponse struct {
 
 #### 7.3 Query Channel
 
-- _SearchMsg_
+* *SearchMsg*
 
 ```go
 type SearchRequest struct {
@@ -205,8 +211,7 @@ type SearchMsg struct {
 }
 ```
 
-- _RetriveMsg_
-
+* *RetriveMsg*
 ```go
 type RetriveRequest struct {
 	Base               *commonpb.MsgBase
@@ -245,7 +250,9 @@ type QueryNode interface {
 }
 ```
 
-- _AddQueryChannel_
+
+
+* *AddQueryChannel*
 
 ```go
 type AddQueryChannelRequest struct {
@@ -257,7 +264,7 @@ type AddQueryChannelRequest struct {
 }
 ```
 
-- _RemoveQueryChannel_
+* *RemoveQueryChannel*
 
 ```go
 type RemoveQueryChannelRequest struct {
@@ -269,7 +276,7 @@ type RemoveQueryChannelRequest struct {
 }
 ```
 
-- _WatchDmChannels_
+* *WatchDmChannels*
 
 ```go
 
@@ -284,7 +291,7 @@ type WatchDmChannelsRequest struct {
 }
 ```
 
-- _LoadSegments_
+* *LoadSegments*
 
 ```go
 type LoadSegmentsRequest struct {
@@ -292,11 +299,10 @@ type LoadSegmentsRequest struct {
 	NodeID        int64
 	Infos         []*SegmentLoadInfo
 	Schema        *schemapb.CollectionSchema
-	LoadCondition TriggerCondition
+	LoadCondition TriggerCondition 
 }
 ```
-
-- _ReleaseCollection_
+* *ReleaseCollection*
 
 ```go
 type ReleaseCollectionRequest struct {
@@ -307,7 +313,7 @@ type ReleaseCollectionRequest struct {
 }
 ```
 
-- _ReleasePartitions_
+* *ReleasePartitions*
 
 ```go
 type ReleasePartitionsRequest struct {
@@ -319,7 +325,7 @@ type ReleasePartitionsRequest struct {
 }
 ```
 
-- _ReleaseSegments_
+* *ReleaseSegments*
 
 ```go
 type ReleaseSegmentsRequest struct {
@@ -332,7 +338,7 @@ type ReleaseSegmentsRequest struct {
 }
 ```
 
-- _GetSegmentInfo_
+* *GetSegmentInfo*
 
 ```go
 type GetSegmentInfoRequest struct {
@@ -346,16 +352,16 @@ type GetSegmentInfoResponse struct {
 }
 ```
 
-//TODO
 
+//TODO
 #### 7.5 Collection Replica
 
 $collectionReplica$ contains a in-memory local copy of persistent collections. In common cases, the system has multiple query nodes. Data of a collection will be distributed across all the available query nodes, and each query node's $collectionReplica$ will maintain its own share (only part of the collection).
 Every replica tracks a value called tSafe which is the maximum timestamp that the replica is up-to-date.
 
-- _Collection_
+* *Collection*
 
-```go
+``` go
 type collectionReplica struct {
 	tSafes map[UniqueID]tSafer // map[collectionID]tSafer
 
@@ -368,7 +374,9 @@ type collectionReplica struct {
 }
 ```
 
-- _Collection_
+
+
+* *Collection*
 
 ```go
 type FieldSchema struct {
@@ -403,7 +411,7 @@ type Collection struct {
 }
 ```
 
-- _Partition_
+* *Partition*
 
 ```go
 type Partition struct {
@@ -413,9 +421,11 @@ type Partition struct {
 }
 ```
 
-- _Segment_
 
-```go
+
+* *Segment*
+
+``` go
 type segmentType int32
 
 const (
@@ -460,7 +470,9 @@ type Segment struct {
 }
 ```
 
-- _Data Sync Service_
+
+
+* *Data Sync Service*
 
 ```go
 type dataSyncService struct {
@@ -475,3 +487,6 @@ type dataSyncService struct {
 	msFactory        msgstream.Factory
 }
 ```
+
+
+

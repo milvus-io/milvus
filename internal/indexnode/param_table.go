@@ -24,6 +24,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+const (
+	StartParamsKey = "START_PARAMS"
+)
+
 // ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
@@ -51,11 +55,10 @@ type ParamTable struct {
 	UpdatedTime time.Time
 }
 
-// Params is a package scoped variable of type ParamTable.
+// Params is an alias for ParamTable.
 var Params ParamTable
 var once sync.Once
 
-// InitAlias initializes an alias for the IndexNode role.
 func (pt *ParamTable) InitAlias(alias string) {
 	pt.Alias = alias
 }

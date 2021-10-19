@@ -2,17 +2,7 @@
 
 # Compile jobs variable; Usage: $ jobs=12 ./build.sh ...
 if [[ ! ${jobs+1} ]]; then
-    if command -v nproc &> /dev/null
-    # For linux
-    then
-        jobs=$(nproc)
-    elif command -v sysctl &> /dev/null
-    # For macOS
-    then
-        jobs=$(sysctl -n hw.logicalcpu)
-    else
-        jobs=4
-    fi
+    jobs=$(nproc)
 fi
 
 SOURCE="${BASH_SOURCE[0]}"

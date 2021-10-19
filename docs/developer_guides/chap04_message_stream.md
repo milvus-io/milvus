@@ -251,24 +251,59 @@ type RmsFactory struct {
 
 
 ```go
+// PulsarMsgStream
 
-// mqMsgStream
-type mqMsgStream struct {
-	ctx              context.Context
-	client           mqclient.Client
-	producers        map[string]mqclient.Producer
-	producerChannels []string
-	consumers        map[string]mqclient.Consumer
-	consumerChannels []string
-	repackFunc       RepackFunc
-	unmarshal        UnmarshalDispatcher
-	receiveBuf       chan *MsgPack
-	wait             *sync.WaitGroup
-	streamCancel     func()
-	bufSize          int64
-	producerLock     *sync.Mutex
-	consumerLock     *sync.Mutex
+func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error)
+
+
+type PulsarTtMsgStream struct {
+	client			*pulsar.Client
+	repackFunc	RepackFunc
+	producers	 []*pulsar.Producer
+	consumers	 []*pulsar.Consumer
+	unmarshal	 *UnmarshalDispatcher
+	inputBuf		[]*TsMsg
+	unsolvedBuf []*TsMsg
+	msgPacks		[]*MsgPack
 }
+
+func (ms *PulsarTtMsgStream) Start() error
+func (ms *PulsarTtMsgStream) Close() error
+func (ms *PulsarTtMsgStream) AsProducer(channels []string)
+func (ms *PulsarTtMsgStream) AsConsumer(channels []string, subName string)
+func (ms *PulsarTtMsgStream) Produce(ctx context.Context, msgs *MsgPack) error
+func (ms *PulsarTtMsgStream) Broadcast(ctx context.Context, msgs *MsgPack) error
+func (ms *PulsarTtMsgStream) Consume() (*MsgPack, context.Context) //return messages in one time tick
+func (ms *PulsarTtMsgStream) Seek(mp *MsgPosition) error
+func (ms *PulsarTtMsgStream) SetRepackFunc(repackFunc RepackFunc)
+
+func NewPulsarTtMsgStream(ctx context.Context, pulsarAddr string, bufferSize int64) *PulsarTtMsgStream
+
+// RmqMsgStream
+
+type RmqMsgStream struct {
+		client	   *rockermq.RocksMQ
+		repackFunc RepackFunc
+		producers  []string
+		consumers  []string
+		subName	   string
+		unmarshal  *UnmarshalDispatcher
+}
+
+func (ms *RmqMsgStream) Start() error
+func (ms *RmqMsgStream) Close() error
+func (ms *RmqMsgStream) AsProducer(channels []string)
+func (ms *RmqMsgStream) AsConsumer(channels []string, subName string)
+func (ms *RmqMsgStream) Produce(ctx context.Context, msgs *MsgPack) error
+func (ms *RmqMsgStream) Broadcast(ctx context.Context, msgs *MsgPack) error
+func (ms *RmqMsgStream) Consume() (*MsgPack, context.Context)
+func (ms *RmqMsgStream) Seek(mp *MsgPosition) error
+func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc)
+
+func NewRmqMsgStream(ctx context.Context) *RmqMsgStream
+```
+
+
 
 
 

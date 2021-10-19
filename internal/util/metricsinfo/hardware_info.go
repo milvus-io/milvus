@@ -48,7 +48,6 @@ func GetCPUUsage() float64 {
 	return percents[0]
 }
 
-// GetMemoryCount returns the memory count in bytes.
 func GetMemoryCount() uint64 {
 	stats, err := mem.VirtualMemory()
 	if err != nil {
@@ -73,13 +72,11 @@ func GetUsedMemoryCount() uint64 {
 }
 
 // TODO(dragondriver): not accurate to calculate disk usage when we use distributed storage
-
-// GetDiskCount returns the disk count in bytes.
 func GetDiskCount() uint64 {
 	return 100 * 1024 * 1024
 }
 
-// GetDiskUsage returns the disk usage in bytes.
+// TODO(dragondriver): not accurate to calculate disk usage when we use distributed storage
 func GetDiskUsage() uint64 {
 	return 2 * 1024 * 1024
 }

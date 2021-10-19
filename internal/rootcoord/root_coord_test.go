@@ -1866,28 +1866,13 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 	})
 
-	t.Run("drop collection with alias", func(t *testing.T) {
-		req := &milvuspb.DropCollectionRequest{
+	t.Run("drop alias", func(t *testing.T) {
+		req := &milvuspb.DropAliasRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropAlias,
 				MsgID:     3016,
 				Timestamp: 3016,
 				SourceID:  3016,
-			},
-			CollectionName: aliasName,
-		}
-		rsp, err := core.DropCollection(ctx, req)
-		assert.Nil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
-	})
-
-	t.Run("drop alias", func(t *testing.T) {
-		req := &milvuspb.DropAliasRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DropAlias,
-				MsgID:     3017,
-				Timestamp: 3017,
-				SourceID:  3017,
 			},
 			Alias: aliasName,
 		}
@@ -1899,9 +1884,9 @@ func TestRootCoord(t *testing.T) {
 	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
-			MsgID:     3018,
-			Timestamp: 3018,
-			SourceID:  3018,
+			MsgID:     3017,
+			Timestamp: 3017,
+			SourceID:  3017,
 		},
 		DbName:         dbName,
 		CollectionName: collName,
@@ -1912,9 +1897,9 @@ func TestRootCoord(t *testing.T) {
 	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
-			MsgID:     3019,
-			Timestamp: 3019,
-			SourceID:  3019,
+			MsgID:     3018,
+			Timestamp: 3018,
+			SourceID:  3018,
 		},
 		DbName:         dbName,
 		CollectionName: collName2,

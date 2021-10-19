@@ -25,46 +25,41 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	// ID of the current DataNode
-	NodeID UniqueID
-
-	// IP of the current DataNode
-	IP string
-
-	// Port of the current DataNode
+	// === DataNode Internal Components Configs ===
+	NodeID                  UniqueID
+	IP                      string
 	Port                    int
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 	FlushInsertBufferSize   int64
 	InsertBinlogRootPath    string
 	StatsBinlogRootPath     string
-	DeleteBinlogRootPath    string
 	Alias                   string // Different datanode in one machine
 
-	// Pulsar address
+	// === DataNode External Components Configs ===
+	// --- Pulsar ---
 	PulsarAddress string
 
-	// Rocksmq path
+	// --- Rocksmq ---
 	RocksmqPath string
 
-	// Cluster channels
+	// --- Cluster channels ---
 	ClusterChannelPrefix string
 
-	// Segment statistics channel
+	// - seg statistics channel -
 	SegmentStatisticsChannelName string
 
-	// Timetick channel
+	// - timetick channel -
 	TimeTickChannelName string
 
-	// Channel subscribition name -
+	// - channel subname -
 	MsgChannelSubName string
 
-	// ETCD
+	// --- ETCD ---
 	EtcdEndpoints []string
 	MetaRootPath  string
 
-	// MinIO
-
+	// --- MinIO ---
 	MinioAddress         string
 	MinioAccessKeyID     string
 	MinioSecretAccessKey string
@@ -99,24 +94,33 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
+	// === DataNode Internal Components Configs ===
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
 	p.initInsertBinlogRootPath()
 	p.initStatsBinlogRootPath()
-	p.initDeleteBinlogRootPath()
 
+	// === DataNode External Components Configs ===
+	// --- Pulsar ---
 	p.initPulsarAddress()
+
 	p.initRocksmqPath()
 
-	// Must init global msgchannel prefix before other channel names
+	// Has to init global msgchannel prefix before other channel names
 	p.initClusterMsgChannelPrefix()
+
+	// - seg statistics channel -
 	p.initSegmentStatisticsChannelName()
+
+	// - timetick channel -
 	p.initTimeTickChannelName()
 
+	// --- ETCD ---
 	p.initEtcdEndpoints()
 	p.initMetaRootPath()
 
+	// --- MinIO ---
 	p.initMinioAddress()
 	p.initMinioAccessKeyID()
 	p.initMinioSecretAccessKey()
@@ -126,6 +130,8 @@ func (p *ParamTable) Init() {
 	p.initRoleName()
 }
 
+// ==== DataNode internal components configs ====
+// ---- flowgraph configs ----
 func (p *ParamTable) initFlowGraphMaxQueueLength() {
 	p.FlowGraphMaxQueueLength = p.ParseInt32("dataNode.dataSync.flowGraph.maxQueueLength")
 }
@@ -134,6 +140,7 @@ func (p *ParamTable) initFlowGraphMaxParallelism() {
 	p.FlowGraphMaxParallelism = p.ParseInt32("dataNode.dataSync.flowGraph.maxParallelism")
 }
 
+// ---- flush configs ----
 func (p *ParamTable) initFlushInsertBufferSize() {
 	p.FlushInsertBufferSize = p.ParseInt64("_DATANODE_INSERTBUFSIZE")
 }
@@ -155,14 +162,7 @@ func (p *ParamTable) initStatsBinlogRootPath() {
 	p.StatsBinlogRootPath = path.Join(rootPath, "stats_log")
 }
 
-func (p *ParamTable) initDeleteBinlogRootPath() {
-	rootPath, err := p.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.DeleteBinlogRootPath = path.Join(rootPath, "delta_log")
-}
-
+// ---- Pulsar ----
 func (p *ParamTable) initPulsarAddress() {
 	url, err := p.Load("_PulsarAddress")
 	if err != nil {
@@ -205,6 +205,7 @@ func (p *ParamTable) initTimeTickChannelName() {
 	p.TimeTickChannelName = strings.Join(s, "-")
 }
 
+// - msg channel subname -
 func (p *ParamTable) initMsgChannelSubName() {
 	config, err := p.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
 	if err != nil {
@@ -214,6 +215,7 @@ func (p *ParamTable) initMsgChannelSubName() {
 	p.MsgChannelSubName = strings.Join(s, "-")
 }
 
+// --- ETCD ---
 func (p *ParamTable) initEtcdEndpoints() {
 	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
@@ -234,6 +236,7 @@ func (p *ParamTable) initMetaRootPath() {
 	p.MetaRootPath = path.Join(rootPath, subPath)
 }
 
+// --- MinIO ---
 func (p *ParamTable) initMinioAddress() {
 	endpoint, err := p.Load("_MinioAddress")
 	if err != nil {

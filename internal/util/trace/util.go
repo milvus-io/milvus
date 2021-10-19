@@ -19,12 +19,10 @@ import (
 	"strings"
 	"sync"
 
-	slog "github.com/milvus-io/milvus/internal/log"
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/log"
 	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
-	"go.uber.org/zap"
 )
 
 var tracingCloserMtx sync.Mutex
@@ -144,9 +142,9 @@ func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operatio
 }
 
 // LogError is a method to log error with span.
-func LogError(span opentracing.Span, err error) {
+func LogError(span opentracing.Span, err error) error {
 	if err == nil {
-		return
+		return nil
 	}
 
 	// Get caller frame.
@@ -155,13 +153,15 @@ func LogError(span opentracing.Span, err error) {
 	if n < 1 {
 		span.LogFields(log.Error(err))
 		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
-		slog.Warn("trace log error failed", zap.Error(err))
+		return err
 	}
 
 	frames := runtime.CallersFrames(pcs[:])
 	frame, _ := frames.Next()
 	file, line := frame.File, frame.Line
 	span.LogFields(log.String("filename", file), log.Int("line", line), log.Error(err))
+
+	return err
 }
 
 // InfoFromSpan is a method return span details.
@@ -204,7 +204,7 @@ func (ppRW PropertiesReaderWriter) Set(key, val string) {
 	ppRW.PpMap[key] = val
 }
 
-// ForeachKey iterates each key value of PpMap.
+// ForeachKey iters each key value of PpMap.
 func (ppRW PropertiesReaderWriter) ForeachKey(handler func(key, val string) error) error {
 	for k, val := range ppRW.PpMap {
 		if err := handler(k, val); err != nil {

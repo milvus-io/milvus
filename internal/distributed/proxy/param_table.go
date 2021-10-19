@@ -23,8 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
-// ParamTable is a derived struct of paramtable.BaseTable. It achieves Composition by
-// embedding paramtable.BaseTable. It is used to quickly and easily access the system configuration.
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -41,19 +39,16 @@ type ParamTable struct {
 	ServerMaxRecvSize int
 }
 
-// Params is a package scoped variable of type ParamTable.
 var Params ParamTable
 var once sync.Once
 
-// Init is an override method of BaseTable's Init. It mainly calls the
-// Init of BaseTable and do some other initialization.
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initParams()
 
-		pt.loadFromEnv()
-		pt.loadFromArgs()
+		pt.LoadFromEnv()
+		pt.LoadFromArgs()
 		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
 
 		pt.initServerMaxSendSize()
@@ -61,11 +56,11 @@ func (pt *ParamTable) Init() {
 	})
 }
 
-func (pt *ParamTable) loadFromArgs() {
+func (pt *ParamTable) LoadFromArgs() {
 
 }
 
-func (pt *ParamTable) loadFromEnv() {
+func (pt *ParamTable) LoadFromEnv() {
 	Params.IP = funcutil.GetLocalIP()
 }
 

@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 25,
-  "iteration": 1633948815100,
+  "iteration": 1633341628859,
   "links": [],
   "panels": [
     {
@@ -2087,7 +2087,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Drop index operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2144,7 +2144,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success of RootCoord Drop index operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2201,7 +2201,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Describe index operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2258,7 +2258,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful RootCoord Describe index operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2618,7 +2618,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Show segments operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2675,7 +2675,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful RootCoord Show segments operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2732,7 +2732,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Describe segments operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2789,7 +2789,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success RootCoord Describe segments operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -3159,7 +3159,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total DataNode flush segments operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -3216,7 +3216,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful DataNode Flush segments operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -3273,7 +3273,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total DataNode Watch dm channel operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -3330,7 +3330,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success of DataNode Watch dm channel operations",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5815,5 +5815,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 152
+  "version": 138
 }

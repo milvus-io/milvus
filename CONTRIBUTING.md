@@ -19,8 +19,8 @@ As for everything else in the project, the contributions to Milvus are governed 
     - [Golang coding style](#golang-coding-style)
     - [C++ coding style](#c-coding-style)
   - [Run unit test with code coverage](#run-unit-test-with-code-coverage)
-    - [Golang](#run-golang-unit-tests)
-    - [C++](#run-c-unit-tests)
+    - [Golang](#golang)
+    - [C++](#c)
   - [Commits and PRs](#commits-and-prs)
 
 ## What contributions can you make?
@@ -39,20 +39,20 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 **If you encountered a bug, you can**
 - (**Recommended**) File an issue about the bug.
-- Provide clear and concrete ways/scripts to reproduce the bug.
-- Provide possible solutions for the bug.
-- Pull a request to fix the bug.
+- (*Optional*) Provide clear and concrete ways/scripts to reproduce the bug.
+- (*Optional*) Provide possible solutions for the bug.
+- (*Optional*) Pull a request to fix the bug.
 
 **If you're interested in existing issues, you can**
 - (**Recommended**) Provide answers for issue labeled `question`.
 - Provide help for issues labeled `bug`, `improvement`, and `enhancement` by
     - (**Recommended**) Ask questions, reproduce the issue, or providie solutions.
-    - Pull a request to fix the issue.
+    - (Optional) Pull a request to fix the issue.
 
 **If you require new feature or major enhancement, you can**
 - (**Recommended**) File an issue about the feature/enhancement with reasons.
-- Provide a MEP for the feature/enhancement.
-- Pull a request to implement the MEP.
+- (*Optional*) Provide a MEP for the feature/enhancement.
+- (*Optional*) Pull a request to implement the MEP.
 
 **If you are a reviewer/approver of Milvus, you can**
 - Participate in [PR review](CODE_REVIEW.md) process.
@@ -133,7 +133,7 @@ $ make fmt
 ```
 
 ### C++ coding style
-The C++ coding style used in Milvus generally follows [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
+The c++ coding style used in Milvus generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 And we made the following changes based on the guide:
 
 -   4 spaces for indentation
@@ -154,7 +154,7 @@ $ make cppcheck
 ## Run unit test with code coverage
 Before submitting your Pull Request, make sure you have run unit test, and your code coverage rate is >= 90%.
 
-### Run golang unit tests
+### Golang
 
 You can run all the Golang unit tests using make.
 ```shell
@@ -178,7 +178,7 @@ $ go test ./internale/datanode -run SegmentReplica/segmentFlushed
 ok  	github.com/milvus-io/milvus/internal/datanode 0.019s
 ```
 
-### Run C++ unit tests
+### C++
 Install lcov
 ```shell
 $ sudo apt-get install lcov

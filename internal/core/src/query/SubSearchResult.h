@@ -17,13 +17,12 @@ namespace milvus::query {
 
 class SubSearchResult {
  public:
-    SubSearchResult(int64_t num_queries, int64_t topk, MetricType metric_type, int64_t round_decimal)
+    SubSearchResult(int64_t num_queries, int64_t topk, MetricType metric_type)
         : metric_type_(metric_type),
           num_queries_(num_queries),
           topk_(topk),
           labels_(num_queries * topk, -1),
-          values_(num_queries * topk, init_value(metric_type)),
-          round_decimal_(round_decimal) {
+          values_(num_queries * topk, init_value(metric_type)) {
     }
 
  public:
@@ -76,8 +75,6 @@ class SubSearchResult {
     mutable_values() {
         return values_;
     }
-    void
-    round_values();
 
     static SubSearchResult
     merge(const SubSearchResult& left, const SubSearchResult& right);
@@ -93,7 +90,6 @@ class SubSearchResult {
  private:
     int64_t num_queries_;
     int64_t topk_;
-    int64_t round_decimal_;
     MetricType metric_type_;
     std::vector<int64_t> labels_;
     std::vector<float> values_;

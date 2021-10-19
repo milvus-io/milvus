@@ -116,10 +116,10 @@ func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexPa
 			return nil, nil, "", err
 		}
 		// get index params when detecting indexParamPrefix
-		if path.Base(p) == storage.IndexParamsKey {
+		if path.Base(p) == storage.IndexParamsFile {
 			_, indexParams, indexName, _, err = indexCodec.Deserialize([]*storage.Blob{
 				{
-					Key:   storage.IndexParamsKey,
+					Key:   storage.IndexParamsFile,
 					Value: []byte(indexPiece),
 				},
 			})

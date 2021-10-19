@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
-// LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
 type LoadIndexInfo struct {
 	cLoadIndexInfo C.CLoadIndexInfo
 }

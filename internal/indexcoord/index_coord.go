@@ -767,21 +767,19 @@ func (i *IndexCoord) assignTaskLoop() {
 				log.Error("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
 			}
 			if len(sessions) <= 0 {
-				log.Warn("There is no IndexNode available as this time.")
+				log.Debug("There is no IndexNode available as this time.")
 				break
 			}
 			var serverIDs []int64
 			for _, session := range sessions {
 				serverIDs = append(serverIDs, session.ServerID)
 			}
+			log.Debug("IndexCoord assignTaskLoop", zap.Int64s("Available IndexNode IDs", serverIDs))
 			metas := i.metaTable.GetUnassignedTasks(serverIDs)
 			sort.Slice(metas, func(i, j int) bool {
 				return metas[i].indexMeta.Version <= metas[j].indexMeta.Version
 			})
-			// only log if we find unassigned tasks
-			if len(metas) != 0 {
-				log.Debug("IndexCoord find unassigned tasks ", zap.Int("Unassigned tasks number", len(metas)), zap.Int64s("Available IndexNode IDs", serverIDs))
-			}
+			log.Debug("IndexCoord assignTaskLoop", zap.Int("Unassigned tasks number", len(metas)))
 			for index, meta := range metas {
 				indexBuildID := meta.indexMeta.IndexBuildID
 				if err = i.metaTable.UpdateVersion(indexBuildID); err != nil {

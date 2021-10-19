@@ -13,6 +13,7 @@
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
+using namespace milvus::query;
 using namespace milvus::segcore;
 
 TEST(Binary, Insert) {

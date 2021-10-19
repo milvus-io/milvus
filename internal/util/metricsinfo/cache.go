@@ -67,7 +67,6 @@ func (manager *MetricsCacheManager) ResetRetention() {
 	manager.retention = DefaultMetricsRetention
 }
 
-// InvalidateSystemInfoMetrics invalidates the system information metrics.
 func (manager *MetricsCacheManager) InvalidateSystemInfoMetrics() {
 	manager.systemInfoMetricsMtx.Lock()
 	defer manager.systemInfoMetricsMtx.Unlock()
@@ -86,7 +85,6 @@ func (manager *MetricsCacheManager) IsSystemInfoMetricsValid() bool {
 		(time.Since(manager.systemInfoMetricsLastUpdatedTime) < retention)
 }
 
-// GetSystemInfoMetrics returns the cached system information metrics.
 func (manager *MetricsCacheManager) GetSystemInfoMetrics() (*milvuspb.GetMetricsResponse, error) {
 	retention := manager.GetRetention()
 

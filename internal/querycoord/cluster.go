@@ -374,7 +374,6 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 			log.Debug("ReleasePartitions: queryNode release partitions error", zap.String("error", err.Error()))
 			return err
 		}
-
 		for _, partitionID := range in.PartitionIDs {
 			err = c.clusterMeta.releasePartition(in.CollectionID, partitionID)
 			if err != nil {

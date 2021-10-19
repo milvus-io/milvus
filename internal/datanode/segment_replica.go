@@ -44,7 +44,6 @@ type Replica interface {
 	addNewSegment(segID, collID, partitionID UniqueID, channelName string, startPos, endPos *internalpb.MsgPosition) error
 	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error
 	filterSegments(channelName string, partitionID UniqueID) []*Segment
-	addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64) error
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
@@ -156,8 +155,6 @@ func (replica *SegmentReplica) new2FlushedSegment(segID UniqueID) {
 	delete(replica.newSegments, segID)
 }
 
-// normal2FlushedSegment transfers a segment from *normal* to *flushed* by changing *isFlushed*
-//  flag into true, and mv the segment from normalSegments map to flushedSegments map.
 func (replica *SegmentReplica) normal2FlushedSegment(segID UniqueID) {
 	var seg Segment = *replica.normalSegments[segID]
 
@@ -176,10 +173,6 @@ func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (coll
 	}
 
 	if seg, ok := replica.normalSegments[segID]; ok {
-		return seg.collectionID, seg.partitionID, nil
-	}
-
-	if seg, ok := replica.flushedSegments[segID]; ok {
 		return seg.collectionID, seg.partitionID, nil
 	}
 
@@ -313,7 +306,7 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 		return fmt.Errorf("Mismatch collection, ID=%d", collID)
 	}
 
-	log.Debug("Add Flushed segment",
+	log.Debug("Add Normal segment",
 		zap.Int64("segment ID", segID),
 		zap.Int64("collection ID", collID),
 		zap.Int64("partition ID", partitionID),

@@ -19,6 +19,7 @@ spec:
       namespaces:
         - chaos-testing
       labelSelectors:
-        release: chaos-testing
-        app: pulsar
+        app.kubernetes.io/instance: chaos-testing
+        app.kubernetes.io/name: milvus
+        component: pulsar
     mode: one

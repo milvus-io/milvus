@@ -1,5 +1,3 @@
-import logging
-
 import pytest
 import functools
 import socket
@@ -10,7 +8,7 @@ from utils.util_log import test_log as log
 from base.client_base import param_info
 from check.param_check import ip_check, number_check
 from config.log_config import log_config
-from utils.utils import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
+from utils.utils import *
 
 timeout = 60
 dimension = 128

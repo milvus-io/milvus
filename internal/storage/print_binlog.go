@@ -377,7 +377,7 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 
 // only print slice meta and index params
 func printIndexFilePayloadValues(reader PayloadReaderInterface, key string) error {
-	if key == IndexParamsKey {
+	if key == IndexParamsFile {
 		rows, err := reader.GetPayloadLengthFromReader()
 		if err != nil {
 			return err

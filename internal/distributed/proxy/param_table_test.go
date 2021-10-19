@@ -35,6 +35,6 @@ func TestParamTable(t *testing.T) {
 	Params.initServerMaxRecvSize()
 	assert.Equal(t, Params.ServerMaxRecvSize, grpcconfigs.DefaultServerMaxRecvSize)
 
-	Params.loadFromEnv()
+	Params.LoadFromEnv()
 	assert.Equal(t, Params.IP, funcutil.GetLocalIP())
 }

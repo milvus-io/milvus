@@ -93,11 +93,6 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	return coord, nil
 }
 
-func createDefaultPartition(ctx context.Context, queryCoord *QueryCoord) error {
-	_, err := queryCoord.rootCoordClient.CreatePartition(ctx, nil)
-	return err
-}
-
 func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	factory := msgstream.NewPmsFactory()
 

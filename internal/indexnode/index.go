@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
-// Blob is an alias for the storage.Blob type
+// TODO: use storage.Blob instead later
 type Blob = storage.Blob
 
 // Index is an interface used to call the interface to build the index task in 'C'.
@@ -191,8 +191,9 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 					CIndex* res_index);
 	*/
 	var indexPtr C.CIndex
-	log.Debug("Start to create index ...", zap.String("params", indexParamsStr))
+	log.Debug("before create index ...")
 	status := C.CreateIndex(typeParamsPointer, indexParamsPointer, &indexPtr)
+	log.Debug("after create index ...")
 	errorCode := status.error_code
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
@@ -200,7 +201,6 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return nil, fmt.Errorf(" failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
 	}
-	log.Debug("Successfully create index ...")
 
 	return &CIndex{
 		indexPtr: indexPtr,

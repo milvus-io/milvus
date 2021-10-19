@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
-// rmqID wraps message ID for rocksmq
 type rmqID struct {
 	messageID rocksmq.UniqueID
 }

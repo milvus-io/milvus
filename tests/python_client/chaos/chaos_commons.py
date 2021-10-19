@@ -19,13 +19,11 @@ def check_config(chaos_config):
 
 
 def reset_counting(checkers={}):
-    """reset checker counts for all checker threads"""
     for ch in checkers.values():
         ch.reset()
 
 
 def gen_experiment_config(yaml):
-    """load the yaml file of chaos experiment"""
     with open(yaml) as f:
         _config = full_load(f)
         f.close()
@@ -33,7 +31,6 @@ def gen_experiment_config(yaml):
 
 
 def start_monitor_threads(checkers={}):
-    """start the threads by checkers"""
     threads = {}
     for k, ch in checkers.items():
         t = threading.Thread(target=ch.keep_running, args=())

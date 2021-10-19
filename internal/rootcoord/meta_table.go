@@ -1321,10 +1321,3 @@ func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, t
 	}
 	return nil
 }
-
-func (mt *MetaTable) IsAlias(collectionAlias string) bool {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	_, ok := mt.collAlias2ID[collectionAlias]
-	return ok
-}

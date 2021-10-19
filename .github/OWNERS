@@ -1,8 +1,6 @@
-# Maintainers of GitHub Actions and Mergify
 reviewers:
-  - LoveEachDay
-  - scsven
   - XuanYang-cn
+  - scsven
 
 approvers:
   - pr-inspection

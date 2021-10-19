@@ -20,7 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
@@ -79,9 +78,6 @@ type RootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEnd
 
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
-
-// makes sure Server implements `positionProvider`
-var _ positionProvider = (*Server)(nil)
 
 // Server implements `types.Datacoord`
 // handles Data Cooridinator related jobs
@@ -311,8 +307,9 @@ func (s *Server) startServerLoop() {
 	go s.startWatchService(s.serverLoopCtx)
 	go s.startFlushLoop(s.serverLoopCtx)
 	go s.session.LivenessCheck(s.serverLoopCtx, s.liveCh, func() {
-		if err := s.Stop(); err != nil {
-			log.Error("failed to stop server", zap.Error(err))
+		err := s.Stop()
+		if err != nil {
+			log.Error("server stop fail", zap.Error(err))
 		}
 	})
 }
@@ -400,8 +397,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
-			if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
-				log.Warn("failed to expire allocations", zap.Error(err))
+			err = s.segmentManager.ExpireAllocations(ch, ts)
+			if err != nil {
+				log.Warn("expire allocations failed", zap.Error(err))
 				continue
 			}
 			segments, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
@@ -637,13 +635,13 @@ func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool
 
 	for _, vchan := range vchans {
 		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
-		flushed := make([]*datapb.SegmentInfo, 0)
+		flushedSegmentIDs := make([]UniqueID, 0)
 		unflushed := make([]*datapb.SegmentInfo, 0)
 		var seekPosition *internalpb.MsgPosition
 		var useUnflushedPosition bool
 		for _, s := range segments {
 			if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
-				flushed = append(flushed, s.SegmentInfo)
+				flushedSegmentIDs = append(flushedSegmentIDs, s.ID)
 				if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
 					seekPosition = s.DmlPosition
 				}
@@ -666,27 +664,12 @@ func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool
 			}
 		}
 
-		// use collection start position when segment position is not found
-		if seekPosition == nil {
-			coll := s.meta.GetCollection(vchan.CollectionID)
-			if coll != nil {
-				for _, sp := range coll.GetStartPositions() {
-					if sp.GetKey() == rootcoord.ToPhysicalChannel(vchan.DmlChannel) {
-						seekPosition = &internalpb.MsgPosition{
-							ChannelName: vchan.DmlChannel,
-							MsgID:       sp.GetData(),
-						}
-					}
-				}
-			}
-		}
-
 		pairs = append(pairs, &datapb.VchannelInfo{
 			CollectionID:      vchan.CollectionID,
 			ChannelName:       vchan.DmlChannel,
 			SeekPosition:      seekPosition,
 			UnflushedSegments: unflushed,
-			FlushedSegments:   flushed,
+			FlushedSegments:   flushedSegmentIDs,
 		})
 	}
 	return pairs, nil

@@ -137,8 +137,8 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
-// SetRootCoord sets RootCoord's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
+// SetRootCoordInterface sets RootCoord's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetRootCoordInterface(rc types.RootCoord) error {
 	switch {
 	case rc == nil, node.rootCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -148,8 +148,8 @@ func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
 	}
 }
 
-// SetDataCoord sets data service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
+// SetDataCoordInterface sets data service's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
 	switch {
 	case ds == nil, node.dataCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -157,11 +157,6 @@ func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 		node.dataCoord = ds
 		return nil
 	}
-}
-
-// SetNodeID set node id for DataNode
-func (node *DataNode) SetNodeID(id UniqueID) {
-	node.NodeID = id
 }
 
 // Register register datanode to etcd
@@ -210,10 +205,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 				log.Warn("Watch channel failed", zap.Error(event.Err()))
 				// if watch loop return due to event canceled, the datanode is not functional anymore
 				// stop the datanode and wait for restart
-				err := node.Stop()
-				if err != nil {
-					log.Warn("node stop failed", zap.Error(err))
-				}
+				node.Stop()
 				return
 			}
 			for _, evt := range event.Events {
@@ -378,10 +370,7 @@ func (node *DataNode) Start() error {
 	go node.BackGroundGC(node.clearSignal)
 
 	go node.session.LivenessCheck(node.ctx, node.liveCh, func() {
-		err := node.Stop()
-		if err != nil {
-			log.Warn("node stop failed", zap.Error(err))
-		}
+		node.Stop()
 	})
 
 	Params.CreatedTime = time.Now()
@@ -394,11 +383,6 @@ func (node *DataNode) Start() error {
 // UpdateStateCode updates datanode's state code
 func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 	node.State.Store(code)
-}
-
-// GetStateCode return datanode's state code
-func (node *DataNode) GetStateCode() internalpb.StateCode {
-	return node.State.Load().(internalpb.StateCode)
 }
 
 func (node *DataNode) isHealthy() bool {
@@ -425,7 +409,6 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	default:
 		for _, chanInfo := range in.GetVchannels() {
 			log.Info("DataNode new dataSyncService",
-				zap.Int64("collectionID", chanInfo.GetCollectionID()),
 				zap.String("channel name", chanInfo.ChannelName),
 				zap.Any("channal Info", chanInfo),
 			)
@@ -433,9 +416,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 				log.Warn("Failed to new data sync service",
 					zap.Any("channel", chanInfo),
 					zap.Error(err))
-
 				// return error even partial success
-				// TODO Goose: release partial success resources?
 				status.Reason = err.Error()
 				return status, nil
 			}
@@ -515,7 +496,7 @@ func (node *DataNode) ReadyToFlush() error {
 //   If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
 //   So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
 //
-//   One precondition: The segmentID in req is in ascending order.
+//   There are 1 precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsTotal).Inc()
 	status := &commonpb.Status{
@@ -528,25 +509,23 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	log.Debug("Receive FlushSegments req",
-		zap.Int64("collectionID", req.GetCollectionID()), zap.Int("num", len(req.SegmentIDs)),
+		zap.Int("num", len(req.SegmentIDs)),
 		zap.Int64s("segments", req.SegmentIDs),
 	)
 
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelNamebySegmentID(id)
-		if len(chanName) == 0 {
-			log.Warn("FlushSegments failed, cannot find segment in DataNode replica",
-				zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
+		log.Debug("vchannel", zap.String("name", chanName), zap.Int64("SegmentID", id))
 
-			status.Reason = fmt.Sprintf("DataNode replica not find segment %d!", id)
+		if len(chanName) == 0 {
+			log.Warn("DataNode not find segment", zap.Int64("ID", id))
+			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
 			return status, nil
 		}
 
 		if node.segmentCache.checkIfCached(id) {
-			// Segment in flushing, ignore
-			log.Info("Segment flushing, ignore the flush request until flush is done.",
-				zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
-
+			// Segment in flushing or flushed, ignore
+			log.Info("Segment in flushing, ignore it", zap.Int64("ID", id))
 			continue
 		}
 
@@ -557,7 +536,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		node.chanMut.RUnlock()
 		if !ok {
 			status.Reason = "DataNode abnormal, restarting"
-			log.Error("DataNode abnormal, no flushCh for a vchannel")
 			return status, nil
 		}
 
@@ -575,8 +553,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		flushChs.deleteBufferCh <- &deleteFlushMsg
 	}
 
-	log.Debug("Flowgraph flushSegment tasks triggered",
-		zap.Int64("collectionID", req.GetCollectionID()), zap.Int64s("segments", req.GetSegmentIDs()))
+	log.Debug("FlushSegments tasks triggered",
+		zap.Int64s("segments", req.SegmentIDs))
 
 	status.ErrorCode = commonpb.ErrorCode_Success
 	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
@@ -597,10 +575,7 @@ func (node *DataNode) Stop() error {
 	}
 
 	if node.closer != nil {
-		err := node.closer.Close()
-		if err != nil {
-			return err
-		}
+		node.closer.Close()
 	}
 	return nil
 }

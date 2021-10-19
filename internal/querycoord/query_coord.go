@@ -13,7 +13,6 @@ package querycoord
 
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"path/filepath"
 	"strconv"
@@ -46,7 +45,6 @@ type queryChannelInfo struct {
 	responseChannel string
 }
 
-// QueryCoord is the coordinator of queryNodes
 type QueryCoord struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
@@ -86,10 +84,7 @@ func (qc *QueryCoord) Register() error {
 	return nil
 }
 
-// Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
-	log.Debug("query coordinator start init")
-	//connect etcd
 	connectEtcdFn := func() error {
 		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		if err != nil {
@@ -131,7 +126,6 @@ func (qc *QueryCoord) Init() error {
 	return initError
 }
 
-// Start function starts the goroutines to watch the meta and node updates
 func (qc *QueryCoord) Start() error {
 	qc.scheduler.Start()
 	log.Debug("start scheduler ...")
@@ -150,7 +144,6 @@ func (qc *QueryCoord) Start() error {
 	return nil
 }
 
-// Stop function stops watching the meta and node updates
 func (qc *QueryCoord) Stop() error {
 	qc.scheduler.Close()
 	log.Debug("close scheduler ...")
@@ -161,12 +154,10 @@ func (qc *QueryCoord) Stop() error {
 	return nil
 }
 
-// UpdateStateCode updates the status of the coord, including healthy, unhealthy
 func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 	qc.stateCode.Store(code)
 }
 
-// NewQueryCoord creates a QueryCoord object.
 func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	queryChannels := make([]*queryChannelInfo, 0)
@@ -194,24 +185,12 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	return service, nil
 }
 
-// SetRootCoord sets root coordinator's client
-func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) error {
-	if rootCoord == nil {
-		return errors.New("null root coordinator interface")
-	}
-
+func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) {
 	qc.rootCoordClient = rootCoord
-	return nil
 }
 
-// SetDataCoord sets data coordinator's client
-func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) error {
-	if dataCoord == nil {
-		return errors.New("null data coordinator interface")
-	}
-
+func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) {
 	qc.dataCoordClient = dataCoord
-	return nil
 }
 
 func (qc *QueryCoord) watchNodeLoop() {
@@ -234,17 +213,19 @@ func (qc *QueryCoord) watchNodeLoop() {
 			SourceNodeIDs: offlineNodeIDs,
 		}
 
-		baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_nodeDown)
 		loadBalanceTask := &LoadBalanceTask{
-			BaseTask:           baseTask,
+			BaseTask: BaseTask{
+				ctx:              qc.loopCtx,
+				Condition:        NewTaskCondition(qc.loopCtx),
+				triggerCondition: querypb.TriggerCondition_nodeDown,
+			},
 			LoadBalanceRequest: loadBalanceSegment,
 			rootCoord:          qc.rootCoordClient,
 			dataCoord:          qc.dataCoordClient,
 			cluster:            qc.cluster,
 			meta:               qc.meta,
 		}
-		//TODO::deal enqueue error
-		qc.scheduler.Enqueue(loadBalanceTask)
+		qc.scheduler.Enqueue([]task{loadBalanceTask})
 		log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
 	}
 
@@ -282,19 +263,21 @@ func (qc *QueryCoord) watchNodeLoop() {
 					BalanceReason: querypb.TriggerCondition_nodeDown,
 				}
 
-				baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_nodeDown)
 				loadBalanceTask := &LoadBalanceTask{
-					BaseTask:           baseTask,
+					BaseTask: BaseTask{
+						ctx:              qc.loopCtx,
+						Condition:        NewTaskCondition(qc.loopCtx),
+						triggerCondition: querypb.TriggerCondition_nodeDown,
+					},
 					LoadBalanceRequest: loadBalanceSegment,
 					rootCoord:          qc.rootCoordClient,
 					dataCoord:          qc.dataCoordClient,
 					cluster:            qc.cluster,
 					meta:               qc.meta,
 				}
-				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
-				//TODO:: deal enqueue error
-				qc.scheduler.Enqueue(loadBalanceTask)
+				qc.scheduler.Enqueue([]task{loadBalanceTask})
 				log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
+				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
 		}
 	}

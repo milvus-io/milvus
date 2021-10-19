@@ -92,7 +92,6 @@ vector_anns: <
   >
   query_info: <
     topk: 10
-    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -131,8 +130,7 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10,
-                        "round_decimal": 3
+                        "topk": 10
                     }
                 }
             }
@@ -180,7 +178,6 @@ vector_anns: <
   >
   query_info: <
     topk: 10
-    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -219,8 +216,7 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10,
-                        "round_decimal": 3
+                        "topk": 10
                     }
                 }
             }
@@ -269,7 +265,6 @@ vector_anns: <
   >
   query_info: <
     topk: 10
-    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -310,8 +305,7 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10,
-                        "round_decimal": 3
+                        "topk": 10
                     }
                 }
             }
@@ -391,7 +385,6 @@ vector_anns: <
   >
   query_info: <
     topk: 10
-    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -448,8 +441,7 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10,
-                        "round_decimal": 3
+                        "topk": 10
                     }
                 }
             }
@@ -491,7 +483,6 @@ vector_anns: <
   >
   query_info: <
     topk: 10
-    round_decimal: 3
     metric_type: "L2"
     search_params: "{\"nprobe\": 10}"
   >
@@ -530,8 +521,7 @@ vector_anns: <
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10,
-                        "round_decimal": 3
+                        "topk": 10
                     }
                 }
             }

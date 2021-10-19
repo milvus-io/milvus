@@ -6,8 +6,7 @@ import logging
 import json
 from multiprocessing import Pool, Process
 import pytest
-from utils.utils import get_milvus, restart_server, gen_entities, gen_unique_str, default_nb
-from common.constants import default_fields, default_entities
+from utils.utils import *
 from common.common_type import CaseLabel
 
 
@@ -51,7 +50,7 @@ class TestRestartBase:
         connect.flush([collection])
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        assert res_count == 2 * default_nb
+        assert res_count == 2 * nb
         # restart server
         logging.getLogger().info("Start restart server")
         assert restart_server(args["service_name"])
@@ -59,7 +58,7 @@ class TestRestartBase:
         new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count = new_connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        assert res_count == 2 * default_nb
+        assert res_count == 2 * nb
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing(self, connect, collection, args):

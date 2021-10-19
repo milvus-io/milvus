@@ -381,8 +381,8 @@ def assert_equal_entity(a, b):
     pass
 
 
-def gen_search_vectors_params(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
-                              metric_type="L2", replace_vecs=None):
+def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
+                      metric_type="L2", replace_vecs=None):
     if rand_vector is True:
         dimension = len(entities[-1]["values"][0])
         query_vectors = gen_vectors(nq, dimension)
@@ -390,15 +390,14 @@ def gen_search_vectors_params(field_name, entities, top_k, nq, search_params={"n
         query_vectors = entities[-1]["values"][:nq]
     if replace_vecs:
         query_vectors = replace_vecs
-
-    search_params["metric_type"] = metric_type
-    _params = {
-        "data": query_vectors,
-        "anns_field": field_name,
-        "param": search_params,
-        "limit": top_k,
+    must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
+    must_param["vector"][field_name]["metric_type"] = metric_type
+    query = {
+        "bool": {
+            "must": [must_param]
+        }
     }
-    return _params, query_vectors
+    return query, query_vectors
 
 
 def update_query_expr(src_query, keep_old=True, expr=None):
@@ -885,17 +884,13 @@ def gen_normal_expressions():
 def get_search_param(index_type, metric_type="L2"):
     search_params = {"metric_type": metric_type}
     if index_type in ivf() or index_type in binary_support():
-        nprobe64 = {"nprobe": 64}
-        search_params.update({"params": nprobe64})
+        search_params.update({"nprobe": 64})
     elif index_type in ["HNSW", "RHNSW_FLAT", "RHNSW_SQ", "RHNSW_PQ"]:
-        ef64 = {"ef": 64}
-        search_params.update({"params": ef64})
+        search_params.update({"ef": 64})
     elif index_type == "NSG":
-        length100 = {"search_length": 100}
-        search_params.update({"params": length100})
+        search_params.update({"search_length": 100})
     elif index_type == "ANNOY":
-        search_k = {"search_k": 1000}
-        search_params.update({"params": search_k})
+        search_params.update({"search_k": 1000})
     else:
         logging.getLogger().error("Invalid index_type.")
         raise Exception("Invalid index_type.")
@@ -1024,4 +1019,3 @@ class MyThread(threading.Thread):
         super(MyThread, self).join()
         if self.exc:
             raise self.exc
-
