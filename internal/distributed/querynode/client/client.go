@@ -84,6 +84,7 @@ func (c *Client) resetConnection() {
 	c.grpcClient = nil
 }
 
+// NewClient creates a new QueryNode client.
 func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
