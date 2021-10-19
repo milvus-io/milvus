@@ -11,7 +11,12 @@
 
 package typeutil
 
-import "time"
+import (
+	"math"
+	"time"
+)
+
+const MaxTimestamp = math.MaxUint64
 
 // ZeroTime is a zero time.
 var ZeroTime = time.Time{}
