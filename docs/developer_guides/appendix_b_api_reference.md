@@ -772,7 +772,7 @@ rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
 
 **Description:**
 
-Create a index for a collection.
+Create an index for a collection.
 
 **Parameters:**
 
