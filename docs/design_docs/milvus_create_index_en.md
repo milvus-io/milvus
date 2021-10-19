@@ -207,13 +207,13 @@ message SegmentInfo {
 ```
 17. If users has called `CreateIndex` on this `Collection`, then when `RootCoord` receives `SegmentFlushCompleted` request, it would extract the `SegmentID` from the request, and send a `GetInsertBinlogPaths` request to `DataCoord` to get the `Binlog` paths, finally `RootCoord` would send a `BuildIndex` request to `IndexCoord` to notify `IndexCoord` to build index on this segment.  
 
-18. The `Grpc` call of `SegmentFlushCompleted` might failed dure to network problem or some others, so how to create index if the `Grpc` failed ? The follwing figure show the solution.
+18. The `Grpc` call of `SegmentFlushCompleted` might failed due to network problem or some others, so how to create index if the `Grpc` failed ? The follwing figure show the solution.
 
 ![data_coord_flushed](./graphs/milvus_create_index_root_coord_check.png)
 
 19. There is a backgroud service, `checkFlushedSegmentLoop`, in `RootCoord`. `checkFlushedSegmentLoop` would periodically check whether there is a segment that needs to be created index but has not been created, the default interval is `10 minutes`, and call `DataCoord` and `IndexCoord`'s service to create index on these segments.
 
-20. In `Milvus 2.0`, `Create Index` is an asynchronous operation, so the `SDK` need to send `GetIndexStates` request to `IndexCoord` periodically to check if the index has been created, the `proto` is defined as follow.
+20. In `Milvus 2.0`, `Create Index` is an asynchronous operation, so the `SDK` needs to send `GetIndexStates` request to `IndexCoord` periodically to check if the index has been created, the `proto` is defined as follow.
 ```proto
 service IndexCoord {
   ...
