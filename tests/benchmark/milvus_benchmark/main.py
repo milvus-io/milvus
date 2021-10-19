@@ -20,6 +20,7 @@ from logs import log
 log.setup_logging()
 logger = logging.getLogger("milvus_benchmark.main")
 
+
 def positive_int(s):
     i = None
     try:
@@ -33,7 +34,7 @@ def positive_int(s):
 
 def get_image_tag(image_version):
     """ Set the image version to the latest version """
-    return "%s-latest" % (image_version)
+    return "%s-latest" % str(image_version)
 
 
 # def shutdown(event):
