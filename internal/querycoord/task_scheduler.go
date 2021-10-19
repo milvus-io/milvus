@@ -791,6 +791,7 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 	}
 }
 
+// processActivateTaskLoop process internal task, such as loadSegment, watchQUeryChannel, watDmChannel
 func (scheduler *TaskScheduler) processActivateTaskLoop() {
 	defer scheduler.wg.Done()
 	for {
