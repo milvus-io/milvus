@@ -88,7 +88,11 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask, binlogs, statslog
 // runFlushDel execute flush delete task with once and retry
 func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBuf) {
 	t.deleteOnce.Do(func() {
-		t.deltaLogs = []*DelDataBuf{deltaLogs}
+		if deltaLogs == nil {
+			t.deltaLogs = []*DelDataBuf{}
+		} else {
+			t.deltaLogs = []*DelDataBuf{deltaLogs}
+		}
 		go func() {
 			err := errStart
 			for err != nil {

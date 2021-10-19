@@ -50,10 +50,11 @@ type deleteNode struct {
 // DelDataBuf buffers insert data, monitoring buffer size and limit
 // size and limit both indicate numOfRows
 type DelDataBuf struct {
-	delData *DeleteData
-	size    int64
-	tsFrom  Timestamp
-	tsTo    Timestamp
+	delData  *DeleteData
+	size     int64
+	tsFrom   Timestamp
+	tsTo     Timestamp
+	fileSize int64
 }
 
 func (ddb *DelDataBuf) updateSize(size int64) {
