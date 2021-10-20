@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UpdateStateCode updates the state code of Proxy.
 func (node *Proxy) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }

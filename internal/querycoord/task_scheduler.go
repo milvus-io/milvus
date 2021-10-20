@@ -661,6 +661,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 	}
 }
 
+// waitActivateTaskDone function Synchronous wait internal task to be done
 func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task, triggerTask task) {
 	defer wg.Done()
 	var err error
@@ -791,6 +792,7 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 	}
 }
 
+// processActivateTaskLoop process internal task, such as loadSegment, watchQUeryChannel, watDmChannel
 func (scheduler *TaskScheduler) processActivateTaskLoop() {
 	defer scheduler.wg.Done()
 	for {

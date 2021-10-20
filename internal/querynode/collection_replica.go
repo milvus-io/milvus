@@ -412,6 +412,7 @@ func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, parti
 	return nil
 }
 
+// setSegment adds a segment to collectionReplica
 func (colReplica *collectionReplica) setSegment(segment *Segment) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -422,12 +423,14 @@ func (colReplica *collectionReplica) setSegment(segment *Segment) error {
 	return colReplica.addSegmentPrivate(segment.segmentID, segment.partitionID, segment)
 }
 
+// removeSegment removes a segment from collectionReplica
 func (colReplica *collectionReplica) removeSegment(segmentID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 	return colReplica.removeSegmentPrivate(segmentID)
 }
 
+// removeSegmentPrivate is private function in collectionReplica, to remove a segment from collectionReplica
 func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) error {
 	log.Debug("remove segment", zap.Int64("segmentID", segmentID))
 	segment, err := colReplica.getSegmentByIDPrivate(segmentID)

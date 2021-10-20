@@ -179,11 +179,11 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		indexMeta.State = commonpb.IndexState_Finished
 		// Under normal circumstances, it.err and it.internalErr will not be non-nil at the same time, but for the sake of insurance, the else judgment is added.
 		if it.err != nil {
-			log.Error("IndexNode CreateIndex Failed and can not be retried", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", it.err))
+			log.Error("IndexNode CreateIndex failed and can not be retried", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", it.err))
 			indexMeta.State = commonpb.IndexState_Failed
 			indexMeta.FailReason = it.err.Error()
 		} else if it.internalErr != nil {
-			log.Error("IndexNode CreateIndex Failed, but it can retried", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", it.internalErr))
+			log.Error("IndexNode CreateIndex failed, but it can retried", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", it.internalErr))
 			indexMeta.State = commonpb.IndexState_Unissued
 		}
 
@@ -284,7 +284,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	defer func() {
 		err = it.index.Delete()
 		if err != nil {
-			log.Warn("IndexNode IndexBuildTask Execute CIndexDelete Failed",
+			log.Warn("IndexNode IndexBuildTask Execute CIndexDelete failed",
 				zap.Int64("buildId", it.req.IndexBuildID),
 				zap.Error(err))
 		}

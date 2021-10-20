@@ -4,19 +4,19 @@ In this section, we introduce the RPCs of milvus service. A brief description of
 
 | RPC                     | description                                                                                   |
 | :---------------------- | --------------------------------------------------------------------------------------------- |
-| CreateCollection        | create a collection based on schema statement                                                  |
+| CreateCollection        | create a collection based on schema statement                                                 |
 | DropCollection          | drop a collection                                                                             |
-| HasCollection           | check whether a collection exists                                                                   |
+| HasCollection           | check whether a collection exists                                                             |
 | LoadCollection          | load collection to memory for future search                                                   |
-| ReleaseCollection       | release the collection from memory                                                      |
+| ReleaseCollection       | release the collection from memory                                                            |
 | DescribeCollection      | show a collection's schema and its descriptive statistics                                     |
 | GetCollectionStatistics | show a collection's statistics                                                                |
 | ShowCollections         | list all collections                                                                          |
 | CreatePartition         | create a partition                                                                            |
 | DropPartition           | drop a partition                                                                              |
-| HasPartition            | check whether a partition exists                                                                    |
+| HasPartition            | check whether a partition exists                                                              |
 | LoadPartition           | load collection to memory for future search                                                   |
-| ReleasePartitions       | release partitions from memory                                                      |
+| ReleasePartitions       | release partitions from memory                                                                |
 | GetPartitionStatistics  | show a partition's statistics                                                                 |
 | ShowPartitions          | list a collection's all partitions                                                            |
 | CreateIndex             | create index for a field in the collection                                                    |
@@ -772,7 +772,7 @@ rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
 
 **Description:**
 
-Create a index for a collection.
+Create an index for a collection.
 
 **Parameters:**
 
@@ -817,7 +817,7 @@ rpc DescribeIndex(DescribeIndexRequest) returns (common.Status){}
 
 **Description:**
 
-Get a index detailed info
+Get an index detailed info
 
 **Parameters:**
 

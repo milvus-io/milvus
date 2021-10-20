@@ -101,7 +101,7 @@ search-result-related message streams.
 
 #### 6.2 Interaction with MsgStream
 
-In Milvus 2.0, the log broker serves as the system' backbone: All data insert and update operations must go through the
+In Milvus 2.0, the log broker serves as the system 'backbone': All data insert and update operations must go through the
 log broker, and worker nodes execute CRUD operations by subscribing to and consuming logs. This design reduces system
 complexity by moving core functions such as data persistence and flashback down to the storage layer, and log pub-sub
 make the system even more flexible and better positioned for future scaling.
@@ -115,12 +115,12 @@ and the corresponding results of query requests will be written to DqResultChann
 As the number of tables increases, the number of DmChannels increases on demand, and the number of physical channels
 also increases on demand. In the future, the number of physical channels in the system can also be limited to a fixed
 number, such as 1024. In this case, the same physical channel will be mapped to virtual channels of different
-collections. As shown in the figure below.
+collections. Shown as the figure below.
 
 ![collection_dm_channels](./graphs/collection_dm_channels.png)
 
 When each collection is created, the Root Coordinator needs to decide the number of its DmChannels and the physical
-channels mapped by each virtual channel, and persist these information as the meta information of the collection; In
+channels mapped by each virtual channel, and persist these kinds of information as the meta information of the collection; In
 addition, when the system finds that the collection receives DmRequest frequently, we can allocate more virtual channels
 to the collection to increase the parallelism and thus increase the system throughput. This function is a key point of
 future work.

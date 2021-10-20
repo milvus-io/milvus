@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
+// Client is the grpc client of QueryNode.
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -83,6 +84,7 @@ func (c *Client) resetConnection() {
 	c.grpcClient = nil
 }
 
+// NewClient creates a new QueryNode client.
 func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")

@@ -541,6 +541,14 @@ func (s *Segment) checkIndexReady(fieldID int64) bool {
 	return s.indexInfos[fieldID].getReadyLoad()
 }
 
+func (s *Segment) updateBloomFilter(pks []int64) {
+	buf := make([]byte, 8)
+	for _, pk := range pks {
+		binary.BigEndian.PutUint64(buf, uint64(pk))
+		s.pkFilter.Add(buf)
+	}
+}
+
 //-------------------------------------------------------------------------------------- interfaces for growing segment
 func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 	/*
@@ -599,12 +607,6 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
-	}
-
-	for _, id := range *entityIDs {
-		b := make([]byte, 8)
-		binary.BigEndian.PutUint64(b, uint64(id))
-		s.pkFilter.Add(b)
 	}
 
 	// Blobs to one big blob

@@ -358,6 +358,7 @@ class TestDeleteOperation(TestcaseBase):
         assert del_res.delete_cnt == 1
         assert collection_w.num_entities == tmp_nb - 1
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_duplicate_primary_keys(self):
         """
         target: test delete from duplicate primary keys
@@ -374,3 +375,17 @@ class TestDeleteOperation(TestcaseBase):
         del_res, _ = collection_w.delete(tmp_expr)
         assert del_res.delete_cnt == tmp_nb
         assert collection_w.is_empty
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_empty_partition(self):
+        """
+        target: test delete empty partition
+        method: delete from an empty partition
+        expected: raise exception
+        """
+        # init collection and partition
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(tmp_expr, partition_name=[partition_w.name], check_task=CheckTasks.err_res, check_items=error)

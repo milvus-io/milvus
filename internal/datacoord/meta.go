@@ -154,7 +154,7 @@ func (m *meta) SetState(segmentID UniqueID, state commonpb.SegmentState) error {
 // `flushed` parameter indicating whether segment is flushed completely or partially
 // `binlogs`, `checkpoints` and `statPositions` are persistence data for segment
 func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
-	binlogs []*datapb.FieldBinlog, checkpoints []*datapb.CheckPoint,
+	binlogs, statslogs []*datapb.FieldBinlog, deltalogs []*datapb.DeltaLogInfo, checkpoints []*datapb.CheckPoint,
 	startPositions []*datapb.SegmentStartPosition) error {
 	m.Lock()
 	defer m.Unlock()
@@ -184,7 +184,7 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 		}
 		return nil
 	}
-
+	// binlogs
 	for _, tBinlogs := range binlogs {
 		fieldBinlogs := getFieldBinlogs(tBinlogs.GetFieldID(), currBinlogs)
 		if fieldBinlogs == nil {
@@ -193,8 +193,21 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 			fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, tBinlogs.Binlogs...)
 		}
 	}
-
 	clonedSegment.Binlogs = currBinlogs
+	// statlogs
+	currStatsLogs := clonedSegment.GetStatslogs()
+	for _, tStatsLogs := range statslogs {
+		fieldStatsLog := getFieldBinlogs(tStatsLogs.GetFieldID(), currStatsLogs)
+		if fieldStatsLog == nil {
+			currStatsLogs = append(currStatsLogs, tStatsLogs)
+		} else {
+			fieldStatsLog.Binlogs = append(fieldStatsLog.Binlogs, tStatsLogs.Binlogs...)
+		}
+	}
+	clonedSegment.Statslogs = currStatsLogs
+	// deltalogs
+	clonedSegment.Deltalogs = append(clonedSegment.Deltalogs, deltalogs...)
+
 	modSegments[segmentID] = clonedSegment
 
 	for _, pos := range startPositions {

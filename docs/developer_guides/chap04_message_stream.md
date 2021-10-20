@@ -1,10 +1,7 @@
 ## 8. Message Stream
 
-
-
-
-
 // TODO remove?
+
 #### 8.2 Message Stream Service API
 
 ```go
@@ -15,7 +12,7 @@ type Client interface {
 }
 ```
 
-* *CreateChannels*
+- _CreateChannels_
 
 ```go
 type OwnerDescription struct {
@@ -35,7 +32,7 @@ type CreateChannelResponse struct {
 }
 ```
 
-* *DestoryChannels*
+- _DestoryChannels_
 
 ```go
 type DestoryChannelRequest struct {
@@ -43,9 +40,7 @@ type DestoryChannelRequest struct {
 }
 ```
 
-
-
-* *DescribeChannels*
+- _DescribeChannels_
 
 ```go
 type DescribeChannelRequest struct {
@@ -62,19 +57,15 @@ type DescribeChannelResponse struct {
 }
 ```
 
-
-
 #### A.3 Message Stream
 
-* Overview
-
-
+- Overview
 
 <img src="./figs/msg_stream_input_output.jpeg" width=700>
 
-* Interface
+- Interface
 
-``` go
+```go
 // Msg
 
 type MsgType uint32
@@ -175,8 +166,6 @@ type TsMsg interface {
 type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
 ```
 
-
-
 ```go
 // Unmarshal
 
@@ -200,9 +189,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher
 type MemUDFactory struct {}
 func (mudf *MemUDFactory) NewUnmarshalDispatcher() *UnmarshalDispatcher
 ```
-
-
-
 
 ```go
 // MsgStream
@@ -248,9 +234,7 @@ type RmsFactory struct {
 }
 ```
 
-
-
-```go
+````go
 
 // mqMsgStream
 type mqMsgStream struct {
@@ -312,9 +296,7 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 func (rmq *RocksMQ) Seek(groupName string, channelName string, msgID MessageID) error
 
 func NewRocksMQ(name string, idAllocator IDAllocator) (*RocksMQ, error)
-```
-
-
+````
 
 ##### A.4.1 Meta (stored in etcd)
 
@@ -326,8 +308,6 @@ func NewRocksMQ(name string, idAllocator IDAllocator) (*RocksMQ, error)
 // consumer group meta
 "$(group_name)/$(channel_name)/current_id", UniqueID
 ```
-
-
 
 ##### A.4.2 Data (stored in RocksDB)
 

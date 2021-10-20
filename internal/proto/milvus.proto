@@ -427,12 +427,21 @@ message CreateIndexRequest {
   repeated common.KeyValuePair extra_params = 5; 
 }
 
+/*
+* Get created index information. 
+* Current release of Milvus only supports showing latest built index.
+*/
 message DescribeIndexRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // The particular collection name in Milvus
+  string collection_name = 3;
+   // The vector field name in this particular collection
   string field_name = 4;
-  string index_name = 5; // No need to set up for now @2021.06.30
+  // No need to set up for now @2021.06.30
+  string index_name = 5; 
 }
 
 message IndexDescription {

@@ -212,6 +212,12 @@ SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
 
+BitsetView
+SegmentSealedImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const {
+    // TODO(yukun)
+    return bitset;
+}
+
 void
 SegmentSealedImpl::vector_search(int64_t vec_count,
                                  query::SearchInfo search_info,

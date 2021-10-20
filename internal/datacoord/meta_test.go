@@ -211,11 +211,14 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta, err := newMeta(memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
-		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0"}}}}}
+		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0"}}},
+			Statslogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog0"}}}}}
 		err = meta.AddSegment(segment1)
 		assert.Nil(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, true, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog1"}}},
+			[]*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog1"}}},
+			[]*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.Nil(t, err)
 
@@ -224,6 +227,8 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 			ID: 1, State: commonpb.SegmentState_Flushing, NumOfRows: 10,
 			StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}},
 			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0", "binlog1"}}},
+			Statslogs:     []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog0", "statslog1"}}},
+			Deltalogs:     []*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
 		}}
 		assert.EqualValues(t, expected, updated)
 	})
@@ -232,7 +237,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta, err := newMeta(memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil)
+		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil, nil, nil)
 		assert.Nil(t, err)
 	})
 
@@ -244,7 +249,8 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		err = meta.AddSegment(segment1)
 		assert.Nil(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, false, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
+		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
+
 			[]*datapb.SegmentStartPosition{{SegmentID: 2, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.Nil(t, err)
 		assert.Nil(t, meta.GetSegment(2))
@@ -266,6 +272,8 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta.segments.SetSegment(1, segmentInfo)
 
 		err = meta.UpdateFlushSegmentsInfo(1, true, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog"}}},
+			[]*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog"}}},
+			[]*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.NotNil(t, err)
 		assert.Equal(t, "mocked fail", err.Error())

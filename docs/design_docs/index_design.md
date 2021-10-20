@@ -42,17 +42,22 @@ deleted from the MetaTable.
 
 When IndexCoordinate receives a query index status request from other components, first check whether the corresponding
 index task is marked for deletion in the MetaTable. If marked for deletion, the return index does not exist, otherwise,
-it returns the index information
+it returns the index information.
 
 ## 8.3 Feature Design
 
 IndexCoord has two main structures, NodeManager and MetaTable. NodeManager is used to manage IndexNode node information,
 and MetaTable is used to maintain index related information.
 
-IndexCoord mainly has these functions: `watchNodeLoop`, `watchMetaLoop`, `assignTaskLoop` and `recycleUnusedIndexFiles`.
-`watchNodeLoop` is mainly responsible for monitoring the changes of IndexNode nodes, `watchMetaLoop` is mainly
-responsible for monitoring the changes of Meta, `assignTaskLoop` is mainly responsible for assigning index building tasks,
-and `recycleUnusedIndexFiles` is mainly responsible for cleaning up useless index files and deleted index records.
+IndexCoord mainly has these functions: 
+
+`watchNodeLoop` is mainly responsible for monitoring the changes of IndexNode nodes;
+
+`watchMetaLoop` is mainly responsible for monitoring the changes of Meta;
+
+`assignTaskLoop` is mainly responsible for assigning index building tasks;
+
+`recycleUnusedIndexFiles` is mainly responsible for cleaning up useless index files and deleted index records;
 
 ### 8.3.1 The relationship between IndexCoord and IndexNode
 

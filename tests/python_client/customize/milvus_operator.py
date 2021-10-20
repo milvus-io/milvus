@@ -5,7 +5,7 @@ from common.cus_resource_opts import CustomResourceOperations as CusResource
 template_yaml = 'template/default.yaml'
 MILVUS_GRP = 'milvus.io'
 MILVUS_VER = 'v1alpha1'
-MILVUS_Plural = 'MilvusClusters'
+MILVUS_PLURAL = 'milvusclusters'
 
 
 def update_configs(yaml, template):
@@ -27,7 +27,7 @@ def install_milvus(cus_configs, template=template_yaml):
 
     _configs = update_configs(cus_configs, template)
     # apply custom resource object to deploy milvus
-    cus_res = CusResource(kind=MILVUS_Plural,
+    cus_res = CusResource(kind=MILVUS_PLURAL,
                           group=MILVUS_GRP,
                           version=MILVUS_VER,
                           namespace='chaos-testing')
@@ -38,7 +38,7 @@ def install_milvus(cus_configs, template=template_yaml):
 def uninstall_milvus(release_name, namespace='default'):
 
     # delete custom resource object to uninstall milvus
-    cus_res = CusResource(kind=MILVUS_Plural,
+    cus_res = CusResource(kind=MILVUS_PLURAL,
                           group=MILVUS_GRP,
                           version=MILVUS_VER,
                           namespace=namespace)

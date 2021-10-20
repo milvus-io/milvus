@@ -16,7 +16,7 @@
 #include <unistd.h>
 #include "easyloggingpp/easylogging++.h"
 
-namespace milvus {
+// namespace milvus {
 
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
@@ -133,4 +133,4 @@ GetThreadName();
 int64_t
 get_thread_start_timestamp();
 
-}  // namespace milvus
+// }  // namespace milvus

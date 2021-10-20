@@ -19,7 +19,7 @@ INITIALIZE_EASYLOGGINGPP
 #include <stdexcept>
 #include <string>
 
-namespace milvus {
+// namespace milvus {
 
 std::string
 LogOut(const char* pattern, ...) {
@@ -105,4 +105,4 @@ get_thread_start_timestamp() {
     }
 }
 
-}  // namespace milvus
+// }  // namespace milvus

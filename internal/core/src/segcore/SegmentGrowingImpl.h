@@ -177,10 +177,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  public:
     std::shared_ptr<DeletedRecord::TmpBitmap>
-    get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
+    get_deleted_bitmap(int64_t del_barrier,
+                       Timestamp query_timestamp,
+                       int64_t insert_barrier,
+                       bool force = false) const;
 
-    const BitsetView
-    get_filtered_bitmap(BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp);
+    BitsetView
+    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
@@ -213,7 +216,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SchemaPtr schema_;
 
     InsertRecord record_;
-    DeletedRecord deleted_record_;
+    mutable DeletedRecord deleted_record_;
     IndexingRecord indexing_record_;
     SealedIndexingRecord sealed_indexing_record_;
 

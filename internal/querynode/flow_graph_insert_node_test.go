@@ -245,6 +245,14 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 		}
 		msg := []flowgraph.Msg{&iMsg}
 		insertNode.Operate(msg)
+		s, err := replica.getSegmentByID(defaultSegmentID)
+		assert.Nil(t, err)
+		buf := make([]byte, 8)
+		for i := 0; i < defaultMsgLength; i++ {
+			binary.BigEndian.PutUint64(buf, uint64(i))
+			assert.True(t, s.pkFilter.Test(buf))
+		}
+
 	})
 
 	t.Run("test invalid partitionID", func(t *testing.T) {

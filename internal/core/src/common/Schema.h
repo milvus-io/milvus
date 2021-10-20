@@ -10,14 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "FieldMeta.h"
-#include <utility>
-#include <vector>
+
+#include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
-#include <memory>
-#include <pb/schema.pb.h>
-#include <optional>
+#include <utility>
+#include <vector>
+
+#include "FieldMeta.h"
+#include "pb/schema.pb.h"
 
 namespace milvus {
 
@@ -107,15 +109,6 @@ class Schema {
     const std::vector<int64_t>&
     get_sizeof_infos() const {
         return sizeof_infos_;
-    }
-
-    [[deprecated]] std::optional<FieldOffset>
-    get_offset_opt(const FieldName& field_name) const {
-        if (!name_offsets_.count(field_name)) {
-            return std::nullopt;
-        } else {
-            return name_offsets_.at(field_name);
-        }
     }
 
     FieldOffset

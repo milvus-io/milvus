@@ -70,28 +70,34 @@ type ConsistentHashChannelPolicyFactory struct {
 	hashring *consistent.Consistent
 }
 
+// NewConsistentHashChannelPolicyFactory creates a new consistent hash policy factory instance
 func NewConsistentHashChannelPolicyFactory(hashring *consistent.Consistent) *ConsistentHashChannelPolicyFactory {
 	return &ConsistentHashChannelPolicyFactory{
 		hashring: hashring,
 	}
 }
 
+// NewRegisterPolicy create a new register policy
 func (f *ConsistentHashChannelPolicyFactory) NewRegisterPolicy() RegisterPolicy {
 	return ConsistentHashRegisterPolicy(f.hashring)
 }
 
+// NewDeregisterPolicy create a new dereigster policy
 func (f *ConsistentHashChannelPolicyFactory) NewDeregisterPolicy() DeregisterPolicy {
 	return ConsistentHashDeregisterPolicy(f.hashring)
 }
 
+// NewAssignPolicy create a new assign policy
 func (f *ConsistentHashChannelPolicyFactory) NewAssignPolicy() ChannelAssignPolicy {
 	return ConsistentHashChannelAssignPolicy(f.hashring)
 }
 
+// NewReassignPolicy creates a new reassign policy
 func (f *ConsistentHashChannelPolicyFactory) NewReassignPolicy() ChannelReassignPolicy {
 	return EmptyReassignPolicy
 }
 
+// NewBgChecker creates a new background checker
 func (f *ConsistentHashChannelPolicyFactory) NewBgChecker() ChannelBGChecker {
 	return EmptyBgChecker
 }

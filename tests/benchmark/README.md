@@ -7,7 +7,7 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
 - Test cases in `milvus_benchmark` can be organized with `yaml`
 - Test can run with local mode or helm mode
    - local: install and start your local server, and pass the host/port param when start the tests
-   - helm: install the server by helm, which will manage the milvus in k8s cluster, and you can interagte the test stage into argo workflow or jenkins pipeline
+   - helm: install the server by helm, which will manage the milvus in k8s cluster, and you can integrate the test stage into argo workflow or jenkins pipeline
    
 ### Usage
 
@@ -73,7 +73,7 @@ insert_performance:
 ```
 - `insert_performance`
 
-   The top level is the runner type: the other test types including: `search_performance/build_performance/insert_performance/accuracy/locust_insert/...`, each test type corresponds to the different runner conponent defined in directory `runnners`
+   The top level is the runner type: the other test types including: `search_performance/build_performance/insert_performance/accuracy/locust_insert/...`, each test type corresponds to the different runner component defined in directory `runnners`
 
 - other fields under runner type
 
@@ -165,11 +165,11 @@ Also, you should provide the field value of the source data file path `source_fi
 
 ## Overview of the benchmark
 
-### Conponents
+### Components
 
 - `main.py`
   
-   The entry file: parse the input params and initialize the other conponent: `metric`, `env`, `runner`
+   The entry file: parse the input params and initialize the other component: `metric`, `env`, `runner`
 
 - `metric`
 
