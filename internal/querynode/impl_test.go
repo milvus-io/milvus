@@ -342,25 +342,217 @@ func TestImpl_ReleasePartitions(t *testing.T) {
 func TestImpl_GetSegmentInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
 
-	req := &queryPb.GetSegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchQueryChannels,
-			MsgID:   rand.Int63(),
-		},
-		SegmentIDs: []UniqueID{defaultSegmentID},
-	}
+	t.Run("test GetSegmentInfo", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
 
-	rsp, err := node.GetSegmentInfo(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
 
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	rsp, err = node.GetSegmentInfo(ctx, req)
-	assert.Error(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+		rsp, err = node.GetSegmentInfo(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+	})
+
+	t.Run("test no collection in historical", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.historical.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
+
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+	})
+
+	t.Run("test no collection in streaming", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.streaming.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
+
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+	})
+
+	t.Run("test different segment type", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
+
+		seg, err := node.streaming.replica.getSegmentByID(defaultSegmentID)
+		assert.NoError(t, err)
+
+		seg.setType(segmentTypeInvalid)
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+
+		seg.setType(segmentTypeSealed)
+		rsp, err = node.GetSegmentInfo(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+
+		seg.setType(segmentTypeGrowing)
+		rsp, err = node.GetSegmentInfo(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+
+		seg.setType(-100)
+		rsp, err = node.GetSegmentInfo(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
+	t.Run("test GetSegmentInfo with indexed segment", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		seg, err := node.historical.replica.getSegmentByID(defaultSegmentID)
+		assert.NoError(t, err)
+
+		err = seg.setIndexInfo(simpleVecField.id, &indexInfo{
+			indexName: "query-node-test",
+			indexID:   UniqueID(0),
+			buildID:   UniqueID(0),
+		})
+		assert.NoError(t, err)
+
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
+
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+		rsp, err = node.GetSegmentInfo(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+	})
+
+	t.Run("test GetSegmentInfo without streaming partition", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
+
+		node.streaming.replica.(*collectionReplica).partitions = make(map[UniqueID]*Partition)
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+	})
+
+	t.Run("test GetSegmentInfo without streaming segment", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
+
+		node.streaming.replica.(*collectionReplica).segments = make(map[UniqueID]*Segment)
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+	})
+
+	t.Run("test GetSegmentInfo without historical partition", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
+
+		node.historical.replica.(*collectionReplica).partitions = make(map[UniqueID]*Partition)
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+	})
+
+	t.Run("test GetSegmentInfo without historical segment", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := &queryPb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+			CollectionID: defaultCollectionID,
+		}
+
+		node.historical.replica.(*collectionReplica).segments = make(map[UniqueID]*Segment)
+		rsp, err := node.GetSegmentInfo(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+	})
 }
 
 func TestImpl_isHealthy(t *testing.T) {
