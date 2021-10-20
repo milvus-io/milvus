@@ -52,7 +52,7 @@ func TestMetaService_All(t *testing.T) {
 
 	t.Run("Test printCollectionStruct", func(t *testing.T) {
 		mf := &MetaFactory{}
-		collectionMeta := mf.CollectionMetaFactory(collectionID0, collectionName0)
+		collectionMeta := mf.GetCollectionMeta(collectionID0, collectionName0)
 		printCollectionStruct(collectionMeta)
 	})
 }
