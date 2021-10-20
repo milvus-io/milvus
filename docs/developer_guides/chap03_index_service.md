@@ -1,8 +1,4 @@
-
-
 ## 3. Index Service
-
-
 
 #### 3.1 Overview
 
@@ -23,9 +19,7 @@ type IndexCoord interface {
 }
 ```
 
-
-
-* *RegisterNode*
+- _RegisterNode_
 
 ```go
 type MsgBase struct {
@@ -56,7 +50,7 @@ type RegisterNodeResponse struct {
 }
 ```
 
-* *BuildIndex*
+- _BuildIndex_
 
 ```go
 type KeyValuePair struct {
@@ -79,7 +73,7 @@ type BuildIndexResponse struct {
 }
 ```
 
-* *DropIndex*
+- _DropIndex_
 
 ```go
 type DropIndexRequest struct {
@@ -87,7 +81,7 @@ type DropIndexRequest struct {
 }
 ```
 
-* *GetIndexStates*
+- _GetIndexStates_
 
 ```go
 type GetIndexStatesRequest struct {
@@ -117,7 +111,7 @@ type GetIndexStatesResponse struct {
 }
 ```
 
-* *GetIndexFilePaths*
+- _GetIndexFilePaths_
 
 ```go
 type GetIndexFilePathsRequest struct {
@@ -137,7 +131,7 @@ type GetIndexFilePathsResponse struct {
 
 ```
 
-* *NotifyBuildIndex*
+- _NotifyBuildIndex_
 
 ```go
 type NotifyBuildIndexRequest struct {
@@ -147,8 +141,6 @@ type NotifyBuildIndexRequest struct {
 	NodeID         UniqueID
 }
 ```
-
-
 
 #### 3.3 Index Node Interface
 
@@ -162,7 +154,7 @@ type IndexNode interface {
 }
 ```
 
-* *BuildIndex*
+- _BuildIndex_
 
 ```go
 
@@ -181,7 +173,7 @@ type BuildIndexRequest struct {
 }
 ```
 
-* *DropIndex*
+- _DropIndex_
 
 ```go
 type DropIndexRequest struct {
