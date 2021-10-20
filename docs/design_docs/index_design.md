@@ -61,8 +61,9 @@ IndexCoord mainly has these functions:
 
 ### 8.3.1 The relationship between IndexCoord and IndexNode
 
-IndexCoord is responsible for assigning index construction tasks and maintaining index status, and IndexNode is the
-node that executes index building tasks.
+IndexCoord is responsible for assigning index construction tasks and maintaining index status. 
+
+IndexNode is a node that executes index building tasks.
 
 ### 8.3.2 NodeManager
 
@@ -71,8 +72,8 @@ load information of each IndexNode. The load information of IndexNode is based o
 When the IndexCoord service starts, it first obtains the node information of all
 current IndexNodes from etcd, and then adds the node information to the NodeManager. After that, the online and offline
 information of IndexNode node is obtained from watchNodeLoop. Then it will traverse the entire MetaTable, get the load
-information corresponding to each IndexNode node, and update the priority queue in the NodeManager. Whenever the task
-of building an index needs to be allocated, the IndexNode with the lowest load will be selected according to the
+information corresponding to each IndexNode node, and update the priority queue in the NodeManager. When an index building 
+task need to be allocated, the IndexNode with the lowest load will be selected according to the
 priority queue to execute the task.
 
 ### 8.3.3 MetaTable
