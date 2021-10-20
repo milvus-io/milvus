@@ -28,7 +28,7 @@ type rmqClient struct {
 func NewRmqClient(opts rocksmq.ClientOptions) (*rmqClient, error) {
 	c, err := rocksmq.NewClient(opts)
 	if err != nil {
-		log.Error("Set rmq client failed, error", zap.Error(err))
+		log.Error("Failed to set rmq client: ", zap.Error(err))
 		return nil, err
 	}
 	return &rmqClient{client: c}, nil
