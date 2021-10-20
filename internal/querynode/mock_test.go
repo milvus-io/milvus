@@ -1079,7 +1079,7 @@ func genSimpleRetrievePlanExpr() ([]byte, error) {
 				},
 			},
 		},
-		OutputFieldIds: []int64{simpleConstField.id},
+		OutputFieldIds: []int64{simpleVecField.id},
 	}
 	planExpr, err := proto.Marshal(planNode)
 	return planExpr, err
@@ -1120,6 +1120,7 @@ func genSimpleSearchRequest() (*internalpb.SearchRequest, error) {
 		Dsl:              simpleDSL,
 		PlaceholderGroup: placeHolder,
 		DslType:          commonpb.DslType_Dsl,
+		TravelTimestamp:  1000,
 	}, nil
 }
 

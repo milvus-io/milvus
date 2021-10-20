@@ -555,6 +555,48 @@ func TestQueryCollection_search(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestQueryCollection_preparePlaceHolderGroupByVectors(t *testing.T) {
+	vector := genSimpleFloatVectors()
+	_, err := preparePlaceHolderGroupByVectors(vector, defaultDim, defaultCollectionID)
+	assert.NoError(t, err)
+
+	_, err = preparePlaceHolderGroupByVectors(vector, defaultDim+1, defaultCollectionID)
+	assert.Error(t, err)
+}
+
+func TestQueryCollection_searchByID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	queryChannel := genQueryChannel()
+	queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+	queryCollection.queryResultMsgStream.Start()
+
+	vecCM, err := genVectorChunkManager(ctx)
+	assert.NoError(t, err)
+
+	queryCollection.vectorChunkManager = vecCM
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+	queryCollection.streaming = node.streaming
+	queryCollection.historical = node.historical
+
+	msg, err := genSimpleSearchMsg()
+	assert.NoError(t, err)
+
+	retrieveReq, err := genSimpleRetrieveRequest()
+	assert.NoError(t, err)
+
+	msg.PlaceholderGroup = nil
+	msg.SearchByIDExprPlan = retrieveReq.SerializedExprPlan
+
+	err = queryCollection.searchByID(msg)
+	assert.NoError(t, err)
+}
+
 func TestQueryCollection_receive(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -570,16 +612,16 @@ func TestQueryCollection_receive(t *testing.T) {
 
 	queryCollection.vectorChunkManager = vecCM
 
-	err = queryCollection.streaming.replica.removeSegment(defaultSegmentID)
-	assert.NoError(t, err)
-
-	err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
-	assert.NoError(t, err)
+	//err = queryCollection.streaming.replica.removeSegment(defaultSegmentID)
+	//assert.NoError(t, err)
+	//
+	//err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
+	//assert.NoError(t, err)
 
 	msg, err := genSimpleRetrieveMsg()
 	assert.NoError(t, err)
 
-	err = queryCollection.retrieve(msg)
+	_, err = queryCollection.retrieve(msg, true)
 	assert.NoError(t, err)
 }
 
