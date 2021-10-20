@@ -388,4 +388,104 @@ class TestDeleteOperation(TestcaseBase):
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
 
         error = {ct.err_code: 0, ct.err_msg: "..."}
-        collection_w.delete(tmp_expr, partition_name=[partition_w.name], check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(tmp_expr, partition_name=[partition_w.name], check_task=CheckTasks.err_res,
+                            check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_not_existed_partition(self):
+        """
+        target: test delete from an not existed partition
+        method: delete from an fake partition
+        expected: raise exception
+        """
+        # init collection with tmp_nb data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+
+        # raise exception
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(tmp_expr, partition_name=[ct.default_tag], check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_part_not_existed_partition(self):
+        """
+        target: test delete from part not existed partitions
+        method: delete with part not existed partition name
+        expected: raise exception
+        """
+        # init collection with tmp_nb data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+
+        # raise exception
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(tmp_expr, partition_name=[ct.default_partition_name, ct.default_tag],
+                            check_task=CheckTasks.err_res, check_items=error)
+        assert collection_w.num_entities == tmp_nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_multi_partitions(self):
+        """
+        target: delete entities from multi partitions
+        method: 1.insert pk (primary keys) [0,half) to tag partition
+                2.insert pk [half,nb) to default partition
+                3.delete pk values 0 and half from two partition
+        expected: two entities are deleted
+        """
+        half = ct.default_nb // 2
+        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
+        expr = f'{ct.default_int64_field_name} in {[0, half]}'
+        collection_w.delete(expr, partition_name=[ct.default_partition_name, partition_w.name])
+        assert collection_w.num_entities == ct.default_nb - 2
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_from_partition_with_another_ids(self):
+        """
+        target: delete another partition entities from partition
+        method: 1.insert nb entities into two partitions in half
+                2.delete entities from partition_1 with partition_2 values
+        expected: No entities will be deleted
+        """
+        half = ct.default_nb // 2
+        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
+
+        # delete entities from another partition
+        expr = f'{ct.default_int64_field_name} in {[0]}'
+        collection_w.delete(expr, partition_name=[ct.default_partition_name])
+        assert collection_w.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_from_partition_with_own_ids(self):
+        """
+        target: test delete own pk from partition
+        method: 1.insert nb entities into two partitions in half
+                2.delete entities from partition_1 with partition_1 values
+        expected: verify entities is deleted
+        """
+        half = ct.default_nb // 2
+        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
+
+        # delete entities from another partition
+        expr = f'{ct.default_int64_field_name} in {[0]}'
+        collection_w.delete(expr, partition_name=[partition_w.name])
+        assert collection_w.num_entities == ct.default_nb - 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_from_partitions_with_same_ids(self):
+        """
+        target: test delete same ids from two partitions with same data
+        method: 1.insert same nb data into two partitions
+                2.delete same ids from two partitions
+        expected: The data in both partitions will be deleted
+        """
+        # init collection and partition
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+
+        # insert same data into partition_w and default partition
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        partition_w.insert(df)
+        assert collection_w.num_entities == tmp_nb * 2
+
+        # delete same ids from two partition
+        collection_w.delete(tmp_expr, partition_name=[ct.default_partition_name, partition_w.name])
+        assert collection_w.num_entities == tmp_nb - 2
