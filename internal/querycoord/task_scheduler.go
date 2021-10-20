@@ -96,7 +96,7 @@ func (queue *TaskQueue) addTaskToFront(t task) {
 }
 
 // PopTask pops a trigger task from task list
-func (queue *TaskQueue) PopTask() task {
+func (queue *TaskQueue) popTask() task {
 	queue.Lock()
 	defer queue.Unlock()
 
@@ -599,7 +599,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			scheduler.stopActivateTaskLoopChan <- 1
 			return
 		case <-scheduler.triggerTaskQueue.Chan():
-			triggerTask = scheduler.triggerTaskQueue.PopTask()
+			triggerTask = scheduler.triggerTaskQueue.popTask()
 			log.Debug("scheduleLoop: pop a triggerTask from triggerTaskQueue", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
 			alreadyNotify := true
 			if triggerTask.getState() == taskUndo || triggerTask.getState() == taskDoing {
