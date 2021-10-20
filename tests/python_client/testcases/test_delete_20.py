@@ -21,7 +21,7 @@ class TestDeleteParams(TestcaseBase):
     Only the `in` operator is supported in the expr
     """
 
-    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.skip(reason="Issues #10273")
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize('is_binary', [False, True])
     def test_delete_entities(self, is_binary):
@@ -33,7 +33,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with default_nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True, is_binary=is_binary)
-        expr = f'{ct.default_int64_field_name} in {ids[0][:half_nb]}'
+        expr = f'{ct.default_int64_field_name} in {ids[:half_nb]}'
 
         # delete half of data
         collection_w.delete(expr)
@@ -56,22 +56,23 @@ class TestDeleteParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
         collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.skip(reason="Issue #10271")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_none(self):
         """
         target: test delete with None expr
         method: delete with None expr
-        expected: todo
+        expected: raise exception
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        collection_w.delete(None)
-        log.debug(collection_w.num_entities)
+        error = {ct.err_code: 0, ct.err_msg: "todo"}
+        collection_w.delete(expr=None, check_task=CheckTasks.err_res, check_items=error)
+        assert collection_w.num_entities == tmp_nb
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr", [1, "12-s", "中文", [], ()])
-    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.skip(reason="Issues #10271")
     def test_delete_expr_non_string(self, expr):
         """
         target: test delete with non-string expression
@@ -83,7 +84,6 @@ class TestDeleteParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "..."}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.skip(reason="Delete function is not implemented")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_empty_value(self):
         """
@@ -97,9 +97,9 @@ class TestDeleteParams(TestcaseBase):
 
         # delete empty entities
         collection_w.delete(expr)
-        assert collection_w.num_entities == ct.default_nb
+        assert collection_w.num_entities == tmp_nb
 
-    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.skip(reason="Issues #10273")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_single(self):
         """
@@ -110,10 +110,11 @@ class TestDeleteParams(TestcaseBase):
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
         expr = f'{ct.default_int64_field_name} in {[0]}'
-        collection_w.delete(expr)
+        del_res, _ = collection_w.delete(expr)
+        assert del_res.delete_count == 1
         assert collection_w.num_entities == tmp_nb - 1
 
-    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.skip(reason="Issues #10273")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_all_values(self):
         """
@@ -123,12 +124,13 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with default_nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)
-        expr = f'{ct.default_int64_field_name} in {ids[0]}'
-        collection_w.delete(expr)
+        expr = f'{ct.default_int64_field_name} in {ids}'
+        del_res, _ = collection_w.delete(expr)
+        assert del_res.delete_count == ct.default_nb
         assert collection_w.num_entities == 0
         assert collection_w.is_empty
 
-    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.skip(reason="Issues #10277")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_not_existed_values(self):
         """
@@ -145,19 +147,22 @@ class TestDeleteParams(TestcaseBase):
         collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="Issues #10277")
     def test_delete_part_existed_values(self):
         """
         target: test delete with part not existed values
         method: delete data part not in the collection
-        expected: not delete and entities
+        expected: delete any entities
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
         expr = f'{ct.default_int64_field_name} in {[0, tmp_nb]}'
         res, _ = collection_w.delete(expr)
         assert res.delete_count == 0
+        assert collection_w.num_entities == tmp_nb
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="Issues #10271")
     def test_delete_expr_inconsistent_values(self):
         """
         target: test delete with inconsistent type values
@@ -173,6 +178,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="Issues #10271")
     def test_delete_expr_mix_values(self):
         """
         target: test delete with mix type values
@@ -255,7 +261,7 @@ class TestDeleteOperation(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.skip(reason="Delete function is not implemented")
+    @pytest.mark.skip(reason="Issues #10277")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_empty_collection(self):
         """
@@ -355,7 +361,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
         expr = f'{ct.default_int64_field_name} in {[0, 0, 0]}'
         del_res, _ = collection_w.delete(expr)
-        assert del_res.delete_cnt == 1
+        assert del_res.delete_count == 1
         assert collection_w.num_entities == tmp_nb - 1
 
     @pytest.mark.tags(CaseLabel.L1)
