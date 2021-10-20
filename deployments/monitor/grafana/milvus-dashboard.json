@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1634644608544,
+  "iteration": 1634731498730,
   "links": [],
   "panels": [
     {
@@ -387,7 +387,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of has_collection_total",
+      "description": "per-minute rate of has_collection",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -531,6 +531,7 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "increase(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
           "interval": "",
           "legendFormat": "total",
@@ -538,6 +539,7 @@
           "refId": "A"
         },
         {
+          "exemplar": true,
           "expr": "increase(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2",
           "interval": "",
           "legendFormat": "success",
@@ -591,7 +593,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of show_collections_total as measured over the last 5 minutes",
+      "description": "per-minute rate of show_collections",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -632,6 +634,7 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "increase(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
           "interval": "",
           "legendFormat": "total",
@@ -639,6 +642,7 @@
           "refId": "A"
         },
         {
+          "exemplar": true,
           "expr": "increase(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
           "interval": "",
           "legendFormat": "success",
@@ -1040,7 +1044,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of describe_collection as measured over the last 5 minutes",
+      "description": "per-minute rate of describe_collection",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1081,6 +1085,7 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
           "interval": "",
           "legendFormat": "total",
@@ -1088,6 +1093,7 @@
           "refId": "A"
         },
         {
+          "exemplar": true,
           "expr": "increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2",
           "interval": "",
           "legendFormat": "success",
@@ -1141,7 +1147,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of drop_collection as measured over the last 5 minutes",
+      "description": "per-minute rate of drop_collection",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1182,7 +1188,8 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(rate(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+          "exemplar": true,
+          "expr": "increase(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
@@ -5845,7 +5852,7 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-5m",
     "to": "now"
   },
   "timepicker": {
@@ -5878,5 +5885,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 40
+  "version": 49
 }
