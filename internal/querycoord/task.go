@@ -1764,19 +1764,21 @@ func assignInternalTask(ctx context.Context,
 	node2Segments := make(map[int64][]*querypb.LoadSegmentsRequest)
 	sizeCounts := make(map[int64]int)
 	for index, nodeID := range segment2Nodes {
+		sizeOfReq := getSizeOfLoadSegmentReq(loadSegmentRequests[index])
 		if _, ok := node2Segments[nodeID]; !ok {
 			node2Segments[nodeID] = make([]*querypb.LoadSegmentsRequest, 0)
 			node2Segments[nodeID] = append(node2Segments[nodeID], loadSegmentRequests[index])
-			sizeCounts[nodeID] = 0
+			sizeCounts[nodeID] = sizeOfReq
+		} else {
+			if sizeCounts[nodeID]+sizeOfReq > 2097152 {
+				node2Segments[nodeID] = append(node2Segments[nodeID], loadSegmentRequests[index])
+				sizeCounts[nodeID] = sizeOfReq
+			} else {
+				lastReq := node2Segments[nodeID][len(node2Segments[nodeID])-1]
+				lastReq.Infos = append(lastReq.Infos, loadSegmentRequests[index].Infos...)
+				sizeCounts[nodeID] += sizeOfReq
+			}
 		}
-		sizeOfReq := getSizeOfLoadSegmentReq(loadSegmentRequests[index])
-		if sizeCounts[nodeID]+sizeOfReq > 2097152 {
-			node2Segments[nodeID] = append(node2Segments[nodeID], loadSegmentRequests[index])
-			sizeCounts[nodeID] = 0
-		}
-		lastReq := node2Segments[nodeID][len(node2Segments[nodeID])-1]
-		lastReq.Infos = append(lastReq.Infos, loadSegmentRequests[index].Infos...)
-		sizeCounts[nodeID] += sizeOfReq
 
 		if cluster.hasWatchedQueryChannel(parentTask.traceCtx(), nodeID, collectionID) {
 			watchQueryChannelInfo[nodeID] = true
