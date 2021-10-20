@@ -30,7 +30,7 @@ class ConcurrentBitset {
         }
     }
 
-    explicit ConcurrentBitset(size_t count, const uint8_t* data) : bitset_(((count + 8 - 1) >> 3)) {
+    explicit ConcurrentBitset(size_t count, const uint8_t* data) : count_(count), bitset_(((count + 8 - 1) >> 3)) {
         memcpy(mutable_data(), data, (count + 8 - 1) >> 3);
     }
 

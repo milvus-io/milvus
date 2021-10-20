@@ -127,14 +127,14 @@ SegmentGrowingImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_ba
     }
     AssertInfo(bitmap_holder, "bitmap_holder is null");
     auto deleted_bitmap = bitmap_holder->bitmap_ptr;
-    AssertInfo(deleted_bitmap->count() == bitset.u8size(), "Deleted bitmap count not equal to filtered bitmap count");
+    AssertInfo(deleted_bitmap->count() == bitset.size(), "Deleted bitmap count not equal to filtered bitmap count");
 
-    auto filtered_bitmap =
-        std::make_shared<faiss::ConcurrentBitset>(faiss::ConcurrentBitset(bitset.u8size(), bitset.data()));
+    auto filtered_bitmap = std::make_shared<faiss::ConcurrentBitset>(bitset.size(), bitset.data());
 
     auto final_bitmap = (*deleted_bitmap.get()) | (*filtered_bitmap.get());
 
-    return BitsetView(final_bitmap);
+    BitsetView res = BitsetView(final_bitmap);
+    return res;
 }
 
 Status
@@ -245,10 +245,12 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     std::vector<idx_t> uids(size);
     std::vector<Timestamp> timestamps(size);
     // #pragma omp parallel for
+    std::cout << "zzzz: " << size << std::endl;
     for (int index = 0; index < size; ++index) {
         auto [t, uid] = ordering[index];
         timestamps[index] = t;
         uids[index] = uid;
+        std::cout << "In Segcore Delete: " << uid << std::endl;
     }
     deleted_record_.timestamps_.set_data(reserved_begin, timestamps.data(), size);
     deleted_record_.uids_.set_data(reserved_begin, uids.data(), size);
@@ -293,7 +295,6 @@ SegmentGrowingImpl::vector_search(int64_t vec_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
-    // TODO(yukun): get final filtered bitmap
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_offset_)) {
         query::SearchOnSealed(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset,
