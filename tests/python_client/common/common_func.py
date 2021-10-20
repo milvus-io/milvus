@@ -509,12 +509,13 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
         if auto_id:
             default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
         insert_res = collection_w.insert(default_data, par[i].name)[0]
+        time_stamp = insert_res.timestamp
         insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)
         start = start + nb // num
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
-    return collection_w, vectors, binary_raw_vectors, insert_ids
+    return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
 
 def _check_primary_keys(primary_keys, nb):
