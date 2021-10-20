@@ -56,6 +56,9 @@ func TestGlobalSealedSegmentManager(t *testing.T) {
 	ids = manager.getGlobalSegmentIDs()
 	assert.Len(t, ids, 0)
 
+	has := manager.hasGlobalSegment(defaultSegmentID)
+	assert.False(t, has)
+
 	segmentInfo.CollectionID = defaultCollectionID
 	err = manager.addGlobalSegmentInfo(segmentInfo)
 	assert.NoError(t, err)

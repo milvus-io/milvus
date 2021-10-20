@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -1248,6 +1249,33 @@ func consumeSimpleRetrieveResult(stream msgstream.MsgStream) (*msgstream.Retriev
 	return res.Msgs[0].(*msgstream.RetrieveResultMsg), nil
 }
 
+func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
+	return &querypb.SealedSegmentsChangeInfo{
+		Base:         genCommonMsgBase(commonpb.MsgType_LoadBalanceSegments),
+		OnlineNodeID: Params.QueryNodeID,
+		OnlineSegments: []*querypb.SegmentInfo{
+			genSimpleSegmentInfo(),
+		},
+		OfflineNodeID: Params.QueryNodeID + 1,
+		OfflineSegments: []*querypb.SegmentInfo{
+			genSimpleSegmentInfo(),
+		},
+	}
+}
+
+func saveChangeInfo(key string, value string) error {
+	log.Debug(".. [query node unittest] Saving change info")
+
+	kv, err := genEtcdKV()
+	if err != nil {
+		return err
+	}
+
+	key = changeInfoMetaPrefix + "/" + key
+
+	return kv.Save(key, value)
+}
+
 // node
 func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 	fac, err := genFactory()
@@ -1255,6 +1283,13 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 		return nil, err
 	}
 	node := NewQueryNode(ctx, fac)
+
+	etcdKV, err := genEtcdKV()
+	if err != nil {
+		return nil, err
+	}
+
+	node.etcdKV = etcdKV
 
 	streaming, err := genSimpleStreaming(ctx)
 	if err != nil {
