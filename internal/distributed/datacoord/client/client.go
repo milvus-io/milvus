@@ -333,6 +333,14 @@ func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 	return ret.(*datapb.GetSegmentStatesResponse), err
 }
 
+// GetInsertBinlogPaths requests binlog paths for specified segment
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the segment id to query
+//
+// response struct `GetInsertBinlogPathsResponse` contains the fields list
+// 	and corresponding binlog path list
+// error is returned only when some communication issue occurs
 func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
