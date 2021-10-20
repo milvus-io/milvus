@@ -66,10 +66,12 @@ func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
 }
 
 // Flush sends flush requests to corresponding datanodes according to channels that segments belong to
-func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo) {
+func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, markSegments []*datapb.SegmentInfo) {
 	channels := c.channelManager.GetChannels()
 	nodeSegments := make(map[int64][]int64)
+	nodeMarks := make(map[int64][]int64)
 	channelNodes := make(map[string]int64)
+	targetNodes := make(map[int64]struct{})
 	// channel -> node
 	for _, c := range channels {
 		for _, ch := range c.Channels {
@@ -84,16 +86,33 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo) {
 			continue
 		}
 		nodeSegments[nodeID] = append(nodeSegments[nodeID], segment.GetID())
+		targetNodes[nodeID] = struct{}{}
+	}
+	for _, segment := range markSegments {
+		nodeID, ok := channelNodes[segment.GetInsertChannel()]
+		if !ok {
+			log.Warn("channel is not allocated to any node", zap.String("channel", segment.GetInsertChannel()))
+			continue
+		}
+		nodeMarks[nodeID] = append(nodeMarks[nodeID], segment.GetID())
+		targetNodes[nodeID] = struct{}{}
 	}
 
-	for nodeID, segments := range nodeSegments {
+	for nodeID := range targetNodes {
+		segments := nodeSegments[nodeID]
+		marks := nodeMarks[nodeID]
+		if len(segments)+len(marks) == 0 { // no segment for this node
+			continue
+		}
 		req := &datapb.FlushSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Flush,
 				SourceID: Params.NodeID,
 			},
-			SegmentIDs: segments,
+			SegmentIDs:     segments,
+			MarkSegmentIDs: marks,
 		}
+		log.Warn("Plan to flush", zap.Int64("node_id", nodeID), zap.Int64s("segments", segments), zap.Int64s("marks", marks))
 		c.sessionManager.Flush(ctx, nodeID, req)
 	}
 }
