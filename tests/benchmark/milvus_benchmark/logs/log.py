@@ -20,5 +20,4 @@ def setup_logging(config_path=LOG_CONFIG_PATH, default_level=logging.INFO):
         log_config["handlers"]["info_file_handler"].update({"filename": FILE_NAME})
         logging.config.dictConfig(log_config)
     except Exception:
-        raise
-        logging.error('Failed to open file', exc_info=True)
+        raise logging.error('Failed to open file', exc_info=True)
