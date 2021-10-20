@@ -1171,14 +1171,18 @@ class TestUtilityBase(TestcaseBase):
         partitions = collection_w.partitions
         middle = len(insert_ids) // 2
         params = {metric_field: metric, "sqrt": sqrt}
+        start = 0
+        end = middle
         for i in range(len(partitions)):
             log.info("Extracting entities from partitions for distance calculating")
             vectors_l = vectors[i].loc[:, default_field_name]
             vectors_r = vectors[i].loc[:, default_field_name]
-            op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
+            op_l = {"ids": insert_ids[start:end], "collection": collection_w.name,
                     "partition": partitions[i].name, "field": default_field_name}
-            op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
+            op_r = {"ids": insert_ids[start:end], "collection": collection_w.name,
                     "partition": partitions[i].name, "field": default_field_name}
+            start += middle
+            end += middle
             log.info("Calculating distance between entities from one partition")
             self.utility_wrap.calc_distance(op_l, op_r, params,
                                             check_task=CheckTasks.check_distance,
@@ -1231,10 +1235,14 @@ class TestUtilityBase(TestcaseBase):
         vectors_l = cf.gen_vectors(nb // 2, default_dim)
         op_l = {"float_vectors": vectors_l}
         params = {metric_field: metric, "sqrt": sqrt}
+        start = 0
+        end = middle
         for i in range(len(partitions)):
             vectors_r = vectors[i].loc[:, default_field_name]
-            op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
+            op_r = {"ids": insert_ids[start:end], "collection": collection_w.name,
                     "partition": partitions[i].name, "field": default_field_name}
+            start += middle
+            end += middle
             self.utility_wrap.calc_distance(op_l, op_r, params,
                                             check_task=CheckTasks.check_distance,
                                             check_items={"vectors_l": vectors_l,
@@ -1257,10 +1265,14 @@ class TestUtilityBase(TestcaseBase):
         vectors_r = cf.gen_vectors(nb // 2, default_dim)
         op_r = {"float_vectors": vectors_r}
         params = {metric_field: metric, "sqrt": sqrt}
+        start = 0
+        end = middle
         for i in range(len(partitions)):
             vectors_l = vectors[i].loc[:, default_field_name]
-            op_l = {"ids": insert_ids[middle:], "collection": collection_w.name,
+            op_l = {"ids": insert_ids[start:end], "collection": collection_w.name,
                     "partition": partitions[i].name, "field": default_field_name}
+            start += middle
+            end += middle
             self.utility_wrap.calc_distance(op_l, op_r, params,
                                             check_task=CheckTasks.check_distance,
                                             check_items={"vectors_l": vectors_l,
