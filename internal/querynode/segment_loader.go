@@ -349,6 +349,10 @@ func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment) error {
 		return err
 	}
 	for _, stat := range stats {
+		if stat.BF == nil {
+			log.Warn("stat log with nil bloom filter", zap.Int64("segmentID", segment.segmentID), zap.Any("stat", stat))
+			continue
+		}
 		err = segment.pkFilter.Merge(stat.BF)
 		if err != nil {
 			return err
