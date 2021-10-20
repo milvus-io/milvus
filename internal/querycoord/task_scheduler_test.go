@@ -62,7 +62,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 		childTask := &loadSegmentTask{
 			baseTask: &baseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        newTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
@@ -80,7 +80,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 		childTask := &watchDmChannelTask{
 			baseTask: &baseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        newTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			WatchDmChannelsRequest: &querypb.WatchDmChannelsRequest{
@@ -98,7 +98,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 		childTask := &watchQueryChannelTask{
 			baseTask: &baseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        newTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			AddQueryChannelRequest: &querypb.AddQueryChannelRequest{
@@ -136,7 +136,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	testTask := &testTask{
 		baseTask: baseTask{
 			ctx:              baseCtx,
-			Condition:        NewTaskCondition(baseCtx),
+			condition:        newTaskCondition(baseCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		baseMsg: &commonpb.MsgBase{
