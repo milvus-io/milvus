@@ -472,6 +472,7 @@ func (colReplica *collectionReplica) getSegmentByIDPrivate(segmentID UniqueID) (
 	return segment, nil
 }
 
+// hasSegment returns true if collectionReplica has the segment, false otherwise
 func (colReplica *collectionReplica) hasSegment(segmentID UniqueID) bool {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
