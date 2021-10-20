@@ -387,7 +387,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of has_collection_total as measured over the last 5 minutes",
+      "description": "per-minute rate of has_collection_total",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
