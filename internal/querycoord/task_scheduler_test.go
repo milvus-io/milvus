@@ -412,7 +412,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 
 	taskScheduler.reloadFromKV()
 
-	task := taskScheduler.triggerTaskQueue.PopTask()
+	task := taskScheduler.triggerTaskQueue.popTask()
 	assert.Equal(t, taskDone, task.getState())
 	assert.Equal(t, 1, len(task.getChildTask()))
 }

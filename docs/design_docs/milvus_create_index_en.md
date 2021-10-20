@@ -1,5 +1,5 @@
 # Create Index
-`Index system` is the core part of `Milvus`, which is used to speed up the searches, this document indroduces which components are involved in `Create Index`,and what do these components do?
+`Index system` is the core part of `Milvus`, which is used to speed up the searches, this document indroduces which components are involved in `Create Index`,and what these components do.
 
 The execution flow of `Create Index` is shown in the following figure:
 
