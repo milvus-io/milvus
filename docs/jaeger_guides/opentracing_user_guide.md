@@ -16,19 +16,13 @@ See also:
 - Blog post [Evolving Distributed Tracing at Uber](https://eng.uber.com/distributed-tracing/).
 - Tutorial / walkthrough [Take OpenTracing for a HotROD ride](https://medium.com/@YuriShkuro/take-opentracing-for-a-hotrod-ride-f6e3141f7941).
 
-
-
 We mainly use jaeger as an implementation of opentracing.
 
 Two request: **Insert Request** and **Search Request** in milvus system is traced at this stage.
 
-
-
 ## Jaeger Home page
 
 ![](./figs/jaeger_home_page.png)
-
-
 
 ### Lookup by Trace ID
 
@@ -73,8 +67,6 @@ The detailed information of search result.
 3. 10675 Span means that there are 10675 operations, see the number of operations for each service in the middle. And the trace time is shown in the right.
 4. The user can select multiple traces with the box in the upper left, and then compare with them to find something different. For example, different insert request may take a different time. At this time, you can select two for comparison, and the comparison can be very easy to know which trace went wrong
 
-
-
 ## Detailed trace information
 
 Click the search result. You can analyze the detail trace information.
@@ -88,8 +80,6 @@ Click the search result. You can analyze the detail trace information.
 5. To enter the details, look at the left half first, showing the call chain of the entire request. The black represents the service name, and the gray kid represents the span name defined in the code.
 6. The duration of the right half of the code call. The length represents the time consumed by the Span in the entire call chain.
 
-
-
 ### Span Detail information
 
 Click the Span to see the detailed span information such as the last span in the picture above.
@@ -98,11 +88,6 @@ Click the Span to see the detailed span information such as the last span in the
 2. Process can locate which specific server processing this data.
 3. Logs are the logs printed by this span during the call.
 
-
-
-
-
 ## More
 
 More usage guides will be updated in the future.
-
