@@ -172,6 +172,7 @@ func (c *Client) Start() error {
 	return nil
 }
 
+// Stop stops QueryNode's grpc client server.
 func (c *Client) Stop() error {
 	c.cancel()
 	c.grpcClientMtx.Lock()
