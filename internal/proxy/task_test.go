@@ -2623,6 +2623,19 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	rc.showPartitionsFunc = nil
 
 	// TODO(dragondriver): test partition-related error
+
+	tmpPlaceHolder := task.query.PlaceholderGroup
+	task.query.PlaceholderGroup = nil
+	task.query.SearchIDs = &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{1, 2, 3},
+			},
+		},
+	}
+	assert.NoError(t, task.PreExecute(ctx))
+	task.query.PlaceholderGroup = tmpPlaceHolder
+	task.query.SearchIDs = nil
 }
 
 func TestSearchTask_Execute(t *testing.T) {

@@ -157,6 +157,7 @@ message SearchRequest {
   repeated int64 output_fields_id = 10;
   uint64 travel_timestamp = 11;
   uint64 guarantee_timestamp = 12;
+  bytes search_byID_expr_plan = 13;
 }
 
 message SearchResults {
