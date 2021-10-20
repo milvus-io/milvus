@@ -370,6 +370,20 @@ func (m *meta) GetFlushingSegments() []*SegmentInfo {
 	return ret
 }
 
+// SelectSegments select segments with selector
+func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
+	var ret []*SegmentInfo
+	segments := m.segments.GetSegments()
+	for _, info := range segments {
+		if selector(info) {
+			ret = append(ret, info)
+		}
+	}
+	return ret
+}
+
 // AddAllocation add allocation in segment
 func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	m.Lock()

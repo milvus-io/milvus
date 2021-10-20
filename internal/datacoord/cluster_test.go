@@ -418,3 +418,35 @@ func TestConsistentHashPolicy(t *testing.T) {
 	bufferChannels := channelManager.GetBuffer()
 	assert.EqualValues(t, 3, len(bufferChannels.Channels))
 }
+
+func TestCluster_Flush(t *testing.T) {
+	kv := memkv.NewMemoryKV()
+	sessionManager := NewSessionManager()
+	channelManager, err := NewChannelManager(kv, dummyPosProvider{})
+	assert.Nil(t, err)
+	cluster := NewCluster(sessionManager, channelManager)
+	defer cluster.Close()
+	addr := "localhost:8080"
+	info := &NodeInfo{
+		Address: addr,
+		NodeID:  1,
+	}
+	nodes := []*NodeInfo{info}
+	err = cluster.Startup(nodes)
+	assert.Nil(t, err)
+
+	err = cluster.Watch("chan-1", 1)
+	assert.NoError(t, err)
+
+	// flush empty should impact nothing
+	assert.NotPanics(t, func() {
+		cluster.Flush(context.Background(), []*datapb.SegmentInfo{}, []*datapb.SegmentInfo{})
+	})
+
+	// flush not watched channel
+	assert.NotPanics(t, func() {
+		cluster.Flush(context.Background(), []*datapb.SegmentInfo{{ID: 1, InsertChannel: "chan-2"}},
+			[]*datapb.SegmentInfo{{ID: 2, InsertChannel: "chan-3"}})
+	})
+	//TODO add a method to verify datanode has flush request after client injection is available
+}

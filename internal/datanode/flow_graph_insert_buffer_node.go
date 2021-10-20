@@ -243,7 +243,6 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			zap.Int64("segmentID", currentSegID),
 			zap.Int64("collectionID", fmsg.collectionID),
 		)
-		segmentsToFlush = append(segmentsToFlush, currentSegID)
 		bd, ok := ibNode.insertBuffer.Load(currentSegID)
 		var err error
 		var buf *BufferData
@@ -252,14 +251,17 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		}
 		if buf == nil || buf.size <= 0 { // Buffer empty
 			log.Debug(".. Buffer empty ...")
-			err = ibNode.flushManager.flushBufferData(nil, currentSegID, true, endPositions[0])
+			err = ibNode.flushManager.flushBufferData(nil, currentSegID, fmsg.flushed, endPositions[0])
 		} else { // Buffer not empty
-			err = ibNode.flushManager.flushBufferData(buf, currentSegID, true, endPositions[0])
+			err = ibNode.flushManager.flushBufferData(buf, currentSegID, fmsg.flushed, endPositions[0])
 		}
 		if err != nil {
 			log.Warn("failed to manual invoke flushBufferData", zap.Error(err))
 		} else {
-			ibNode.replica.segmentFlushed(currentSegID)
+			segmentsToFlush = append(segmentsToFlush, currentSegID)
+			if fmsg.flushed {
+				ibNode.replica.segmentFlushed(currentSegID)
+			}
 			ibNode.insertBuffer.Delete(currentSegID)
 		}
 	default:
