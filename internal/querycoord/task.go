@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
@@ -1861,28 +1860,5 @@ func assignInternalTask(ctx context.Context,
 }
 
 func getSizeOfLoadSegmentReq(req *querypb.LoadSegmentsRequest) int {
-	var totalSize = 0
-	totalSize += int(reflect.ValueOf(*req).Type().Size())
-	for _, info := range req.Infos {
-		totalSize += int(reflect.ValueOf(*info).Type().Size())
-		for _, FieldBinlog := range info.BinlogPaths {
-			totalSize += int(reflect.ValueOf(*FieldBinlog).Type().Size())
-			for _, path := range FieldBinlog.Binlogs {
-				totalSize += len(path)
-			}
-		}
-	}
-
-	totalSize += len(req.Schema.Name) + len(req.Schema.Description) + int(reflect.ValueOf(*req.Schema).Type().Size())
-	for _, fieldSchema := range req.Schema.Fields {
-		totalSize += len(fieldSchema.Name) + len(fieldSchema.Description) + int(reflect.ValueOf(*fieldSchema).Type().Size())
-		for _, typeParam := range fieldSchema.TypeParams {
-			totalSize += len(typeParam.Key) + len(typeParam.Value)
-		}
-		for _, indexParam := range fieldSchema.IndexParams {
-			totalSize += len(indexParam.Key) + len(indexParam.Value)
-		}
-	}
-
-	return totalSize
+	return proto.Size(req)
 }
