@@ -461,6 +461,7 @@ func (colReplica *collectionReplica) getSegmentByID(segmentID UniqueID) (*Segmen
 	return colReplica.getSegmentByIDPrivate(segmentID)
 }
 
+// getSegmentByIDPrivate is private function in collectionReplica, it returns the segment which id is segmentID
 func (colReplica *collectionReplica) getSegmentByIDPrivate(segmentID UniqueID) (*Segment, error) {
 	segment, ok := colReplica.segments[segmentID]
 	if !ok {
