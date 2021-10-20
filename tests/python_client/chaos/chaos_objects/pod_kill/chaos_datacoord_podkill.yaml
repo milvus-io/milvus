@@ -14,10 +14,9 @@ spec:
       namespaces:
         - chaos-testing
       labelSelectors:
-    labelSelectors:
-      app.kubernetes.io/instance: milvus-chaos
-      app.kubernetes.io/name: milvus
-      component: datacoord
+        app.kubernetes.io/instance: milvus-chaos
+        app.kubernetes.io/name: milvus
+        component: datacoord
     mode: one
     action: pod-kill
     gracePeriod: 0
