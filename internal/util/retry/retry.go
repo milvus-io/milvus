@@ -29,18 +29,20 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 		opt(c)
 	}
 	el := make(ErrorList, 0)
-
-	for i := uint(0); i < c.attempts; i++ {
+	flag := true
+	for i := uint(0); i < c.attempts && flag; i++ {
 		if err := fn(); err != nil {
-			if ok := IsUncoverable(err); ok {
-				return err
-			}
 			el = append(el, err)
+
+			if ok := IsUncoverable(err); ok {
+				break
+			}
 
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
-				return ctx.Err()
+				el = append(el, ctx.Err())
+				flag = false
 			}
 
 			c.sleep *= 2
@@ -51,7 +53,12 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			return nil
 		}
 	}
-	return el
+	var errorStrings []string
+	for _, e := range el {
+		errorStrings = append(errorStrings, e.Error())
+	}
+	ret := fmt.Errorf(strings.Join(errorStrings, ":"))
+	return ret
 }
 
 // ErrorList for print error log
