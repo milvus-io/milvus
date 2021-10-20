@@ -455,6 +455,7 @@ func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) er
 	return nil
 }
 
+// getSegmentByID returns the segment which id is segmentID
 func (colReplica *collectionReplica) getSegmentByID(segmentID UniqueID) (*Segment, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
