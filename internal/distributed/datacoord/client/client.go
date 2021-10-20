@@ -309,6 +309,15 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	return ret.(*datapb.AssignSegmentIDResponse), err
 }
 
+// GetSegmentStates requests segment state information
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the list of segment id to query
+//
+// response struct `GetSegmentStatesResponse` contains the list of each state query result
+// 	when the segment is not found, the state entry will has the field `Status`  to identify failure
+// 	otherwise the Segment State and Start position information will be returned
+// error is returned only when some communication issue occurs
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
