@@ -343,7 +343,7 @@ func (ss *suffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error
 	return value, nil
 }
 
-// MultiSave save muiltple kvs
+// MultiSave save multiple kvs
 // if ts == 0, act like TxnKV
 // each key-value will be treat in same logic like Save
 func (ss *suffixSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) error {
