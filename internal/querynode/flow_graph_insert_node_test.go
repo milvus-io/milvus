@@ -373,13 +373,13 @@ func TestGetSegmentsByPKs(t *testing.T) {
 		segmentID: 1,
 		pkFilter:  filter,
 	}
-	exist, err := filterSegmentsByPKs([]int64{0, 1, 2, 3, 4}, segment)
+	pks, err := filterSegmentsByPKs([]int64{0, 1, 2, 3, 4}, segment)
 	assert.Nil(t, err)
-	assert.True(t, exist)
+	assert.Equal(t, len(pks), 3)
 
-	exist, err = filterSegmentsByPKs([]int64{}, segment)
+	pks, err = filterSegmentsByPKs([]int64{}, segment)
 	assert.Nil(t, err)
-	assert.False(t, exist)
+	assert.Equal(t, len(pks), 0)
 	_, err = filterSegmentsByPKs(nil, segment)
 	assert.NotNil(t, err)
 	_, err = filterSegmentsByPKs([]int64{0, 1, 2, 3, 4}, nil)
