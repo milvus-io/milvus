@@ -147,7 +147,8 @@ message GetPartitionStatesResponse {
 
 message GetSegmentInfoRequest {
   common.MsgBase base = 1;
-  repeated int64 segmentIDs = 2;
+  repeated int64 segmentIDs = 2; // deprecated
+  int64 collectionID = 3;
 }
 
 message SegmentInfo {
