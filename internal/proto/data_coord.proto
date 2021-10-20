@@ -170,7 +170,8 @@ message FlushSegmentsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
-  repeated int64 segmentIDs = 4;
+  repeated int64 segmentIDs = 4; // segments to flush
+  repeated int64 markSegmentIDs = 5; // segments to clean buffer and mark segment position, but NOT flushed
 }
 
 message SegmentMsg{

@@ -13,9 +13,9 @@ spec:
     selector:
       namespaces:
         - chaos-testing
-    labelSelectors:
-      release: milvus-chaos
-      app: minio 
+      labelSelectors:
+        release: milvus-chaos
+        app: minio 
     mode: one
     action: pod-kill
     gracePeriod: 0

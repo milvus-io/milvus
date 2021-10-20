@@ -50,4 +50,5 @@ type flushMsg struct {
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
+	flushed      bool
 }

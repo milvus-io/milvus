@@ -559,45 +559,61 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		zap.Int64s("segments", req.SegmentIDs),
 	)
 
-	for _, id := range req.SegmentIDs {
-		chanName := node.getChannelNamebySegmentID(id)
-		if len(chanName) == 0 {
-			log.Warn("FlushSegments failed, cannot find segment in DataNode replica",
-				zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
+	processSegments := func(segmentIDs []UniqueID, flushed bool) bool {
+		noErr := true
+		for _, id := range segmentIDs {
+			chanName := node.getChannelNamebySegmentID(id)
+			if len(chanName) == 0 {
+				log.Warn("FlushSegments failed, cannot find segment in DataNode replica",
+					zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
 
-			status.Reason = fmt.Sprintf("DataNode replica not find segment %d!", id)
-			return status, nil
+				status.Reason = fmt.Sprintf("DataNode replica not find segment %d!", id)
+				noErr = false
+				continue
+			}
+
+			if node.segmentCache.checkIfCached(id) {
+				// Segment in flushing, ignore
+				log.Info("Segment flushing, ignore the flush request until flush is done.",
+					zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
+
+				continue
+			}
+
+			node.segmentCache.Cache(id)
+
+			node.chanMut.RLock()
+			flushChs, ok := node.vchan2FlushChs[chanName]
+			node.chanMut.RUnlock()
+			if !ok {
+				status.Reason = "DataNode abnormal, restarting"
+				log.Error("DataNode abnormal, no flushCh for a vchannel")
+				noErr = false
+				continue
+			}
+
+			flushChs <- flushMsg{
+				msgID:        req.Base.MsgID,
+				timestamp:    req.Base.Timestamp,
+				segmentID:    id,
+				collectionID: req.CollectionID,
+				flushed:      flushed,
+			}
 		}
+		log.Debug("Flowgraph flushSegment tasks triggered", zap.Bool("flushed", flushed),
+			zap.Int64("collectionID", req.GetCollectionID()), zap.Int64s("segments", segmentIDs))
 
-		if node.segmentCache.checkIfCached(id) {
-			// Segment in flushing, ignore
-			log.Info("Segment flushing, ignore the flush request until flush is done.",
-				zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
-
-			continue
-		}
-
-		node.segmentCache.Cache(id)
-
-		node.chanMut.RLock()
-		flushChs, ok := node.vchan2FlushChs[chanName]
-		node.chanMut.RUnlock()
-		if !ok {
-			status.Reason = "DataNode abnormal, restarting"
-			log.Error("DataNode abnormal, no flushCh for a vchannel")
-			return status, nil
-		}
-
-		flushChs <- flushMsg{
-			msgID:        req.Base.MsgID,
-			timestamp:    req.Base.Timestamp,
-			segmentID:    id,
-			collectionID: req.CollectionID,
-		}
+		return noErr
 	}
 
-	log.Debug("Flowgraph flushSegment tasks triggered",
-		zap.Int64("collectionID", req.GetCollectionID()), zap.Int64s("segments", req.GetSegmentIDs()))
+	ok := processSegments(req.GetSegmentIDs(), true)
+	if !ok {
+		return status, nil
+	}
+	ok = processSegments(req.GetMarkSegmentIDs(), false)
+	if !ok {
+		return status, nil
+	}
 
 	status.ErrorCode = commonpb.ErrorCode_Success
 	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsSuccess).Inc()

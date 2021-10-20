@@ -172,43 +172,26 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Warn(err.Error())
 				continue
 			}
-			exist, err := filterSegmentsByPKs(delMsg.PrimaryKeys, segment)
+			pks, err := filterSegmentsByPKs(delMsg.PrimaryKeys, segment)
 			if err != nil {
 				log.Warn(err.Error())
 				continue
 			}
-			if exist {
-				offset := segment.segmentPreDelete(len(delMsg.PrimaryKeys))
+			if len(pks) > 0 {
+				offset := segment.segmentPreDelete(len(pks))
 				if err != nil {
 					log.Warn(err.Error())
 					continue
 				}
-				delData.deleteIDs[segmentID] = append(delData.deleteIDs[segmentID], delMsg.PrimaryKeys...)
-				delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], delMsg.Timestamps...)
+				delData.deleteIDs[segmentID] = append(delData.deleteIDs[segmentID], pks...)
+				// TODO(yukun) get offset of pks
+				delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], delMsg.Timestamps[:len(pks)]...)
 				delData.deleteOffset[segmentID] = offset
 			}
 		}
 	}
 
-	// 2. do preDelete
-	for segmentID := range delData.deleteIDs {
-		var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
-		if err != nil {
-			log.Warn(err.Error())
-		}
-
-		var numOfRecords = len(delData.deleteIDs[segmentID])
-		if targetSegment != nil {
-			offset := targetSegment.segmentPreDelete(numOfRecords)
-			if err != nil {
-				log.Warn(err.Error())
-			}
-			delData.deleteOffset[segmentID] = offset
-			log.Debug("insertNode operator", zap.Int("delete size", numOfRecords), zap.Int64("delete offset", offset), zap.Int64("segment id", segmentID))
-		}
-	}
-
-	// 3. do delete
+	// 2. do delete
 	for segmentID := range delData.deleteIDs {
 		wg.Add(1)
 		go iNode.delete(delData, segmentID, &wg)
@@ -225,20 +208,24 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
-func filterSegmentsByPKs(pks []int64, segment *Segment) (bool, error) {
+func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
 	if pks == nil {
-		return false, fmt.Errorf("pks is nil when getSegmentsByPKs")
+		return nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
 	}
 	if segment == nil {
-		return false, fmt.Errorf("segments is nil when getSegmentsByPKs")
+		return nil, fmt.Errorf("segments is nil when getSegmentsByPKs")
 	}
 	buf := make([]byte, 8)
+	res := make([]int64, 0)
 	for _, pk := range pks {
 		binary.BigEndian.PutUint64(buf, uint64(pk))
 		exist := segment.pkFilter.Test(buf)
-		return exist, nil
+		if exist {
+			res = append(res, pk)
+		}
 	}
-	return false, nil
+	log.Debug("In filterSegmentsByPKs", zap.Any("pk", res), zap.Any("segment", segment.segmentID))
+	return res, nil
 }
 
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) {
@@ -270,7 +257,7 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 	}
 
 	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])),
-		zap.Int64("segmentID", segmentID))
+		zap.Int64("segmentID", segmentID), zap.Any("IDS", iData.insertPKs))
 	wg.Done()
 }
 

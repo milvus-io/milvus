@@ -79,7 +79,7 @@ type EmptyTicker struct {
 	tChan <-chan time.Time
 }
 
-// Chan return a read-only channel from which you can only receive time.Time type data.
+// Chan returns a read-only channel from which you can only receive time.Time type data.
 // As for EmptyTicker, you will never read data from Chan.
 func (t *EmptyTicker) Chan() <-chan time.Time {
 	return t.tChan
@@ -108,7 +108,7 @@ func (t *Ticker) Init() {
 	t.ticker = time.NewTicker(t.UpdateInterval)
 }
 
-// Reset rests the inner member `ticker`.
+// Reset resets the inner member `ticker`.
 func (t *Ticker) Reset() {
 	t.ticker.Reset(t.UpdateInterval)
 }

@@ -47,10 +47,11 @@ const connEtcdMaxRetryTime = 100000
 
 var (
 	// TODO: sunby put to config
-	enableTtChecker  = true
-	ttCheckerName    = "dataTtChecker"
-	ttMaxInterval    = 3 * time.Minute
-	ttCheckerWarnMsg = fmt.Sprintf("we haven't received tt for %f minutes", ttMaxInterval.Minutes())
+	enableTtChecker           = true
+	ttCheckerName             = "dataTtChecker"
+	ttMaxInterval             = 3 * time.Minute
+	ttCheckerWarnMsg          = fmt.Sprintf("we haven't received tt for %f minutes", ttMaxInterval.Minutes())
+	segmentTimedFlushDuration = 10.0
 )
 
 type (
@@ -415,10 +416,14 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				continue
 			}
 
-			if len(segments) == 0 {
+			staleSegments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
+				return !info.lastFlushTime.IsZero() && time.Since(info.lastFlushTime).Minutes() >= segmentTimedFlushDuration
+			})
+
+			if len(segments)+len(staleSegments) == 0 {
 				continue
 			}
-			log.Debug("flush segments", zap.Int64s("segmentIDs", segments))
+			log.Debug("flush segments", zap.Int64s("segmentIDs", segments), zap.Int("markSegments count", len(staleSegments)))
 			segmentInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 			for _, id := range segments {
 				sInfo := s.meta.GetSegment(id)
@@ -430,8 +435,19 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				segmentInfos = append(segmentInfos, sInfo.SegmentInfo)
 				s.meta.SetLastFlushTime(id, time.Now())
 			}
-			if len(segmentInfos) > 0 {
-				s.cluster.Flush(s.ctx, segmentInfos)
+			markSegments := make([]*datapb.SegmentInfo, 0, len(staleSegments))
+			for _, segment := range staleSegments {
+				for _, fSeg := range segmentInfos {
+					// check segment needs flush first
+					if segment.GetID() == fSeg.GetID() {
+						continue
+					}
+				}
+				markSegments = append(markSegments, segment.SegmentInfo)
+				s.meta.SetLastFlushTime(segment.GetID(), time.Now())
+			}
+			if len(segmentInfos)+len(markSegments) > 0 {
+				s.cluster.Flush(s.ctx, segmentInfos, markSegments)
 			}
 		}
 		s.helper.eventAfterHandleDataNodeTt()

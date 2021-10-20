@@ -73,12 +73,13 @@ struct SearchResult {
     int64_t num_queries_;
     int64_t topk_;
     std::vector<float> result_distances_;
+    std::vector<int64_t> internal_seg_offsets_;
 
  public:
     // TODO(gexi): utilize these field
     void* segment_;
-    std::vector<int64_t> internal_seg_offsets_;
     std::vector<int64_t> result_offsets_;
+    std::vector<int64_t> primary_keys_;
     std::vector<std::vector<char>> row_data_;
 };
 
