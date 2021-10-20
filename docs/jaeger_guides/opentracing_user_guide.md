@@ -38,15 +38,15 @@ The use of the search box requires configuration of the log collection system. F
 
 ### Service
 
-Filter with service name
+Filter with service name.
 
 ### Operation
 
-Operation in Service, eg request name, function name
+Operation in Service, eg request name, function name.
 
 ### Tags
 
-Set tag to facilitate search. Tag is defined in code
+Set tag to facilitate search. Tag is defined in code.
 
 ### Lookback
 
@@ -54,11 +54,11 @@ Filter with time.
 
 ### Min Duraton Max Duration
 
-The minimum and maximum request duration, you can use this condition to find the time-consuming and short-term requests
+The minimum and maximum request duration, you can use this condition to find the time-consuming and short-term requests.
 
 ### Limit Result
 
-The max number of result
+The max number of result.
 
 ## Search result
 
@@ -84,7 +84,7 @@ Click the search result. You can analyze the detail trace information.
 1. Duration: Total time consume.
 2. Service: The number of service called.
 3. Depth: Call chain depth.
-4. Total Spans: This call consists of 10 spans
+4. Total Spans: This call consists of 10 spans.
 5. To enter the details, look at the left half first, showing the call chain of the entire request. The black represents the service name, and the gray kid represents the span name defined in the code.
 6. The duration of the right half of the code call. The length represents the time consumed by the Span in the entire call chain.
 
@@ -104,5 +104,5 @@ Click the Span to see the detailed span information such as the last span in the
 
 ## More
 
-More usage guides will be updated in the future
+More usage guides will be updated in the future.
 
