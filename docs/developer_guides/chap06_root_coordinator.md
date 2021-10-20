@@ -9,7 +9,16 @@ type RootCoord interface {
 	Component
 	TimeTickProvider
 
-	//DDL request
+	// DDL request
+  // CreateCollection notifies RootCoord to create a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name, collection schema and
+	//     physical channel num for inserting data
+	//
+	// The `ErrorCode` of `Status` is `Success` if create collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
 	DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 	HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
