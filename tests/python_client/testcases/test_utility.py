@@ -1227,16 +1227,19 @@ class TestUtilityBase(TestcaseBase):
         method: set left vectors as random vectors, right vectors are entities
         expected: distance calculated successfully
         """
+        log.info("Creating connection")
         self._connect()
         nb = 10
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
         middle = len(insert_ids) // 2
         partitions = collection_w.partitions
         vectors_l = cf.gen_vectors(nb // 2, default_dim)
+        log.info("Extract entities from collection as right vectors")
         op_l = {"float_vectors": vectors_l}
         params = {metric_field: metric, "sqrt": sqrt}
         start = 0
         end = middle
+        log.info("Calculate distance between vector and entities")
         for i in range(len(partitions)):
             vectors_r = vectors[i].loc[:, default_field_name]
             op_r = {"ids": insert_ids[start:end], "collection": collection_w.name,
