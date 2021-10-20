@@ -496,3 +496,133 @@ class TestDeleteOperation(TestcaseBase):
         # delete same ids from two partition
         collection_w.delete(tmp_expr, partition_name=[ct.default_partition_name, partition_w.name])
         assert collection_w.num_entities == tmp_nb - 2
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_delete_auto_id_collection(self):
+        """
+        target: test delete from auto_id collection
+        method: delete entities from auto_id=true collection
+        expected: versify delete successfully
+        """
+        # init an auto_id collection and insert tmp_nb data
+        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, auto_id=True)
+
+        # delete with insert ids
+        expr = f'{ct.default_int64_field_name} in {[ids[0]]}'
+        res, _ = collection_w.delete(expr)
+
+        # verify delete result
+        collection_w.load()
+        assert res.delete_count == 1
+        query_res, _ = collection_w.query(expr)
+        assert len(query_res) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_without_flush(self):
+        """
+        target: test delete without flush
+        method: 1.insert data and no flush
+                2.delete ids from collection
+                3.load and query with id
+        expected: query result is empty
+        """
+        # init collection and insert data without flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete
+        del_res, _ = collection_w.delete(tmp_expr)
+        assert del_res.delete_count == 1
+
+        # query with id
+        collection_w.load()
+        query_res = collection_w.query(tmp_expr)[0]
+        assert len(query_res) == 0
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_delete_insert_same_entity(self):
+        """
+        target: test delete and insert same entity
+        method: 1.delete entity one
+                2.insert entity one
+                3.query  entity one
+        expected: verify query result
+        """
+        # init collection and insert data without flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete
+        del_res, _ = collection_w.delete(tmp_expr)
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
+        # insert entity with primary key 0
+        collection_w.insert(df[:1])
+
+        # query entity one
+        collection_w.load()
+        res = df.iloc[0:1, :1].to_dict('records')
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_delete_entity_loop(self):
+        """
+        target: test delete all entities one by one in a loop
+        method: delete data one by one for a loop
+        expected: No exception
+        """
+        # init an auto_id collection and insert tmp_nb data
+        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, auto_id=True)
+
+        for del_id in ids:
+            expr = f'{ct.default_int64_field_name} in {[del_id]}'
+            res, _ = collection_w.delete(expr)
+            assert res.delete_count == 1
+
+        # query with first and last id
+        collection_w.load()
+        first_expr = f'{ct.default_int64_field_name} in {ids[0]}'
+        first_res, _ = collection_w.query(first_expr)
+        assert len(first_res) == 0
+        last_expr = f'{ct.default_int64_field_name} in {ids[-1]}'
+        last_res, _ = collection_w.query(last_expr)
+        assert len(last_res) == 0
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_delete_flush_loop(self):
+        """
+        target: test delete and flush in a loop
+        method: in a loop, delete batch and flush, until delete all entities
+        expected: No exception
+        """
+        # init an auto_id collection and insert tmp_nb data
+        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, auto_id=True)
+
+        batch = 10
+        for i in range(tmp_nb // batch):
+            expr = f'{ct.default_int64_field_name} in {ids[i*batch : (i+1) * batch]}'
+            res, _ = collection_w.delete(expr)
+            assert res.delete_count == batch
+            assert collection_w.num_entities == tmp_nb
+
+        # query with first and last id
+        collection_w.load()
+        first_expr = f'{ct.default_int64_field_name} in {ids[0]}'
+        first_res, _ = collection_w.query(first_expr)
+        assert len(first_res) == 0
+        last_expr = f'{ct.default_int64_field_name} in {ids[-1]}'
+        last_res, _ = collection_w.query(last_expr)
+        assert len(last_res) == 0
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.skip(reason="TODO")
+    def test_delete_multi_threading(self):
+        """
+        target: test delete multi threading
+        method: delete multi threading
+        expected: delete successfully
+        """
+        pass
