@@ -108,7 +108,7 @@ func (t *Ticker) Init() {
 	t.ticker = time.NewTicker(t.UpdateInterval)
 }
 
-// Reset rests the inner member `ticker`.
+// Reset resets the inner member `ticker`.
 func (t *Ticker) Reset() {
 	t.ticker.Reset(t.UpdateInterval)
 }
