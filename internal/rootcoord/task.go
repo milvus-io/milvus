@@ -851,7 +851,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		flushedSegs = append(flushedSegs, k)
 	}
 	if err != nil {
-		log.Debug("get flushed segments from data coord failed", zap.String("collection_name", collMeta.Schema.Name), zap.Error(err))
+		log.Debug("Get flushed segments from data coord failed", zap.String("collection_name", collMeta.Schema.Name), zap.Error(err))
 		return err
 	}
 
