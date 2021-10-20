@@ -470,8 +470,8 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         nb = 10
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                            is_index=True)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb,
+                                                                               is_index=True)
         middle = len(insert_ids) // 2
         op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
                 "field": default_field_name}
@@ -1048,7 +1048,7 @@ class TestUtilityBase(TestcaseBase):
         log.info("Creating connection")
         self._connect()
         nb = 10
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb)
         middle = len(insert_ids) // 2
         vectors = vectors[0].loc[:, default_field_name]
         vectors_l = vectors[:middle]
@@ -1081,8 +1081,8 @@ class TestUtilityBase(TestcaseBase):
         nb = 10
         prefix_1 = "utility_distance"
         log.info("Creating two collections")
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
-        collection_w_1, vectors_1, _, insert_ids_1 = self.init_collection_general(prefix_1, True, nb)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb)
+        collection_w_1, vectors_1, _, insert_ids_1, _ = self.init_collection_general(prefix_1, True, nb)
         vectors_l = vectors[0].loc[:, default_field_name]
         vectors_r = vectors_1[0].loc[:, default_field_name]
         log.info("Extracting entities from collections for distance calculating")
@@ -1109,7 +1109,7 @@ class TestUtilityBase(TestcaseBase):
         log.info("Creating connection")
         self._connect()
         nb = 10
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb)
         middle = len(insert_ids) // 2
         vectors = vectors[0].loc[:, default_field_name]
         vectors_l = cf.gen_vectors(nb, default_dim)
@@ -1139,7 +1139,7 @@ class TestUtilityBase(TestcaseBase):
         log.info("Creating connection")
         self._connect()
         nb = 10
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb)
         middle = len(insert_ids) // 2
         vectors = vectors[0].loc[:, default_field_name]
         vectors_l = vectors[:middle]
@@ -1167,7 +1167,7 @@ class TestUtilityBase(TestcaseBase):
         log.info("Creating connection")
         self._connect()
         nb = 10
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
         partitions = collection_w.partitions
         middle = len(insert_ids) // 2
         params = {metric_field: metric, "sqrt": sqrt}
@@ -1201,7 +1201,7 @@ class TestUtilityBase(TestcaseBase):
         log.info("Create connection")
         self._connect()
         nb = 10
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
         partitions = collection_w.partitions
         middle = len(insert_ids) // 2
         params = {metric_field: metric, "sqrt": sqrt}
@@ -1230,7 +1230,7 @@ class TestUtilityBase(TestcaseBase):
         log.info("Creating connection")
         self._connect()
         nb = 10
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
         middle = len(insert_ids) // 2
         partitions = collection_w.partitions
         vectors_l = cf.gen_vectors(nb // 2, default_dim)
@@ -1262,7 +1262,7 @@ class TestUtilityBase(TestcaseBase):
         """
         self._connect()
         nb = 10
-        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
         middle = len(insert_ids) // 2
         partitions = collection_w.partitions
         vectors_r = cf.gen_vectors(nb // 2, default_dim)

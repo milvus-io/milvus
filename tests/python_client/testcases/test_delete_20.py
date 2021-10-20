@@ -32,7 +32,7 @@ class TestDeleteParams(TestcaseBase):
         expected: assert num entities
         """
         # init collection with default_nb default data
-        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True, is_binary=is_binary)
+        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True, is_binary=is_binary)[0:4]
         expr = f'{ct.default_int64_field_name} in {ids[:half_nb]}'
 
         # delete half of data
@@ -123,10 +123,11 @@ class TestDeleteParams(TestcaseBase):
         expected: num entities becomes zero
         """
         # init collection with default_nb default data
-        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)
+        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
         expr = f'{ct.default_int64_field_name} in {ids}'
         del_res, _ = collection_w.delete(expr)
         assert del_res.delete_count == ct.default_nb
+
         assert collection_w.num_entities == 0
         assert collection_w.is_empty
 
