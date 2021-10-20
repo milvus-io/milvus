@@ -304,7 +304,7 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 func TestProxy(t *testing.T) {
 	var err error
 
-	path := "/tmp/milvus/rocksmq"
+	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
 	err = os.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
 	assert.NoError(t, err)
@@ -1166,7 +1166,7 @@ func TestProxy(t *testing.T) {
 		// waiting for collection to be loaded
 		counter := 0
 		for !f() {
-			if counter > 10 {
+			if counter > 100 {
 				loaded = false
 				break
 			}
@@ -1175,9 +1175,7 @@ func TestProxy(t *testing.T) {
 			counter++
 		}
 	})
-	if !loaded {
-		log.Warn("load operation was not sure to be done")
-	}
+	assert.True(t, loaded)
 
 	wg.Add(1)
 	t.Run("show in-memory collections", func(t *testing.T) {
