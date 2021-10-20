@@ -147,6 +147,7 @@ def get_server_tag(deploy_params):
 
 
 def search_param_analysis(vector_query, filter_query):
+    """ Search parameter adjustment, applicable pymilvus version >= 2.0.0rc7.dev24 """
 
     if "vector" in vector_query:
         vector = vector_query["vector"]
