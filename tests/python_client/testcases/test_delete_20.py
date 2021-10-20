@@ -389,3 +389,17 @@ class TestDeleteOperation(TestcaseBase):
 
         error = {ct.err_code: 0, ct.err_msg: "..."}
         collection_w.delete(tmp_expr, partition_name=[partition_w.name], check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_not_existed_partition(self):
+        """
+        target: test delete from an not existed partition
+        method: delete from an fake partition
+        expected: raise exception
+        """
+        # init collection with tmp_nb data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+
+        # raise exception
+        error = {ct.err_code: 0, ct.err_msg: "..."}
+        collection_w.delete(tmp_expr, partition_name=[ct.default_tag], check_task=CheckTasks.err_res, check_items=error)
