@@ -25,7 +25,7 @@ type MsgStream struct {
 }
 
 // NewMsgStreamCoord nil
-func NewMsgStreamCoord(ctx context.Context) (*MsgStream, error) {
+func NewMsgStreamCoord(_ context.Context) (*MsgStream, error) {
 	return nil, nil
 }
 

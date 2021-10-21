@@ -26,7 +26,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func componentsNotServingHandler(w http.ResponseWriter, r *http.Request, msg string) {
+func componentsNotServingHandler(w http.ResponseWriter, _ *http.Request, msg string) {
 	w.WriteHeader(http.StatusInternalServerError)
 	w.Header().Set(healthz.ContentTypeHeader, healthz.ContentTypeText)
 	_, err := fmt.Fprint(w, msg)

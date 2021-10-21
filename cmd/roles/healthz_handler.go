@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
-func unhealthyHandler(w http.ResponseWriter, r *http.Request, reason string) {
+func unhealthyHandler(w http.ResponseWriter, _ *http.Request, reason string) {
 	w.WriteHeader(http.StatusInternalServerError)
 	w.Header().Set(healthz.ContentTypeHeader, healthz.ContentTypeText)
 	_, err := fmt.Fprint(w, reason)
@@ -39,7 +39,7 @@ func unhealthyHandler(w http.ResponseWriter, r *http.Request, reason string) {
 	}
 }
 
-func healthyHandler(w http.ResponseWriter, r *http.Request) {
+func healthyHandler(w http.ResponseWriter, _ *http.Request) {
 	var err error
 
 	w.WriteHeader(http.StatusOK)
