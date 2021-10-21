@@ -19,7 +19,7 @@ In this section, we introduce the RPCs of milvus service. A brief description of
 | ReleasePartitions       | release partitions from memory                                                                |
 | GetPartitionStatistics  | show a partition's statistics                                                                 |
 | ShowPartitions          | list a collection's all partitions                                                            |
-| CreateIndex             | create index for a field in the collection                                                    |
+| CreateIndex             | create an index for a field in the collection                                                    |
 | DescribeIndex           | get index details for a field in the collection                                               |
 | GetIndexStates          | get build index state                                                                         |
 | DropIndex               | drop a specific index for a field in the collection                                           |

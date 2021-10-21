@@ -150,6 +150,7 @@ class TestcaseBase(Base):
         vectors = []
         binary_raw_vectors = []
         insert_ids = []
+        time_stamp = 0
         # 1 create collection
         default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim)
         if is_binary:
@@ -164,16 +165,15 @@ class TestcaseBase(Base):
             cf.gen_partitions(collection_w, partition_num)
         # 3 insert data if specified
         if insert_data:
-            collection_w, vectors, binary_raw_vectors, insert_ids = \
-                cf.insert_data(collection_w, nb, is_binary, is_all_data_type,
-                               auto_id=auto_id, dim=dim)
+            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
+                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim)
             assert collection_w.is_empty is False
             assert collection_w.num_entities == nb
             # This condition will be removed after auto index feature
             if not is_index:
                 collection_w.load()
 
-        return collection_w, vectors, binary_raw_vectors, insert_ids
+        return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
     def insert_entities_into_two_partitions_in_half(self, half, prefix='query'):
         """

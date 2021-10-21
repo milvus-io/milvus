@@ -13,7 +13,10 @@ class CustomResourceOperations(object):
         self.group = group
         self.version = version
         self.namespace = namespace
-        self.plural = kind.lower()
+        if kind.lower() == "schedule":
+            self.plural = "schedules"
+        else:
+            self.plural = kind.lower()
 
     def create(self, body):
         """create or apply a custom resource in k8s"""

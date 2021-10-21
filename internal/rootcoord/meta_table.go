@@ -90,7 +90,7 @@ type MetaTable struct {
 }
 
 // NewMetaTable create meta table for rootcoord, which stores all in-memory information
-// for collection, partion, segment, index etc.
+// for collection, partition, segment, index etc.
 func NewMetaTable(kv kv.SnapShotKV) (*MetaTable, error) {
 	mt := &MetaTable{
 		client:     kv,

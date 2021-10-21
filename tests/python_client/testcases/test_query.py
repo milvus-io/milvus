@@ -932,7 +932,7 @@ class TestQueryOperation(TestcaseBase):
         limit = 1000
         nb_old = 500
         collection_w, vectors, binary_raw_vectors, insert_ids = \
-            self.init_collection_general(prefix, True, nb_old)
+            self.init_collection_general(prefix, True, nb_old)[0:4]
 
         # 2. search for original data after load
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]

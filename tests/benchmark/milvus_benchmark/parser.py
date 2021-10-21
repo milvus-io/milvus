@@ -50,15 +50,16 @@ def parse_ann_collection_name(collection_name):
     metric = collection_name.split("_")[2]
     # metric = collection_name.attrs['distance']
     # dimension = len(collection_name["train"][0])
+    metric_type = ''
     if metric == "euclidean":
         metric_type = "l2"
-    elif metric  == "angular":
+    elif metric == "angular":
         metric_type = "ip"
-    elif metric  == "jaccard":
+    elif metric == "jaccard":
         metric_type = "jaccard"
     elif metric == "hamming":
         metric_type = "hamming"
-    return (data_type, dimension, metric_type)
+    return data_type, dimension, metric_type
 
 
 def search_params_parser(param):

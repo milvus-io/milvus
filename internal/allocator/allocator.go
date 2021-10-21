@@ -61,7 +61,7 @@ type IDRequest struct {
 	count uint32
 }
 
-// SyncRequest embed BaseRequest and is used to force synchronize from RootCoordinator.
+// SyncRequest embeds BaseRequest and is used to force synchronize from RootCoordinator.
 type SyncRequest struct {
 	BaseRequest
 }

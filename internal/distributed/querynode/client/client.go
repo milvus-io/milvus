@@ -101,6 +101,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	return client, nil
 }
 
+// Init initializes QueryNode's grpc client.
 func (c *Client) Init() error {
 	Params.Init()
 	return nil
@@ -166,10 +167,12 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	return ret, err
 }
 
+// Start starts QueryNode's client service. But it does nothing here.
 func (c *Client) Start() error {
 	return nil
 }
 
+// Stop stops QueryNode's grpc client server.
 func (c *Client) Stop() error {
 	c.cancel()
 	c.grpcClientMtx.Lock()

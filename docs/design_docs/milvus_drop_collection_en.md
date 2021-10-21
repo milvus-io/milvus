@@ -5,7 +5,7 @@ The execution flow of `Drop Collection` is shown in the following figure:
 
 ![drop_collection](./graphs/dml_drop_collection.png)
 
-1. Firstly, `SDK` starts a `DropCollection` request to `Proxy` via `Grpc`, the `proto` is defined as follows:
+1. Firstly, `SDK` sends a `DropCollection` request to `Proxy` via `Grpc`, the `proto` is defined as follows:
 ```proto
 service MilvusService {
     ...
@@ -22,7 +22,7 @@ message DropCollectionRequest {
 }
 ```
 
-2. Once the `DropCollection` request is received, the `Proxy` would wrap this request into `DropCollectionTask`, and push this task into `DdTaskQueue` queue. After that, `Proxy` would call method of `WatiToFinish` to wait until the task is finished.
+2. Once the `DropCollection` request is received, the `Proxy` would wrap this request into `DropCollectionTask`, and push this task into `DdTaskQueue` queue. After that, `Proxy` would call `WatiToFinish` method to wait until the task is finished.
 ```go
 type task interface {
 	TraceCtx() context.Context

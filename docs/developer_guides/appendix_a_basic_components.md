@@ -472,6 +472,7 @@ func (kv *EtcdKV) MultiRemove(keys []string) error
 func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
 func (kv *EtcdKV) Watch(key string) clientv3.WatchChan
 func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan
+func (kv *EtcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan
 
 func NewEtcdKV(etcdAddr string, rootPath string) *EtcdKV
 ```
