@@ -108,6 +108,7 @@ func (c *consumer) Seek(id UniqueID) error { //nolint:govet
 	return nil
 }
 
+// Close destroy current consumer in rocksmq
 func (c *consumer) Close() {
 	err := c.client.server.DestroyConsumerGroup(c.topic, c.consumerName)
 	if err != nil {
