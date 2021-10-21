@@ -479,6 +479,7 @@ func (colReplica *collectionReplica) hasSegment(segmentID UniqueID) bool {
 	return colReplica.hasSegmentPrivate(segmentID)
 }
 
+// hasSegmentPrivate is private function in collectionReplica, to check if collectionReplica has the segment
 func (colReplica *collectionReplica) hasSegmentPrivate(segmentID UniqueID) bool {
 	_, ok := colReplica.segments[segmentID]
 	return ok
