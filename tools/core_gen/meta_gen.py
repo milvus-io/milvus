@@ -39,11 +39,11 @@ def meta_gen(content):
 
         body_res = body_pattern.findall(body)
         if len(body_res) != 1:
-            continue
             eprint(struct_name)
             eprint(body_res)
             eprint(body)
             assert False
+            continue
         struct_name, base_name = pack
         if not base_name:
             root_base = struct_name
