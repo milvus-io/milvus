@@ -78,7 +78,7 @@ information to `ExtraBytes`.
 In addition, `ExtraBytes` was also designed to extend binlog. Then we can add new features to binlog file without
 breaking the compatibility.
 
-For example, we can store the memory size of original content(before encode) to `ExtraBytes`.
+For example, we can store the memory size of original content(before encoding) to `ExtraBytes`.
 The key in `ExtraBytes` is `original_size`. For now, `original_size` is required, not optional.
 
 ### 8.3 Type code
