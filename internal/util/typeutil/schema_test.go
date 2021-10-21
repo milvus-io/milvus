@@ -279,11 +279,11 @@ func TestSchema_invalid(t *testing.T) {
 
 		_, err = helper.GetPrimaryKeyField()
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, "no primary in schema")
+		assert.EqualError(t, err, "Failed to get primary key field: no primary in schema")
 
 		_, err = helper.GetFieldFromName("none")
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, "fieldName(none) not found")
+		assert.EqualError(t, err, "Failed to get field schema by name: fieldName(none) not found")
 
 		_, err = helper.GetFieldFromID(101)
 		assert.NotNil(t, err)
