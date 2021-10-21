@@ -59,8 +59,7 @@ class HelmEnv(BaseEnv):
                 self.set_hostname(hostname)
                 while not helm_utils.running_status(self.name, self._name_space):
                     pass
-                else:
-                    return hostname
+                return hostname
         except Exception as e:
             os.system("rm -rf %s" % lock_file_path)
             logger.error("Helm install server failed: %s" % (str(e)))
