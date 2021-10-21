@@ -719,10 +719,10 @@ func TestRootCoord(t *testing.T) {
 		core.chanTimeTick.lock.Unlock()
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = DecodeDdOperation(ddOpStr, &ddOp)
@@ -889,10 +889,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, collName, pnm.GetCollArray()[0])
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = DecodeDdOperation(ddOpStr, &ddOp)
@@ -1224,10 +1224,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, collName, pnm.GetCollArray()[1])
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = DecodeDdOperation(ddOpStr, &ddOp)
@@ -1314,10 +1314,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, collName, collArray[2])
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = DecodeDdOperation(ddOpStr, &ddOp)
