@@ -336,7 +336,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
 	collMeta := s.meta.GetCollection(collectionID)
 	if collMeta == nil {
-		return -1, fmt.Errorf("failed to get collection %d", collectionID)
+		return -1, fmt.Errorf("Failed to get collection %d", collectionID)
 	}
 	return s.estimatePolicy(collMeta.Schema)
 }
@@ -355,7 +355,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	}
 	segment := s.meta.GetSegment(segmentID)
 	if segment == nil {
-		log.Warn("failed to get segment", zap.Int64("id", segmentID))
+		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
 		return
 	}
 	s.meta.SetAllocations(segmentID, []*Allocation{})
