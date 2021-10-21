@@ -188,6 +188,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
+// GetComponentStates gets the component states of QueryNode.
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
