@@ -18,7 +18,6 @@ if False:
 
     faiss.fvec_inner_product (swig_ptr(a), swig_ptr(b), 4)
 
-    1/0
 
 xd = 100
 yd = 1000000

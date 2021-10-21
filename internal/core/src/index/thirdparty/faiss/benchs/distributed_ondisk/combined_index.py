@@ -137,7 +137,6 @@ class CombinedIndex:
         for idx in self.indexes:
             il = faiss.downcast_InvertedLists(
                 faiss.extract_index_ivf(idx).invlists)
-            il.prefetch_nthread
             il.prefetch_nthread = nt
 
     def set_omp_num_threads(self, nt):

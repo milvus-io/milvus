@@ -38,7 +38,6 @@ class TestDeleteParams(TestcaseBase):
         # delete half of data
         del_res = collection_w.delete(expr)[0]
         assert del_res.delete_count == half_nb
-        collection_w.num_entities
 
         # query with deleted ids
         query_res = collection_w.query(expr)[0]
