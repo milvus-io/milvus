@@ -356,6 +356,14 @@ func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	return ret.(*datapb.GetInsertBinlogPathsResponse), err
 }
 
+// GetCollectionStatistics requests collection statistics
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the collection id to query
+//
+// response struct `GetCollectionStatisticsResponse` contains the key-value list fields returning related data
+// 	only row count for now
+// error is returned only when some communication issue occurs
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
