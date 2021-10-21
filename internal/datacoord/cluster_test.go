@@ -392,7 +392,8 @@ func TestConsistentHashPolicy(t *testing.T) {
 	}
 
 	hash.Remove("1")
-	cluster.UnRegister(nodeInfo1)
+	err = cluster.UnRegister(nodeInfo1)
+	assert.Nil(t, err)
 	for _, c := range channels {
 		idstr, err := hash.Get(c)
 		assert.Nil(t, err)
@@ -403,7 +404,8 @@ func TestConsistentHashPolicy(t *testing.T) {
 	}
 
 	hash.Remove("2")
-	cluster.UnRegister(nodeInfo2)
+	err = cluster.UnRegister(nodeInfo2)
+	assert.Nil(t, err)
 	for _, c := range channels {
 		idstr, err := hash.Get(c)
 		assert.Nil(t, err)
@@ -414,7 +416,8 @@ func TestConsistentHashPolicy(t *testing.T) {
 	}
 
 	hash.Remove("3")
-	cluster.UnRegister(nodeInfo3)
+	err = cluster.UnRegister(nodeInfo3)
+	assert.Nil(t, err)
 	bufferChannels := channelManager.GetBuffer()
 	assert.EqualValues(t, 3, len(bufferChannels.Channels))
 }
