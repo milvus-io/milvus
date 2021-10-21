@@ -532,7 +532,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 					zap.Any("guaranteeTime_l", guaranteeTs),
 					zap.Any("serviceTime_l", serviceTime),
 				)
-				if guaranteeTs <= serviceTime {
+				if guaranteeTs <= q.getServiceableTime() {
 					unSolvedMsg = append(unSolvedMsg, m)
 					continue
 				}
