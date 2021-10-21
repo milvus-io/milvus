@@ -371,6 +371,14 @@ func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	return ret.(*datapb.GetCollectionStatisticsResponse), err
 }
 
+// GetPartitionStatistics requests partition statistics
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the collection and partition id to query
+//
+// response struct `GetPartitionStatisticsResponse` contains the key-value list fields returning related data
+// 	only row count for now
+// error is returned only when some communication issue occurs
 func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
