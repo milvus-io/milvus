@@ -10,7 +10,7 @@ This document guides you through the Pytest-based PyMilvus test framework.
 
 ### Deploy Milvus
 
-To accommodate the variety of requirements, Milvus offers as much as four deployment methods. PyMilvus supports Milvus deployed with any of the methods below:
+To accommodate the variety of requirements, Milvus offers as many as four deployment methods. PyMilvus supports Milvus deployed with any of the methods below:
 
 1. [Build from source code](https://github.com/milvus-io/milvus#to-start-developing-milvus)
 2. Install with Docker Compose 
@@ -23,7 +23,7 @@ To accommodate the variety of requirements, Milvus offers as much as four deploy
 
 4. Install with KinD
 
-> For test purpose, we recommend installing Milvus with KinD. KinD supports ClickOnce deployment of Milvus and its test client. KinD deployment is tailored for scenarios with small data scale, such as development/debugging test cases and functional verification.
+> For test purposes, we recommend installing Milvus with KinD. KinD supports the ClickOnce deployment of Milvus and its test client. KinD deployment is tailored for scenarios with small data scale, such as development/debugging test cases and functional verification.
 
 - **Prerequisites**
 
