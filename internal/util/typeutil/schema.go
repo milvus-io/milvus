@@ -121,8 +121,8 @@ func (helper *SchemaHelper) GetFieldFromID(fieldID int64) (*schemapb.FieldSchema
 }
 
 // GetVectorDimFromID returns the dimension of specified field
-func (helper *SchemaHelper) GetVectorDimFromID(filedID int64) (int, error) {
-	sch, err := helper.GetFieldFromID(filedID)
+func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
+	sch, err := helper.GetFieldFromID(fieldID)
 	if err != nil {
 		return 0, err
 	}
@@ -138,7 +138,7 @@ func (helper *SchemaHelper) GetVectorDimFromID(filedID int64) (int, error) {
 			return dim, nil
 		}
 	}
-	return 0, fmt.Errorf("fieldID(%d) not has dim", filedID)
+	return 0, fmt.Errorf("fieldID(%d) not has dim", fieldID)
 }
 
 // IsVectorType returns true if input is a vector type, otherwise false
