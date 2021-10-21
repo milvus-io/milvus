@@ -61,14 +61,7 @@ func TestBaseTable_SaveAndLoad(t *testing.T) {
 
 func TestBaseTable_LoadFromKVPair(t *testing.T) {
 	var kvPairs []*commonpb.KeyValuePair
-	kvPairs = append(kvPairs, &commonpb.KeyValuePair{
-		Key:   "k1",
-		Value: "v1",
-	})
-	kvPairs = append(kvPairs, &commonpb.KeyValuePair{
-		Key:   "k2",
-		Value: "v2",
-	})
+	kvPairs = append(kvPairs, &commonpb.KeyValuePair{Key: "k1", Value: "v1"}, &commonpb.KeyValuePair{Key: "k2", Value: "v2"})
 
 	err := baseParams.LoadFromKVPair(kvPairs)
 	assert.Nil(t, err)
