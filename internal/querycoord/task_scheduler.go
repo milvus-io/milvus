@@ -438,9 +438,11 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	var taskInfoKey string
 	// assign taskID for childTask and update triggerTask's childTask to etcd
 	updateKVFn := func(parentTask task) error {
-		kvs := make(map[string]string)
-		kvs[taskInfoKey] = strconv.Itoa(int(taskDone))
+		// TODO:: if childTask.type == loadSegment, then only save segmentID to etcd instead of binlog paths
+		// The binlog paths of each segment will be written into etcd in advance
+		// The binlog paths will be filled in through etcd when load segment grpc is called
 		for _, childTask := range parentTask.getChildTask() {
+			kvs := make(map[string]string)
 			id, err := scheduler.taskIDAllocator()
 			if err != nil {
 				return err
@@ -454,11 +456,18 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 			kvs[childTaskKey] = string(blobs)
 			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, childTask.getTaskID())
 			kvs[stateKey] = strconv.Itoa(int(taskUndo))
+			err = scheduler.client.MultiSave(kvs)
+			if err != nil {
+				return err
+			}
 		}
-		err := scheduler.client.MultiSave(kvs)
+
+		parentInfoKey := fmt.Sprintf("%s/%d", taskInfoPrefix, parentTask.getTaskID())
+		err := scheduler.client.Save(parentInfoKey, strconv.Itoa(int(taskDone)))
 		if err != nil {
 			return err
 		}
+
 		return nil
 	}
 
