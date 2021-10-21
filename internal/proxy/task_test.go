@@ -2718,6 +2718,58 @@ func TestSearchTask_Execute(t *testing.T) {
 	// TODO(dragondriver): cover getDQLStream
 }
 
+func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32) *schemapb.SearchResultData {
+	return &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topk,
+		FieldsData: nil,
+		Scores:     scores,
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: ids,
+				},
+			},
+		},
+		Topks: make([]int64, nq),
+	}
+}
+
+func TestSearchTask_Reduce(t *testing.T) {
+	const (
+		nq         = 1
+		topk       = 4
+		metricType = "L2"
+	)
+	t.Run("case1", func(t *testing.T) {
+		ids := []int64{1, 2, 3, 4}
+		scores := []float32{-1.0, -2.0, -3.0, -4.0}
+		data1 := genSearchResultData(nq, topk, ids, scores)
+		data2 := genSearchResultData(nq, topk, ids, scores)
+		dataArray := make([]*schemapb.SearchResultData, 0)
+		dataArray = append(dataArray, data1)
+		dataArray = append(dataArray, data2)
+		res, err := reduceSearchResultData(dataArray, 2, nq, topk, metricType)
+		assert.Nil(t, err)
+		assert.Equal(t, ids, res.Results.Ids.GetIntId().Data)
+		assert.Equal(t, []float32{1.0, 2.0, 3.0, 4.0}, res.Results.Scores)
+	})
+	t.Run("case2", func(t *testing.T) {
+		ids1 := []int64{1, 2, 3, 4}
+		scores1 := []float32{-1.0, -2.0, -3.0, -4.0}
+		ids2 := []int64{5, 1, 3, 4}
+		scores2 := []float32{-1.0, -1.0, -3.0, -4.0}
+		data1 := genSearchResultData(nq, topk, ids1, scores1)
+		data2 := genSearchResultData(nq, topk, ids2, scores2)
+		dataArray := make([]*schemapb.SearchResultData, 0)
+		dataArray = append(dataArray, data1)
+		dataArray = append(dataArray, data2)
+		res, err := reduceSearchResultData(dataArray, 2, nq, topk, metricType)
+		assert.Nil(t, err)
+		assert.ElementsMatch(t, []int64{1, 5, 2, 3}, res.Results.Ids.GetIntId().Data)
+	})
+}
+
 func TestQueryTask_all(t *testing.T) {
 	var err error
 

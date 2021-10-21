@@ -1893,6 +1893,18 @@ func copySearchResultData(dst *schemapb.SearchResultData, src *schemapb.SearchRe
 	return nil
 }
 
+//func printSearchResultData(data *schemapb.SearchResultData, header string) {
+//	size := len(data.Ids.GetIntId().Data)
+//	if size != len(data.Scores) {
+//		log.Error("SearchResultData length mis-match")
+//	}
+//	log.Debug("==== SearchResultData ====",
+//		zap.String("header", header), zap.Int64("nq", data.NumQueries), zap.Int64("topk", data.TopK))
+//	for i := 0; i < size; i++ {
+//		log.Debug("", zap.Int("i", i), zap.Int64("id", data.Ids.GetIntId().Data[i]), zap.Float32("score", data.Scores[i]))
+//	}
+//}
+
 func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultData, availableQueryNodeNum int64,
 	nq int64, topk int64, metricType string, maxParallel int) (*milvuspb.SearchResults, error) {
 
@@ -1931,6 +1943,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
 			return ret, err
 		}
+		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
 
 	// TODO(yukun): Use parallel function
@@ -1938,30 +1951,57 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, availableQueryNodeNum)
 
-		var j int64
-		for j = 0; j < topk; j++ {
+		var prevIDSet = make(map[int64]struct{})
+		var prevScore float32 = math.MaxFloat32
+		var loc int64
+		for loc = 0; loc < topk; {
 			sel := selectSearchResultData(searchResultData, offsets, topk, i)
 			if sel == -1 {
 				break
 			}
-			offset := offsets[sel]
-			idx := i*topk + offset
+			idx := i*topk + offsets[sel]
 
-			// ignore invalid search result
 			id := searchResultData[sel].Ids.GetIntId().Data[idx]
+			score := searchResultData[sel].Scores[idx]
+			// ignore invalid search result
 			if id == -1 {
 				continue
 			}
-			copySearchResultData(ret.Results, searchResultData[sel], idx)
-			ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
-			ret.Results.Scores = append(ret.Results.Scores, searchResultData[sel].Scores[i*topk+offset])
+
+			// remove duplicates
+			if math.Abs(float64(score)-float64(prevScore)) > 0.00001 {
+				copySearchResultData(ret.Results, searchResultData[sel], idx)
+				ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
+				ret.Results.Scores = append(ret.Results.Scores, score)
+				prevScore = score
+				prevIDSet = map[int64]struct{}{id: {}}
+				loc++
+			} else {
+				// To handle this case:
+				//    e1: [100, 0.99]
+				//    e2: [101, 0.99]   ==> not duplicated, should keep
+				//    e3: [100, 0.99]   ==> duplicated, should remove
+				if _, ok := prevIDSet[id]; !ok {
+					copySearchResultData(ret.Results, searchResultData[sel], idx)
+					ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
+					ret.Results.Scores = append(ret.Results.Scores, score)
+					prevIDSet[id] = struct{}{}
+					loc++
+				} else {
+					// entity with same id and same score must be duplicated
+					log.Debug("skip duplicated search result",
+						zap.Int64("id", id),
+						zap.Float32("score", score),
+						zap.Float32("prevScore", prevScore))
+				}
+			}
 			offsets[sel]++
 		}
-		if realTopK != -1 && realTopK != j {
+		if realTopK != -1 && realTopK != loc {
 			log.Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
 			// return nil, errors.New("the length (topk) between all result of query is different")
 		}
-		realTopK = j
+		realTopK = loc
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 	}
 
