@@ -85,7 +85,7 @@ func (t *EmptyTicker) Chan() <-chan time.Time {
 	return t.tChan
 }
 
-// Init do nothing.
+// Init does nothing.
 func (t *EmptyTicker) Init() {
 }
 
