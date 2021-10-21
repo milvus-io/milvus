@@ -185,11 +185,27 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		return err
 	}
 
-	log.Debug("loading bloom filter...")
-	err = loader.loadSegmentBloomFilter(segment)
+	pkIDField, err := loader.historicalReplica.getPKFieldIDByCollectionID(collectionID)
 	if err != nil {
 		return err
 	}
+	if pkIDField == common.InvalidFieldID {
+		log.Warn("segment primary key field doesn't exist when load segment")
+	} else {
+		log.Debug("loading bloom filter...")
+		pkStatsBinlogs := loader.filterPKStatsBinlogs(segmentLoadInfo.Statslogs, pkIDField)
+		err = loader.loadSegmentBloomFilter(segment, pkStatsBinlogs)
+		if err != nil {
+			return err
+		}
+	}
+
+	log.Debug("loading delta...")
+	err = loader.loadDeltaLogs(segment, segmentLoadInfo.Deltalogs)
+	if err != nil {
+		return err
+	}
+
 	for _, id := range indexedFieldIDs {
 		log.Debug("loading index...")
 		err = loader.indexLoader.loadIndex(segment, id)
@@ -220,6 +236,16 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 //
 //	return statesResponse, nil
 //}
+
+func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) []string {
+	result := make([]string, 0)
+	for _, fieldBinlog := range fieldBinlogs {
+		if fieldBinlog.FieldID == pkFieldID {
+			result = append(result, fieldBinlog.Binlogs...)
+		}
+	}
+	return result
+}
 
 func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, skipFieldIDs []int64) []*datapb.FieldBinlog {
 	result := make([]*datapb.FieldBinlog, 0)
@@ -320,28 +346,20 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 
 	return nil
 }
-func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment) error {
-	// Todo: get path from etcd
-	collection, err := loader.historicalReplica.getCollectionByID(segment.collectionID)
-	if err != nil {
-		return err
-	}
-	pkField := int64(-1)
-	for _, field := range collection.schema.Fields {
-		if field.IsPrimaryKey {
-			pkField = field.FieldID
-			break
-		}
+
+func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment, binlogPaths []string) error {
+	if len(binlogPaths) == 0 {
+		log.Info("there are no stats logs saved with segment", zap.Any("segmentID", segment.segmentID))
+		return nil
 	}
 
-	p := path.Join("files/stats_log", JoinIDPath(segment.collectionID, segment.partitionID, segment.segmentID, pkField))
-	keys, values, err := loader.minioKV.LoadWithPrefix(p + "/")
+	values, err := loader.minioKV.MultiLoad(binlogPaths)
 	if err != nil {
 		return err
 	}
 	blobs := make([]*storage.Blob, 0)
-	for i := 0; i < len(keys); i++ {
-		blobs = append(blobs, &storage.Blob{Key: keys[i], Value: []byte(values[i])})
+	for i := 0; i < len(values); i++ {
+		blobs = append(blobs, &storage.Blob{Value: []byte(values[i])})
 	}
 
 	stats, err := storage.DeserializeStats(blobs)
@@ -358,6 +376,41 @@ func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb.DeltaLogInfo) error {
+	if len(deltaLogs) == 0 {
+		log.Info("there are no delta logs saved with segment", zap.Any("segmentID", segment.segmentID))
+		return nil
+	}
+	dCodec := storage.DeleteCodec{}
+	blobs := make([]*storage.Blob, 0)
+	for _, deltaLog := range deltaLogs {
+		value, err := loader.minioKV.Load(deltaLog.DeltaLogPath)
+		if err != nil {
+			return err
+		}
+		blob := &storage.Blob{
+			Key:   deltaLog.DeltaLogPath,
+			Value: []byte(value),
+		}
+		blobs = append(blobs, blob)
+	}
+	_, _, deltaData, err := dCodec.Deserialize(blobs)
+	if err != nil {
+		return err
+	}
+
+	// TODO yukun: implements segment.Delete
+	//rowCount := len(deltaData.Data)
+	pks := make([]string, 0)
+	tss := make([]int64, 0)
+	for pk, ts := range deltaData.Data {
+		pks = append(pks, pk)
+		tss = append(tss, ts)
+	}
+	// segment.Delete(pks, tss, rowCount)
 	return nil
 }
 
