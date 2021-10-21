@@ -6,7 +6,7 @@ update: 6.21.2021, by [Goose](https://github.com/XuanYang-cn)
 
 ## What's DataNode?
 
-DataNode processes insert data and persists them.
+DataNode processes data insert requests and persists the data.
 
 DataNode is based on flowgraph; each flowgraph cares about only one vchannel. There are ddl messages, dml
 messages, and timetick messages inside one vchannel, FIFO log stream.
