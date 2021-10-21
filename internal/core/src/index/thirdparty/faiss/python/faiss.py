@@ -424,7 +424,7 @@ def add_ref_in_constructor(the_class, parameter_no):
         pset = parameter_no[len(args)]
         self.referenced_objects = [args[no] for no in pset]
 
-    if type(parameter_no) == dict:
+    if type(parameter_no) is dict:
         # a list of parameters to keep, depending on the number of arguments
         the_class.__init__ = replacement_init_multiple
     else:
