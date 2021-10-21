@@ -34,5 +34,5 @@ def assert_pass(func, milvus_client, **params):
     try:
         methodcaller(func, **params)(milvus_client)
         logger.debug("&&&&&&&&&&&&&&&&&&&&")
-    except Exception as e:
-        raise
+    except:
+        raise Exception
