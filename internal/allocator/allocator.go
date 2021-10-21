@@ -93,7 +93,7 @@ func (t *EmptyTicker) Init() {
 func (t *EmptyTicker) Reset() {
 }
 
-// Close do nothing.
+// Close does nothing.
 func (t *EmptyTicker) Close() {
 }
 
