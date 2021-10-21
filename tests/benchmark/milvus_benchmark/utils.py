@@ -141,7 +141,6 @@ def get_server_tag(deploy_params):
     server_tag = ""
     if deploy_params and "server" in deploy_params:
         server = deploy_params["server"]
-        # server_name = server["server_name"] if "server_name" in server else ""
         server_tag = server["server_tag"] if "server_tag" in server else ""
     return server_tag
 
@@ -185,7 +184,6 @@ def search_param_analysis(vector_query, filter_query):
                         expression = expression + ' && ' + exp2
                     else:
                         expression = exp2
-
         else:
             logger.error("[search_param_analysis] filter_range not dict or len != 1: %s" % str(filter_range))
             return False
