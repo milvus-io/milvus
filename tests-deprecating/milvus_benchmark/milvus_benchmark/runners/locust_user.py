@@ -96,7 +96,7 @@ def locust_executor(host, port, collection_name, connection_type="single", run_p
     spawn_rate = run_params["spawn_rate"]
     during_time = run_params["during_time"]
     runner.start(clients_num, spawn_rate=spawn_rate)
-    gevent.spawn_later(during_time, lambda: runner.quit())
+    gevent.spawn_later(during_time, runner.quit)
     runner.greenlet.join()
     print_stats(env.stats)
     result = {

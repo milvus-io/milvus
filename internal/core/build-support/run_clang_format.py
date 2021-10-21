@@ -85,8 +85,7 @@ if __name__ == "__main__":
 
     if arguments.fix:
         if not arguments.quiet:
-            print("\n".join(map(lambda x: "Formatting {}".format(x),
-                                formatted_filenames)))
+            print("\n".join(map("Formatting {}".format,formatted_filenames)))
 
         # Break clang-format invocations into chunks: each invocation formats
         # 16 files. Wait for all processes to complete
