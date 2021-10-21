@@ -1,4 +1,3 @@
-
 """ Initialized parameters """
 port = 19530
 epsilon = 0.000001
@@ -72,12 +71,11 @@ get_invalid_strs = [
     "%$#",
     "a".join("a" for i in range(256))]
 
-
 get_not_string = [
     [],
     {},
     None,
-    (1, ),
+    (1,),
     1,
     1.0,
     [1, "2", 3]
@@ -145,7 +143,6 @@ get_wrong_format_dict = [
     {"host": 0, "port": 19520}
 ]
 
-
 """ Specially defined list """
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ",
                    "BIN_FLAT", "BIN_IVF_FLAT"]
@@ -174,6 +171,7 @@ class CheckTasks:
     check_partition_property = "check_partition_property"
     check_search_results = "check_search_results"
     check_query_results = "check_query_results"
+    check_query_empty = "check_query_empty"  # verify that query result is empty
     check_distance = "check_distance"
 
 
