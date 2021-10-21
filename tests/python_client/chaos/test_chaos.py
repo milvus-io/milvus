@@ -58,7 +58,7 @@ class TestChaosBase:
             if test_chaos in chaos_yaml:
                 expects = t.get('testcase', {}).get('expectation', {}).get('cluster_1_node', {})
                 # for cluster_n_node mode
-                for node in node_map.keys():
+                for node in node_map:
                     if node in test_chaos and len(getattr(ms, node_map[node])) > 1:
                         expects = t.get('testcase', {}).get('expectation', {}).get('cluster_n_node', {})
                 log.info(f"yaml.expects: {expects}")
