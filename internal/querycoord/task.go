@@ -87,7 +87,7 @@ type task interface {
 }
 
 type baseTask struct {
-	Condition
+	condition
 	ctx        context.Context
 	cancel     context.CancelFunc
 	result     *commonpb.Status
@@ -106,12 +106,12 @@ type baseTask struct {
 
 func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *baseTask {
 	childCtx, cancel := context.WithCancel(ctx)
-	condition := NewTaskCondition(childCtx)
+	condition := newTaskCondition(childCtx)
 
 	baseTask := &baseTask{
 		ctx:              childCtx,
 		cancel:           cancel,
-		Condition:        condition,
+		condition:        condition,
 		state:            taskUndo,
 		retryCount:       MaxRetryNum,
 		triggerCondition: triggerType,
