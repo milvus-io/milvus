@@ -13,7 +13,9 @@ from chaos import constants
 from delayed_assert import expect, assert_expectations
 
 
-def assert_statistic(checkers, expectations={}):
+def assert_statistic(checkers, expectations=None):
+    if expectations is None:
+        expectations = {}
     for k in checkers.keys():
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()

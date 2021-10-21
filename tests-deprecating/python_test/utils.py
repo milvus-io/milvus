@@ -383,8 +383,9 @@ def assert_equal_entity(a, b):
     pass
 
 
-def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
-                      metric_type="L2", replace_vecs=None):
+def gen_query_vectors(field_name, entities, top_k, nq, search_params=None, rand_vector=False, metric_type="L2", replace_vecs=None):
+    if search_params is None:
+        search_params = {"nprobe": 10}
     if rand_vector is True:
         dimension = len(entities[-1]["values"][0])
         query_vectors = gen_vectors(nq, dimension)
