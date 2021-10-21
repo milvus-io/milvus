@@ -89,7 +89,7 @@ func (t *EmptyTicker) Chan() <-chan time.Time {
 func (t *EmptyTicker) Init() {
 }
 
-// Reset do nothing.
+// Reset does nothing.
 func (t *EmptyTicker) Reset() {
 }
 
