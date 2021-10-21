@@ -401,6 +401,13 @@ func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// GetSegmentInfo requests segment info
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the list of segment ids to query
+//
+// response struct `GetSegmentInfoResponse` contains the list of segment info
+// error is returned only when some communication issue occurs
 func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
