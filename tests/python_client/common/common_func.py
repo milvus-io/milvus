@@ -23,6 +23,10 @@ def gen_str_by_length(length=8):
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
+def gen_digits_by_length(length=8):
+    return "".join(random.choice(string.digits) for _ in range(length))
+
+
 def gen_bool_field(name=ct.default_bool_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     bool_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BOOL, description=description,
                                                               is_primary=is_primary, **kwargs)
