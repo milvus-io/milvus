@@ -2,7 +2,8 @@ name: Pod Failure Chaos Test
 
 on:
   workflow_dispatch:
-
+  schedule:
+    - cron: "30 19 * * *"
 jobs:
   
   test-pod-failure-chaos:
