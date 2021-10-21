@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1634731498730,
+  "iteration": 1634816955564,
   "links": [],
   "panels": [
     {
@@ -437,7 +437,7 @@
         },
         {
           "exemplar": true,
-          "expr": "sum(increase(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
+          "expr": "increase(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2 ",
           "interval": "",
           "legendFormat": "success",
           "refId": "B"
@@ -540,7 +540,7 @@
         },
         {
           "exemplar": true,
-          "expr": "sum(increase(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
+          "expr": "increase(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2",
           "interval": "",
           "legendFormat": "success",
           "refId": "B"
@@ -635,7 +635,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "increase(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
+          "expr": "sum(increase(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
@@ -1043,7 +1043,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "$datasource",
+      "datasource": "prometheus",
       "description": "per-minute rate of describe_collection",
       "fieldConfig": {
         "defaults": {},
@@ -1086,7 +1086,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
+          "expr": "sum(increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
@@ -1094,7 +1094,7 @@
         },
         {
           "exemplar": true,
-          "expr": "increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2",
+          "expr": "sum(increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
           "interval": "",
           "legendFormat": "success",
           "refId": "B"
@@ -1189,14 +1189,15 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "increase(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
+          "expr": "sum(increase(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+          "exemplar": true,
+          "expr": "sum(increase(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
           "interval": "",
           "legendFormat": "success",
           "refId": "B"
@@ -1291,14 +1292,15 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "increase(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2",
+          "expr": "sum(increase(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
           "refId": "A"
         },
         {
-          "expr": "increase(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2",
+          "exemplar": true,
+          "expr": "sum(increase(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
           "interval": "",
           "legendFormat": "success",
           "refId": "B"
@@ -1698,7 +1700,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of show_partitions as measured over the last 5 minutes",
+      "description": "per-minute rate of show_partitions",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1739,14 +1741,16 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(rate(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+          "exemplar": true,
+          "expr": "sum(increase(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+          "exemplar": true,
+          "expr": "sum(increase(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
           "interval": "",
           "legendFormat": "success",
           "refId": "B"
@@ -5714,7 +5718,7 @@
         "name": "app_name",
         "options": [
           {
-            "selected": true,
+            "selected": false,
             "text": "milvus",
             "value": "milvus"
           }
@@ -5757,7 +5761,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "All",
           "value": "$__all"
         },
@@ -5885,5 +5889,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 49
+  "version": 61
 }
