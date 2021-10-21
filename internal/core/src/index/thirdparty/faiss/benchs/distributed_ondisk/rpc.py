@@ -213,8 +213,7 @@ class Client:
         (st, ret) = pickle.load(self.fs)
         if st is not None:
             raise ServerException(st)
-        else:
-            return ret
+        return ret
 
     def __getattr__(self,name):
         return lambda *x: self.generic_fun(name,x)
