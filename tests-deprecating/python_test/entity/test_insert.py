@@ -104,7 +104,7 @@ class TestInsertBase:
         ids = connect.insert(collection, default_entity)
         assert len(ids) == 1
         connect.drop_collection(collection)
-        assert connect.has_collection(collection) == False
+        assert connect.has_collection(collection) is False
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -118,7 +118,7 @@ class TestInsertBase:
         assert len(ids) == 1
         connect.flush([collection])
         connect.drop_collection(collection)
-        assert connect.has_collection(collection) == False
+        assert connect.has_collection(collection) is False
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(ADD_TIMEOUT)

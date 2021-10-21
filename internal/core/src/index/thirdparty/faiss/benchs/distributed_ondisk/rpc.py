@@ -211,7 +211,7 @@ class Client:
 
     def get_result(self):
         (st, ret) = pickle.load(self.fs)
-        if st!=None:
+        if st is not None:
             raise ServerException(st)
         else:
             return ret

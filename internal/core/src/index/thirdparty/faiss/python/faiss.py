@@ -726,7 +726,7 @@ class Kmeans:
         else:
             self.index = IndexFlatL2(d)
         if self.gpu:
-            if self.gpu == True:
+            if self.gpu is True:
                 ngpu = -1
             else:
                 ngpu = self.gpu

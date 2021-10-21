@@ -114,7 +114,7 @@ class TestCollectionLogic(object):
                 # logging.getLogger().info(logic_seq[i])
                 error_flag = True
                 break
-        assert error_flag == True
+        assert error_flag is True
 
     def tear_down(self, connect):
         names = connect.list_collections()[1]
