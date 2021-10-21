@@ -490,6 +490,7 @@ func (colReplica *collectionReplica) getSegmentNum() int {
 	return len(colReplica.segments)
 }
 
+//  getSegmentStatistics returns the statistics of segments in collectionReplica
 func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.SegmentStats {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
