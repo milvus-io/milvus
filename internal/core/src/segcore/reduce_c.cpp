@@ -84,7 +84,6 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
 #else
     float prev_dis = MAXFLOAT;
     std::unordered_set<int64_t> prev_pk_set;
-    prev_pk_set.insert(-1);
     while (loc_offset - query_offset < topk) {
         result_pairs[0].reset_distance();
         std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
