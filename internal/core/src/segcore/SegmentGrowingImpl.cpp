@@ -127,6 +127,9 @@ SegmentGrowingImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_ba
     }
     AssertInfo(bitmap_holder, "bitmap_holder is null");
     auto deleted_bitmap = bitmap_holder->bitmap_ptr;
+    if (bitset.size() == 0) {
+        return BitsetView(deleted_bitmap);
+    }
     AssertInfo(deleted_bitmap->count() == bitset.size(), "Deleted bitmap count not equal to filtered bitmap count");
 
     auto filtered_bitmap = std::make_shared<faiss::ConcurrentBitset>(bitset.size(), bitset.data());
