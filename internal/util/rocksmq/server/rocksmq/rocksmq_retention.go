@@ -456,7 +456,7 @@ func (ri *retentionInfo) newExpiredCleanUp(topic string) error {
 	}
 
 	if endID == 0 {
-		log.Debug("All messaged are not time expired")
+		log.Debug("All messages are not time expired")
 	}
 	log.Debug("Expired check by retention time", zap.Any("topic", topic), zap.Any("startID", startID), zap.Any("endID", endID), zap.Any("deletedAckedSize", deletedAckedSize))
 
