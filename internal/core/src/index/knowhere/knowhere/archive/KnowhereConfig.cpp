@@ -26,7 +26,6 @@
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "utils/ConfigUtils.h"
 #include "utils/Error.h"
-#include "utils/Log.h"
 #include "knowhere/common/Exception.h"
 
 #include <string>
