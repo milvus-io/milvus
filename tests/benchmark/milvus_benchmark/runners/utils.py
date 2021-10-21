@@ -97,6 +97,8 @@ def get_vectors_from_binary(nq, dimension, data_type):
         file_name = DEEP_SRC_DATA_DIR + 'query.npy'
     elif data_type == "binary":
         file_name = BINARY_SRC_DATA_DIR + 'query.npy'
+    else:
+        raise Exception("There is no corresponding file for this data type %s." % str(data_type))
     data = np.load(file_name)
     vectors = data[0:nq].tolist()
     return vectors

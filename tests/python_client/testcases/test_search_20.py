@@ -268,7 +268,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "metric type not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6727")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
@@ -289,6 +288,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         # 3. search
         invalid_search_params = cf.gen_invaild_search_params_type()
+        message = "Search params check failed"
         for invalid_search_param in invalid_search_params:
             if index == invalid_search_param["index_type"]:
                 search_params = {"metric_type": "L2", "params": invalid_search_param["search_params"]}
@@ -297,7 +297,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
                                     check_items={"err_code": 0,
-                                                 "err_msg": "metric type not found"})
+                                                 "err_msg": message})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_limit_type(self, get_invalid_limit):

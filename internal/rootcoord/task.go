@@ -855,7 +855,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo, flushedSegs, t.Req.Base.GetTimestamp())
+	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo, flushedSegs)
 	if err != nil {
 		log.Debug("RootCoord CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
 		return err
@@ -880,8 +880,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		if info.BuildID != 0 {
 			info.EnableIndex = true
 		}
-		ts, _ := t.core.TSOAllocator(1)
-		if err := t.core.MetaTable.AddIndex(&info, ts); err != nil {
+		if err := t.core.MetaTable.AddIndex(&info); err != nil {
 			log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
 		}
 	}
@@ -958,8 +957,7 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ts, _ := t.core.TSOAllocator(1)
-	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName, ts)
+	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
 	return err
 }
 

@@ -80,7 +80,7 @@ func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOpti
 // name is upper @skip call stacks of the function
 func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
-		return NoopSpan(), ctx
+		return NoopSpan(), nil
 	}
 
 	var pcs [1]uintptr
@@ -118,7 +118,7 @@ func StartSpanFromContextWithOperationName(ctx context.Context, operationName st
 // And will log print the current call line number and file name.
 func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operationName string, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
-		return NoopSpan(), ctx
+		return NoopSpan(), nil
 	}
 
 	var pcs [1]uintptr

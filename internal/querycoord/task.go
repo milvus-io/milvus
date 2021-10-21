@@ -43,6 +43,8 @@ const (
 const (
 	// MaxRetryNum is the maximum number of times that each task can be retried
 	MaxRetryNum = 5
+	// MaxSendSizeToEtcd is the default limit size of etcd messages that can be sent and received
+	MaxSendSizeToEtcd = 2097152
 )
 
 type taskState int
@@ -87,7 +89,7 @@ type task interface {
 }
 
 type baseTask struct {
-	Condition
+	condition
 	ctx        context.Context
 	cancel     context.CancelFunc
 	result     *commonpb.Status
@@ -106,12 +108,12 @@ type baseTask struct {
 
 func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *baseTask {
 	childCtx, cancel := context.WithCancel(ctx)
-	condition := NewTaskCondition(childCtx)
+	condition := newTaskCondition(childCtx)
 
 	baseTask := &baseTask{
 		ctx:              childCtx,
 		cancel:           cancel,
-		Condition:        condition,
+		condition:        condition,
 		state:            taskUndo,
 		retryCount:       MaxRetryNum,
 		triggerCondition: triggerType,
@@ -1630,6 +1632,9 @@ func shuffleChannelsToQueryNode(dmChannels []string, cluster Cluster, wait bool,
 	}
 }
 
+// shuffleSegmentsToQueryNode shuffle segments to online nodes
+// returned are noded id for each segment, which satisfies:
+//     len(returnedNodeIds) == len(segmentIDs) && segmentIDs[i] is assigned to returnedNodeIds[i]
 func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster Cluster, wait bool, excludeNodeIDs []int64) ([]int64, error) {
 	maxNumSegments := 0
 	nodes := make(map[int64]Node)

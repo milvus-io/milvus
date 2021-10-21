@@ -274,6 +274,7 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 	ri.lastRetentionTime.Store(topic, lastRetentionTs)
 }
 
+// retention do time ticker and trigger retention check and operation for each topic
 func (ri *retentionInfo) retention() error {
 	log.Debug("Rocksmq retention goroutine start!")
 	// Do retention check every 6s
