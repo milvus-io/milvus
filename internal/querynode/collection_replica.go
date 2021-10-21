@@ -484,6 +484,7 @@ func (colReplica *collectionReplica) hasSegmentPrivate(segmentID UniqueID) bool 
 	return ok
 }
 
+// getSegmentNum returns num of segments in collectionReplica
 func (colReplica *collectionReplica) getSegmentNum() int {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
