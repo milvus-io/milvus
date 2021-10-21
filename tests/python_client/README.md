@@ -218,7 +218,7 @@ assert self.partition_wrap.is_empty
        method: 1. create collection1
                2. drop collection1
                3. create partition in collection1
-       expected: 1. raise exception
+       expected: raise exception
        """
        # create collection
        collection_w = self.init_collection_wrap()
