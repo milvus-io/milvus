@@ -103,7 +103,8 @@ class LocustInsertRunner(LocustRunner):
             "task": collection["task"],
             "connection_type": connection_type,
         }
-        self.init_metric(self.name, collection_info, index_info, None, run_params)
+        self.init_metric(self.name, collection_info,
+                         index_info, None, run_params)
         case_metric = copy.deepcopy(self.metric)
         # set metric type as case
         case_metric.set_case_metric_type()
@@ -216,7 +217,8 @@ class LocustSearchRunner(LocustRunner):
             "task": collection["task"],
             "connection_type": connection_type,
         }
-        self.init_metric(self.name, collection_info, index_info, None, run_params)
+        self.init_metric(self.name, collection_info,
+                         index_info, None, run_params)
         case_metric = copy.deepcopy(self.metric)
         # set metric type as case
         case_metric.set_case_metric_type()
@@ -370,7 +372,8 @@ class LocustRandomRunner(LocustRunner):
             "task": collection["task"],
             "connection_type": connection_type,
         }
-        self.init_metric(self.name, collection_info, index_info, None, run_params)
+        self.init_metric(self.name, collection_info,
+                         index_info, None, run_params)
         case_metric = copy.deepcopy(self.metric)
         case_metric.set_case_metric_type()
         case_metrics = []

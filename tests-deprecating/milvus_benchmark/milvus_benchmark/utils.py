@@ -9,6 +9,7 @@ import config
 import tableprint as tp
 import yaml
 from yaml import dump, full_load
+from yaml.representer import SafeRepresenter
 
 logger = logging.getLogger("milvus_benchmark.utils")
 
@@ -40,8 +41,6 @@ def change_style(style, representer):
 
     return new_representer
 
-
-from yaml.representer import SafeRepresenter
 
 # represent_str does handle some corner cases, so use that
 # instead of calling represent_scalar directly

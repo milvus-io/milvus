@@ -183,7 +183,8 @@ def search_param_analysis(vector_query, filter_query):
             limit = vector[key]["topk"]
     else:
         logger.error(
-            "[search_param_analysis] vector not dict or len != 1: %s" % str(vector)
+            "[search_param_analysis] vector not dict or len != 1: %s" % str(
+                vector)
         )
         return False
 
@@ -198,10 +199,12 @@ def search_param_analysis(vector_query, filter_query):
                 field_name = filter_range[key]
                 expression = None
                 if "GT" in filter_range[key]:
-                    exp1 = "%s > %s" % (field_name, str(filter_range[key]["GT"]))
+                    exp1 = "%s > %s" % (
+                        field_name, str(filter_range[key]["GT"]))
                     expression = exp1
                 if "LT" in filter_range[key]:
-                    exp2 = "%s < %s" % (field_name, str(filter_range[key]["LT"]))
+                    exp2 = "%s < %s" % (
+                        field_name, str(filter_range[key]["LT"]))
                     if expression:
                         expression = expression + " && " + exp2
                     else:

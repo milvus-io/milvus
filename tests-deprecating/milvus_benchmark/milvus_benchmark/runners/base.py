@@ -116,7 +116,8 @@ class BaseRunner(object):
                     vectors = utils.generate_vectors(ni, dimension)
                     if vectors:
                         start_id = i * vectors_per_file + j * ni
-                        ni_time = self.insert_core(milvus, info, start_id, vectors)
+                        ni_time = self.insert_core(
+                            milvus, info, start_id, vectors)
                         total_time = total_time + ni_time
                 i += 1
         else:
@@ -129,10 +130,11 @@ class BaseRunner(object):
                     data = np.load(file_name)
                     # logger.info("Load npy file: %s end" % file_name)
                     for j in range(vectors_per_file // ni):
-                        vectors = data[j * ni : (j + 1) * ni].tolist()
+                        vectors = data[j * ni: (j + 1) * ni].tolist()
                         if vectors:
                             start_id = i * vectors_per_file + j * ni
-                            ni_time = self.insert_core(milvus, info, start_id, vectors)
+                            ni_time = self.insert_core(
+                                milvus, info, start_id, vectors)
                             total_time = total_time + ni_time
                     i += 1
                 else:
@@ -146,11 +148,13 @@ class BaseRunner(object):
                         vectors.extend(data.tolist())
                     if vectors:
                         start_id = i * vectors_per_file
-                        ni_time = self.insert_core(milvus, info, start_id, vectors)
+                        ni_time = self.insert_core(
+                            milvus, info, start_id, vectors)
                         total_time = total_time + ni_time
                     i += loops
         rps = round(size / total_time, 2)
         ni_time = round(total_time / (size / ni), 2)
-        result = {"total_time": round(total_time, 2), "rps": rps, "ni_time": ni_time}
+        result = {"total_time": round(
+            total_time, 2), "rps": rps, "ni_time": ni_time}
         logger.info(result)
         return result

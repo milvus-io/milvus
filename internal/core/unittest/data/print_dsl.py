@@ -5,7 +5,8 @@ import random
 
 def show_dsl(query_entities):
     if not isinstance(query_entities, (dict,)):
-        raise ParamError("Invalid query format. 'query_entities' must be a dict")
+        raise ParamError(
+            "Invalid query format. 'query_entities' must be a dict")
 
     duplicated_entities = copy.deepcopy(query_entities)
     vector_placeholders = {}

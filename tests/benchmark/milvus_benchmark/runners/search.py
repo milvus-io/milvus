@@ -82,7 +82,8 @@ class SearchRunner(BaseRunner):
                             "search_param": search_param,
                             "filter": filter_param,
                         }
-                        vector_query = {"vector": {index_field_name: search_info}}
+                        vector_query = {"vector": {
+                            index_field_name: search_info}}
                         case = {
                             "collection_name": collection_name,
                             "index_field_name": index_field_name,
@@ -98,7 +99,8 @@ class SearchRunner(BaseRunner):
         collection_name = case_param["collection_name"]
         self.milvus.set_collection(collection_name)
         if not self.milvus.exists_collection():
-            logger.error("collection name: {} not existed".format(collection_name))
+            logger.error(
+                "collection name: {} not existed".format(collection_name))
             return False
         logger.debug(self.milvus.count())
         logger.info("Start load collection")
@@ -123,7 +125,8 @@ class SearchRunner(BaseRunner):
             if (i == 0) or (min_query_time > interval_time):
                 min_query_time = round(interval_time, 2)
         avg_query_time = round(total_query_time / run_count, 2)
-        tmp_result = {"search_time": min_query_time, "avc_search_time": avg_query_time}
+        tmp_result = {"search_time": min_query_time,
+                      "avc_search_time": avg_query_time}
         return tmp_result
 
 
@@ -213,7 +216,8 @@ class InsertSearchRunner(BaseRunner):
                             "search_param": search_param,
                             "filter": filter_query,
                         }
-                        vector_query = {"vector": {index_field_name: search_info}}
+                        vector_query = {"vector": {
+                            index_field_name: search_info}}
                         case = {
                             "collection_name": collection_name,
                             "index_field_name": index_field_name,
