@@ -101,8 +101,8 @@ func (t *timestampOracle) InitTimestamp() error {
 	}
 	next := time.Now()
 
-	//If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
-	//the timestamp allocation will start from the saved etcd timestamp temporarily.
+	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
+	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubTimeByWallClock(next, last) < updateTimestampGuard {
 		next = last.Add(updateTimestampGuard)
 	}
