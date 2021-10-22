@@ -80,7 +80,8 @@ class TestUtilityParams(TestcaseBase):
             self.utility_wrap.has_collection(
                 c_name,
                 check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1, ct.err_msg: "Invalid collection name"},
+                check_items={ct.err_code: 1,
+                             ct.err_msg: "Invalid collection name"},
             )
         # elif not isinstance(c_name, str):
         #     self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: "illegal"})
@@ -724,7 +725,8 @@ class TestUtilityBase(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         self.init_collection_wrap(name=c_name)
-        res, _ = self.utility_wrap.has_partition(c_name, ct.default_partition_name)
+        res, _ = self.utility_wrap.has_partition(
+            c_name, ct.default_partition_name)
         assert res is True
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -914,7 +916,8 @@ class TestUtilityBase(TestcaseBase):
         expected: all entities is loafed, because load is synchronous
         """
         # create, insert default_nb, flush and load
-        collection_w = self.init_collection_general(prefix, insert_data=True, nb=nb)[0]
+        collection_w = self.init_collection_general(
+            prefix, insert_data=True, nb=nb)[0]
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert res[num_total_entities] == nb
         assert res[num_loaded_entities] == nb
@@ -955,7 +958,8 @@ class TestUtilityBase(TestcaseBase):
         method: insert and flush data, call loading_progress without loading
         expected: loaded entities is 0
         """
-        collection_w = self.init_collection_general(prefix, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, insert_data=True)[0]
         collection_w.release()
         exp_res = {num_loaded_entities: 0, num_total_entities: ct.default_nb}
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
@@ -1177,7 +1181,8 @@ class TestUtilityBase(TestcaseBase):
             op_r,
             params,
             check_task=CheckTasks.check_distance,
-            check_items={"vectors_l": vectors_l, "vectors_r": vectors_r, "sqrt": sqrt},
+            check_items={"vectors_l": vectors_l,
+                         "vectors_r": vectors_r, "sqrt": sqrt},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1631,7 +1636,7 @@ class TestUtilityAdvanced(TestcaseBase):
         for i in range(thread_num):
             x = threading.Thread(
                 target=create_and_drop_collection,
-                args=(c_names[i * num : (i + 1) * num],),
+                args=(c_names[i * num: (i + 1) * num],),
             )
             threads.append(x)
             x.start()
