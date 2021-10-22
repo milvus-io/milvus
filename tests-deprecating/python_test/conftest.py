@@ -33,7 +33,7 @@ def pytest_configure(config):
 
 
 def pytest_runtest_setup(item):
-    tags = list()
+    tags = []
     for marker in item.iter_markers(name="tag"):
         for tag in marker.args:
             tags.append(tag)

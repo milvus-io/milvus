@@ -82,12 +82,12 @@ def retry(times):
 def convert_nested(dct):
     def insert(dct, lst):
         for x in lst[:-2]:
-            dct[x] = dct = dct.get(x, dict())
+            dct[x] = dct = dct.get(x, {})
         dct.update({lst[-2]: lst[-1]})
 
         # empty dict to store the result
 
-    result = dict()
+    result = {}
 
     # create an iterator of lists
     # representing nested or hierarchial flow
