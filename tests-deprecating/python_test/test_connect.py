@@ -14,7 +14,9 @@ class TestConnect:
         """
         check if ip is localhost or not
         """
-        return bool(not args["ip"] or args["ip"] == 'localhost' or args["ip"] == "127.0.0.1")
+        return bool(
+            not args["ip"] or args["ip"] == "localhost" or args["ip"] == "127.0.0.1"
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_close(self, connect):
@@ -91,10 +93,12 @@ class TestConnect:
         """
         uri_value = ""
         if self.local_ip(args):
-            milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
+            milvus = get_milvus(None, None, uri=uri_value,
+                                handler=args["handler"])
         else:
             with pytest.raises(Exception) as e:
-                milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
+                milvus = get_milvus(None, None, uri=uri_value,
+                                    handler=args["handler"])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_connect_with_multiprocess(self, args):
@@ -105,7 +109,8 @@ class TestConnect:
         """
 
         def connect():
-            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
+            milvus = get_milvus(args["ip"], args["port"],
+                                handler=args["handler"])
             assert milvus
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
