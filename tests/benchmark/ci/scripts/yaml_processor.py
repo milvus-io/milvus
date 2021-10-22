@@ -12,7 +12,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.tokens import CommentToken
 
 yaml = YAML(typ="rt")
-## format yaml file
+# format yaml file
 yaml.indent(mapping=2, sequence=4, offset=2)
 
 
@@ -77,7 +77,8 @@ def _map_comment(_element, _key):
                 space_list = [" " for i in range(col)]
                 space_str = "".join(space_list)
 
-                origin_comment = "\n" + "".join([space_str + t.value for t in token[3]])
+                origin_comment = "\n" + \
+                    "".join([space_str + t.value for t in token[3]])
             except Exception:
                 pass
 
@@ -111,7 +112,8 @@ def _comment_counter(_comment):
     counter comment tips and split into list
     """
 
-    x = lambda l: l.strip().strip("#").strip()
+    def x(l):
+        return l.strip().strip("#").strip()
 
     _counter = []
     if _comment.startswith("\n"):
@@ -125,7 +127,7 @@ def _comment_counter(_comment):
     else:
         index = _comment.find("\n")
         _counter.append(x(_comment[:index]))
-        _counter.append(x(_comment[index + 1 :]))
+        _counter.append(x(_comment[index + 1:]))
 
     return _counter
 
@@ -302,7 +304,7 @@ def _merge(master, target):
 
         sys.exit(1)
 
-    ## item is a sequence
+    # item is a sequence
     if isinstance(target, CommentedSeq):
         for index in range(len(target)):
             # get target comment
@@ -344,7 +346,7 @@ def _merge(master, target):
                     master, _extract_comment(comment) + "\n\n", len(master) - 1
                 )
 
-    ## item is a map
+    # item is a map
     elif isinstance(target, CommentedMap):
         for item in target:
             if item == "flag":
@@ -369,7 +371,8 @@ def _merge(master, target):
             if len(comment) > 0:
                 _add_eol_comment(master, _extract_comment(comment), item)
 
-            start_comment = _obtain_comment(origin_start_comment, target_start_comment)
+            start_comment = _obtain_comment(
+                origin_start_comment, target_start_comment)
             if len(start_comment) > 0:
                 master.yaml_set_start_comment(_extract_comment(start_comment))
 
@@ -458,12 +461,14 @@ def _set_merge_parser(_parsers):
     config merge parser
     """
 
-    merge_parser = _parsers.add_parser("merge", help="merge with another yaml file")
+    merge_parser = _parsers.add_parser(
+        "merge", help="merge with another yaml file")
 
     _set_merge_parser_arg(merge_parser)
     _set_update_parser_arg(merge_parser)
 
-    merge_parser.set_defaults(function=merge_yaml, tips=merge_parser.format_help())
+    merge_parser.set_defaults(
+        function=merge_yaml, tips=merge_parser.format_help())
 
 
 def _set_merge_parser_arg(_parser):
@@ -479,10 +484,12 @@ def _set_update_parser(_parsers):
     config merge parser
     """
 
-    update_parser = _parsers.add_parser("update", help="update with another yaml file")
+    update_parser = _parsers.add_parser(
+        "update", help="update with another yaml file")
     _set_update_parser_arg(update_parser)
 
-    update_parser.set_defaults(function=update_yaml, tips=update_parser.format_help())
+    update_parser.set_defaults(
+        function=update_yaml, tips=update_parser.format_help())
 
 
 def _set_update_parser_arg(_parser):
@@ -494,7 +501,8 @@ def _set_update_parser_arg(_parser):
     _parser.add_argument(
         "-u", "--update", help='update with args, instance as "a.b.c=d# d comment"'
     )
-    _parser.add_argument("-a", "--append", action="store_true", help="append to a seq")
+    _parser.add_argument(
+        "-a", "--append", action="store_true", help="append to a seq")
 
     group = _parser.add_mutually_exclusive_group()
     group.add_argument("-o", "--out-file", help="indicate output yaml file")
