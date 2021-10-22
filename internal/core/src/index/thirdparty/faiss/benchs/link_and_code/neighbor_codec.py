@@ -4,7 +4,6 @@
 # LICENSE file in the root directory of this source tree.
 
 #! /usr/bin/env python2
-
 """
 This is the training code for the link and code. Especially the
 neighbors_kmeans function implements the EM-algorithm to find the
@@ -69,7 +68,6 @@ def train_kmeans(x, k, ngpu, max_points_per_centroid=256):
 # Learning the codebook from neighbors
 # ----------------------------------------------------------
 
-
 # works with both a full Inn table and dynamically generated neighbors
 
 
@@ -87,7 +85,7 @@ def get_neighbor_table(x_coded, Inn, i):
     out = np.zeros((M + 1, d), dtype="float32")
     rfn.get_neighbor_table(i, faiss.swig_ptr(out))
     _, _, sq = Inn
-    return out[:, sq * rfn.dsub : (sq + 1) * rfn.dsub]
+    return out[:, sq * rfn.dsub: (sq + 1) * rfn.dsub]
 
 
 # Function that produces the best regression values from the vector
@@ -114,9 +112,9 @@ def regress_opt_beta(x, x_coded, Inn):
     X = np.zeros((d * N))
     Y = np.zeros((d * N, knn))
     for i in xrange(N):
-        X[i * d : (i + 1) * d] = x[i, :]
+        X[i * d: (i + 1) * d] = x[i, :]
         neighbor_table = get_neighbor_table(x_coded, Inn, i)
-        Y[i * d : (i + 1) * d, :] = neighbor_table.transpose()
+        Y[i * d: (i + 1) * d, :] = neighbor_table.transpose()
     beta_opt = np.linalg.lstsq(Y, X, rcond=0.01)[0]
     return beta_opt
 
@@ -181,7 +179,8 @@ def neighbors_kmeans(x, x_coded, Inn, K, ngpus=1, niter=5):
             cl1 = idx[np.random.randint(idx.size)]
             pos = np.nonzero(idx == cl1)[0]
             pos = rs.choice(pos, pos.size / 2)
-            print("   cl %d -> %d + %d" % (cl1, len(pos), hist[cl1] - len(pos)))
+            print("   cl %d -> %d + %d" %
+                  (cl1, len(pos), hist[cl1] - len(pos)))
             idx[pos] = cl0
             hist = np.bincount(idx)
 
@@ -194,9 +193,9 @@ def neighbors_kmeans(x, x_coded, Inn, K, ngpus=1, niter=5):
             Y = np.zeros((d * npos, knn))
 
             for i in range(npos):
-                X[i * d : (i + 1) * d] = x[pos[i], :]
+                X[i * d: (i + 1) * d] = x[pos[i], :]
                 neighbor_table = get_neighbor_table(x_coded, Inn, pos[i])
-                Y[i * d : (i + 1) * d, :] = neighbor_table.transpose()
+                Y[i * d: (i + 1) * d, :] = neighbor_table.transpose()
             sol, residuals, _, _ = np.linalg.lstsq(Y, X, rcond=0.01)
             if residuals.size > 0:
                 tot_err += residuals.sum()
@@ -214,7 +213,7 @@ def assign_beta_2(beta_centroids, x, rfn, Inn):
     all_beta_centroids = np.zeros((rfn.nsq, rfn.k, rfn.M + 1), dtype="float32")
     all_beta_centroids[sq] = beta_centroids
     all_x = np.zeros((len(x), rfn.d), dtype="float32")
-    all_x[:, sq * rfn.dsub : (sq + 1) * rfn.dsub] = x
+    all_x[:, sq * rfn.dsub: (sq + 1) * rfn.dsub] = x
     rfn.codes.clear()
     rfn.ntotal = 0
     faiss.copy_array_to_vector(all_beta_centroids.ravel(), rfn.codebook)
@@ -232,7 +231,8 @@ def train_beta_codebook(rfn, xb_full, niter=10):
     beta_centroids = []
     for sq in range(rfn.nsq):
         d0, d1 = sq * rfn.dsub, (sq + 1) * rfn.dsub
-        print("training subquantizer %d/%d on dimensions %d:%d" % (sq, rfn.nsq, d0, d1))
+        print("training subquantizer %d/%d on dimensions %d:%d" %
+              (sq, rfn.nsq, d0, d1))
         beta_centroids_i = neighbors_kmeans(
             xb_full[:, d0:d1],
             rfn,
