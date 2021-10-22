@@ -273,6 +273,7 @@ func (c *Client) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQuer
 	return ret.(*commonpb.Status), err
 }
 
+// WatchDmChannels watches the channels about data manipulation.
 func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
