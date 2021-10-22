@@ -236,5 +236,5 @@ def evaluate(xq, gt, index, k=100, endl=True):
         )
         rank *= 10
     if endl:
-        print
+        pass
     return D, I

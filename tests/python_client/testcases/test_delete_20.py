@@ -735,7 +735,6 @@ class TestDeleteOperation(TestcaseBase):
         # delete id 0 and flush
         del_res = collection_w.delete(tmp_expr)[0]
         assert del_res.delete_count == 1
-        collection_w.num_entities
         # load and query id 0
         collection_w.load()
         query_res = collection_w.query(tmp_expr)[0]
