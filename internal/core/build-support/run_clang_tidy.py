@@ -72,11 +72,10 @@ def _check_all(cmd, filenames, ignore_checks):
                 #   error: 'fiu.h' file not found [clang-diagnostic-error]
                 cnt_info = ""
                 for line in stdout.splitlines():
-                    if any(
-                        len(re.findall(check, line)) > 0 for check in ignore_checks
-                    ):
+                    if any(len(re.findall(check, line)) > 0 for check in ignore_checks):
                         cnt_info += (
-                            line.replace(" error: ", " ignore: ").decode("utf-8") + "\n"
+                            line.replace(" error: ", " ignore: ").decode(
+                                "utf-8") + "\n"
                         )
                     else:
                         cnt_info += line.decode("utf-8") + "\n"
