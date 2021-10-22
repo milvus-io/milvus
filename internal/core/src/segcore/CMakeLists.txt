@@ -40,7 +40,6 @@ target_link_libraries(milvus_segcore
         milvus_common
         milvus_query
         milvus_utils
-        milvus_storage
         milvus_config
         )
 
