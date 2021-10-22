@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -46,7 +47,7 @@ type mockMinioKV struct {
 	kv.BaseKV
 }
 
-func (kv *mockMinioKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
+func (kv *mockMinioKV) MultiLoad(keys []string) ([]string, error) {
 	stats := &storage.Int64Stats{
 		FieldID: common.RowIDField,
 		Min:     0,
@@ -54,14 +55,14 @@ func (kv *mockMinioKV) LoadWithPrefix(prefix string) ([]string, []string, error)
 		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 	}
 	buffer, _ := json.Marshal(stats)
-	return []string{"0"}, []string{string(buffer)}, nil
+	return []string{string(buffer)}, nil
 }
 
 type mockPkfilterMergeError struct {
 	kv.BaseKV
 }
 
-func (kv *mockPkfilterMergeError) LoadWithPrefix(prefix string) ([]string, []string, error) {
+func (kv *mockPkfilterMergeError) MultiLoad(keys []string) ([]string, error) {
 	stats := &storage.Int64Stats{
 		FieldID: common.RowIDField,
 		Min:     0,
@@ -69,23 +70,30 @@ func (kv *mockPkfilterMergeError) LoadWithPrefix(prefix string) ([]string, []str
 		BF:      bloom.NewWithEstimates(1, 0.0001),
 	}
 	buffer, _ := json.Marshal(stats)
-	return []string{"0"}, []string{string(buffer)}, nil
+	return []string{string(buffer)}, nil
 }
 
 type mockMinioKVError struct {
 	kv.BaseKV
 }
 
-func (kv *mockMinioKVError) LoadWithPrefix(prefix string) ([]string, []string, error) {
-	return nil, nil, fmt.Errorf("mock error")
+func (kv *mockMinioKVError) MultiLoad(keys []string) ([]string, error) {
+	return nil, fmt.Errorf("mock error")
 }
 
 type mockMinioKVStatsError struct {
 	kv.BaseKV
 }
 
-func (kv *mockMinioKVStatsError) LoadWithPrefix(prefix string) ([]string, []string, error) {
-	return []string{"0"}, []string{"3123123,error,test"}, nil
+func (kv *mockMinioKVStatsError) MultiLoad(keys []string) ([]string, error) {
+	return []string{"3123123,error,test"}, nil
+}
+
+func getSimpleFieldBinlog() *datapb.FieldBinlog {
+	return &datapb.FieldBinlog{
+		FieldID: 100,
+		Binlogs: []string{"test"},
+	}
 }
 
 func TestSegmentReplica_getCollectionAndPartitionID(te *testing.T) {
@@ -303,7 +311,7 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 				sr.minIOKV = &mockMinioKV{}
 				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
-				err = sr.addNormalSegment(test.inSegID, test.inCollID, 1, "", 0, &segmentCheckPoint{})
+				err = sr.addNormalSegment(test.inSegID, test.inCollID, 1, "", 0, []*datapb.FieldBinlog{getSimpleFieldBinlog()}, &segmentCheckPoint{})
 				if test.isValidCase {
 					assert.NoError(t, err)
 					assert.True(t, sr.hasSegment(test.inSegID, true))
@@ -529,9 +537,9 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
-		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
+		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp)
 		assert.NotNil(to, err)
-		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
+		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()})
 		assert.NotNil(to, err)
 	})
 
@@ -542,9 +550,9 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
-		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
+		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp)
 		assert.NotNil(to, err)
-		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
+		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()})
 		assert.NotNil(to, err)
 	})
 
@@ -555,9 +563,9 @@ func TestSegmentReplica_InterfaceMethod(te *testing.T) {
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
-		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
+		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp)
 		assert.NotNil(to, err)
-		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
+		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()})
 		assert.NotNil(to, err)
 	})
 
@@ -598,7 +606,7 @@ func TestInnerFunctionSegment(t *testing.T) {
 
 	cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 	cp := &segmentCheckPoint{int64(10), *cpPos}
-	err = replica.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
+	err = replica.addNormalSegment(1, 1, 2, "insert-01", int64(10), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp)
 	assert.NoError(t, err)
 	assert.True(t, replica.hasSegment(1, true))
 	assert.Equal(t, 1, len(replica.normalSegments))
@@ -615,7 +623,7 @@ func TestInnerFunctionSegment(t *testing.T) {
 	assert.False(t, seg.isNew.Load().(bool))
 	assert.False(t, seg.isFlushed.Load().(bool))
 
-	err = replica.addNormalSegment(1, 100000, 2, "invalid", int64(0), &segmentCheckPoint{})
+	err = replica.addNormalSegment(1, 100000, 2, "invalid", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, &segmentCheckPoint{})
 	assert.Error(t, err)
 
 	replica.updateStatistics(1, 10)
@@ -650,7 +658,7 @@ func TestInnerFunctionSegment(t *testing.T) {
 	replica.updateSegmentCheckPoint(1)
 	assert.Equal(t, int64(20), replica.normalSegments[UniqueID(1)].checkPoint.numRows)
 
-	err = replica.addFlushedSegment(1, 1, 2, "insert-01", int64(0))
+	err = replica.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()})
 	assert.Nil(t, err)
 
 	totalSegments := replica.filterSegments("insert-01", 0)
@@ -696,7 +704,7 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 
 	err = replica.addNewSegment(1, collID, partID, chanName, startPos, endPos)
 	assert.Nil(t, err)
-	err = replica.addNormalSegment(2, collID, partID, chanName, 100, cp)
+	err = replica.addNormalSegment(2, collID, partID, chanName, 100, []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp)
 	assert.Nil(t, err)
 
 	segNew := replica.newSegments[1]
