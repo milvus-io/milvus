@@ -12,7 +12,6 @@
 package rocksmq
 
 import (
-	"context"
 	"reflect"
 	"sync"
 
@@ -25,9 +24,9 @@ type client struct {
 	server          RocksMQ
 	producerOptions []ProducerOptions
 	consumerOptions []ConsumerOptions
-	ctx             context.Context
-	cancel          context.CancelFunc
 	wg              *sync.WaitGroup
+	closeCh         chan struct{}
+	closeOnce       sync.Once
 }
 
 func newClient(options ClientOptions) (*client, error) {
@@ -35,16 +34,11 @@ func newClient(options ClientOptions) (*client, error) {
 		return nil, newError(InvalidConfiguration, "options.Server is nil")
 	}
 
-	if options.Ctx == nil {
-		options.Ctx, options.Cancel = context.WithCancel(context.Background())
-	}
-
 	c := &client{
 		server:          options.Server,
 		producerOptions: []ProducerOptions{},
-		ctx:             options.Ctx,
-		cancel:          options.Cancel,
 		wg:              &sync.WaitGroup{},
+		closeCh:         make(chan struct{}),
 	}
 	return c, nil
 }
@@ -128,7 +122,7 @@ func (c *client) consume(consumer *consumer) {
 	defer c.wg.Done()
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.closeCh:
 			return
 		case _, ok := <-consumer.MsgMutex():
 			if !ok {
@@ -164,11 +158,13 @@ func (c *client) consume(consumer *consumer) {
 
 func (c *client) Close() {
 	// TODO(yukun): Should call server.close() here?
-	c.cancel()
-	// Wait all consume goroutines exit
-	c.wg.Wait()
-	if c.server != nil {
-		c.server.Close()
-	}
-	c.consumerOptions = nil
+	c.closeOnce.Do(func() {
+		close(c.closeCh)
+		c.wg.Wait()
+		if c.server != nil {
+			c.server.Close()
+		}
+		// Wait all consume goroutines exit
+		c.consumerOptions = nil
+	})
 }
