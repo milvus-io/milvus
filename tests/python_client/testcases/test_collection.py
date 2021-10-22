@@ -1723,7 +1723,7 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         nb = 100
         df = cf.gen_default_dataframe_data(nb)
-        new_values = pd.Series(data=[i for i in range(0, -nb, -1)])
+        new_values = pd.Series(data=list(range(0, -nb, -1)))
         df[ct.default_int64_field_name] = new_values
         self.collection_wrap.construct_from_dataframe(
             cf.gen_unique_str(prefix),

@@ -32,7 +32,7 @@ class TestMysql:
         index_type = IndexType.IVF_PQ
         vectors = gen_vectors(big_nb, default_dim)
         status, ids = connect.bulk_insert(
-            collection, vectors, ids=[i for i in range(big_nb)]
+            collection, vectors, ids=list(range(big_nb))
         )
         status = connect.flush([collection])
         assert status.OK()

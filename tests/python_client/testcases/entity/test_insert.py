@@ -198,7 +198,7 @@ class TestInsertBase:
         expected: the length of ids and the collection row count
         """
         nb = insert_count
-        ids = [i for i in range(nb)]
+        ids = list(range(nb))
         entities = ut.gen_entities(nb)
         entities[0]["values"] = ids
         result = connect.insert(id_collection, entities)
@@ -245,7 +245,7 @@ class TestInsertBase:
             "auto_id": False,
         }
         connect.create_collection(collection_name, fields)
-        ids = [i for i in range(nb)]
+        ids = list(range(nb))
         entities = ut.gen_entities_by_fields(
             fields["fields"], nb, ut.default_dim, ids)
         logging.getLogger().info(entities)
@@ -278,7 +278,7 @@ class TestInsertBase:
         method: test insert vectors twice, use customize ids first, and then use no ids
         expected:  BaseException raised
         """
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         entities = copy.deepcopy(default_entities)
         entities[0]["values"] = ids
         connect.insert(id_collection, entities)
@@ -307,7 +307,7 @@ class TestInsertBase:
         method: create collection and insert vectors in it
         expected: raise an exception
         """
-        ids = [i for i in range(1, default_nb)]
+        ids = list(range(1, default_nb))
         logging.getLogger().info(len(ids))
         entities = copy.deepcopy(default_entities)
         entities[0]["values"] = ids
@@ -322,7 +322,7 @@ class TestInsertBase:
         method: create collection and insert vectors in it
         expected: raise an exception
         """
-        ids = [i for i in range(1, default_nb)]
+        ids = list(range(1, default_nb))
         logging.getLogger().info(len(ids))
         entity = copy.deepcopy(default_entity)
         entity[0]["values"] = ids
@@ -357,7 +357,7 @@ class TestInsertBase:
         expected: the collection row count equals to nq
         """
         connect.create_partition(id_collection, default_tag)
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         entities = ut.gen_entities(default_nb)
         entities[0]["values"] = ids
         result = connect.insert(id_collection, entities,

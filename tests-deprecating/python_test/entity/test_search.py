@@ -1240,7 +1240,7 @@ class TestSearchDSL(object):
         expr = {
             "must": [
                 gen_default_vector_expr(default_query),
-                gen_default_term_expr(values=[i for i in range(100000, 100010)]),
+                gen_default_term_expr(values=list(range(100000, 100010))),
             ]
         }
         query = update_query_expr(default_query, expr=expr)
@@ -1283,9 +1283,7 @@ class TestSearchDSL(object):
             "must": [
                 gen_default_vector_expr(default_query),
                 gen_default_term_expr(
-                    values=[
-                        i for i in range(default_nb // 2, default_nb + default_nb // 2)
-                    ]
+                    values=list(range(default_nb // 2, default_nb + default_nb // 2))
                 ),
             ]
         }
@@ -1378,7 +1376,7 @@ class TestSearchDSL(object):
             "must": [
                 gen_default_vector_expr(default_query),
                 gen_default_term_expr(
-                    keyword="terrm", values=[i for i in range(default_nb // 2)]
+                    keyword="terrm", values=list(range(default_nb // 2))
                 ),
             ]
         }
@@ -1420,7 +1418,7 @@ class TestSearchDSL(object):
         # assert count == default_nb
         stats = connect.get_collection_stats(collection_term)
         assert stats["row_count"] == default_nb
-        term_param = {"term": {"term": {"values": [i for i in range(default_nb // 2)]}}}
+        term_param = {"term": {"term": {"values": list(range(default_nb // 2))}}}
         expr = {"must": [gen_default_vector_expr(default_query), term_param]}
         query = update_query_expr(default_query, expr=expr)
         connect.load_collection(collection_term)
@@ -1555,7 +1553,7 @@ class TestSearchDSL(object):
         """
         entities, ids = init_data(connect, collection)
         term_first = gen_default_term_expr()
-        term_second = gen_default_term_expr(values=[i for i in range(default_nb // 3)])
+        term_second = gen_default_term_expr(values=list(range(default_nb // 3)))
         expr = {
             "must": [gen_default_vector_expr(default_query), term_first, term_second]
         }
@@ -1574,7 +1572,7 @@ class TestSearchDSL(object):
         entities, ids = init_data(connect, collection)
         term_first = gen_default_term_expr()
         term_second = gen_default_term_expr(
-            values=[i for i in range(default_nb // 2, default_nb + default_nb // 2)]
+            values=list(range(default_nb // 2, default_nb + default_nb // 2))
         )
         expr = {
             "must": [gen_default_vector_expr(default_query), term_first, term_second]
@@ -1612,7 +1610,7 @@ class TestSearchDSL(object):
         expected: pass
         """
         entities, ids = init_data(connect, collection)
-        term_first = {"int64": {"values": [i for i in range(default_nb // 2)]}}
+        term_first = {"int64": {"values": list(range(default_nb // 2))}}
         term_second = {
             "float": {"values": [float(i) for i in range(default_nb // 2, default_nb)]}
         }

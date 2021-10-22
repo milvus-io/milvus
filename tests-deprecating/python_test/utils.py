@@ -304,7 +304,7 @@ def gen_binary_default_fields(auto_id=True):
 def gen_entities(nb, is_normal=False):
     vectors = gen_vectors(nb, default_dim, is_normal)
     entities = [
-        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"name": "int64", "type": DataType.INT64, "values": list(range(nb))},
         {
             "name": "float",
             "type": DataType.FLOAT,
@@ -322,7 +322,7 @@ def gen_entities(nb, is_normal=False):
 def gen_entities_new(nb, is_normal=False):
     vectors = gen_vectors(nb, default_dim, is_normal)
     entities = [
-        {"name": "int64", "values": [i for i in range(nb)]},
+        {"name": "int64", "values": list(range(nb))},
         {"name": "float", "values": [float(i) for i in range(nb)]},
         {"name": default_float_vec_field_name, "values": vectors},
     ]
@@ -355,7 +355,7 @@ def gen_entities_rows(nb, is_normal=False, _id=True):
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
     entities = [
-        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"name": "int64", "type": DataType.INT64, "values": list(range(nb))},
         {
             "name": "float",
             "type": DataType.FLOAT,
@@ -373,7 +373,7 @@ def gen_binary_entities(nb):
 def gen_binary_entities_new(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
     entities = [
-        {"name": "int64", "values": [i for i in range(nb)]},
+        {"name": "int64", "values": list(range(nb))},
         {"name": "float", "values": [float(i) for i in range(nb)]},
         {"name": default_binary_vec_field_name, "values": vectors},
     ]
@@ -469,7 +469,7 @@ def gen_default_vector_expr(default_query):
 
 def gen_default_term_expr(keyword="term", field="int64", values=None):
     if values is None:
-        values = [i for i in range(default_nb // 2)]
+        values = list(range(default_nb // 2))
     expr = {keyword: {field: {"values": values}}}
     return expr
 
@@ -521,7 +521,7 @@ def gen_invalid_term():
         {"term": 1},
         {"term": []},
         {"term": {}},
-        {"term": {"term": {"int64": {"values": [i for i in range(default_nb // 2)]}}}},
+        {"term": {"term": {"int64": {"values": list(range(default_nb // 2))}}}},
     ]
     return terms
 
@@ -543,7 +543,7 @@ def add_field(entities, field_name=None):
     field = {
         "name": field_name,
         "type": DataType.INT64,
-        "values": [i for i in range(nb)],
+        "values": list(range(nb)),
     }
     tmp_entities.append(field)
     return tmp_entities

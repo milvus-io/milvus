@@ -258,7 +258,7 @@ class AccAccuracyRunner(AccuracyRunner):
             if start < end:
                 # Insert up to INSERT_INTERVAL=50000 at a time
                 tmp_vectors = insert_vectors[start:end]
-                ids = [i for i in range(start, end)]
+                ids = list(range(start, end))
                 if not isinstance(tmp_vectors, list):
                     entities = utils.generate_entities(
                         info, tmp_vectors.tolist(), ids)

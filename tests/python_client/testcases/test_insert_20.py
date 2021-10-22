@@ -327,7 +327,7 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         nb = 10
-        int_values = [i for i in range(nb - 1)]
+        int_values = list(range(nb - 1))
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
@@ -344,7 +344,7 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         nb = 10
-        int_values = [i for i in range(nb)]
+        int_values = list(range(nb))
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb - 1, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
@@ -361,7 +361,7 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        new_values = [i for i in range(ct.default_nb)]
+        new_values = list(range(ct.default_nb))
         df.insert(3, "new", new_values)
         error = {
             ct.err_code: 0,
@@ -396,7 +396,7 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         nb = 10
-        int_values = [i for i in range(nb)]
+        int_values = list(range(nb))
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [float_values, int_values, float_vec_values]
@@ -416,7 +416,7 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         nb = 10
-        int_values = pd.Series(data=[i for i in range(nb)])
+        int_values = pd.Series(data=list(range(nb)))
         float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         df = pd.DataFrame(
@@ -727,7 +727,7 @@ class TestInsertOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         nb = 100
         data = cf.gen_default_list_data(nb)
-        data[0] = [i for i in range(0, -nb, -1)]
+        data[0] = list(range(0, -nb, -1))
         mutation_res, _ = collection_w.insert(data)
         assert mutation_res.primary_keys == data[0]
         assert collection_w.num_entities == nb

@@ -118,7 +118,7 @@ def create_collections_and_insert_data():
         vectors = [[i / nb for _ in range(dim)] for i in range(nb)]
         collection.insert(
             [
-                [i for i in range(nb)],
+                list(range(nb)),
                 [float(random.randrange(-20, -10)) for _ in range(nb)],
                 vectors,
             ]
