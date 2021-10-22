@@ -14,10 +14,7 @@ class TestConnect:
         """
         check if ip is localhost or not
         """
-        if not args["ip"] or args["ip"] == "localhost" or args["ip"] == "127.0.0.1":
-            return True
-        else:
-            return False
+        return bool(not args["ip"] or args["ip"] == 'localhost' or args["ip"] == "127.0.0.1")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_close(self, connect):
