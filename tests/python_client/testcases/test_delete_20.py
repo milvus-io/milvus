@@ -11,8 +11,8 @@ tmp_nb = 100
 
 tmp_expr = f"{ct.default_int64_field_name} in {[0]}"
 
-tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
-query_res_tmp_expr = [{f'{ct.default_int64_field_name}': 0}]
+tmp_expr = f"{ct.default_int64_field_name} in {[0]}"
+query_res_tmp_expr = [{f"{ct.default_int64_field_name}": 0}]
 
 exp_res = "exp_res"
 
@@ -96,9 +96,12 @@ class TestDeleteParams(TestcaseBase):
         expected: raise exception
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
         error = {ct.err_code: 0, ct.err_msg: f"expr value {expr} is illegal"}
-        collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr", ["12-s", "中文"])
@@ -109,9 +112,15 @@ class TestDeleteParams(TestcaseBase):
         expected: Raise exception
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 1, ct.err_msg: f"failed to create expr plan, expr = {expr}"}
-        collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"failed to create expr plan, expr = {expr}",
+        }
+        collection_w.delete(
+            expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_empty_value(self):
@@ -186,8 +195,11 @@ class TestDeleteParams(TestcaseBase):
 
         res = collection_w.delete(expr=expr)[0]
         # todo assert res.delete_count == 0
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: query_res_tmp_expr})
-
+        collection_w.query(
+            tmp_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: query_res_tmp_expr},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_inconsistent_values(self):
@@ -249,10 +261,17 @@ class TestDeleteParams(TestcaseBase):
         assert del_res.delete_count == 1
 
         # query with deleted id and query with existed id
-        res = df.iloc[1:2, :1].to_dict('records')
-        collection_w.query(f'{ct.default_int64_field_name} in [1]',
-                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty, partition_names=[partition_w.name])
+        res = df.iloc[1:2, :1].to_dict("records")
+        collection_w.query(
+            f"{ct.default_int64_field_name} in [1]",
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res},
+        )
+        collection_w.query(
+            tmp_expr,
+            check_task=CheckTasks.check_query_empty,
+            partition_names=[partition_w.name],
+        )
 
     @pytest.mark.skip(reason="Waiting for debug")
     @pytest.mark.tags(CaseLabel.L1)
