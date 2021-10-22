@@ -8,7 +8,7 @@ import locust.stats
 
 # import gevent.monkey
 # gevent.monkey.patch_all()
-from locust import LoadTestShape, User, between, events, 
+from locust import LoadTestShape, User, between, events
 from locust.env import Environment
 from locust.log import greenlet_exception_logger, setup_logging
 from locust.stats import print_stats, stats_printer
@@ -91,7 +91,8 @@ def locust_executor(
             run_params["spawn_rate"],
             run_params["during_time"],
         )
-        env = Environment(events=events, user_classes=[MyUser], shape_class=test)
+        env = Environment(events=events, user_classes=[
+                          MyUser], shape_class=test)
         runner = env.create_local_runner()
         env.runner.start_shape()
     else:
