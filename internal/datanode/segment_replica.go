@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"path"
 	"sync"
 	"sync/atomic"
 
@@ -51,9 +50,9 @@ type Replica interface {
 	getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error)
 
 	addNewSegment(segID, collID, partitionID UniqueID, channelName string, startPos, endPos *internalpb.MsgPosition) error
-	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error
+	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlog []*datapb.FieldBinlog, cp *segmentCheckPoint) error
 	filterSegments(channelName string, partitionID UniqueID) []*Segment
-	addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64) error
+	addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlog []*datapb.FieldBinlog) error
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
@@ -286,7 +285,7 @@ func (replica *SegmentReplica) filterSegments(channelName string, partitionID Un
 
 // addNormalSegment adds a *NotNew* and *NotFlushed* segment. Before add, please make sure there's no
 // such segment by `hasSegment`
-func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error {
+func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlogs []*datapb.FieldBinlog, cp *segmentCheckPoint) error {
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
@@ -315,7 +314,7 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 		minPK:    math.MaxInt64, // use max value, represents no value
 		maxPK:    math.MinInt64, // use min value represents no value
 	}
-	err := replica.initPKBloomFilter(seg)
+	err := replica.initPKBloomFilter(seg, statsBinlogs)
 	if err != nil {
 		return err
 	}
@@ -332,7 +331,7 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 
 // addFlushedSegment adds a *Flushed* segment. Before add, please make sure there's no
 // such segment by `hasSegment`
-func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64) error {
+func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlogs []*datapb.FieldBinlog) error {
 
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
@@ -361,7 +360,7 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
-	err := replica.initPKBloomFilter(seg)
+	err := replica.initPKBloomFilter(seg, statsBinlogs)
 	if err != nil {
 		return err
 	}
@@ -376,12 +375,16 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 	return nil
 }
 
-func (replica *SegmentReplica) initPKBloomFilter(s *Segment) error {
+func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*datapb.FieldBinlog) error {
+	if len(statsBinlogs) == 0 {
+		log.Info("statsBinlogs is empty")
+	}
 	schema, err := replica.getCollectionSchema(s.collectionID, 0)
 	if err != nil {
 		return err
 	}
 
+	// get pkfield id
 	pkField := int64(-1)
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
@@ -390,14 +393,22 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment) error {
 		}
 	}
 
-	p := path.Join(Params.StatsBinlogRootPath, JoinIDPath(s.collectionID, s.partitionID, s.segmentID, pkField))
-	keys, values, err := replica.minIOKV.LoadWithPrefix(p + "/")
+	// filter stats binlog files which is pk field stats log
+	bloomFilterFiles := make([]string, 0)
+	for _, binlog := range statsBinlogs {
+		if binlog.FieldID != pkField {
+			continue
+		}
+		bloomFilterFiles = append(bloomFilterFiles, binlog.Binlogs...)
+	}
+
+	values, err := replica.minIOKV.MultiLoad(bloomFilterFiles)
 	if err != nil {
 		return err
 	}
 	blobs := make([]*Blob, 0)
-	for i := 0; i < len(keys); i++ {
-		blobs = append(blobs, &Blob{Key: keys[i], Value: []byte(values[i])})
+	for i := 0; i < len(values); i++ {
+		blobs = append(blobs, &Blob{Value: []byte(values[i])})
 	}
 
 	stats, err := storage.DeserializeStats(blobs)

@@ -230,6 +230,8 @@ message SegmentLoadInfo {
   int64 flush_time = 5;
   repeated data.FieldBinlog binlog_paths = 6;
   int64 num_of_rows = 7;
+  repeated data.FieldBinlog statslogs = 8;
+  repeated data.DeltaLogInfo deltalogs = 9;
 }
 
 message LoadSegmentsRequest {
