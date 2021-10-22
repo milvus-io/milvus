@@ -947,9 +947,11 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: test search normal case
         method: create connection, collection, insert and search
-        expected: search successfully with limit(topK)
+        expected: 1. search returned with 0 before travel timestamp
+                  2. search successfully with limit(topK) after travel timestamp
         """
         # 1. initialize with data
+
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(
             prefix, True, auto_id=auto_id, dim=dim
         )[0:5]
