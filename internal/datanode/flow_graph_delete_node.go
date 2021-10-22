@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
@@ -73,7 +72,7 @@ func (ddb *DelDataBuf) updateTimeRange(tr TimeRange) {
 func newDelDataBuf() *DelDataBuf {
 	return &DelDataBuf{
 		delData: &DeleteData{
-			Data: make(map[string]int64),
+			Data: make(map[int64]int64),
 		},
 		size:   0,
 		tsFrom: math.MaxUint64,
@@ -120,7 +119,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		delData := delDataBuf.(*DelDataBuf).delData
 
 		for i := 0; i < rows; i++ {
-			delData.Data[strconv.FormatInt(pks[i], 10)] = tss[i]
+			delData.Data[pks[i]] = tss[i]
 			log.Debug("delete", zap.Int64("primary key", pks[i]), zap.Int64("ts", tss[i]))
 		}
 
@@ -141,7 +140,7 @@ func (dn *deleteNode) showDelBuf() {
 			delDataBuf, _ := v.(*DelDataBuf)
 			log.Debug("del data buffer status", zap.Int64("segID", segID), zap.Int64("size", delDataBuf.size))
 			for pk, ts := range delDataBuf.delData.Data {
-				log.Debug("del data", zap.String("pk", pk), zap.Int64("ts", ts))
+				log.Debug("del data", zap.Int64("pk", pk), zap.Int64("ts", ts))
 			}
 		} else {
 			log.Error("segment not exist", zap.Int64("segID", segID))
