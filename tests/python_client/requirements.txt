@@ -12,7 +12,6 @@ allure-pytest==2.7.0
 pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.2.1
-# pytest-parallel
 pymilvus==2.0.0rc8.dev12
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
@@ -26,3 +25,7 @@ kubernetes==17.17.0
 PyYAML==5.4.1
 pytest-sugar==0.9.4
 pytest-reportportal==5.0.10
+
+# for customize config test
+python-benedict==0.24.3
+pytest-dependency==0.5.1
