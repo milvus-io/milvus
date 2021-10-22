@@ -239,8 +239,8 @@ func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 // For each field, it will create a binlog writer, and write a event to the binlog.
 // It returns binlog buffer in the end.
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, []*Blob, error) {
-	var blobs []*Blob
-	var statsBlobs []*Blob
+	blobs := make([]*Blob, 0)
+	statsBlobs := make([]*Blob, 0)
 	var writer *InsertBinlogWriter
 	timeFieldData, ok := data.Data[rootcoord.TimeStampField]
 	if !ok {
@@ -327,19 +327,19 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		})
 
 		// stats fields
-		statsWriter := &StatsWriter{}
 		switch field.DataType {
 		case schemapb.DataType_Int64:
+			statsWriter := &StatsWriter{}
 			err = statsWriter.StatsInt64(field.FieldID, field.IsPrimaryKey, singleData.(*Int64FieldData).Data)
+			if err != nil {
+				return nil, nil, err
+			}
+			statsBuffer := statsWriter.GetBuffer()
+			statsBlobs = append(statsBlobs, &Blob{
+				Key:   blobKey,
+				Value: statsBuffer,
+			})
 		}
-		if err != nil {
-			return nil, nil, err
-		}
-		statsBuffer := statsWriter.GetBuffer()
-		statsBlobs = append(statsBlobs, &Blob{
-			Key:   blobKey,
-			Value: statsBuffer,
-		})
 	}
 
 	return blobs, statsBlobs, nil
