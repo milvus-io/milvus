@@ -1,16 +1,18 @@
-import sys
+import datetime
+import json
+import logging
 import pdb
 import random
-import logging
-import json
-import time, datetime
+import sys
+import time
 import traceback
 from multiprocessing import Process
-from pymilvus import Milvus, DataType
+
+import config
 import numpy as np
 import utils as util
-import config
 from milvus_benchmark.runners import utils
+from pymilvus import DataType, Milvus
 
 logger = logging.getLogger("milvus_benchmark.client")
 
@@ -28,7 +30,7 @@ INDEX_MAP = {
     "bin_flat": "BIN_FLAT",
     "bin_ivf_flat": "BIN_IVF_FLAT",
     "rhnsw_pq": "RHNSW_PQ",
-    "rhnsw_sq": "RHNSW_SQ"
+    "rhnsw_sq": "RHNSW_SQ",
 }
 epsilon = 0.1
 DEFAULT_WARM_QUERY_TOPK = 1
@@ -77,10 +79,8 @@ class MilvusClient(object):
         while time.time() < start_time + timeout:
             try:
                 self._milvus = Milvus(
-                    host=host,
-                    port=port,
-                    try_connect=False,
-                    pre_ping=False)
+                    host=host, port=port, try_connect=False, pre_ping=False
+                )
                 break
             except Exception as e:
                 logger.error(str(e))
@@ -93,10 +93,10 @@ class MilvusClient(object):
         # self._metric_type = None
 
     def __str__(self):
-        return 'Milvus collection %s' % self._collection_name
+        return "Milvus collection %s" % self._collection_name
 
     def set_collection(self, collection_name):
-        """ seting collection name """
+        """seting collection name"""
         self._collection_name = collection_name
 
     # TODO: server not support
@@ -119,15 +119,21 @@ class MilvusClient(object):
         return self._collection_name
 
     # only support the given field name
-    def create_collection(self, dimension, data_type=DataType.FLOAT_VECTOR, auto_id=False,
-                          collection_name=None, other_fields=None):
+    def create_collection(
+        self,
+        dimension,
+        data_type=DataType.FLOAT_VECTOR,
+        auto_id=False,
+        collection_name=None,
+        other_fields=None,
+    ):
         self._dimension = dimension
         if not collection_name:
             collection_name = self._collection_name
         vec_field_name = utils.get_default_field_name(data_type)
         fields = [
             {"name": vec_field_name, "type": data_type, "params": {"dim": dimension}},
-            {"name": "id", "type": DataType.INT64, "is_primary": True}
+            {"name": "id", "type": DataType.INT64, "is_primary": True},
         ]
         if other_fields:
             other_fields = other_fields.split(",")
@@ -141,9 +147,7 @@ class MilvusClient(object):
                 else:
                     raise Exception("Field name not supported")
                 fields.append({"name": other_field_name, "type": field_type})
-        create_param = {
-            "fields": fields,
-            "auto_id": auto_id}
+        create_param = {"fields": fields, "auto_id": auto_id}
         try:
             self._milvus.create_collection(collection_name, create_param)
             logger.info("Create collection: <%s> successfully" % collection_name)
@@ -158,9 +162,13 @@ class MilvusClient(object):
 
     @time_wrapper
     def insert(self, entities, collection_name=None, timeout=None):
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
         try:
-            insert_res = self._milvus.insert(tmp_collection_name, entities, timeout=timeout)
+            insert_res = self._milvus.insert(
+                tmp_collection_name, entities, timeout=timeout
+            )
             return insert_res.primary_keys
         except Exception as e:
             logger.error(str(e))
@@ -168,7 +176,9 @@ class MilvusClient(object):
     @time_wrapper
     def insert_flush(self, entities, _async=False, collection_name=None):
         # the method that included insert and flush
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
         try:
             insert_res = self._milvus.insert(tmp_collection_name, entities)
             return insert_res.primary_keys
@@ -190,7 +200,9 @@ class MilvusClient(object):
             # random choice one segment
             segment = random.choice(segments)
             try:
-                segment_ids = self._milvus.list_id_in_segment(self._collection_name, segment["id"])
+                segment_ids = self._milvus.list_id_in_segment(
+                    self._collection_name, segment["id"]
+                )
             except Exception as e:
                 logger.error(str(e))
             if not len(segment_ids):
@@ -220,7 +232,6 @@ class MilvusClient(object):
     #     self.check_status(status)
     #     return ids, get_res
 
-
     @time_wrapper
     def get_entities(self, get_ids):
         get_res = self._milvus.get_entity_by_id(self._collection_name, get_ids)
@@ -229,17 +240,23 @@ class MilvusClient(object):
     @time_wrapper
     def delete(self, ids, collection_name=None):
         # delete entity by id
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
         self._milvus.delete_entity_by_id(tmp_collection_name, ids)
 
     def delete_rand(self):
         delete_id_length = random.randint(1, 100)
         count_before = self.count()
-        logger.debug("%s: length to delete: %d" % (self._collection_name, delete_id_length))
+        logger.debug(
+            "%s: length to delete: %d" % (self._collection_name, delete_id_length)
+        )
         delete_ids = self.get_rand_ids(delete_id_length)
         self.delete(delete_ids)
         self.flush()
-        logger.info("%s: count after delete: %d" % (self._collection_name, self.count()))
+        logger.info(
+            "%s: count after delete: %d" % (self._collection_name, self.count())
+        )
         get_res = self._milvus.get_entity_by_id(self._collection_name, delete_ids)
         for item in get_res:
             assert not item
@@ -249,52 +266,76 @@ class MilvusClient(object):
 
     @time_wrapper
     def flush(self, _async=False, collection_name=None, timeout=None):
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
         self._milvus.flush([tmp_collection_name], _async=_async, timeout=timeout)
 
     @time_wrapper
     def compact(self, collection_name=None):
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
         status = self._milvus.compact(tmp_collection_name)
         self.check_status(status)
 
     # only support "in" in expr
     @time_wrapper
     def get(self, ids, collection_name=None, timeout=None):
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
         # res = self._milvus.get(tmp_collection_name, ids, output_fields=None, partition_names=None)
         ids_expr = "id in %s" % (str(ids))
-        res = self._milvus.query(tmp_collection_name, ids_expr, output_fields=None, partition_names=None, timeout=timeout)
+        res = self._milvus.query(
+            tmp_collection_name,
+            ids_expr,
+            output_fields=None,
+            partition_names=None,
+            timeout=timeout,
+        )
         return res
 
     @time_wrapper
-    def create_index(self, field_name, index_type, metric_type, _async=False, index_param=None):
+    def create_index(
+        self, field_name, index_type, metric_type, _async=False, index_param=None
+    ):
         index_type = INDEX_MAP[index_type]
         metric_type = utils.metric_type_trans(metric_type)
-        logger.info("Building index start, collection_name: %s, index_type: %s, metric_type: %s" % (
-            self._collection_name, index_type, metric_type))
+        logger.info(
+            "Building index start, collection_name: %s, index_type: %s, metric_type: %s"
+            % (self._collection_name, index_type, metric_type)
+        )
         if index_param:
             logger.info(index_param)
         index_params = {
             "index_type": index_type,
             "metric_type": metric_type,
-            "params": index_param
+            "params": index_param,
         }
-        self._milvus.create_index(self._collection_name, field_name, index_params, _async=_async)
+        self._milvus.create_index(
+            self._collection_name, field_name, index_params, _async=_async
+        )
 
     # TODO: need to check
     def describe_index(self, field_name, collection_name=None):
         # stats = self.get_stats()
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
         info = self._milvus.describe_index(tmp_collection_name, field_name)
         logger.info(info)
         index_info = {"index_type": "flat", "metric_type": None, "index_param": None}
         if info:
-            index_info = {"index_type": info["index_type"], "metric_type": info["metric_type"], "index_param": info["params"]}
+            index_info = {
+                "index_type": info["index_type"],
+                "metric_type": info["metric_type"],
+                "index_param": info["params"],
+            }
             # transfer index type name
             for k, v in INDEX_MAP.items():
-                if index_info['index_type'] == v:
-                    index_info['index_type'] = k
+                if index_info["index_type"] == v:
+                    index_info["index_type"] = k
         return index_info
 
     def drop_index(self, field_name):
@@ -303,8 +344,10 @@ class MilvusClient(object):
 
     @time_wrapper
     def query(self, vector_query, filter_query=None, collection_name=None, timeout=300):
-        """ This method corresponds to the search method of milvus """
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        """This method corresponds to the search method of milvus"""
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
 
         params = util.search_param_analysis(vector_query, filter_query)
         params.update({"timeout": timeout})
@@ -322,18 +365,23 @@ class MilvusClient(object):
 
     @time_wrapper
     def warm_query(self, index_field_name, search_param, metric_type, times=2):
-        query_vectors = [[random.random() for _ in range(self._dimension)] for _ in range(DEFAULT_WARM_QUERY_NQ)]
+        query_vectors = [
+            [random.random() for _ in range(self._dimension)]
+            for _ in range(DEFAULT_WARM_QUERY_NQ)
+        ]
         # index_info = self.describe_index(index_field_name)
-        vector_query = {"vector": {index_field_name: {
-            "topk": DEFAULT_WARM_QUERY_TOPK, 
-            "query": query_vectors, 
-            "metric_type": metric_type,
-            "params": search_param}
-        }}
-        must_params = [vector_query]
-        query = {
-            "bool": {"must": must_params}
+        vector_query = {
+            "vector": {
+                index_field_name: {
+                    "topk": DEFAULT_WARM_QUERY_TOPK,
+                    "query": query_vectors,
+                    "metric_type": metric_type,
+                    "params": search_param,
+                }
+            }
         }
+        must_params = [vector_query]
+        query = {"bool": {"must": must_params}}
         logger.debug("Start warm up query")
         for i in range(times):
             params = util.search_param_analysis(vector_query, None)
@@ -343,14 +391,16 @@ class MilvusClient(object):
         logger.debug("End warm up query")
 
     @time_wrapper
-    def load_and_query(self, vector_query, filter_query=None, collection_name=None, timeout=120):
-        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+    def load_and_query(
+        self, vector_query, filter_query=None, collection_name=None, timeout=120
+    ):
+        tmp_collection_name = (
+            self._collection_name if collection_name is None else collection_name
+        )
         must_params = [vector_query]
         if filter_query:
             must_params.extend(filter_query)
-        query = {
-            "bool": {"must": must_params}
-        }
+        query = {"bool": {"must": must_params}}
         self.load_collection(tmp_collection_name)
 
         params = util.search_param_analysis(vector_query, filter_query)
@@ -381,14 +431,21 @@ class MilvusClient(object):
         search_param = {"nprobe": nprobe}
         query_vectors = [[random.random() for _ in range(dimension)] for _ in range(nq)]
         metric_type = random.choice(["l2", "ip"])
-        logger.info("%s, Search nq: %d, top_k: %d, nprobe: %d" % (self._collection_name, nq, top_k, nprobe))
+        logger.info(
+            "%s, Search nq: %d, top_k: %d, nprobe: %d"
+            % (self._collection_name, nq, top_k, nprobe)
+        )
         vec_field_name = utils.get_default_field_name()
-        vector_query = {"vector": {vec_field_name: {
-            "topk": top_k,
-            "query": query_vectors,
-            "metric_type": utils.metric_type_trans(metric_type),
-            "params": search_param}
-        }}
+        vector_query = {
+            "vector": {
+                vec_field_name: {
+                    "topk": top_k,
+                    "query": query_vectors,
+                    "metric_type": utils.metric_type_trans(metric_type),
+                    "params": search_param,
+                }
+            }
+        }
         self.query(vector_query, timeout=timeout)
 
     def load_query_rand(self, nq_max=100, timeout=None):
@@ -400,14 +457,21 @@ class MilvusClient(object):
         search_param = {"nprobe": nprobe}
         query_vectors = [[random.random() for _ in range(dimension)] for _ in range(nq)]
         metric_type = random.choice(["l2", "ip"])
-        logger.info("%s, Search nq: %d, top_k: %d, nprobe: %d" % (self._collection_name, nq, top_k, nprobe))
+        logger.info(
+            "%s, Search nq: %d, top_k: %d, nprobe: %d"
+            % (self._collection_name, nq, top_k, nprobe)
+        )
         vec_field_name = utils.get_default_field_name()
-        vector_query = {"vector": {vec_field_name: {
-            "topk": top_k,
-            "query": query_vectors,
-            "metric_type": utils.metric_type_trans(metric_type),
-            "params": search_param}
-        }}
+        vector_query = {
+            "vector": {
+                vec_field_name: {
+                    "topk": top_k,
+                    "query": query_vectors,
+                    "metric_type": utils.metric_type_trans(metric_type),
+                    "params": search_param,
+                }
+            }
+        }
         self.load_and_query(vector_query, timeout=timeout)
 
     # TODO: need to check
@@ -495,7 +559,9 @@ class MilvusClient(object):
     def release_partitions(self, tag_names, collection_name=None, timeout=3000):
         if collection_name is None:
             collection_name = self._collection_name
-        return self._milvus.release_partitions(collection_name, tag_names, timeout=timeout)
+        return self._milvus.release_partitions(
+            collection_name, tag_names, timeout=timeout
+        )
 
     @time_wrapper
     def scene_test(self, collection_name=None, vectors=None, ids=None):
@@ -521,8 +587,13 @@ class MilvusClient(object):
         self.flush(collection_name=collection_name)
 
         logger.debug("[scene_test] Start create index : %s" % collection_name)
-        self.create_index(field_name='float_vector', index_type="ivf_sq8", metric_type='l2',
-                          collection_name=collection_name, index_param={'nlist': 2048})
+        self.create_index(
+            field_name="float_vector",
+            index_type="ivf_sq8",
+            metric_type="l2",
+            collection_name=collection_name,
+            index_param={"nlist": 2048},
+        )
         # time.sleep(59)
 
         logger.debug("[scene_test] Start drop : %s" % collection_name)

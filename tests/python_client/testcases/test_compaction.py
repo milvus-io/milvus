@@ -1,5 +1,4 @@
 import pytest
-
 from base.client_base import TestcaseBase
 
 

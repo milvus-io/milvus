@@ -1,14 +1,14 @@
-import time
-import random
-import pdb
-import threading
 import logging
+import pdb
+import random
+import threading
+import time
 from multiprocessing import Pool, Process
-import pytest
-from pymilvus import IndexType
 
-from utils.utils import get_milvus, gen_vectors, default_dim
+import pytest
 from common.common_type import CaseLabel
+from pymilvus import IndexType
+from utils.utils import default_dim, gen_vectors, get_milvus
 
 
 class TestMysql:
@@ -31,7 +31,9 @@ class TestMysql:
         index_param = {"nlist": 1024, "m": 16}
         index_type = IndexType.IVF_PQ
         vectors = gen_vectors(big_nb, default_dim)
-        status, ids = connect.bulk_insert(collection, vectors, ids=[i for i in range(big_nb)])
+        status, ids = connect.bulk_insert(
+            collection, vectors, ids=[i for i in range(big_nb)]
+        )
         status = connect.flush([collection])
         assert status.OK()
         status, res_count = connect.count_entities(collection)

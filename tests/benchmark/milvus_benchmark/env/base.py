@@ -1,12 +1,13 @@
 import logging
-from milvus_benchmark import utils
-from milvus_benchmark import config
+
+from milvus_benchmark import config, utils
 
 logger = logging.getLogger("milvus_benchmark.env.env")
 
 
 class BaseEnv(object):
     """docstring for Env"""
+
     def __init__(self, deploy_mode="single"):
         self.deploy_mode = deploy_mode
         self._name = utils.get_unique_name()
@@ -39,8 +40,7 @@ class BaseEnv(object):
     @property
     def hostname(self):
         return self._hostname
-    
+
     @property
     def port(self):
         return self._port
-    

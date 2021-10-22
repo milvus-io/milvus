@@ -1,14 +1,14 @@
-import pdb
 import logging
+import pdb
+
+from milvus_benchmark import config
 from pymongo import MongoClient
 
+from .config import DB, DOC_COLLECTION, UNIQUE_ID_COLLECTION
 from .models.env import Env
 from .models.hardware import Hardware
 from .models.metric import Metric
 from .models.server import Server
-from .config import DB, UNIQUE_ID_COLLECTION, DOC_COLLECTION
-from milvus_benchmark import config
-
 
 # Initialize the mongoDB client
 _client = MongoClient(config.MONGO_SERVER)
@@ -17,10 +17,10 @@ logger = logging.getLogger("milvus_benchmark.metric.api")
 
 def insert_or_get(md5):
     collection = _client[DB][UNIQUE_ID_COLLECTION]
-    found = collection.find_one({'md5': md5})
+    found = collection.find_one({"md5": md5})
     if not found:
-        return collection.insert_one({'md5': md5}).inserted_id
-    return found['_id']
+        return collection.insert_one({"md5": md5}).inserted_id
+    return found["_id"]
 
 
 def save(obj):

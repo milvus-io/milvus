@@ -1,14 +1,14 @@
+import logging
 import os
 import pdb
-import logging
-import numpy as np
-import sklearn.preprocessing
-import h5py
 import random
 from itertools import product
 
-from pymilvus import DataType
+import h5py
+import numpy as np
+import sklearn.preprocessing
 from milvus_benchmark import config
+from pymilvus import DataType
 
 logger = logging.getLogger("milvus_benchmark.runners.utils")
 
@@ -26,19 +26,29 @@ WARM_NQ = 1
 DEFAULT_DIM = 512
 DEFAULT_METRIC_TYPE = "L2"
 
-RANDOM_SRC_DATA_DIR = config.RAW_DATA_DIR + 'random/'
-SIFT_SRC_DATA_DIR = config.RAW_DATA_DIR + 'sift1b/'  # has organized the corresponding query.npy file
-DEEP_SRC_DATA_DIR = config.RAW_DATA_DIR + 'deep1b/'
-JACCARD_SRC_DATA_DIR = config.RAW_DATA_DIR + 'jaccard/'  # has organized the corresponding query.npy file
-HAMMING_SRC_DATA_DIR = config.RAW_DATA_DIR + 'hamming/'  # The current data set is not organized on the NAS
-STRUCTURE_SRC_DATA_DIR = config.RAW_DATA_DIR + 'structure/'  # The current data set is not organized on the NAS
-BINARY_SRC_DATA_DIR = config.RAW_DATA_DIR + 'binary/'  # has organized the corresponding query.npy file
-SIFT_SRC_GROUNDTRUTH_DATA_DIR = SIFT_SRC_DATA_DIR + 'gnd'
+RANDOM_SRC_DATA_DIR = config.RAW_DATA_DIR + "random/"
+SIFT_SRC_DATA_DIR = (
+    config.RAW_DATA_DIR + "sift1b/"
+)  # has organized the corresponding query.npy file
+DEEP_SRC_DATA_DIR = config.RAW_DATA_DIR + "deep1b/"
+JACCARD_SRC_DATA_DIR = (
+    config.RAW_DATA_DIR + "jaccard/"
+)  # has organized the corresponding query.npy file
+HAMMING_SRC_DATA_DIR = (
+    config.RAW_DATA_DIR + "hamming/"
+)  # The current data set is not organized on the NAS
+STRUCTURE_SRC_DATA_DIR = (
+    config.RAW_DATA_DIR + "structure/"
+)  # The current data set is not organized on the NAS
+BINARY_SRC_DATA_DIR = (
+    config.RAW_DATA_DIR + "binary/"
+)  # has organized the corresponding query.npy file
+SIFT_SRC_GROUNDTRUTH_DATA_DIR = SIFT_SRC_DATA_DIR + "gnd"
 
-DEFAULT_F_FIELD_NAME = 'float_vector'
-DEFAULT_B_FIELD_NAME = 'binary_vector'
-DEFAULT_INT_FIELD_NAME = 'int64'
-DEFAULT_FLOAT_FIELD_NAME = 'float'
+DEFAULT_F_FIELD_NAME = "float_vector"
+DEFAULT_B_FIELD_NAME = "binary_vector"
+DEFAULT_INT_FIELD_NAME = "int64"
+DEFAULT_FLOAT_FIELD_NAME = "float"
 DEFAULT_DOUBLE_FIELD_NAME = "double"
 
 GROUNDTRUTH_MAP = {
@@ -60,7 +70,7 @@ METRIC_MAP = {
     "jaccard": "JACCARD",
     "hamming": "HAMMING",
     "sub": "SUBSTRUCTURE",
-    "super": "SUPERSTRUCTURE"
+    "super": "SUPERSTRUCTURE",
 }
 
 
@@ -90,13 +100,13 @@ def get_vectors_from_binary(nq, dimension, data_type):
     if data_type == "local":
         return generate_vectors(nq, dimension)
     elif data_type == "random":
-        file_name = RANDOM_SRC_DATA_DIR + 'query_%d.npy' % dimension
+        file_name = RANDOM_SRC_DATA_DIR + "query_%d.npy" % dimension
     elif data_type == "sift":
-        file_name = SIFT_SRC_DATA_DIR + 'query.npy'
+        file_name = SIFT_SRC_DATA_DIR + "query.npy"
     elif data_type == "deep":
-        file_name = DEEP_SRC_DATA_DIR + 'query.npy'
+        file_name = DEEP_SRC_DATA_DIR + "query.npy"
     elif data_type == "binary":
-        file_name = BINARY_SRC_DATA_DIR + 'query.npy'
+        file_name = BINARY_SRC_DATA_DIR + "query.npy"
     data = np.load(file_name)
     vectors = data[0:nq].tolist()
     return vectors
@@ -124,7 +134,12 @@ def generate_entities(info, vectors, ids=None):
         #     continue
         field_type = field["type"]
         entities.append(
-            {"name": field["name"], "type": field_type, "values": generate_values(field_type, vectors, ids)})
+            {
+                "name": field["name"],
+                "type": field_type,
+                "values": generate_values(field_type, vectors, ids),
+            }
+        )
     return entities
 
 
@@ -158,7 +173,7 @@ def get_default_field_name(data_type=DataType.FLOAT_VECTOR):
 
 
 def get_vector_type(data_type):
-    vector_type = ''
+    vector_type = ""
     if data_type in ["random", "sift", "deep", "glove", "local"]:
         vector_type = DataType.FLOAT_VECTOR
     elif data_type in ["binary"]:
@@ -169,7 +184,7 @@ def get_vector_type(data_type):
 
 
 def get_vector_type_from_metric(metric_type):
-    vector_type = ''
+    vector_type = ""
     if metric_type in ["hamming", "jaccard"]:
         vector_type = DataType.BINARY_VECTOR
     else:
@@ -180,7 +195,7 @@ def get_vector_type_from_metric(metric_type):
 def normalize(metric_type, X):
     if metric_type == "ip":
         logger.info("Set normalize for metric_type: %s" % metric_type)
-        X = sklearn.preprocessing.normalize(X, axis=1, norm='l2')
+        X = sklearn.preprocessing.normalize(X, axis=1, norm="l2")
         X = X.astype(np.float32)
     elif metric_type == "l2":
         X = X.astype(np.float32)
@@ -243,7 +258,7 @@ def get_recall_value(true_ids, result_ids):
 def get_ground_truth_ids(collection_size):
     fname = GROUNDTRUTH_MAP[str(collection_size)]
     fname = SIFT_SRC_GROUNDTRUTH_DATA_DIR + "/" + fname
-    a = np.fromfile(fname, dtype='int32')
+    a = np.fromfile(fname, dtype="int32")
     d = a[0]
     true_ids = a.reshape(-1, d + 1)[:, 1:].copy()
     return true_ids
@@ -252,7 +267,7 @@ def get_ground_truth_ids(collection_size):
 def normalize(metric_type, X):
     if metric_type == "ip":
         logger.info("Set normalize for metric_type: %s" % metric_type)
-        X = sklearn.preprocessing.normalize(X, axis=1, norm='l2')
+        X = sklearn.preprocessing.normalize(X, axis=1, norm="l2")
         X = X.astype(np.float32)
     elif metric_type == "l2":
         X = X.astype(np.float32)

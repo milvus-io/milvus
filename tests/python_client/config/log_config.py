@@ -10,13 +10,16 @@ class LogConfig:
 
     @staticmethod
     def get_env_variable(var="CI_LOG_PATH"):
-        """ get log path for testing """
+        """get log path for testing"""
         try:
             log_path = os.environ[var]
             return str(log_path)
         except Exception as e:
             log_path = "/tmp/ci_logs/"
-            print("[get_env_variable] failed to get environment variables : %s, use default path : %s" % (str(e), log_path))
+            print(
+                "[get_env_variable] failed to get environment variables : %s, use default path : %s"
+                % (str(e), log_path)
+            )
             return log_path
 
     @staticmethod
@@ -27,7 +30,7 @@ class LogConfig:
             os.makedirs(log_path)
 
     def get_default_config(self):
-        """ Make sure the path exists """
+        """Make sure the path exists"""
         log_dir = self.get_env_variable()
         self.log_debug = "%s/ci_test_log.debug" % log_dir
         self.log_info = "%s/ci_test_log.log" % log_dir

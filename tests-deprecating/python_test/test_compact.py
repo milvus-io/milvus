@@ -1,11 +1,12 @@
-import time
+import logging
 import pdb
 import threading
-import logging
+import time
 from multiprocessing import Pool, Process
+
 import pytest
-from utils import *
 from constants import *
+from utils import *
 
 # COMPACT_TIMEOUT = 180
 # field_name = default_float_vec_field_name

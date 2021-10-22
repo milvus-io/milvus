@@ -5,23 +5,27 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
 import unittest
+
 import faiss
+import numpy as np
 import torch
+
 
 def swig_ptr_from_FloatTensor(x):
     assert x.is_contiguous()
     assert x.dtype == torch.float32
     return faiss.cast_integer_to_float_ptr(
-        x.storage().data_ptr() + x.storage_offset() * 4)
+        x.storage().data_ptr() + x.storage_offset() * 4
+    )
+
 
 def swig_ptr_from_LongTensor(x):
     assert x.is_contiguous()
-    assert x.dtype == torch.int64, 'dtype=%s' % x.dtype
+    assert x.dtype == torch.int64, "dtype=%s" % x.dtype
     return faiss.cast_integer_to_long_ptr(
-        x.storage().data_ptr() + x.storage_offset() * 8)
-
+        x.storage().data_ptr() + x.storage_offset() * 8
+    )
 
 
 def search_index_pytorch(index, x, k, D=None, I=None):
@@ -44,24 +48,22 @@ def search_index_pytorch(index, x, k, D=None, I=None):
     xptr = swig_ptr_from_FloatTensor(x)
     Iptr = swig_ptr_from_LongTensor(I)
     Dptr = swig_ptr_from_FloatTensor(D)
-    index.search_c(n, xptr,
-                   k, Dptr, Iptr)
+    index.search_c(n, xptr, k, Dptr, Iptr)
     torch.cuda.synchronize()
     return D, I
 
 
-def search_raw_array_pytorch(res, xb, xq, k, D=None, I=None,
-                             metric=faiss.METRIC_L2):
+def search_raw_array_pytorch(res, xb, xq, k, D=None, I=None, metric=faiss.METRIC_L2):
     assert xb.device == xq.device
 
     nq, d = xq.size()
     if xq.is_contiguous():
         xq_row_major = True
     elif xq.t().is_contiguous():
-        xq = xq.t()    # I initially wrote xq:t(), Lua is still haunting me :-)
+        xq = xq.t()  # I initially wrote xq:t(), Lua is still haunting me :-)
         xq_row_major = False
     else:
-        raise TypeError('matrix should be row or column-major')
+        raise TypeError("matrix should be row or column-major")
 
     xq_ptr = swig_ptr_from_FloatTensor(xq)
 
@@ -73,7 +75,7 @@ def search_raw_array_pytorch(res, xb, xq, k, D=None, I=None,
         xb = xb.t()
         xb_row_major = False
     else:
-        raise TypeError('matrix should be row or column-major')
+        raise TypeError("matrix should be row or column-major")
     xb_ptr = swig_ptr_from_FloatTensor(xb)
 
     if D is None:
@@ -91,22 +93,33 @@ def search_raw_array_pytorch(res, xb, xq, k, D=None, I=None,
     D_ptr = swig_ptr_from_FloatTensor(D)
     I_ptr = swig_ptr_from_LongTensor(I)
 
-    faiss.bruteForceKnn(res, metric,
-                        xb_ptr, xb_row_major, nb,
-                        xq_ptr, xq_row_major, nq,
-                        d, k, D_ptr, I_ptr)
+    faiss.bruteForceKnn(
+        res,
+        metric,
+        xb_ptr,
+        xb_row_major,
+        nb,
+        xq_ptr,
+        xq_row_major,
+        nq,
+        d,
+        k,
+        D_ptr,
+        I_ptr,
+    )
 
     return D, I
 
+
 def to_column_major(x):
-    if hasattr(torch, 'contiguous_format'):
+    if hasattr(torch, "contiguous_format"):
         return x.t().clone(memory_format=torch.contiguous_format).t()
     else:
         # was default setting before memory_format was introduced
         return x.t().clone().t()
 
-class PytorchFaissInterop(unittest.TestCase):
 
+class PytorchFaissInterop(unittest.TestCase):
     def test_interop(self):
 
         d = 16
@@ -187,8 +200,6 @@ class PytorchFaissInterop(unittest.TestCase):
                 assert np.all(I == gt_I)
                 assert np.all(np.abs(D - gt_D).max() < 1e-4)
 
-
-
                 # test on subset
                 try:
                     D, I = search_raw_array_pytorch(res, xb_t, xq_t[60:80], k)
@@ -207,9 +218,5 @@ class PytorchFaissInterop(unittest.TestCase):
                 assert np.all(np.abs(D - gt_D[60:80]).max() < 1e-4)
 
 
-
-
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

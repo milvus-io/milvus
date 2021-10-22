@@ -6,38 +6,36 @@
 #!/usr/bin/env python3
 
 import unittest
-import numpy as np
-import faiss
 
+import faiss
+import numpy as np
 from common import make_binary_dataset
 
 
 def bitvec_shuffle(a, order):
     n, d = a.shape
-    db, = order.shape
-    b = np.empty((n, db // 8), dtype='uint8')
+    (db,) = order.shape
+    b = np.empty((n, db // 8), dtype="uint8")
     faiss.bitvec_shuffle(
-        n, d * 8, db,
-        faiss.swig_ptr(order),
-        faiss.swig_ptr(a), faiss.swig_ptr(b))
+        n, d * 8, db, faiss.swig_ptr(order), faiss.swig_ptr(a), faiss.swig_ptr(b)
+    )
     return b
 
 
 class TestSmallFuncs(unittest.TestCase):
-
     def test_shuffle(self):
         d = 256
         n = 1000
         rs = np.random.RandomState(123)
-        o = rs.permutation(d).astype('int32')
+        o = rs.permutation(d).astype("int32")
 
-        x = rs.randint(256, size=(n, d // 8)).astype('uint8')
+        x = rs.randint(256, size=(n, d // 8)).astype("uint8")
 
         y1 = bitvec_shuffle(x, o[:128])
         y2 = bitvec_shuffle(x, o[128:])
         y = np.hstack((y1, y2))
 
-        oinv = np.empty(d, dtype='int32')
+        oinv = np.empty(d, dtype="int32")
         oinv[o] = np.arange(d)
         z = bitvec_shuffle(y, oinv)
 
@@ -45,7 +43,6 @@ class TestSmallFuncs(unittest.TestCase):
 
 
 class TestRange(unittest.TestCase):
-
     def test_hash(self):
         d = 128
         nq = 100
@@ -73,8 +70,8 @@ class TestRange(unittest.TestCase):
             stats.reset()
             Lnew, Dnew, Inew = index.range_search(xq, radius)
             for i in range(nq):
-                ref = Iref[Lref[i]:Lref[i + 1]]
-                new = Inew[Lnew[i]:Lnew[i + 1]]
+                ref = Iref[Lref[i] : Lref[i + 1]]
+                new = Inew[Lnew[i] : Lnew[i + 1]]
                 snew = set(new)
                 # no duplicates
                 self.assertTrue(len(new) == len(snew))
@@ -82,8 +79,8 @@ class TestRange(unittest.TestCase):
                 self.assertTrue(snew <= set(ref))
             nfound.append(Lnew[-1])
             ndis.append(stats.ndis)
-        print('nfound=', nfound)
-        print('ndis=', ndis)
+        print("nfound=", nfound)
+        print("ndis=", ndis)
         nfound = np.array(nfound)
         self.assertTrue(nfound[-1] == Lref[-1])
         self.assertTrue(np.all(nfound[1:] >= nfound[:-1]))
@@ -116,8 +113,8 @@ class TestRange(unittest.TestCase):
             stats.reset()
             Lnew, Dnew, Inew = index.range_search(xq, radius)
             for i in range(nq):
-                ref = Iref[Lref[i]:Lref[i + 1]]
-                new = Inew[Lnew[i]:Lnew[i + 1]]
+                ref = Iref[Lref[i] : Lref[i + 1]]
+                new = Inew[Lnew[i] : Lnew[i + 1]]
                 snew = set(new)
                 # no duplicates
                 self.assertTrue(len(new) == len(snew))
@@ -125,15 +122,14 @@ class TestRange(unittest.TestCase):
                 self.assertTrue(snew <= set(ref))
             nfound.append(Lnew[-1])
             ndis.append(stats.ndis)
-        print('nfound=', nfound)
-        print('ndis=', ndis)
+        print("nfound=", nfound)
+        print("ndis=", ndis)
         nfound = np.array(nfound)
         # self.assertTrue(nfound[-1] == Lref[-1])
         self.assertTrue(np.all(nfound[1:] >= nfound[:-1]))
 
 
 class TestKnn(unittest.TestCase):
-
     def test_hash_and_multihash(self):
         d = 128
         nq = 100
@@ -165,19 +161,18 @@ class TestKnn(unittest.TestCase):
                     # no duplicates
                     self.assertTrue(len(new) == len(snew))
                     nf += len(set(ref) & snew)
-                print('nfound', nh, nbit, nf)
+                print("nfound", nh, nbit, nf)
                 nfound[(nh, nbit)] = nf
             self.assertGreater(nfound[(nh, 4)], nfound[(nh, 7)])
 
             # test serialization
-            index2 = faiss.deserialize_index_binary(
-                faiss.serialize_index_binary(index))
+            index2 = faiss.deserialize_index_binary(faiss.serialize_index_binary(index))
 
             D2, I2 = index2.search(xq, k)
             np.testing.assert_array_equal(Inew, I2)
             np.testing.assert_array_equal(Dnew, D2)
 
-        print('nfound=', nfound)
+        print("nfound=", nfound)
         self.assertGreater(3, abs(nfound[(0, 7)] - nfound[(1, 7)]))
         self.assertGreater(nfound[(3, 7)], nfound[(1, 7)])
         self.assertGreater(nfound[(5, 7)], nfound[(3, 7)])

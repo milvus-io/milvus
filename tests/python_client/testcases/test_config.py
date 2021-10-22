@@ -1399,4 +1399,3 @@
 #         expected: status ok, set successfully
 #         '''
 #         relpy = connect.set_config("wal.path", "/var/lib/milvus/wal")
-

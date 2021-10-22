@@ -1,18 +1,16 @@
 from gevent import monkey
+
 monkey.patch_all()
-from yaml import full_load, dump
 from chaos.chaos_opt import ChaosOpt
-from milvus_benchmark.chaos.chaos_mesh import PodChaos, NetworkChaos
 from milvus_benchmark import config
+from milvus_benchmark.chaos.chaos_mesh import NetworkChaos, PodChaos
+from yaml import dump, full_load
 
-kind_chaos_mapping = {
-    "PodChaos": PodChaos,
-    "NetworkChaos": NetworkChaos
-}
+kind_chaos_mapping = {"PodChaos": PodChaos, "NetworkChaos": NetworkChaos}
 
 
-if __name__ == '__main__':
-    with open('./pod.yaml') as f:
+if __name__ == "__main__":
+    with open("./pod.yaml") as f:
         conf = full_load(f)
         f.close()
     chaos_config = conf["chaos"]
@@ -20,7 +18,9 @@ if __name__ == '__main__':
     spec = chaos_config["spec"]
     metadata_name = config.NAMESPACE + "-" + kind.lower()
     metadata = {"name": metadata_name}
-    chaos_mesh = kind_chaos_mapping[kind](config.DEFAULT_API_VERSION, kind, metadata, spec)
+    chaos_mesh = kind_chaos_mapping[kind](
+        config.DEFAULT_API_VERSION, kind, metadata, spec
+    )
     experiment_params = chaos_mesh.gen_experiment_config()
     # print(experiment_params)
     # with open('./pod-new-chaos.yaml', "w") as f:

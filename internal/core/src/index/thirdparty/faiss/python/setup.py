@@ -1,7 +1,9 @@
 from __future__ import print_function
-from setuptools import setup, find_packages
+
 import os
 import shutil
+
+from setuptools import find_packages, setup
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -22,7 +24,7 @@ try:
 except:
     pass
 
-long_description="""
+long_description = """
 Faiss is a library for efficient similarity search and clustering of dense
 vectors. It contains algorithms that search in sets of vectors of any size,
  up to ones that possibly do not fit in RAM. It also contains supporting
@@ -31,20 +33,18 @@ complete wrappers for Python/numpy. Some of the most useful algorithms
 are implemented on the GPU. It is developed by Facebook AI Research.
 """
 setup(
-    name='faiss',
-    version='1.6.3',
-    description='A library for efficient similarity search and clustering of dense vectors',
+    name="faiss",
+    version="1.6.3",
+    description="A library for efficient similarity search and clustering of dense vectors",
     long_description=long_description,
-    url='https://github.com/facebookresearch/faiss',
-    author='Matthijs Douze, Jeff Johnson, Herve Jegou, Lucas Hosseini',
-    author_email='matthijs@fb.com',
-    license='MIT',
-    keywords='search nearest neighbors',
-
-    install_requires=['numpy'],
-    packages=['faiss'],
+    url="https://github.com/facebookresearch/faiss",
+    author="Matthijs Douze, Jeff Johnson, Herve Jegou, Lucas Hosseini",
+    author_email="matthijs@fb.com",
+    license="MIT",
+    keywords="search nearest neighbors",
+    install_requires=["numpy"],
+    packages=["faiss"],
     package_data={
-        'faiss': ['*.so'],
+        "faiss": ["*.so"],
     },
-
 )

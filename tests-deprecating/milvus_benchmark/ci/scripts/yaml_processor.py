@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
-import sys
 import argparse
-from argparse import Namespace
-import os, shutil
 import getopt
+import os
+import shutil
+import sys
+from argparse import Namespace
+
 from ruamel.yaml import YAML, yaml_object
-from ruamel.yaml.comments import CommentedSeq, CommentedMap
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.tokens import CommentToken
 
 ##
@@ -39,11 +41,15 @@ def _add_eol_comment(element, *args, **kwargs):
     add_eol_comment
     args --> (comment, key)
     """
-    if element is None or \
-            (not isinstance(element, CommentedMap) and
-             not isinstance(element, CommentedSeq)) or \
-            args[0] is None or \
-            len(args[0]) == 0:
+    if (
+        element is None
+        or (
+            not isinstance(element, CommentedMap)
+            and not isinstance(element, CommentedSeq)
+        )
+        or args[0] is None
+        or len(args[0]) == 0
+    ):
         return
 
     comment = args[0]
@@ -120,7 +126,7 @@ def _comment_counter(_comment):
     else:
         index = _comment.find("\n")
         _counter.append(x(_comment[:index]))
-        _counter.append(x(_comment[index + 1:]))
+        _counter.append(x(_comment[index + 1 :]))
 
     return _counter
 
@@ -166,11 +172,11 @@ def _get_update_par(_args):
     # file path
     _in_file = _dict.get("f", None) or _dict.get("file", None)
     # tips
-    _tips = _dict.get('tips', None) or "Input \"-h\" for more information"
+    _tips = _dict.get("tips", None) or 'Input "-h" for more information'
     # update
     _u = _dict.get("u", None) or _dict.get("update", None)
     # apppend
-    _a = _dict.get('a', None) or _dict.get('append', None)
+    _a = _dict.get("a", None) or _dict.get("append", None)
     # out stream group
     _i = _dict.get("i", None) or _dict.get("inplace", None)
     _o = _dict.get("o", None) or _dict.get("out_file", None)
@@ -184,11 +190,11 @@ def _get_update_par(_args):
 ############################################
 def update_map_element(element, key, value, comment, _type):
     """
-     element:
-     key:
-     value:
-     comment:
-     _type:  value type.
+    element:
+    key:
+    value:
+    comment:
+    _type:  value type.
     """
     if element is None or not isinstance(element, CommentedMap):
         print("Only key-value update support")
@@ -253,7 +259,7 @@ def _update(code, _update, _app, _tips):
             keys, value = variant.split("=")
             run_update(code, keys, value, comment, _app)
         except ValueError:
-            print("Invalid format. print command \"--help\" get more info.")
+            print('Invalid format. print command "--help" get more info.')
             sys.exit(1)
 
     return code
@@ -328,12 +334,16 @@ def _merge(master, target):
 
             # # remove enter signal in previous item
             previous_comment = _seq_comment(master, master_index - 1)
-            _add_eol_comment(master, _extract_comment(previous_comment), master_index - 1)
+            _add_eol_comment(
+                master, _extract_comment(previous_comment), master_index - 1
+            )
 
             origin_comment = _seq_comment(master, master_index)
             comment = _obtain_comment(origin_comment, target_comment)
             if len(comment) > 0:
-                _add_eol_comment(master, _extract_comment(comment) + "\n\n", len(master) - 1)
+                _add_eol_comment(
+                    master, _extract_comment(comment) + "\n\n", len(master) - 1
+                )
 
     ## item is a map
     elif isinstance(target, CommentedMap):
@@ -350,9 +360,9 @@ def _merge(master, target):
             target_start_comment = _start_comment(target)
 
             m = master.get(item, default=None)
-            if m is None or \
-                    (not (isinstance(m, CommentedMap) or
-                          isinstance(m, CommentedSeq))):
+            if m is None or (
+                not (isinstance(m, CommentedMap) or isinstance(m, CommentedSeq))
+            ):
                 master.update({item: target[item]})
 
             else:
@@ -368,12 +378,12 @@ def _merge(master, target):
 
 
 def _save(_code, _file):
-    with open(_file, 'w') as wf:
+    with open(_file, "w") as wf:
         yaml.dump(_code, wf)
 
 
 def _load(_file):
-    with open(_file, 'r') as rf:
+    with open(_file, "r") as rf:
         code = yaml.load(rf)
     return code
 
@@ -433,12 +443,12 @@ def update_yaml(_args):
 
 def reset(_args):
     _dict = _args.__dict__
-    _f = _dict.get('f', None) or _dict.get('file', None)
+    _f = _dict.get("f", None) or _dict.get("file", None)
 
     if _f:
         _recovery(_f)
     else:
-        _t = _dict.get('tips', None) or "Input \"-h\" for more information"
+        _t = _dict.get("tips", None) or 'Input "-h" for more information'
         print(_t)
 
 
@@ -456,10 +466,7 @@ def _set_merge_parser(_parsers):
     _set_merge_parser_arg(merge_parser)
     _set_update_parser_arg(merge_parser)
 
-    merge_parser.set_defaults(
-        function=merge_yaml,
-        tips=merge_parser.format_help()
-    )
+    merge_parser.set_defaults(function=merge_yaml, tips=merge_parser.format_help())
 
 
 def _set_merge_parser_arg(_parser):
@@ -478,10 +485,7 @@ def _set_update_parser(_parsers):
     update_parser = _parsers.add_parser("update", help="update with another yaml file")
     _set_update_parser_arg(update_parser)
 
-    update_parser.set_defaults(
-        function=update_yaml,
-        tips=update_parser.format_help()
-    )
+    update_parser.set_defaults(function=update_yaml, tips=update_parser.format_help())
 
 
 def _set_update_parser_arg(_parser):
@@ -490,12 +494,19 @@ def _set_update_parser_arg(_parser):
     """
 
     _parser.add_argument("-f", "--file", help="source yaml file")
-    _parser.add_argument('-u', '--update', help="update with args, instance as \"a.b.c=d# d comment\"")
-    _parser.add_argument('-a', '--append', action="store_true", help="append to a seq")
+    _parser.add_argument(
+        "-u", "--update", help='update with args, instance as "a.b.c=d# d comment"'
+    )
+    _parser.add_argument("-a", "--append", action="store_true", help="append to a seq")
 
     group = _parser.add_mutually_exclusive_group()
     group.add_argument("-o", "--out-file", help="indicate output yaml file")
-    group.add_argument("-i", "--inplace", action="store_true", help="indicate whether result store in origin file")
+    group.add_argument(
+        "-i",
+        "--inplace",
+        action="store_true",
+        help="indicate whether result store in origin file",
+    )
 
 
 def _set_reset_parser(_parsers):
@@ -506,12 +517,9 @@ def _set_reset_parser(_parsers):
     reset_parser = _parsers.add_parser("reset", help="reset yaml file")
 
     # indicate yaml file
-    reset_parser.add_argument('-f', '--file', help="indicate input yaml file")
+    reset_parser.add_argument("-f", "--file", help="indicate input yaml file")
 
-    reset_parser.set_defaults(
-        function=reset,
-        tips=reset_parser.format_help()
-    )
+    reset_parser.set_defaults(function=reset, tips=reset_parser.format_help())
 
 
 def main():
@@ -532,5 +540,5 @@ def main():
     args.function(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

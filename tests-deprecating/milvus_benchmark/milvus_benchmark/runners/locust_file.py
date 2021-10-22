@@ -1,24 +1,16 @@
-
 import random
-from locust import HttpUser, task, between
 
+from locust import HttpUser, between, task
 
 collection_name = "random_1m_2048_512_ip_sq8"
-headers = {'Content-Type': "application/json"}
-url = '/collections/%s/vectors' % collection_name
+headers = {"Content-Type": "application/json"}
+url = "/collections/%s/vectors" % collection_name
 top_k = 2
 nq = 1
 dim = 512
-vectors =  [[random.random() for _ in range(dim)] for _ in range(nq)] 
-data = {
-    "search":{
-        "topk": top_k,
-        "vectors": vectors,
-        "params": {
-            "nprobe": 1
-        }
-    }
-}
+vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+data = {"search": {"topk": top_k, "vectors": vectors, "params": {"nprobe": 1}}}
+
 
 class MyUser(HttpUser):
     wait_time = between(0, 0.1)
@@ -27,4 +19,4 @@ class MyUser(HttpUser):
     @task
     def search(self):
         response = self.client.put(url=url, json=data, headers=headers, timeout=2)
-        print(response) 
+        print(response)

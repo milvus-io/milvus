@@ -1,15 +1,13 @@
 import pytest
-
-from scale.helm_env import HelmEnv
 from common import common_func as cf
 from common.common_type import CaseLabel
 from scale import scale_common as sc
+from scale.helm_env import HelmEnv
 
 prefix = "proxy_scale"
 
 
 class TestProxyScale:
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_expand_proxy(self):
         """

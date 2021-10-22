@@ -1,6 +1,7 @@
 #!python
-import random
 import copy
+import random
+
 
 def show_dsl(query_entities):
     if not isinstance(query_entities, (dict,)):
@@ -39,26 +40,27 @@ def show_dsl(query_entities):
     for tag, vectors in vector_placeholders.items():
         print("tag: ", tag)
 
+
 if __name__ == "__main__":
     num = 5
     dimension = 4
     vectors = [[random.random() for _ in range(4)] for _ in range(num)]
     dsl = {
         "bool": {
-            "must":[
-                {
-                    "term": {"A": [1, 2, 5]}
-                },
-                {
-                    "range": {"B": {"GT": 1, "LT": 100}}
-                },
+            "must": [
+                {"term": {"A": [1, 2, 5]}},
+                {"range": {"B": {"GT": 1, "LT": 100}}},
                 {
                     "vector": {
-                       "Vec": {"topk": 10, "query": vectors[:1], "metric_type": "L2", "params": {"nprobe": 10}}
+                        "Vec": {
+                            "topk": 10,
+                            "query": vectors[:1],
+                            "metric_type": "L2",
+                            "params": {"nprobe": 10},
+                        }
                     }
-                }
+                },
             ]
         }
     }
     show_dsl(dsl)
-

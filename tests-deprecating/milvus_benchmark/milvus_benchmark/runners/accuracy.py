@@ -1,9 +1,9 @@
-import json
-import time
 import copy
+import json
 import logging
-import numpy as np
+import time
 
+import numpy as np
 from milvus_benchmark import parser
 from milvus_benchmark.runners import utils
 from milvus_benchmark.runners.base import BaseRunner
@@ -14,20 +14,27 @@ INSERT_INTERVAL = 50000
 
 class AccuracyRunner(BaseRunner):
     """run accuracy"""
+
     name = "accuracy"
 
     def extract_cases(self, collection):
-        collection_name = collection["collection_name"] if "collection_name" in collection else None
-        (data_type, collection_size, dimension, metric_type) = parser.collection_parser(collection_name)
+        collection_name = (
+            collection["collection_name"] if "collection_name" in collection else None
+        )
+        (data_type, collection_size, dimension, metric_type) = parser.collection_parser(
+            collection_name
+        )
         vector_type = utils.get_vector_type(data_type)
         index_field_name = utils.get_default_field_name(vector_type)
-        base_query_vectors = utils.get_vectors_from_binary(utils.MAX_NQ, dimension, data_type)
+        base_query_vectors = utils.get_vectors_from_binary(
+            utils.MAX_NQ, dimension, data_type
+        )
         # collection_info and index_info are used to report
         collection_info = {
             "dimension": dimension,
             "metric_type": metric_type,
             "dataset_name": collection_name,
-            "collection_size": collection_size
+            "collection_size": collection_size,
         }
         index_info = self.milvus.describe_index(index_field_name, collection_name)
         filters = collection["filters"] if "filters" in collection else []
@@ -57,7 +64,8 @@ class AccuracyRunner(BaseRunner):
                             "topk": top_k,
                             "query": query_vectors,
                             "metric_type": utils.metric_type_trans(metric_type),
-                            "params": search_param}
+                            "params": search_param,
+                        }
                         # TODO: only update search_info
                         case_metric = copy.deepcopy(self.metric)
                         case_metric.set_case_metric_type()
@@ -65,7 +73,7 @@ class AccuracyRunner(BaseRunner):
                             "nq": nq,
                             "topk": top_k,
                             "search_param": search_param,
-                            "filter": filter_param
+                            "filter": filter_param,
                         }
                         vector_query = {"vector": {index_field_name: search_info}}
                         case = {
@@ -77,7 +85,7 @@ class AccuracyRunner(BaseRunner):
                             "vector_type": vector_type,
                             "collection_size": collection_size,
                             "filter_query": filter_query,
-                            "vector_query": vector_query
+                            "vector_query": vector_query,
                         }
                         cases.append(case)
                         case_metrics.append(case_metric)
@@ -94,7 +102,9 @@ class AccuracyRunner(BaseRunner):
         collection_size = case_param["collection_size"]
         nq = case_metric.search["nq"]
         top_k = case_metric.search["topk"]
-        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+        query_res = self.milvus.query(
+            case_param["vector_query"], filter_query=case_param["filter_query"]
+        )
         true_ids = utils.get_ground_truth_ids(collection_size)
         logger.debug({"true_ids": [len(true_ids[0]), len(true_ids[0])]})
         result_ids = self.milvus.get_ids(query_res)
@@ -106,6 +116,7 @@ class AccuracyRunner(BaseRunner):
 
 class AccAccuracyRunner(AccuracyRunner):
     """run ann accuracy"""
+
     """
     1. entities from hdf5
     2. one collection test different index
@@ -113,8 +124,12 @@ class AccAccuracyRunner(AccuracyRunner):
     name = "ann_accuracy"
 
     def extract_cases(self, collection):
-        collection_name = collection["collection_name"] if "collection_name" in collection else None
-        (data_type, dimension, metric_type) = parser.parse_ann_collection_name(collection_name)
+        collection_name = (
+            collection["collection_name"] if "collection_name" in collection else None
+        )
+        (data_type, dimension, metric_type) = parser.parse_ann_collection_name(
+            collection_name
+        )
         hdf5_source_file = collection["source_file"]
         index_types = collection["index_types"]
         index_params = collection["index_params"]
@@ -127,7 +142,7 @@ class AccAccuracyRunner(AccuracyRunner):
         collection_info = {
             "dimension": dimension,
             "metric_type": metric_type,
-            "dataset_name": collection_name
+            "dataset_name": collection_name,
         }
         filters = collection["filters"] if "filters" in collection else []
         filter_query = []
@@ -139,10 +154,7 @@ class AccAccuracyRunner(AccuracyRunner):
         true_ids = np.array(dataset["neighbors"])
         for index_type in index_types:
             for index_param in index_params:
-                index_info = {
-                    "index_type": index_type,
-                    "index_param": index_param
-                }
+                index_info = {"index_type": index_type, "index_param": index_param}
                 for search_param in search_params:
                     if not filters:
                         filters.append(None)
@@ -155,13 +167,16 @@ class AccAccuracyRunner(AccuracyRunner):
                             filter_query.append(eval(filter["term"]))
                             filter_param.append(filter["term"])
                         for nq in nqs:
-                            query_vectors = utils.normalize(metric_type, np.array(dataset["test"][:nq]))
+                            query_vectors = utils.normalize(
+                                metric_type, np.array(dataset["test"][:nq])
+                            )
                             for top_k in top_ks:
                                 search_info = {
                                     "topk": top_k,
                                     "query": query_vectors,
                                     "metric_type": utils.metric_type_trans(metric_type),
-                                    "params": search_param}
+                                    "params": search_param,
+                                }
                                 # TODO: only update search_info
                                 case_metric = copy.deepcopy(self.metric)
                                 case_metric.set_case_metric_type()
@@ -170,9 +185,11 @@ class AccAccuracyRunner(AccuracyRunner):
                                     "nq": nq,
                                     "topk": top_k,
                                     "search_param": search_param,
-                                    "filter": filter_param
+                                    "filter": filter_param,
                                 }
-                                vector_query = {"vector": {index_field_name: search_info}}
+                                vector_query = {
+                                    "vector": {index_field_name: search_info}
+                                }
                                 case = {
                                     "collection_name": collection_name,
                                     "dataset": dataset,
@@ -185,7 +202,7 @@ class AccAccuracyRunner(AccuracyRunner):
                                     "index_param": index_param,
                                     "filter_query": filter_query,
                                     "vector_query": vector_query,
-                                    "true_ids": true_ids
+                                    "true_ids": true_ids,
                                 }
                                 cases.append(case)
                                 case_metrics.append(case_metric)
@@ -199,7 +216,7 @@ class AccAccuracyRunner(AccuracyRunner):
         index_type = case_param["index_type"]
         index_param = case_param["index_param"]
         index_field_name = case_param["index_field_name"]
-        
+
         self.milvus.set_collection(collection_name)
         if self.milvus.exists_collection(collection_name):
             logger.info("Re-create collection: %s" % collection_name)
@@ -208,9 +225,13 @@ class AccAccuracyRunner(AccuracyRunner):
         self.milvus.create_collection(dimension, data_type=vector_type)
         insert_vectors = utils.normalize(metric_type, np.array(dataset["train"]))
         if len(insert_vectors) != dataset["train"].shape[0]:
-            raise Exception("Row count of insert vectors: %d is not equal to dataset size: %d" % (
-                len(insert_vectors), dataset["train"].shape[0]))
-        logger.debug("The row count of entities to be inserted: %d" % len(insert_vectors))
+            raise Exception(
+                "Row count of insert vectors: %d is not equal to dataset size: %d"
+                % (len(insert_vectors), dataset["train"].shape[0])
+            )
+        logger.debug(
+            "The row count of entities to be inserted: %d" % len(insert_vectors)
+        )
         # Insert batch once
         # milvus_instance.insert(insert_vectors)
         info = self.milvus.get_info(collection_name)
@@ -238,7 +259,9 @@ class AccAccuracyRunner(AccuracyRunner):
         if self.milvus.describe_index(index_field_name):
             self.milvus.drop_index(index_field_name)
             logger.info("Re-create index: %s" % collection_name)
-        self.milvus.create_index(index_field_name, index_type, metric_type, index_param=index_param)
+        self.milvus.create_index(
+            index_field_name, index_type, metric_type, index_param=index_param
+        )
         logger.info(self.milvus.describe_index(index_field_name))
         logger.info("Start load collection: %s" % collection_name)
         # self.milvus.release_collection()
@@ -249,9 +272,10 @@ class AccAccuracyRunner(AccuracyRunner):
         true_ids = case_param["true_ids"]
         nq = case_metric.search["nq"]
         top_k = case_metric.search["topk"]
-        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+        query_res = self.milvus.query(
+            case_param["vector_query"], filter_query=case_param["filter_query"]
+        )
         result_ids = self.milvus.get_ids(query_res)
         acc_value = utils.get_recall_value(true_ids[:nq, :top_k].tolist(), result_ids)
         tmp_result = {"acc": acc_value}
         return tmp_result
-

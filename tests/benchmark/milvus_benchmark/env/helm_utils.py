@@ -1,20 +1,21 @@
+import hashlib
+import logging
 import os
 import pdb
 import time
-import logging
-import hashlib
 import traceback
-from yaml import full_load, dump
-from milvus_benchmark import utils
-from milvus_benchmark import config
+
+from milvus_benchmark import config, utils
+from yaml import dump, full_load
 
 logger = logging.getLogger("milvus_benchmark.env.helm_utils")
-BOOKKEEPER_PULSAR_MEM = '\"-Xms512m -Xmx1024m -XX:MaxDirectMemorySize=1024m -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+UseG1GC -XX:MaxGCPauseMillis=10 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+AggressiveOpts -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintHeapAtGC -verbosegc -XX:G1LogLevel=finest\"'
-BROKER_PULSAR_MEM = '\"-Xms512m -Xmx1024m -XX:MaxDirectMemorySize=1024m -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+AggressiveOpts -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem\"'
+BOOKKEEPER_PULSAR_MEM = '"-Xms512m -Xmx1024m -XX:MaxDirectMemorySize=1024m -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+UseG1GC -XX:MaxGCPauseMillis=10 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+AggressiveOpts -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintHeapAtGC -verbosegc -XX:G1LogLevel=finest"'
+BROKER_PULSAR_MEM = '"-Xms512m -Xmx1024m -XX:MaxDirectMemorySize=1024m -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+AggressiveOpts -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem"'
 
 
 def get_host_cpus(hostname):
     from kubernetes import client, config
+
     config.load_kube_config()
     client.rest.logger.setLevel(logging.WARNING)
     try:
@@ -59,12 +60,14 @@ return: no return
 """
 
 
-def update_values(file_path, deploy_mode, hostname, server_tag, milvus_config, server_config=None):
+def update_values(
+    file_path, deploy_mode, hostname, server_tag, milvus_config, server_config=None
+):
     # bak values.yaml
     file_name = os.path.basename(file_path)
     bak_file_name = file_name + ".bak"
     file_parent_path = os.path.dirname(file_path)
-    bak_file_path = file_parent_path + '/' + bak_file_name
+    bak_file_path = file_parent_path + "/" + bak_file_name
     if os.path.exists(bak_file_path):
         os.system("cp %s %s" % (bak_file_path, file_path))
     else:
@@ -137,7 +140,7 @@ def update_values(file_path, deploy_mode, hostname, server_tag, milvus_config, s
     # values_dict["metrics"]["enabled"] = True
     # values_dict["metrics"]["address"] = "192.168.1.237"
     # values_dict["metrics"]["port"] = 9091
-    # # only test avx2 
+    # # only test avx2
     # values_dict["extraConfiguration"].update({"engine": {"simd_type": "avx2"}})
     # # stat_optimizer_enable
     # values_dict["extraConfiguration"]["engine"].update({"stat_optimizer_enable": False})
@@ -172,48 +175,52 @@ def update_values(file_path, deploy_mode, hostname, server_tag, milvus_config, s
     #     values_dict["mysql"]["enabled"] = False
     # # update values.yaml with the given host
     node_config = None
-    perf_tolerations = [{
-        "key": "worker",
-        "operator": "Equal",
-        "value": "performance",
-        "effect": "NoSchedule"
-    }]
+    perf_tolerations = [
+        {
+            "key": "worker",
+            "operator": "Equal",
+            "value": "performance",
+            "effect": "NoSchedule",
+        }
+    ]
     if hostname:
-        node_config = {'kubernetes.io/hostname': hostname}
+        node_config = {"kubernetes.io/hostname": hostname}
     elif server_tag:
         # server tag
-        node_config = {'instance-type': server_tag}
+        node_config = {"instance-type": server_tag}
     cpus = server_config["cpus"]
     logger.debug(hostname)
     if cluster is False:
         if node_config:
-            values_dict['standalone']['nodeSelector'] = node_config
-            values_dict['minio']['nodeSelector'] = node_config
-            values_dict['etcd']['nodeSelector'] = node_config
+            values_dict["standalone"]["nodeSelector"] = node_config
+            values_dict["minio"]["nodeSelector"] = node_config
+            values_dict["etcd"]["nodeSelector"] = node_config
             # TODO: disable
             # set limit/request cpus in resources
-            values_dict['standalone']['resources'] = {
+            values_dict["standalone"]["resources"] = {
                 "limits": {
                     # "cpu": str(int(cpus)) + ".0"
-                    "cpu": str(int(cpus)) + ".0"
+                    "cpu": str(int(cpus))
+                    + ".0"
                 },
                 "requests": {
-                    "cpu": str(int(cpus) // 2 + 1) + ".0"
+                    "cpu": str(int(cpus) // 2 + 1)
+                    + ".0"
                     # "cpu": "4.0"
-                }
+                },
             }
             logger.debug("Add tolerations into standalone server")
-            values_dict['standalone']['tolerations'] = perf_tolerations
-            values_dict['minio']['tolerations'] = perf_tolerations
-            values_dict['etcd']['tolerations'] = perf_tolerations
+            values_dict["standalone"]["tolerations"] = perf_tolerations
+            values_dict["minio"]["tolerations"] = perf_tolerations
+            values_dict["etcd"]["tolerations"] = perf_tolerations
     else:
         # values_dict['pulsar']["broker"]["configData"].update({"maxMessageSize": "52428800", "PULSAR_MEM": BOOKKEEPER_PULSAR_MEM})
         # values_dict['pulsar']["bookkeeper"]["configData"].update({"nettyMaxFrameSizeBytes": "52428800", "PULSAR_MEM": BROKER_PULSAR_MEM})
-        values_dict['proxynode']['nodeSelector'] = node_config
-        values_dict['querynode']['nodeSelector'] = node_config
-        values_dict['indexnode']['nodeSelector'] = node_config
-        values_dict['datanode']['nodeSelector'] = node_config
-        values_dict['minio']['nodeSelector'] = node_config
+        values_dict["proxynode"]["nodeSelector"] = node_config
+        values_dict["querynode"]["nodeSelector"] = node_config
+        values_dict["indexnode"]["nodeSelector"] = node_config
+        values_dict["datanode"]["nodeSelector"] = node_config
+        values_dict["minio"]["nodeSelector"] = node_config
 
         # values_dict['pulsar']["enabled"] = True
         # values_dict['pulsar']['autoRecovery']['nodeSelector'] = node_config
@@ -221,16 +228,16 @@ def update_values(file_path, deploy_mode, hostname, server_tag, milvus_config, s
         # values_dict['pulsar']['broker']['nodeSelector'] = node_config
         # values_dict['pulsar']['bookkeeper']['nodeSelector'] = node_config
         # values_dict['pulsar']['zookeeper']['nodeSelector'] = node_config
-        values_dict['pulsarStandalone']['nodeSelector'] = node_config
+        values_dict["pulsarStandalone"]["nodeSelector"] = node_config
         if hostname:
             logger.debug("Add tolerations into cluster server")
-            values_dict['proxynode']['tolerations'] = perf_tolerations
-            values_dict['querynode']['tolerations'] = perf_tolerations
-            values_dict['indexnode']['tolerations'] = perf_tolerations
-            values_dict['datanode']['tolerations'] = perf_tolerations
-            values_dict['etcd']['tolerations'] = perf_tolerations
-            values_dict['minio']['tolerations'] = perf_tolerations
-            values_dict['pulsarStandalone']['tolerations'] = perf_tolerations
+            values_dict["proxynode"]["tolerations"] = perf_tolerations
+            values_dict["querynode"]["tolerations"] = perf_tolerations
+            values_dict["indexnode"]["tolerations"] = perf_tolerations
+            values_dict["datanode"]["tolerations"] = perf_tolerations
+            values_dict["etcd"]["tolerations"] = perf_tolerations
+            values_dict["minio"]["tolerations"] = perf_tolerations
+            values_dict["pulsarStandalone"]["tolerations"] = perf_tolerations
             # values_dict['pulsar']['autoRecovery']['tolerations'] = perf_tolerations
             # values_dict['pulsar']['proxy']['tolerations'] = perf_tolerations
             # values_dict['pulsar']['broker']['tolerations'] = perf_tolerations
@@ -238,26 +245,23 @@ def update_values(file_path, deploy_mode, hostname, server_tag, milvus_config, s
             # values_dict['pulsar']['zookeeper']['tolerations'] = perf_tolerations
 
     # add extra volumes
-    values_dict['extraVolumes'] = [{
-        'name': 'test',
-        'flexVolume': {
-            'driver': "fstab/cifs",
-            'fsType': "cifs",
-            'secretRef': {
-                'name': "cifs-test-secret"
+    values_dict["extraVolumes"] = [
+        {
+            "name": "test",
+            "flexVolume": {
+                "driver": "fstab/cifs",
+                "fsType": "cifs",
+                "secretRef": {"name": "cifs-test-secret"},
+                "options": {
+                    "networkPath": config.IDC_NAS_URL,
+                    "mountOptions": "vers=1.0",
+                },
             },
-            'options': {
-                'networkPath': config.IDC_NAS_URL,
-                'mountOptions': "vers=1.0"
-            }
         }
-    }]
-    values_dict['extraVolumeMounts'] = [{
-        'name': 'test',
-        'mountPath': '/test'
-    }]
+    ]
+    values_dict["extraVolumeMounts"] = [{"name": "test", "mountPath": "/test"}]
 
-    with open(file_path, 'w') as f:
+    with open(file_path, "w") as f:
         dump(values_dict, f, default_flow_style=False)
     f.close()
     # DEBUG
@@ -272,13 +276,16 @@ def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, nam
     logger.debug("Server deploy mode: %s" % deploy_mode)
     host = "%s-milvus-ha.%s.svc.cluster.local" % (name, namespace)
     # TODO: update etcd config
-    etcd_config_map_cmd = "kubectl create configmap -n %s %s --from-literal=ETCD_QUOTA_BACKEND_BYTES=8589934592 --from-literal=ETCD_SNAPSHOT_COUNT=5000 --from-literal=ETCD_AUTO_COMPACTION_MODE=revision --from-literal=ETCD_AUTO_COMPACTION_RETENTION=1" % (
-        namespace, name)
+    etcd_config_map_cmd = (
+        "kubectl create configmap -n %s %s --from-literal=ETCD_QUOTA_BACKEND_BYTES=8589934592 --from-literal=ETCD_SNAPSHOT_COUNT=5000 --from-literal=ETCD_AUTO_COMPACTION_MODE=revision --from-literal=ETCD_AUTO_COMPACTION_RETENTION=1"
+        % (namespace, name)
+    )
     if os.system(etcd_config_map_cmd):
         raise Exception("Create configmap: {} failed".format(name))
     logger.debug("Create configmap: {} successfully".format(name))
     log_path = config.LOG_PATH + "install.log"
-    install_cmd = "helm install \
+    install_cmd = (
+        "helm install \
             --set standalone.service.type=ClusterIP \
             --set image.all.repository=%s \
             --set image.all.tag=%s \
@@ -286,10 +293,13 @@ def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, nam
             --set etcd.persistence.enabled=false \
             --set etcd.envVarsConfigMap=%s \
             --namespace %s \
-            %s . >>%s >&1" % (config.REGISTRY_URL, image_tag, name, namespace, name, log_path)
+            %s . >>%s >&1"
+        % (config.REGISTRY_URL, image_tag, name, namespace, name, log_path)
+    )
     # --set image.all.pullPolicy=Always \
     if deploy_mode == "cluster":
-        install_cmd = "helm install \
+        install_cmd = (
+            "helm install \
                 --set standalone.enabled=false \
                 --set image.all.repository=%s \
                 --set image.all.tag=%s \
@@ -297,7 +307,9 @@ def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, nam
                 --set etcd.persistence.enabled=false \
                 --set etcd.envVarsConfigMap=%s \
                 --namespace %s \
-                %s . >>%s >&1" % (config.REGISTRY_URL, image_tag, name, namespace, name, log_path)
+                %s . >>%s >&1"
+            % (config.REGISTRY_URL, image_tag, name, namespace, name, log_path)
+        )
         # --set image.all.pullPolicy=Always \
     elif deploy_mode != "single":
         raise Exception("Deploy mode: {} not support".format(deploy_mode))
@@ -351,7 +363,10 @@ def restart_server(helm_release_name, namespace):
     # body = {"replicas": 0}
     pods = v1.list_namespaced_pod(namespace)
     for i in pods.items:
-        if i.metadata.name.find(helm_release_name) != -1 and i.metadata.name.find("mysql") == -1:
+        if (
+            i.metadata.name.find(helm_release_name) != -1
+            and i.metadata.name.find("mysql") == -1
+        ):
             pod_name = i.metadata.name
             break
             # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
@@ -374,15 +389,22 @@ def restart_server(helm_release_name, namespace):
             logger.error(pod_name_tmp)
             if pod_name_tmp == pod_name:
                 continue
-            if pod_name_tmp.find(helm_release_name) == -1 or pod_name_tmp.find("mysql") != -1:
+            if (
+                pod_name_tmp.find(helm_release_name) == -1
+                or pod_name_tmp.find("mysql") != -1
+            ):
                 continue
-            status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
+            status_res = v1.read_namespaced_pod_status(
+                pod_name_tmp, namespace, pretty="true"
+            )
             logger.error(status_res.status.phase)
             start_time = time.time()
             ready_break = False
             while time.time() - start_time <= timeout:
                 logger.error(time.time())
-                status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
+                status_res = v1.read_namespaced_pod_status(
+                    pod_name_tmp, namespace, pretty="true"
+                )
                 if status_res.status.phase == "Running":
                     logger.error("Already running")
                     ready_break = True
@@ -425,10 +447,11 @@ def restart_server(helm_release_name, namespace):
 
 def get_pod_status(helm_release_name, namespace):
     from kubernetes import client, config
+
     config.load_kube_config()
     v1 = client.CoreV1Api()
     pod_status = []
-    label_selector = 'app.kubernetes.io/instance={}'.format(helm_release_name)
+    label_selector = "app.kubernetes.io/instance={}".format(helm_release_name)
     # pods = v1.list_namespaced_pod(namespace, label_selector=label_selector)
     pods = v1.list_namespaced_pod(namespace)
     for i in pods.items:
@@ -448,10 +471,11 @@ def running_status(helm_release_name, namespace):
     return True
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+
     def ff():
-        namespace = 'milvus'
-        helm_release_name = 'zong-standalone'
+        namespace = "milvus"
+        helm_release_name = "zong-standalone"
         # st = get_pod_status(helm_release_name, namespace)
         status = get_pod_status(helm_release_name, namespace)
         print(status)
@@ -460,10 +484,8 @@ if __name__ == '__main__':
                 return False
         return True
 
-
     def fff():
         print(time.time())
-
 
     while not ff():
         print("retry")

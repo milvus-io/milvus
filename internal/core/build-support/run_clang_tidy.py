@@ -17,22 +17,26 @@
 # under the License.
 
 from __future__ import print_function
+
 import argparse
 import multiprocessing as mp
-import lintutils
-from subprocess import PIPE
+import re
 import sys
 from functools import partial
-import re
+from subprocess import PIPE
+
+import lintutils
 
 
 def _get_chunk_key(filenames):
     # lists are not hashable so key on the first filename in a chunk
     return filenames[0]
 
+
 def _count_key(str, key):
     m = re.findall(key, str)
     return len(m)
+
 
 # clang-tidy outputs complaints in '/path:line_number: complaint' format,
 # so we can scan its output to get a list of files to fix
@@ -50,8 +54,7 @@ def _check_all(cmd, filenames, ignore_checks):
     # record completed processes (keyed by the first filename in the input
     # chunk) for lookup in _check_some_files
     completed_processes = {
-        _get_chunk_key(some): result
-        for some, result in zip(chunks, results)
+        _get_chunk_key(some): result for some, result in zip(chunks, results)
     }
     checker = partial(_check_some_files, completed_processes)
     pool = mp.Pool()
@@ -69,16 +72,23 @@ def _check_all(cmd, filenames, ignore_checks):
                 #   error: 'fiu.h' file not found [clang-diagnostic-error]
                 cnt_info = ""
                 for line in stdout.splitlines():
-                    if any([len(re.findall(check, line)) > 0 for check in ignore_checks]):
-                        cnt_info += line.replace(" error: ", " ignore: ").decode("utf-8") + "\n"
+                    if any(
+                        [len(re.findall(check, line)) > 0 for check in ignore_checks]
+                    ):
+                        cnt_info += (
+                            line.replace(" error: ", " ignore: ").decode("utf-8") + "\n"
+                        )
                     else:
                         cnt_info += line.decode("utf-8") + "\n"
                 cnt_error += _count_key(cnt_info, " error: ")
                 cnt_warning += _count_key(cnt_info, " warning: ")
                 cnt_ignore += _count_key(cnt_info, " ignore: ")
                 print(cnt_info)
-                print("clang-tidy - error: {}, warning: {}, ignore {}".
-                      format(cnt_error, cnt_warning, cnt_ignore))
+                print(
+                    "clang-tidy - error: {}, warning: {}, ignore {}".format(
+                        cnt_error, cnt_warning, cnt_ignore
+                    )
+                )
                 error = error or (cnt_error > 0 or cnt_warning > 0)
     except Exception:
         error = True
@@ -92,31 +102,42 @@ def _check_all(cmd, filenames, ignore_checks):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Runs clang-tidy on all ")
-    parser.add_argument("--clang_tidy_binary",
-                        required=True,
-                        help="Path to the clang-tidy binary")
-    parser.add_argument("--exclude_globs",
-                        help="Filename containing globs for files "
-                        "that should be excluded from the checks")
-    parser.add_argument("--ignore_checks",
-                        help="Checkname containing checklist for files "
-                        "that should be ignore from the checks")
-    parser.add_argument("--compile_commands",
-                        required=True,
-                        help="compile_commands.json to pass clang-tidy")
-    parser.add_argument("--source_dir",
-                        required=True,
-                        help="Root directory of the source code")
-    parser.add_argument("--fix", default=False,
-                        action="store_true",
-                        help="If specified, will attempt to fix the "
-                        "source code instead of recommending fixes, "
-                        "defaults to %(default)s")
-    parser.add_argument("--quiet", default=False,
-                        action="store_true",
-                        help="If specified, only print errors")
+    parser = argparse.ArgumentParser(description="Runs clang-tidy on all ")
+    parser.add_argument(
+        "--clang_tidy_binary", required=True, help="Path to the clang-tidy binary"
+    )
+    parser.add_argument(
+        "--exclude_globs",
+        help="Filename containing globs for files "
+        "that should be excluded from the checks",
+    )
+    parser.add_argument(
+        "--ignore_checks",
+        help="Checkname containing checklist for files "
+        "that should be ignore from the checks",
+    )
+    parser.add_argument(
+        "--compile_commands",
+        required=True,
+        help="compile_commands.json to pass clang-tidy",
+    )
+    parser.add_argument(
+        "--source_dir", required=True, help="Root directory of the source code"
+    )
+    parser.add_argument(
+        "--fix",
+        default=False,
+        action="store_true",
+        help="If specified, will attempt to fix the "
+        "source code instead of recommending fixes, "
+        "defaults to %(default)s",
+    )
+    parser.add_argument(
+        "--quiet",
+        default=False,
+        action="store_true",
+        help="If specified, only print errors",
+    )
     arguments = parser.parse_args()
 
     exclude_globs = []
@@ -134,18 +155,15 @@ if __name__ == "__main__":
         linted_filenames.append(path)
 
     if not arguments.quiet:
-        msg = 'Tidying {}' if arguments.fix else 'Checking {}'
+        msg = "Tidying {}" if arguments.fix else "Checking {}"
         print("\n".join(map(msg.format, linted_filenames)))
 
-    cmd = [
-        arguments.clang_tidy_binary,
-        '-p',
-        arguments.compile_commands
-    ]
+    cmd = [arguments.clang_tidy_binary, "-p", arguments.compile_commands]
     if arguments.fix:
-        cmd.append('-fix')
+        cmd.append("-fix")
         results = lintutils.run_parallel(
-            [cmd + some for some in lintutils.chunk(linted_filenames, 16)])
+            [cmd + some for some in lintutils.chunk(linted_filenames, 16)]
+        )
         for returncode, stdout, stderr in results:
             if returncode != 0:
                 sys.exit(returncode)

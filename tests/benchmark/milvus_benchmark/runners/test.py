@@ -1,6 +1,6 @@
 import math
-from locust import User, TaskSet, task, constant
-from locust import LoadTestShape
+
+from locust import LoadTestShape, TaskSet, User, constant, task
 
 
 class StepLoadShape(LoadTestShape):

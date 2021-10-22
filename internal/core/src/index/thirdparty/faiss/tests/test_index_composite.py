@@ -6,17 +6,17 @@
 """ more elaborate that test_index.py """
 from __future__ import absolute_import, division, print_function
 
-import numpy as np
-import unittest
-import faiss
 import os
 import shutil
 import tempfile
+import unittest
 
+import faiss
+import numpy as np
 from common import get_dataset_2
 
-class TestRemove(unittest.TestCase):
 
+class TestRemove(unittest.TestCase):
     def do_merge_then_remove(self, ondisk):
         d = 10
         nb = 1000
@@ -34,15 +34,15 @@ class TestRemove(unittest.TestCase):
         if ondisk:
             filename = tempfile.mkstemp()[1]
             invlists = faiss.OnDiskInvertedLists(
-                index1.nlist, index1.code_size,
-                filename)
+                index1.nlist, index1.code_size, filename
+            )
             index1.replace_invlists(invlists)
 
-        index1.add(xb[:int(nb / 2)])
+        index1.add(xb[: int(nb / 2)])
 
         index2 = faiss.IndexIVFFlat(quantizer, d, 20)
         assert index2.is_trained
-        index2.add(xb[int(nb / 2):])
+        index2.add(xb[int(nb / 2) :])
 
         Dref, Iref = index1.search(xq, 10)
         index1.merge_from(index2, int(nb / 2))
@@ -70,7 +70,7 @@ class TestRemove(unittest.TestCase):
         # only tests the python interface
 
         index = faiss.IndexFlat(5)
-        xb = np.zeros((10, 5), dtype='float32')
+        xb = np.zeros((10, 5), dtype="float32")
         xb[:, 0] = np.arange(10) + 1000
         index.add(xb)
         index.remove_ids(np.arange(5) * 2)
@@ -79,7 +79,7 @@ class TestRemove(unittest.TestCase):
 
     def test_remove_id_map(self):
         sub_index = faiss.IndexFlat(5)
-        xb = np.zeros((10, 5), dtype='float32')
+        xb = np.zeros((10, 5), dtype="float32")
         xb[:, 0] = np.arange(10) + 1000
         index = faiss.IndexIDMap2(sub_index)
         index.add_with_ids(xb, np.arange(10) + 100)
@@ -91,7 +91,7 @@ class TestRemove(unittest.TestCase):
         except RuntimeError:
             pass
         else:
-            assert False, 'should have raised an exception'
+            assert False, "should have raised an exception"
 
     def test_remove_id_map_2(self):
         # from https://github.com/facebookresearch/faiss/issues/255
@@ -99,15 +99,15 @@ class TestRemove(unittest.TestCase):
         X = rs.randn(10, 10).astype(np.float32)
         idx = np.array([0, 10, 20, 30, 40, 5, 15, 25, 35, 45], np.int64)
         remove_set = np.array([10, 30], dtype=np.int64)
-        index = faiss.index_factory(10, 'IDMap,Flat')
+        index = faiss.index_factory(10, "IDMap,Flat")
         index.add_with_ids(X[:5, :], idx[:5])
         index.remove_ids(remove_set)
         index.add_with_ids(X[5:, :], idx[5:])
 
-        print (index.search(X, 1))
+        print(index.search(X, 1))
 
         for i in range(10):
-            _, searchres = index.search(X[i:i + 1, :], 1)
+            _, searchres = index.search(X[i : i + 1, :], 1)
             if idx[i] in remove_set:
                 assert searchres[0] != idx[i]
             else:
@@ -115,7 +115,7 @@ class TestRemove(unittest.TestCase):
 
     def test_remove_id_map_binary(self):
         sub_index = faiss.IndexBinaryFlat(40)
-        xb = np.zeros((10, 5), dtype='uint8')
+        xb = np.zeros((10, 5), dtype="uint8")
         xb[:, 0] = np.arange(10) + 100
         index = faiss.IndexBinaryIDMap2(sub_index)
         index.add_with_ids(xb, np.arange(10) + 1000)
@@ -127,7 +127,7 @@ class TestRemove(unittest.TestCase):
         except RuntimeError:
             pass
         else:
-            assert False, 'should have raised an exception'
+            assert False, "should have raised an exception"
 
         # while we are there, let's test I/O as well...
         _, tmpnam = tempfile.mkstemp()
@@ -143,15 +143,13 @@ class TestRemove(unittest.TestCase):
         except RuntimeError:
             pass
         else:
-            assert False, 'should have raised an exception'
-
+            assert False, "should have raised an exception"
 
 
 class TestRangeSearch(unittest.TestCase):
-
     def test_range_search_id_map(self):
         sub_index = faiss.IndexFlat(5, 1)  # L2 search instead of inner product
-        xb = np.zeros((10, 5), dtype='float32')
+        xb = np.zeros((10, 5), dtype="float32")
         xb[:, 0] = np.arange(10) + 1000
         index = faiss.IndexIDMap2(sub_index)
         index.add_with_ids(xb, np.arange(10) + 100)
@@ -163,16 +161,15 @@ class TestRangeSearch(unittest.TestCase):
 
 
 class TestUpdate(unittest.TestCase):
-
     def test_update(self):
         d = 64
         nb = 1000
         nt = 1500
         nq = 100
         np.random.seed(123)
-        xb = np.random.random(size=(nb, d)).astype('float32')
-        xt = np.random.random(size=(nt, d)).astype('float32')
-        xq = np.random.random(size=(nq, d)).astype('float32')
+        xb = np.random.random(size=(nb, d)).astype("float32")
+        xt = np.random.random(size=(nt, d)).astype("float32")
+        xq = np.random.random(size=(nq, d)).astype("float32")
 
         index = faiss.index_factory(d, "IVF64,Flat")
         index.train(xt)
@@ -185,12 +182,12 @@ class TestUpdate(unittest.TestCase):
 
         # revert order of the 200 first vectors
         nu = 200
-        index.update_vectors(np.arange(nu), xb[nu - 1::-1].copy())
+        index.update_vectors(np.arange(nu), xb[nu - 1 :: -1].copy())
 
         recons_after = np.vstack([index.reconstruct(i) for i in range(nb)])
 
         # make sure reconstructions remain the same
-        diff_recons = recons_before[:nu] - recons_after[nu - 1::-1]
+        diff_recons = recons_before[:nu] - recons_after[nu - 1 :: -1]
         assert np.abs(diff_recons).max() == 0
 
         D2, I2 = index.search(xq, 5)
@@ -205,7 +202,6 @@ class TestUpdate(unittest.TestCase):
 
 
 class TestPCAWhite(unittest.TestCase):
-
     def test_white(self):
 
         # generate data
@@ -217,7 +213,7 @@ class TestPCAWhite(unittest.TestCase):
         # normal distribition
         x = faiss.randn((nt + nb + nq) * d, 1234).reshape(nt + nb + nq, d)
 
-        index = faiss.index_factory(d, 'Flat')
+        index = faiss.index_factory(d, "Flat")
 
         xt = x[:nt]
         xb = x[nt:-nq]
@@ -230,20 +226,20 @@ class TestPCAWhite(unittest.TestCase):
         # make distribution very skewed
         x *= [10, 4, 1, 0.5]
         rr, _ = np.linalg.qr(faiss.randn(d * d).reshape(d, d))
-        x = np.dot(x, rr).astype('float32')
+        x = np.dot(x, rr).astype("float32")
 
         xt = x[:nt]
         xb = x[nt:-nq]
         xq = x[-nq:]
 
         # L2 search on skewed distribution
-        index = faiss.index_factory(d, 'Flat')
+        index = faiss.index_factory(d, "Flat")
 
         index.add(xb)
         Dl2, Il2 = index.search(xq, 5)
 
         # whiten + L2 search on L2 distribution
-        index = faiss.index_factory(d, 'PCAW%d,Flat' % d)
+        index = faiss.index_factory(d, "PCAW%d,Flat" % d)
 
         index.train(xt)
         index.add(xb)
@@ -252,12 +248,10 @@ class TestPCAWhite(unittest.TestCase):
         # make sure correlation of whitened results with original
         # results is much better than simple L2 distances
         # should be 961 vs. 264
-        assert (faiss.eval_intersection(Io, Iw) >
-                2 * faiss.eval_intersection(Io, Il2))
+        assert faiss.eval_intersection(Io, Iw) > 2 * faiss.eval_intersection(Io, Il2)
 
 
 class TestTransformChain(unittest.TestCase):
-
     def test_chain(self):
 
         # generate data
@@ -272,7 +266,7 @@ class TestTransformChain(unittest.TestCase):
         # make distribution very skewed
         x *= [10, 4, 1, 0.5]
         rr, _ = np.linalg.qr(faiss.randn(d * d).reshape(d, d))
-        x = np.dot(x, rr).astype('float32')
+        x = np.dot(x, rr).astype("float32")
 
         xt = x[:nt]
         xb = x[nt:-nq]
@@ -305,8 +299,8 @@ class TestTransformChain(unittest.TestCase):
 
         assert np.all(I == I2)
 
-class TestRareIO(unittest.TestCase):
 
+class TestRareIO(unittest.TestCase):
     def compare_results(self, index1, index2, xq):
 
         Dref, Iref = index1.search(xq, 5)
@@ -327,7 +321,7 @@ class TestRareIO(unittest.TestCase):
         if sparse:
             # makes the inverted lists sparse because all elements get
             # assigned to the same invlist
-            xt += (np.ones(10) * 1000).astype('float32')
+            xt += (np.ones(10) * 1000).astype("float32")
 
         if in_pretransform:
             # make sure it still works when wrapped in an IndexPreTransform
@@ -361,7 +355,6 @@ class TestRareIO(unittest.TestCase):
 
 
 class TestIVFFlatDedup(unittest.TestCase):
-
     def normalize_res(self, D, I):
         dmax = D[-1]
         res = [(d, i) for d, i in zip(D, I) if d < dmax]
@@ -438,7 +431,6 @@ class TestIVFFlatDedup(unittest.TestCase):
 
 
 class TestSerialize(unittest.TestCase):
-
     def test_serialize_to_vector(self):
         d = 10
         nb = 1000
@@ -476,7 +468,6 @@ class TestSerialize(unittest.TestCase):
 
 
 class TestRenameOndisk(unittest.TestCase):
-
     def test_rename(self):
         d = 10
         nb = 500
@@ -496,30 +487,30 @@ class TestRenameOndisk(unittest.TestCase):
 
             # make an index with ondisk invlists
             invlists = faiss.OnDiskInvertedLists(
-                index1.nlist, index1.code_size,
-                dirname + '/aa.ondisk')
+                index1.nlist, index1.code_size, dirname + "/aa.ondisk"
+            )
             index1.replace_invlists(invlists)
             index1.add(xb)
             D1, I1 = index1.search(xq, 10)
-            faiss.write_index(index1, dirname + '/aa.ivf')
+            faiss.write_index(index1, dirname + "/aa.ivf")
 
             # move the index elsewhere
-            os.mkdir(dirname + '/1')
-            for fname in 'aa.ondisk', 'aa.ivf':
-                os.rename(dirname + '/' + fname,
-                          dirname + '/1/' + fname)
+            os.mkdir(dirname + "/1")
+            for fname in "aa.ondisk", "aa.ivf":
+                os.rename(dirname + "/" + fname, dirname + "/1/" + fname)
 
             # try to read it: fails!
             try:
-                index2 = faiss.read_index(dirname + '/1/aa.ivf')
+                index2 = faiss.read_index(dirname + "/1/aa.ivf")
             except RuntimeError:
-                pass   # normal
+                pass  # normal
             else:
                 assert False
 
             # read it with magic flag
-            index2 = faiss.read_index(dirname + '/1/aa.ivf',
-                                      faiss.IO_FLAG_ONDISK_SAME_DIR)
+            index2 = faiss.read_index(
+                dirname + "/1/aa.ivf", faiss.IO_FLAG_ONDISK_SAME_DIR
+            )
             D2, I2 = index2.search(xq, 10)
             assert np.all(I1 == I2)
 
@@ -528,7 +519,6 @@ class TestRenameOndisk(unittest.TestCase):
 
 
 class TestInvlistMeta(unittest.TestCase):
-
     def test_slice_vstack(self):
         d = 10
         nb = 1000
@@ -565,7 +555,5 @@ class TestInvlistMeta(unittest.TestCase):
         assert np.all(I == Iref)
 
 
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-import time
 import logging
-import string
 import random
-from yaml import full_load, dump
-import yaml
-import tableprint as tp
+import string
+import time
 from pprint import pprint
+
 import config
+import tableprint as tp
+import yaml
+from yaml import dump, full_load
 
 logger = logging.getLogger("milvus_benchmark.utils")
 
@@ -27,7 +28,8 @@ def timestr_to_int(time_str):
     return time_int
 
 
-class literal_str(str): pass
+class literal_str(str):
+    pass
 
 
 def change_style(style, representer):
@@ -43,7 +45,7 @@ from yaml.representer import SafeRepresenter
 
 # represent_str does handle some corner cases, so use that
 # instead of calling represent_scalar directly
-represent_literal_str = change_style('|', SafeRepresenter.represent_str)
+represent_literal_str = change_style("|", SafeRepresenter.represent_str)
 
 yaml.add_representer(literal_str, represent_literal_str)
 
@@ -52,6 +54,7 @@ def retry(times):
     """
     This decorator prints the execution time for the decorated function.
     """
+
     def wrapper(func):
         def newfn(*args, **kwargs):
             attempt = 0
@@ -67,7 +70,9 @@ def retry(times):
                     time.sleep(3)
                     attempt += 1
             return result
+
         return newfn
+
     return wrapper
 
 
@@ -81,11 +86,11 @@ def convert_nested(dct):
 
     result = dict()
 
-    # create an iterator of lists  
-    # representing nested or hierarchial flow 
+    # create an iterator of lists
+    # representing nested or hierarchial flow
     lsts = ([*k.split("."), v] for k, v in dct.items())
 
-    # insert each list into the result 
+    # insert each list into the result
     for lst in lsts:
         insert(result, lst)
     return result
@@ -94,11 +99,16 @@ def convert_nested(dct):
 def get_unique_name(prefix=None):
     if prefix is None:
         prefix = "distributed-benchmark-test-"
-    return prefix + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8)).lower()
+    return (
+        prefix
+        + "".join(
+            random.choice(string.ascii_letters + string.digits) for _ in range(8)
+        ).lower()
+    )
 
 
 def get_current_time():
-    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
 
 def print_table(headers, columns, data):
@@ -120,7 +130,10 @@ def get_deploy_mode(deploy_params):
             deploy_mode = config.DEFUALT_DEPLOY_MODE
         elif "deploy_mode" in milvus_params:
             deploy_mode = milvus_params["deploy_mode"]
-            if deploy_mode not in [config.SINGLE_DEPLOY_MODE, config.CLUSTER_DEPLOY_MODE]:
+            if deploy_mode not in [
+                config.SINGLE_DEPLOY_MODE,
+                config.CLUSTER_DEPLOY_MODE,
+            ]:
                 raise Exception("Invalid deploy mode: %s" % deploy_mode)
     return deploy_mode
 

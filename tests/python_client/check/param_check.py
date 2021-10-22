@@ -1,5 +1,6 @@
-import sys
 import operator
+import sys
+
 from common import common_type as ct
 
 sys.path.append("..")
@@ -14,7 +15,7 @@ def ip_check(ip):
         log.error("[IP_CHECK] IP(%s) is not a string." % ip)
         return False
 
-    _list = ip.split('.')
+    _list = ip.split(".")
     if len(_list) != 4:
         log.error("[IP_CHECK] IP(%s) is wrong, please check manually." % ip)
         return False
@@ -47,7 +48,10 @@ def exist_check(param, _list):
 
 def dict_equal_check(dict1, dict2):
     if not isinstance(dict1, dict) or not isinstance(dict2, dict):
-        log.error("[DICT_EQUAL_CHECK] Type of dict(%s) or dict(%s) is not a dict." % (str(dict1), str(dict2)))
+        log.error(
+            "[DICT_EQUAL_CHECK] Type of dict(%s) or dict(%s) is not a dict."
+            % (str(dict1), str(dict2))
+        )
         return False
     return operator.eq(dict1, dict2)
 
@@ -63,8 +67,10 @@ def list_de_duplication(_list):
     # Keep the order of the elements unchanged
     result.sort(key=_list.index)
 
-    log.debug("[LIST_DE_DUPLICATION] %s after removing the duplicate elements, the list becomes %s" % (
-        str(_list), str(result)))
+    log.debug(
+        "[LIST_DE_DUPLICATION] %s after removing the duplicate elements, the list becomes %s"
+        % (str(_list), str(result))
+    )
     return result
 
 
@@ -86,7 +92,10 @@ def list_equal_check(param1, param2):
         check_result = False
 
     if check_result is False:
-        log.error("[LIST_EQUAL_CHECK] List(%s) and list(%s) are not equal." % (str(param1), str(param2)))
+        log.error(
+            "[LIST_EQUAL_CHECK] List(%s) and list(%s) are not equal."
+            % (str(param1), str(param2))
+        )
 
     return check_result
 
@@ -105,28 +114,36 @@ def list_contain_check(sublist, superlist):
         else:
             superlist.remove(i)
     if not check_result:
-        log.error("list_contain_check: List(%s) does not contain list(%s)"
-                  % (str(superlist), str(sublist)))
+        log.error(
+            "list_contain_check: List(%s) does not contain list(%s)"
+            % (str(superlist), str(sublist))
+        )
 
     return check_result
 
 
 def get_connect_object_name(_list):
-    """ get the name of the objects that returned by the connection """
+    """get the name of the objects that returned by the connection"""
     if not isinstance(_list, list):
-        log.error("[GET_CONNECT_OBJECT_NAME] Type of list(%s) is not a list." % str(_list))
+        log.error(
+            "[GET_CONNECT_OBJECT_NAME] Type of list(%s) is not a list." % str(_list)
+        )
         return _list
 
     new_list = []
     for i in _list:
         if not isinstance(i, tuple):
-            log.error("[GET_CONNECT_OBJECT_NAME] The element:%s of the list is not tuple, please check manually."
-                      % str(i))
+            log.error(
+                "[GET_CONNECT_OBJECT_NAME] The element:%s of the list is not tuple, please check manually."
+                % str(i)
+            )
             return _list
 
         if len(i) != 2:
-            log.error("[GET_CONNECT_OBJECT_NAME] The length of the tuple:%s is not equal to 2, please check manually."
-                      % str(i))
+            log.error(
+                "[GET_CONNECT_OBJECT_NAME] The length of the tuple:%s is not equal to 2, please check manually."
+                % str(i)
+            )
             return _list
 
         if i[1] is not None:
@@ -135,7 +152,10 @@ def get_connect_object_name(_list):
         else:
             new_list.append(i)
 
-    log.debug("[GET_CONNECT_OBJECT_NAME] list:%s is reset to list:%s" % (str(_list), str(new_list)))
+    log.debug(
+        "[GET_CONNECT_OBJECT_NAME] list:%s is reset to list:%s"
+        % (str(_list), str(new_list))
+    )
     return new_list
 
 

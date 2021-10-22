@@ -1,17 +1,42 @@
-import docker
 import copy
+
+import docker
 from pymilvus import (
-    connections, FieldSchema, CollectionSchema, DataType,
-    Collection, list_collections,
+    Collection,
+    CollectionSchema,
+    DataType,
+    FieldSchema,
+    connections,
+    list_collections,
 )
 
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ",
-                   "BIN_FLAT", "BIN_IVF_FLAT"]
+all_index_types = [
+    "FLAT",
+    "IVF_FLAT",
+    "IVF_SQ8",
+    "IVF_PQ",
+    "HNSW",
+    "ANNOY",
+    "RHNSW_FLAT",
+    "RHNSW_PQ",
+    "RHNSW_SQ",
+    "BIN_FLAT",
+    "BIN_IVF_FLAT",
+]
 
-default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {"M": 48, "efConstruction": 500},
-                        {"M": 48, "efConstruction": 500, "PQM": 64}, {"M": 48, "efConstruction": 500}, {"nlist": 128},
-                        {"nlist": 128}]
+default_index_params = [
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16, "nbits": 8},
+    {"M": 48, "efConstruction": 500},
+    {"n_trees": 50},
+    {"M": 48, "efConstruction": 500},
+    {"M": 48, "efConstruction": 500, "PQM": 64},
+    {"M": 48, "efConstruction": 500},
+    {"nlist": 128},
+    {"nlist": 128},
+]
 
 index_params_map = dict(zip(all_index_types, default_index_params))
 
@@ -20,7 +45,10 @@ def gen_search_param(index_type, metric_type="L2"):
     search_params = []
     if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8H", "IVF_PQ"]:
         for nprobe in [10]:
-            ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
+            ivf_search_params = {
+                "metric_type": metric_type,
+                "params": {"nprobe": nprobe},
+            }
             search_params.append(ivf_search_params)
     elif index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
         for nprobe in [10]:
@@ -32,11 +60,17 @@ def gen_search_param(index_type, metric_type="L2"):
             search_params.append(hnsw_search_param)
     elif index_type in ["NSG", "RNSG"]:
         for search_length in [100]:
-            nsg_search_param = {"metric_type": metric_type, "params": {"search_length": search_length}}
+            nsg_search_param = {
+                "metric_type": metric_type,
+                "params": {"search_length": search_length},
+            }
             search_params.append(nsg_search_param)
     elif index_type == "ANNOY":
         for search_k in [1000]:
-            annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
+            annoy_search_param = {
+                "metric_type": metric_type,
+                "params": {"search_k": search_k},
+            }
             search_params.append(annoy_search_param)
     else:
         print("Invalid index_type.")
@@ -64,13 +98,16 @@ def get_collections():
 
 def create_collections_and_insert_data():
     import random
+
     dim = 128
     default_fields = [
         FieldSchema(name="count", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="random_value", dtype=DataType.DOUBLE),
-        FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
     ]
-    default_schema = CollectionSchema(fields=default_fields, description="test collection")
+    default_schema = CollectionSchema(
+        fields=default_fields, description="test collection"
+    )
     print(f"\nList collections...")
     print(list_collections())
     for col_name in all_index_types:
@@ -83,7 +120,7 @@ def create_collections_and_insert_data():
             [
                 [i for i in range(nb)],
                 [float(random.randrange(-20, -10)) for _ in range(nb)],
-                vectors
+                vectors,
             ]
         )
         print(f"collection name: {col_name}")
@@ -94,7 +131,11 @@ def create_collections_and_insert_data():
 
 def create_index():
     # create index
-    default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+    default_index = {
+        "index_type": "IVF_FLAT",
+        "params": {"nlist": 128},
+        "metric_type": "L2",
+    }
     col_list = list_collections()
     print(f"\nCreate index...")
     for name in col_list:
@@ -125,12 +166,18 @@ def load_and_search():
         # search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
 
         import time
+
         start_time = time.time()
         print(f"\nSearch...")
         # define output_fields of search result
         res = c.search(
-            vectors[:1], "float_vector", search_params, topK,
-            "count > 500", output_fields=["count", "random_value"], timeout=20
+            vectors[:1],
+            "float_vector",
+            search_params,
+            topK,
+            "count > 500",
+            output_fields=["count", "random_value"],
+            timeout=20,
         )
         end_time = time.time()
         # show result

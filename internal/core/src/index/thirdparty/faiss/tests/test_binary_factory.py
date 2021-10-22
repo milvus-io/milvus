@@ -6,11 +6,11 @@
 from __future__ import absolute_import, division, print_function
 
 import unittest
+
 import faiss
 
 
 class TestBinaryFactory(unittest.TestCase):
-
     def test_factory_IVF(self):
 
         index = faiss.index_binary_factory(16, "BIVF10")

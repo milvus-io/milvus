@@ -3,13 +3,12 @@ import threading
 import numpy as np
 import pandas as pd
 import pytest
-from pymilvus import Index
-
 from base.client_base import TestcaseBase
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus import Index
+from utils.util_log import test_log as log
 
 prefix = "insert"
 exp_name = "name"
@@ -18,12 +17,20 @@ exp_num = "num_entities"
 exp_primary = "primary"
 default_schema = cf.gen_default_collection_schema()
 default_binary_schema = cf.gen_default_binary_collection_schema()
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
-default_binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
+default_index_params = {
+    "index_type": "IVF_SQ8",
+    "metric_type": "L2",
+    "params": {"nlist": 64},
+}
+default_binary_index_params = {
+    "index_type": "BIN_IVF_FLAT",
+    "metric_type": "JACCARD",
+    "params": {"nlist": 64},
+}
 
 
 class TestInsertParams(TestcaseBase):
-    """ Test case of Insert interface """
+    """Test case of Insert interface"""
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_non_data_type(self, request):
@@ -49,7 +56,9 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=df)
         assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        assert (
+            mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        )
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -77,7 +86,9 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         error = {ct.err_code: 0, ct.err_msg: "Data type is not support"}
-        collection_w.insert(data=get_non_data_type, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(
+            data=get_non_data_type, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("data", [[], pd.DataFrame()])
@@ -89,7 +100,10 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 0, ct.err_msg: "The data fields number is not match with schema"}
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The data fields number is not match with schema",
+        }
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -116,8 +130,11 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
-        df.rename(columns={ct.default_int64_field_name: ' '}, inplace=True)
-        error = {ct.err_code: 0, ct.err_msg: "The types of schema and data do not match"}
+        df.rename(columns={ct.default_int64_field_name: " "}, inplace=True)
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The types of schema and data do not match",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -130,8 +147,13 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
-        df.rename(columns={ct.default_int64_field_name: get_invalid_field_name}, inplace=True)
-        error = {ct.err_code: 0, ct.err_msg: "The types of schema and data do not match"}
+        df.rename(
+            columns={ct.default_int64_field_name: get_invalid_field_name}, inplace=True
+        )
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The types of schema and data do not match",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     def test_insert_dataframe_index(self):
@@ -178,11 +200,15 @@ class TestInsertParams(TestcaseBase):
         expected: assert num_entities
         """
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        collection_w = self.init_collection_wrap(
+            name=c_name, schema=default_binary_schema
+        )
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=df)
         assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        assert (
+            mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        )
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -193,7 +219,9 @@ class TestInsertParams(TestcaseBase):
         expected: assert num_entities
         """
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        collection_w = self.init_collection_wrap(
+            name=c_name, schema=default_binary_schema
+        )
         data, _ = cf.gen_default_binary_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data)
         assert mutation_res.insert_count == ct.default_nb
@@ -227,8 +255,10 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         dim = 129
         df = cf.gen_default_dataframe_data(ct.default_nb, dim=dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"Collection field dim is {ct.default_dim}, but entities field dim is {dim}",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -240,11 +270,15 @@ class TestInsertParams(TestcaseBase):
         expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        collection_w = self.init_collection_wrap(
+            name=c_name, schema=default_binary_schema
+        )
         dim = 120
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb, dim=dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"Collection field dim is {ct.default_dim}, but entities field dim is {dim}",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -258,7 +292,10 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
-        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The types of schema and data do not match",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -274,7 +311,10 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
         df.iloc[:, 1] = new_float_value
-        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The types of schema and data do not match",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -291,7 +331,7 @@ class TestInsertParams(TestcaseBase):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
-        error = {ct.err_code: 0, ct.err_msg: 'Arrays must all be same length.'}
+        error = {ct.err_code: 0, ct.err_msg: "Arrays must all be same length."}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -308,7 +348,7 @@ class TestInsertParams(TestcaseBase):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb - 1, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
-        error = {ct.err_code: 0, ct.err_msg: 'Arrays must all be same length.'}
+        error = {ct.err_code: 0, ct.err_msg: "Arrays must all be same length."}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -322,8 +362,11 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         new_values = [i for i in range(ct.default_nb)]
-        df.insert(3, 'new', new_values)
-        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema.'}
+        df.insert(3, "new", new_values)
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The data fields number is not match with schema.",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -337,7 +380,10 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         df.drop(ct.default_float_vec_field_name, axis=1, inplace=True)
-        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema.'}
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The data fields number is not match with schema.",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -354,7 +400,10 @@ class TestInsertParams(TestcaseBase):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [float_values, int_values, float_vec_values]
-        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The types of schema and data do not match",
+        }
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -370,12 +419,17 @@ class TestInsertParams(TestcaseBase):
         int_values = pd.Series(data=[i for i in range(nb)])
         float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
-        df = pd.DataFrame({
-            ct.default_float_field_name: float_values,
-            ct.default_float_vec_field_name: float_vec_values,
-            ct.default_int64_field_name: int_values
-        })
-        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
+        df = pd.DataFrame(
+            {
+                ct.default_float_field_name: float_values,
+                ct.default_float_vec_field_name: float_vec_values,
+                ct.default_int64_field_name: int_values,
+            }
+        )
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The types of schema and data do not match",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -389,7 +443,10 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb=100)
         data[0][1] = 1.0
-        error = {ct.err_code: 0, ct.err_msg: "The data in the same column must be of the same type"}
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The data in the same column must be of the same type",
+        }
         collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -417,12 +474,17 @@ class TestInsertOperation(TestcaseBase):
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
         data = cf.gen_default_list_data(10)
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")],
-                                            [cf.gen_binary_vec_field()],
-                                            [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")]])
+    @pytest.mark.parametrize(
+        "vec_fields",
+        [
+            [cf.gen_float_vec_field(name="float_vector1")],
+            [cf.gen_binary_vec_field()],
+            [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")],
+        ],
+    )
     def test_insert_multi_float_vec_fields(self, vec_fields):
         """
         target: test insert into multi float vec fields collection
@@ -430,7 +492,9 @@ class TestInsertOperation(TestcaseBase):
         expected: verify num entities
         """
         schema = cf.gen_schema_multi_vector_fields(vec_fields)
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
         df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
@@ -466,7 +530,11 @@ class TestInsertOperation(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         assert collection_w.has_index()[0]
         index, _ = collection_w.index()
-        assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
+        assert index == Index(
+            collection_w.collection,
+            ct.default_float_vec_field_name,
+            default_index_params,
+        )
         assert collection_w.indexes[0] == index
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -480,7 +548,11 @@ class TestInsertOperation(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         assert collection_w.has_index()[0]
         index, _ = collection_w.index()
-        assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
+        assert index == Index(
+            collection_w.collection,
+            ct.default_float_vec_field_name,
+            default_index_params,
+        )
         assert collection_w.indexes[0] == index
         df = cf.gen_default_dataframe_data(ct.default_nb)
         collection_w.insert(data=df)
@@ -494,11 +566,19 @@ class TestInsertOperation(TestcaseBase):
         expected: 1.index ok 2.num entities correct
         """
         schema = cf.gen_default_binary_collection_schema()
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
-        collection_w.create_index(ct.default_binary_vec_field_name, default_binary_index_params)
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        collection_w.create_index(
+            ct.default_binary_vec_field_name, default_binary_index_params
+        )
         assert collection_w.has_index()[0]
         index, _ = collection_w.index()
-        assert index == Index(collection_w.collection, ct.default_binary_vec_field_name, default_binary_index_params)
+        assert index == Index(
+            collection_w.collection,
+            ct.default_binary_vec_field_name,
+            default_binary_index_params,
+        )
         assert collection_w.indexes[0] == index
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         collection_w.insert(data=df)
@@ -512,7 +592,9 @@ class TestInsertOperation(TestcaseBase):
         expected: index correct
         """
         schema = cf.gen_default_collection_schema(auto_id=True)
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
         df = cf.gen_default_dataframe_data(ct.default_nb)
         df.drop(ct.default_int64_field_name, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
@@ -522,7 +604,11 @@ class TestInsertOperation(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         assert collection_w.has_index()[0]
         index, _ = collection_w.index()
-        assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
+        assert index == Index(
+            collection_w.collection,
+            ct.default_float_vec_field_name,
+            default_index_params,
+        )
         assert collection_w.indexes[0] == index
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -589,7 +675,10 @@ class TestInsertOperation(TestcaseBase):
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         df = cf.gen_default_dataframe_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: 'Auto_id is True, primary field should not have data'}
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "Auto_id is True, primary field should not have data",
+        }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.is_empty
 
@@ -604,7 +693,10 @@ class TestInsertOperation(TestcaseBase):
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         data = cf.gen_default_list_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema'}
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "The data fields number is not match with schema",
+        }
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.is_empty
 
@@ -654,7 +746,7 @@ class TestInsertOperation(TestcaseBase):
         primary_keys = df[ct.default_int64_field_name].values.tolist()
 
         def insert(thread_i):
-            log.debug(f'In thread-{thread_i}')
+            log.debug(f"In thread-{thread_i}")
             mutation_res, _ = collection_w.insert(df)
             assert mutation_res.insert_count == ct.default_nb
             assert mutation_res.primary_keys == primary_keys
@@ -691,7 +783,10 @@ class TestInsertOperation(TestcaseBase):
             df = cf.gen_default_dataframe_data(step, dim)
             mutation_res, _ = collection_w.insert(data=df)
             assert mutation_res.insert_count == step
-            assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+            assert (
+                mutation_res.primary_keys
+                == df[ct.default_int64_field_name].values.tolist()
+            )
 
         assert collection_w.num_entities == nb
 
@@ -705,8 +800,9 @@ class TestInsertOperation(TestcaseBase):
         self._connect()
         nb = 100
         df = cf.gen_dataframe_all_data_type(nb=nb)
-        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                      primary_field=ct.default_int64_field_name)
+        self.collection_wrap.construct_from_dataframe(
+            cf.gen_unique_str(prefix), df, primary_field=ct.default_int64_field_name
+        )
         assert self.collection_wrap.num_entities == nb
 
 
@@ -730,7 +826,9 @@ class TestInsertAsync(TestcaseBase):
         future.done()
         mutation_res = future.result()
         assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        assert (
+            mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        )
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -744,7 +842,9 @@ class TestInsertAsync(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         mutation_res, _ = collection_w.insert(data=df, _async=False)
         assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        assert (
+            mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        )
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -756,10 +856,14 @@ class TestInsertAsync(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data()
-        future, _ = collection_w.insert(data=df, _async=True, _callback=assert_mutation_result)
+        future, _ = collection_w.insert(
+            data=df, _async=True, _callback=assert_mutation_result
+        )
         future.done()
         mutation_res = future.result()
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        assert (
+            mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        )
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -776,7 +880,9 @@ class TestInsertAsync(TestcaseBase):
         future.done()
         mutation_res = future.result()
         assert mutation_res.insert_count == nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        assert (
+            mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        )
         assert collection_w.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -789,7 +895,9 @@ class TestInsertAsync(TestcaseBase):
         nb = 100000
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(nb)
-        future, _ = collection_w.insert(data=df, _async=True, _callback=assert_mutation_result, timeout=1)
+        future, _ = collection_w.insert(
+            data=df, _async=True, _callback=assert_mutation_result, timeout=1
+        )
         with pytest.raises(Exception):
             future.result()
 
@@ -804,7 +912,9 @@ class TestInsertAsync(TestcaseBase):
         columns = [ct.default_int64_field_name, ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
         error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
-        collection_w.insert(data=df, _async=True, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(
+            data=df, _async=True, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_async_invalid_partition(self):

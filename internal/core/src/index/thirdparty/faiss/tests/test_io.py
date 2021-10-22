@@ -5,24 +5,23 @@
 
 #!/usr/bin/env python3
 
-import numpy as np
-import unittest
-import faiss
-import tempfile
-import os
 import io
+import os
 import sys
+import tempfile
+import unittest
 import warnings
 from multiprocessing.dummy import Pool as ThreadPool
 
+import faiss
+import numpy as np
 from common import get_dataset, get_dataset_2
 
 
 class TestIOVariants(unittest.TestCase):
-
     def test_io_error(self):
         d, n = 32, 1000
-        x = np.random.uniform(size=(n, d)).astype('float32')
+        x = np.random.uniform(size=(n, d)).astype("float32")
         index = faiss.IndexFlatL2(d)
         index.add(x)
         _, fname = tempfile.mkstemp()
@@ -33,9 +32,9 @@ class TestIOVariants(unittest.TestCase):
             faiss.read_index(fname)
 
             # now damage file
-            data = open(fname, 'rb').read()
-            data = data[:int(len(data) / 2)]
-            open(fname, 'wb').write(data)
+            data = open(fname, "rb").read()
+            data = data[: int(len(data) / 2)]
+            open(fname, "wb").write(data)
 
             # should make a nice readable exception that mentions the filename
             try:
@@ -52,10 +51,9 @@ class TestIOVariants(unittest.TestCase):
 
 
 class TestCallbacks(unittest.TestCase):
-
     def do_write_callback(self, bsz):
         d, n = 32, 1000
-        x = np.random.uniform(size=(n, d)).astype('float32')
+        x = np.random.uniform(size=(n, d)).astype("float32")
         index = faiss.IndexFlatL2(d)
         index.add(x)
 
@@ -67,26 +65,23 @@ class TestCallbacks(unittest.TestCase):
             writer = faiss.BufferedIOWriter(writer, bsz)
 
         faiss.write_index(index, writer)
-        del writer   # make sure all writes committed
+        del writer  # make sure all writes committed
 
         if sys.version_info[0] < 3:
             buf = f.getvalue()
         else:
             buf = f.getbuffer()
 
-        index2 = faiss.deserialize_index(np.frombuffer(buf, dtype='uint8'))
+        index2 = faiss.deserialize_index(np.frombuffer(buf, dtype="uint8"))
 
         self.assertEqual(index.d, index2.d)
-        self.assertTrue(np.all(
-            faiss.vector_to_array(index.xb) == faiss.vector_to_array(index2.xb)
-        ))
+        self.assertTrue(
+            np.all(faiss.vector_to_array(index.xb) == faiss.vector_to_array(index2.xb))
+        )
 
         # This is not a callable function: shoudl raise an exception
         writer = faiss.PyCallbackIOWriter("blabla")
-        self.assertRaises(
-            Exception,
-            faiss.write_index, index, writer
-        )
+        self.assertRaises(Exception, faiss.write_index, index, writer)
 
     def test_buf_read(self):
         x = np.random.uniform(size=20)
@@ -95,14 +90,14 @@ class TestCallbacks(unittest.TestCase):
         try:
             x.tofile(fname)
 
-            f = open(fname, 'rb')
+            f = open(fname, "rb")
             reader = faiss.PyCallbackIOReader(f.read, 1234)
 
             bsz = 123
             reader = faiss.BufferedIOReader(reader, bsz)
 
             y = np.zeros_like(x)
-            print('nbytes=', y.nbytes)
+            print("nbytes=", y.nbytes)
             reader(faiss.swig_ptr(y), y.nbytes, 1)
 
             np.testing.assert_array_equal(x, y)
@@ -112,7 +107,7 @@ class TestCallbacks(unittest.TestCase):
 
     def do_read_callback(self, bsz):
         d, n = 32, 1000
-        x = np.random.uniform(size=(n, d)).astype('float32')
+        x = np.random.uniform(size=(n, d)).astype("float32")
         index = faiss.IndexFlatL2(d)
         index.add(x)
 
@@ -120,7 +115,7 @@ class TestCallbacks(unittest.TestCase):
         try:
             faiss.write_index(index, fname)
 
-            f = open(fname, 'rb')
+            f = open(fname, "rb")
 
             reader = faiss.PyCallbackIOReader(f.read, 1234)
 
@@ -131,16 +126,12 @@ class TestCallbacks(unittest.TestCase):
 
             self.assertEqual(index.d, index2.d)
             np.testing.assert_array_equal(
-                faiss.vector_to_array(index.xb),
-                faiss.vector_to_array(index2.xb)
+                faiss.vector_to_array(index.xb), faiss.vector_to_array(index2.xb)
             )
 
             # This is not a callable function: should raise an exception
             reader = faiss.PyCallbackIOReader("blabla")
-            self.assertRaises(
-                Exception,
-                faiss.read_index, reader
-            )
+            self.assertRaises(Exception, faiss.read_index, reader)
         finally:
             if os.path.exists(fname):
                 os.unlink(fname)
@@ -161,7 +152,7 @@ class TestCallbacks(unittest.TestCase):
 
     def test_read_buffer(self):
         d, n = 32, 1000
-        x = np.random.uniform(size=(n, d)).astype('float32')
+        x = np.random.uniform(size=(n, d)).astype("float32")
         index = faiss.IndexFlatL2(d)
         index.add(x)
 
@@ -169,27 +160,24 @@ class TestCallbacks(unittest.TestCase):
         try:
             faiss.write_index(index, fname)
 
-            reader = faiss.BufferedIOReader(
-                faiss.FileIOReader(fname), 1234)
+            reader = faiss.BufferedIOReader(faiss.FileIOReader(fname), 1234)
 
             index2 = faiss.read_index(reader)
 
             self.assertEqual(index.d, index2.d)
             np.testing.assert_array_equal(
-                faiss.vector_to_array(index.xb),
-                faiss.vector_to_array(index2.xb)
+                faiss.vector_to_array(index.xb), faiss.vector_to_array(index2.xb)
             )
 
         finally:
             if os.path.exists(fname):
                 os.unlink(fname)
 
-
     def test_transfer_pipe(self):
-        """ transfer an index through a Unix pipe """
+        """transfer an index through a Unix pipe"""
 
         d, n = 32, 1000
-        x = np.random.uniform(size=(n, d)).astype('float32')
+        x = np.random.uniform(size=(n, d)).astype("float32")
         index = faiss.IndexFlatL2(d)
         index.add(x)
         Dref, Iref = index.search(x, 10)

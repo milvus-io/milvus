@@ -1,4 +1,4 @@
-MONGO_SERVER = 'mongodb://192.168.1.234:27017/'
+MONGO_SERVER = "mongodb://192.168.1.234:27017/"
 # MONGO_SERVER = 'mongodb://mongodb.test:27017/'
 
 SCHEDULER_DB = "scheduler"
@@ -30,9 +30,9 @@ CLUSTER_DEPLOY_MODE = "cluster"
 
 NAMESPACE = "milvus"
 CHAOS_NAMESPACE = "chaos-testing"
-DEFAULT_API_VERSION = 'chaos-mesh.org/v1alpha1'
-DEFAULT_GROUP = 'chaos-mesh.org'
-DEFAULT_VERSION = 'v1alpha1'
+DEFAULT_API_VERSION = "chaos-mesh.org/v1alpha1"
+DEFAULT_GROUP = "chaos-mesh.org"
+DEFAULT_VERSION = "v1alpha1"
 
 # minio config
 MINIO_HOST = "milvus-test-minio.qa-milvus.svc.cluster.local"

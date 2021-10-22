@@ -1,7 +1,8 @@
 import logging
 import os
-from yaml import full_load
+
 from milvus_benchmark.chaos import utils
+from yaml import full_load
 
 logger = logging.getLogger("milvus_benchmark.chaos.base")
 
@@ -40,12 +41,16 @@ class BaseChaos(object):
         label_selector_value = label_selector[1]
         # pods = utils.list_pod_for_namespace(label_selector[0] + "=" + label_selector_value)
         pods = utils.list_pod_for_namespace()
-        real_label_selector_value = list(map(lambda pod: pod, filter(lambda pod: label_selector_value in pod, pods)))[0]
-        self.spec["selector"]["labelSelectors"].update({label_selector[0]: real_label_selector_value})
+        real_label_selector_value = list(
+            map(lambda pod: pod, filter(lambda pod: label_selector_value in pod, pods))
+        )[0]
+        self.spec["selector"]["labelSelectors"].update(
+            {label_selector[0]: real_label_selector_value}
+        )
 
 
 class PodChaos(BaseChaos):
-    default_yaml = BaseChaos.cur_path + '/template/PodChaos.yaml'
+    default_yaml = BaseChaos.cur_path + "/template/PodChaos.yaml"
 
     def gen_experiment_config(self):
         with open(self.default_yaml) as f:
@@ -61,6 +66,5 @@ class PodChaos(BaseChaos):
 
 
 class NetworkChaos(BaseChaos):
-
     def gen_experiment_config(self):
         pass

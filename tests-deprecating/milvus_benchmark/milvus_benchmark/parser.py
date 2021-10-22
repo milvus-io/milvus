@@ -1,5 +1,5 @@
-import pdb
 import logging
+import pdb
 
 logger = logging.getLogger("milvus_benchmark.parser")
 
@@ -13,7 +13,7 @@ def operations_parser(operations):
 
 
 def collection_parser(collection_name):
-    """ Collection size analysis """
+    """Collection size analysis"""
     tmp = collection_name.split("_")
     # if len(tmp) != 5:
     #     return None
@@ -39,9 +39,9 @@ def parse_ann_collection_name(collection_name):
     # dimension = len(collection_name["train"][0])
     if metric == "euclidean":
         metric_type = "l2"
-    elif metric  == "angular":
+    elif metric == "angular":
         metric_type = "ip"
-    elif metric  == "jaccard":
+    elif metric == "jaccard":
         metric_type = "jaccard"
     elif metric == "hamming":
         metric_type = "hamming"
@@ -83,6 +83,6 @@ def search_params_parser(param):
     elif isinstance(nprobes, list):
         nprobes = list(nprobes)
     else:
-        logger.warning("Invalid format nprobes: %s" % str(nprobes))    
+        logger.warning("Invalid format nprobes: %s" % str(nprobes))
 
     return top_ks, nqs, nprobes

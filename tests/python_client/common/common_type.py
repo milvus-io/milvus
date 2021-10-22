@@ -69,24 +69,17 @@ get_invalid_strs = [
     "(mn)",
     "中文",
     "%$#",
-    "a".join("a" for i in range(256))]
-
-get_not_string = [
-    [],
-    {},
-    None,
-    (1,),
-    1,
-    1.0,
-    [1, "2", 3]
+    "a".join("a" for i in range(256)),
 ]
+
+get_not_string = [[], {}, None, (1,), 1, 1.0, [1, "2", 3]]
 
 get_invalid_vectors = [
     "1*2",
     [1],
     [1, 2],
     [" "],
-    ['a'],
+    ["a"],
     [None],
     None,
     (1, 2),
@@ -96,7 +89,7 @@ get_invalid_vectors = [
     "String",
     " siede ",
     "中文",
-    "a".join("a" for i in range(256))
+    "a".join("a" for i in range(256)),
 ]
 
 get_invalid_ints = [
@@ -110,7 +103,7 @@ get_invalid_ints = [
     "String",
     "=c",
     "中文",
-    "a".join("a" for i in range(256))
+    "a".join("a" for i in range(256)),
 ]
 
 get_invalid_dict = [
@@ -125,7 +118,7 @@ get_invalid_dict = [
     {1: 1},
     {"中文": 1},
     {"%$#": ["a"]},
-    {"a".join("a" for i in range(256)): "a"}
+    {"a".join("a" for i in range(256)): "a"},
 ]
 
 get_dict_without_host_port = [
@@ -135,22 +128,42 @@ get_dict_without_host_port = [
     # ("host", "port"),
     {"host": -1},
     {"port": ["192.168.1.1"]},
-    {"": ""}
+    {"": ""},
 ]
 
 get_wrong_format_dict = [
     {"host": "string_host", "port": {}},
-    {"host": 0, "port": 19520}
+    {"host": 0, "port": 19520},
 ]
 
 """ Specially defined list """
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ",
-                   "BIN_FLAT", "BIN_IVF_FLAT"]
+all_index_types = [
+    "FLAT",
+    "IVF_FLAT",
+    "IVF_SQ8",
+    "IVF_PQ",
+    "HNSW",
+    "ANNOY",
+    "RHNSW_FLAT",
+    "RHNSW_PQ",
+    "RHNSW_SQ",
+    "BIN_FLAT",
+    "BIN_IVF_FLAT",
+]
 
-default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {"M": 48, "efConstruction": 500},
-                        {"M": 48, "efConstruction": 500, "PQM": 64}, {"M": 48, "efConstruction": 500}, {"nlist": 128},
-                        {"nlist": 128}]
+default_index_params = [
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16, "nbits": 8},
+    {"M": 48, "efConstruction": 500},
+    {"n_trees": 50},
+    {"M": 48, "efConstruction": 500},
+    {"M": 48, "efConstruction": 500, "PQM": 64},
+    {"M": 48, "efConstruction": 500},
+    {"nlist": 128},
+    {"nlist": 128},
+]
 
 Handler_type = ["GRPC", "HTTP"]
 index_cpu_not_support = ["IVF_SQ8_HYBRID"]
@@ -163,7 +176,8 @@ structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
 class CheckTasks:
-    """ The name of the method used to check the result """
+    """The name of the method used to check the result"""
+
     check_nothing = "check_nothing"
     err_res = "error_response"
     ccr = "check_connection_result"
@@ -199,6 +213,7 @@ class CaseLabel:
             Triggered by cron job or manually
             run duration depends on test configuration
     """
+
     L0 = "L0"
     L1 = "L1"
     L2 = "L2"

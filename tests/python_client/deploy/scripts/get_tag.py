@@ -1,5 +1,6 @@
-import requests
 import json
+
+import requests
 
 milvus_dev = "https://registry.hub.docker.com/v2/repositories/milvusdb/milvus-dev/tags?ordering=last_updated"
 milvus = "https://registry.hub.docker.com/v2/repositories/milvusdb/milvus/tags?ordering=last_updated"
@@ -25,7 +26,7 @@ print(latest_tag, latest_rc_tag)
 data = {
     "latest_tag": latest_tag,
     "latest_rc_tag": latest_rc_tag[1:],
-    "release_version": release_version
+    "release_version": release_version,
 }
 print(data)
 with open("tag_info.json", "w") as f:

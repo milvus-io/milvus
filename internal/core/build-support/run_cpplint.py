@@ -17,21 +17,22 @@
 # under the License.
 
 from __future__ import print_function
-import lintutils
-from subprocess import PIPE, STDOUT
+
 import argparse
 import multiprocessing as mp
-import sys
 import platform
+import sys
 from functools import partial
+from subprocess import PIPE, STDOUT
 
+import lintutils
 
 # NOTE(wesm):
 #
 # * readability/casting is disabled as it aggressively warns about functions
 #   with names like "int32", so "int32(x)", where int32 is a function name,
 #   warns with
-_filters = '''
+_filters = """
 -whitespace/comments
 -readability/casting
 -readability/todo
@@ -40,7 +41,7 @@ _filters = '''
 -build/c++11
 -runtime/references
 -build/include_order
-'''.split()
+""".split()
 
 
 def _get_chunk_key(filenames):
@@ -57,19 +58,25 @@ def _check_some_files(completed_processes, filenames):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Runs cpplint on all of the source files.")
-    parser.add_argument("--cpplint_binary",
-                        required=True,
-                        help="Path to the cpplint binary")
-    parser.add_argument("--exclude_globs",
-                        help="Filename containing globs for files "
-                        "that should be excluded from the checks")
-    parser.add_argument("--source_dir",
-                        required=True,
-                        help="Root directory of the source code")
-    parser.add_argument("--quiet", default=False,
-                        action="store_true",
-                        help="If specified, only print errors")
+        description="Runs cpplint on all of the source files."
+    )
+    parser.add_argument(
+        "--cpplint_binary", required=True, help="Path to the cpplint binary"
+    )
+    parser.add_argument(
+        "--exclude_globs",
+        help="Filename containing globs for files "
+        "that should be excluded from the checks",
+    )
+    parser.add_argument(
+        "--source_dir", required=True, help="Root directory of the source code"
+    )
+    parser.add_argument(
+        "--quiet",
+        default=False,
+        action="store_true",
+        help="If specified, only print errors",
+    )
     arguments = parser.parse_args()
 
     exclude_globs = []
@@ -83,19 +90,18 @@ if __name__ == "__main__":
 
     cmd = [
         arguments.cpplint_binary,
-        '--verbose=2',
-        '--linelength=120',
-        '--filter=' + ','.join(_filters)
+        "--verbose=2",
+        "--linelength=120",
+        "--filter=" + ",".join(_filters),
     ]
-    if (arguments.cpplint_binary.endswith('.py') and
-            platform.system() == 'Windows'):
+    if arguments.cpplint_binary.endswith(".py") and platform.system() == "Windows":
         # Windows doesn't support executable scripts; execute with
         # sys.executable
         cmd.insert(0, sys.executable)
     if arguments.quiet:
-        cmd.append('--quiet')
+        cmd.append("--quiet")
     else:
-        print("\n".join(map("Linting {}".format,linted_filenames)))
+        print("\n".join(map("Linting {}".format, linted_filenames)))
 
     # lint files in chunks: each invocation of cpplint will process 16 files
     chunks = lintutils.chunk(linted_filenames, 16)
@@ -106,8 +112,7 @@ if __name__ == "__main__":
     # record completed processes (keyed by the first filename in the input
     # chunk) for lookup in _check_some_files
     completed_processes = {
-        _get_chunk_key(filenames): result
-        for filenames, result in zip(chunks, results)
+        _get_chunk_key(filenames): result for filenames, result in zip(chunks, results)
     }
     checker = partial(_check_some_files, completed_processes)
     pool = mp.Pool()
@@ -117,7 +122,7 @@ if __name__ == "__main__":
         for problem_files, stdout in pool.imap(checker, chunks):
             if problem_files:
                 if isinstance(stdout, bytes):
-                    stdout = stdout.decode('utf8')
+                    stdout = stdout.decode("utf8")
                 print(stdout, file=sys.stderr)
                 error = True
     except Exception:
@@ -128,4 +133,3 @@ if __name__ == "__main__":
         pool.join()
 
     sys.exit(1 if error else 0)
-

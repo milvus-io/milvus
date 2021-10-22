@@ -6,14 +6,14 @@
 #!/usr/bin/env python2
 
 from __future__ import print_function
+
 import os
-import time
-import numpy as np
 import pdb
+import time
 
 import faiss
-from datasets import load_sift1M, evaluate
-
+import numpy as np
+from datasets import evaluate, load_sift1M
 
 print("load data")
 
@@ -91,4 +91,6 @@ for lnprobe in range(10):
     index.setNumProbes(nprobe)
     t, r = evaluate(index, xq, gt, 100)
 
-    print("nprobe=%4d %.3f ms recalls= %.4f %.4f %.4f" % (nprobe, t, r[1], r[10], r[100]))
+    print(
+        "nprobe=%4d %.3f ms recalls= %.4f %.4f %.4f" % (nprobe, t, r[1], r[10], r[100])
+    )

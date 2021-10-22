@@ -1,6 +1,7 @@
-import time
 import copy
 import logging
+import time
+
 from milvus_benchmark import parser
 from milvus_benchmark.runners import utils
 from milvus_benchmark.runners.base import BaseRunner
@@ -10,29 +11,33 @@ logger = logging.getLogger("milvus_benchmark.runners.build")
 
 class BuildRunner(BaseRunner):
     """run build"""
+
     name = "build_performance"
 
     def extract_cases(self, collection):
-        collection_name = collection["collection_name"] if "collection_name" in collection else None
-        (data_type, collection_size, dimension, metric_type) = parser.collection_parser(collection_name)
+        collection_name = (
+            collection["collection_name"] if "collection_name" in collection else None
+        )
+        (data_type, collection_size, dimension, metric_type) = parser.collection_parser(
+            collection_name
+        )
         ni_per = collection["ni_per"]
         vector_type = utils.get_vector_type(data_type)
-        other_fields = collection["other_fields"] if "other_fields" in collection else None
+        other_fields = (
+            collection["other_fields"] if "other_fields" in collection else None
+        )
         collection_info = {
             "dimension": dimension,
             "metric_type": metric_type,
             "dataset_name": collection_name,
             "collection_size": collection_size,
             "other_fields": other_fields,
-            "ni_per": ni_per
+            "ni_per": ni_per,
         }
         index_field_name = utils.get_default_field_name(vector_type)
         index_type = collection["index_type"]
         index_param = collection["index_param"]
-        index_info = {
-            "index_type": index_type,
-            "index_param": index_param
-        }
+        index_info = {"index_type": index_type, "index_param": index_param}
         flush = True
         if "flush" in collection and collection["flush"] == "no":
             flush = False
@@ -69,8 +74,12 @@ class BuildRunner(BaseRunner):
     def run_case(self, case_metric, **case_param):
         index_field_name = case_param["index_field_name"]
         start_time = time.time()
-        self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"],
-                                 index_param=case_param["index_param"])
+        self.milvus.create_index(
+            index_field_name,
+            case_param["index_type"],
+            case_param["metric_type"],
+            index_param=case_param["index_param"],
+        )
         build_time = round(time.time() - start_time, 2)
         tmp_result = {"build_time": build_time}
         return tmp_result
@@ -78,6 +87,7 @@ class BuildRunner(BaseRunner):
 
 class InsertBuildRunner(BuildRunner):
     """run insert and build"""
+
     name = "insert_build_performance"
 
     def prepare(self, **case_param):
@@ -90,9 +100,17 @@ class InsertBuildRunner(BuildRunner):
             logger.debug("Start drop collection")
             self.milvus.drop()
             time.sleep(utils.DELETE_INTERVAL_TIME)
-        self.milvus.create_collection(dimension, data_type=vector_type, other_fields=other_fields)
-        self.insert(self.milvus, collection_name, case_param["data_type"], dimension,
-                               case_param["collection_size"], case_param["ni_per"])
+        self.milvus.create_collection(
+            dimension, data_type=vector_type, other_fields=other_fields
+        )
+        self.insert(
+            self.milvus,
+            collection_name,
+            case_param["data_type"],
+            dimension,
+            case_param["collection_size"],
+            case_param["ni_per"],
+        )
         start_time = time.time()
         self.milvus.flush()
         flush_time = round(time.time() - start_time, 2)

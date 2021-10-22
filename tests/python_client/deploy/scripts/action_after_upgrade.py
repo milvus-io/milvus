@@ -1,5 +1,4 @@
 import docker
-
 from utils import *
 
 connections.connect()

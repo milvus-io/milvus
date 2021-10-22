@@ -6,14 +6,18 @@
 #!/usr/bin/env python2
 
 from __future__ import print_function
+
 import os
 import time
+
 import numpy as np
 
 try:
     import matplotlib
-    matplotlib.use('Agg')
+
+    matplotlib.use("Agg")
     from matplotlib import pyplot
+
     graphical_output = True
 except ImportError:
     graphical_output = False
@@ -24,27 +28,30 @@ import faiss
 # Small I/O functions
 #################################################################
 
+
 def ivecs_read(fname):
     a = np.fromfile(fname, dtype="int32")
     d = a[0]
     return a.reshape(-1, d + 1)[:, 1:].copy()
 
+
 def fvecs_read(fname):
-    return ivecs_read(fname).view('float32')
+    return ivecs_read(fname).view("float32")
 
 
 def plot_OperatingPoints(ops, nq, **kwargs):
     ops = ops.optimal_pts
     n = ops.size() * 2 - 1
-    pyplot.plot([ops.at( i      // 2).perf for i in range(n)],
-                [ops.at((i + 1) // 2).t / nq * 1000 for i in range(n)],
-                **kwargs)
+    pyplot.plot(
+        [ops.at(i // 2).perf for i in range(n)],
+        [ops.at((i + 1) // 2).t / nq * 1000 for i in range(n)],
+        **kwargs
+    )
 
 
 #################################################################
 # prepare common data for all indexes
 #################################################################
-
 
 
 t0 = time.time()
@@ -60,7 +67,7 @@ d = xt.shape[1]
 print("load GT")
 
 gt = ivecs_read("sift1M/sift_groundtruth.ivecs")
-gt = gt.astype('int64')
+gt = gt.astype("int64")
 k = gt.shape[1]
 
 print("prepare criterion")
@@ -72,28 +79,36 @@ crit.nnn = k
 
 # indexes that are useful when there is no limitation on memory usage
 unlimited_mem_keys = [
-    "IMI2x10,Flat", "IMI2x11,Flat",
-    "IVF4096,Flat", "IVF16384,Flat",
-    "PCA64,IMI2x10,Flat"]
+    "IMI2x10,Flat",
+    "IMI2x11,Flat",
+    "IVF4096,Flat",
+    "IVF16384,Flat",
+    "PCA64,IMI2x10,Flat",
+]
 
 # memory limited to 16 bytes / vector
-keys_mem_16 = [
-    'IMI2x10,PQ16', 'IVF4096,PQ16',
-    'IMI2x10,PQ8+8', 'OPQ16_64,IMI2x10,PQ16'
-    ]
+keys_mem_16 = ["IMI2x10,PQ16", "IVF4096,PQ16", "IMI2x10,PQ8+8", "OPQ16_64,IMI2x10,PQ16"]
 
 # limited to 32 bytes / vector
 keys_mem_32 = [
-    'IMI2x10,PQ32', 'IVF4096,PQ32', 'IVF16384,PQ32',
-    'IMI2x10,PQ16+16',
-    'OPQ32,IVF4096,PQ32', 'IVF4096,PQ16+16', 'OPQ16,IMI2x10,PQ16+16'
-    ]
+    "IMI2x10,PQ32",
+    "IVF4096,PQ32",
+    "IVF16384,PQ32",
+    "IMI2x10,PQ16+16",
+    "OPQ32,IVF4096,PQ32",
+    "IVF4096,PQ16+16",
+    "OPQ16,IMI2x10,PQ16+16",
+]
 
 # indexes that can run on the GPU
 keys_gpu = [
     "PCA64,IVF4096,Flat",
-    "PCA64,Flat", "Flat", "IVF4096,Flat", "IVF16384,Flat",
-    "IVF4096,PQ32"]
+    "PCA64,Flat",
+    "Flat",
+    "IVF4096,Flat",
+    "IVF16384,Flat",
+    "IVF4096,PQ32",
+]
 
 
 keys_to_test = unlimited_mem_keys
@@ -102,8 +117,9 @@ use_gpu = False
 
 if use_gpu:
     # if this fails, it means that the GPU version was not comp
-    assert faiss.StandardGpuResources, \
-        "FAISS was not compiled with GPU support, or loading _swigfaiss_gpu.so failed"
+    assert (
+        faiss.StandardGpuResources
+    ), "FAISS was not compiled with GPU support, or loading _swigfaiss_gpu.so failed"
     res = faiss.StandardGpuResources()
     dev_no = 0
 
@@ -121,7 +137,6 @@ for index_key in keys_to_test:
 
     # make the index described by the key
     index = faiss.index_factory(d, index_key)
-
 
     if use_gpu:
         # transfer to GPU (may be partial)
@@ -155,14 +170,16 @@ for index_key in keys_to_test:
 
         fig = pyplot.figure(figsize=(12, 9))
         pyplot.xlabel("1-recall at 1")
-        pyplot.ylabel("search time (ms/query, %d threads)" % faiss.omp_get_max_threads())
-        pyplot.gca().set_yscale('log')
+        pyplot.ylabel(
+            "search time (ms/query, %d threads)" % faiss.omp_get_max_threads()
+        )
+        pyplot.gca().set_yscale("log")
         pyplot.grid()
         for i2, opi2 in op_per_key:
-            plot_OperatingPoints(opi2, crit.nq, label = i2, marker = 'o')
+            plot_OperatingPoints(opi2, crit.nq, label=i2, marker="o")
         # plot_OperatingPoints(op, crit.nq, label = 'best', marker = 'o', color = 'r')
         pyplot.legend(loc=2)
-        fig.savefig('tmp/demo_auto_tune.png')
+        fig.savefig("tmp/demo_auto_tune.png")
 
 
 print("[%.3f s] final result:" % (time.time() - t0))

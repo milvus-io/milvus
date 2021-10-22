@@ -7,8 +7,8 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
 import faiss
+import numpy as np
 
 # reduce number of threads to avoid excessive nb of threads in opt
 # mode (recuces runtime from 100s to 4s!)
@@ -22,7 +22,6 @@ def random_unitary(n, d, seed):
 
 
 class Randu10k:
-
     def __init__(self):
         self.nb = 10000
         self.nq = 1000
@@ -47,14 +46,12 @@ class Randu10k:
         D, I = DI
         e = {}
         for rank in 1, 10, 100:
-            e[rank] = ((I[:, :rank] == self.gt.reshape(-1, 1)).sum() /
-                       float(self.nq))
+            e[rank] = (I[:, :rank] == self.gt.reshape(-1, 1)).sum() / float(self.nq)
         print("1-recalls: %s" % e)
         return e
 
 
 class Randu10kUnbalanced(Randu10k):
-
     def __init__(self):
         Randu10k.__init__(self)
 
@@ -75,9 +72,9 @@ class Randu10kUnbalanced(Randu10k):
 
 def get_dataset(d, nb, nt, nq):
     rs = np.random.RandomState(123)
-    xb = rs.rand(nb, d).astype('float32')
-    xt = rs.rand(nt, d).astype('float32')
-    xq = rs.rand(nq, d).astype('float32')
+    xb = rs.rand(nb, d).astype("float32")
+    xt = rs.rand(nt, d).astype("float32")
+    xq = rs.rand(nq, d).astype("float32")
 
     return (xt, xb, xq)
 
@@ -86,7 +83,7 @@ def get_dataset_2(d, nt, nb, nq):
     """A dataset that is not completely random but still challenging to
     index
     """
-    d1 = 10     # intrinsic dimension (more or less)
+    d1 = 10  # intrinsic dimension (more or less)
     n = nb + nt + nq
     rs = np.random.RandomState(1338)
     x = rs.normal(size=(n, d1))
@@ -95,14 +92,14 @@ def get_dataset_2(d, nt, nb, nq):
     # higher factor (>4) -> higher frequency -> less linear
     x = x * (rs.rand(d) * 4 + 0.1)
     x = np.sin(x)
-    x = x.astype('float32')
-    return x[:nt], x[nt:nt + nb], x[nt + nb:]
+    x = x.astype("float32")
+    return x[:nt], x[nt : nt + nb], x[nt + nb :]
 
 
 def make_binary_dataset(d, nt, nb, nq):
     assert d % 8 == 0
     rs = np.random.RandomState(123)
-    x = rs.randint(256, size=(nb + nq + nt, int(d / 8))).astype('uint8')
+    x = rs.randint(256, size=(nb + nq + nt, int(d / 8))).astype("uint8")
     return x[:nt], x[nt:-nq], x[-nq:]
 
 
@@ -113,16 +110,16 @@ def compare_binary_result_lists(D1, I1, D2, I2):
     assert D1.shape == I1.shape == D2.shape == I2.shape
     n, k = D1.shape
     ndiff = (D1 != D2).sum()
-    assert ndiff == 0, '%d differences in distance matrix %s' % (
-        ndiff, D1.shape)
+    assert ndiff == 0, "%d differences in distance matrix %s" % (ndiff, D1.shape)
 
     def normalize_DI(D, I):
         norm = I.max() + 1.0
-        Dr = D.astype('float64') + I / norm
+        Dr = D.astype("float64") + I / norm
         # ignore -1s and elements on last column
         Dr[I1 == -1] = 1e20
         Dr[D == D[:, -1:]] = 1e20
         Dr.sort(axis=1)
         return Dr
+
     ndiff = (normalize_DI(D1, I1) != normalize_DI(D2, I2)).sum()
-    assert ndiff == 0, '%d differences in normalized D matrix' % ndiff
+    assert ndiff == 0, "%d differences in normalized D matrix" % ndiff

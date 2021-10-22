@@ -1,26 +1,30 @@
 import datetime
-import pytest
 
+import pytest
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel
-from utils.util_log import test_log as log
 from pymilvus import utility
-
+from utils.util_log import test_log as log
 
 rounds = 100
 per_nb = 100000
 default_field_name = ct.default_float_vec_field_name
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_index_params = {
+    "index_type": "IVF_SQ8",
+    "metric_type": "L2",
+    "params": {"nlist": 64},
+}
 
 
 class TestLoad(TestcaseBase):
-    """ Test case of end to end"""
+    """Test case of end to end"""
+
     @pytest.mark.tags(CaseLabel.L3)
     def test_load_default(self):
-        name = 'load_test_collection_1'
-        name2 = 'load_test_collection_2'
+        name = "load_test_collection_1"
+        name2 = "load_test_collection_2"
         # create
         # collection_w = self.init_collection_wrap(name=name)
         # collection_w2 = self.init_collection_wrap(name=name2)

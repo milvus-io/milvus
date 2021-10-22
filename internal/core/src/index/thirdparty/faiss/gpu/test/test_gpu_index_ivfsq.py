@@ -6,23 +6,28 @@
 #! /usr/bin/env python3
 
 from __future__ import print_function
+
 import unittest
-import numpy as np
+
 import faiss
+import numpy as np
+
 
 def make_t(num, d, clamp=False):
     rs = np.random.RandomState(123)
-    x = rs.rand(num, d).astype('float32')
+    x = rs.rand(num, d).astype("float32")
     if clamp:
-        x = (x * 255).astype('uint8').astype('float32')
+        x = (x * 255).astype("uint8").astype("float32")
     return x
+
 
 def make_indices_copy_from_cpu(nlist, d, qtype, by_residual, metric, clamp):
     to_train = make_t(10000, d, clamp)
 
     quantizer_cp = faiss.IndexFlat(d, metric)
-    idx_cpu = faiss.IndexIVFScalarQuantizer(quantizer_cp, d, nlist,
-                                            qtype, metric, by_residual)
+    idx_cpu = faiss.IndexIVFScalarQuantizer(
+        quantizer_cp, d, nlist, qtype, metric, by_residual
+    )
 
     idx_cpu.train(to_train)
     idx_cpu.add(to_train)
@@ -39,14 +44,16 @@ def make_indices_copy_from_gpu(nlist, d, qtype, by_residual, metric, clamp):
 
     res = faiss.StandardGpuResources()
     res.noTempMemory()
-    idx_gpu = faiss.GpuIndexIVFScalarQuantizer(res, d, nlist,
-                                               qtype, metric, by_residual)
+    idx_gpu = faiss.GpuIndexIVFScalarQuantizer(
+        res, d, nlist, qtype, metric, by_residual
+    )
     idx_gpu.train(to_train)
     idx_gpu.add(to_train)
 
     quantizer_cp = faiss.IndexFlat(d, metric)
-    idx_cpu = faiss.IndexIVFScalarQuantizer(quantizer_cp, d, nlist,
-                                            qtype, metric, by_residual)
+    idx_cpu = faiss.IndexIVFScalarQuantizer(
+        quantizer_cp, d, nlist, qtype, metric, by_residual
+    )
     idx_gpu.copyTo(idx_cpu)
 
     return idx_cpu, idx_gpu
@@ -56,27 +63,31 @@ def make_indices_train(nlist, d, qtype, by_residual, metric, clamp):
     to_train = make_t(10000, d, clamp)
 
     quantizer_cp = faiss.IndexFlat(d, metric)
-    idx_cpu = faiss.IndexIVFScalarQuantizer(quantizer_cp, d, nlist,
-                                            qtype, metric, by_residual)
-    assert(by_residual == idx_cpu.by_residual)
+    idx_cpu = faiss.IndexIVFScalarQuantizer(
+        quantizer_cp, d, nlist, qtype, metric, by_residual
+    )
+    assert by_residual == idx_cpu.by_residual
 
     idx_cpu.train(to_train)
     idx_cpu.add(to_train)
 
     res = faiss.StandardGpuResources()
     res.noTempMemory()
-    idx_gpu = faiss.GpuIndexIVFScalarQuantizer(res, d, nlist,
-                                               qtype, metric, by_residual)
-    assert(by_residual == idx_gpu.by_residual)
+    idx_gpu = faiss.GpuIndexIVFScalarQuantizer(
+        res, d, nlist, qtype, metric, by_residual
+    )
+    assert by_residual == idx_gpu.by_residual
 
     idx_gpu.train(to_train)
     idx_gpu.add(to_train)
 
     return idx_cpu, idx_gpu
 
+
 #
 # Testing functions
 #
+
 
 def summarize_results(dist, idx):
     valid = []
@@ -96,6 +107,7 @@ def summarize_results(dist, idx):
 
     return valid, invalid
 
+
 def compare_results(d1, i1, d2, i2):
     # Count number of index differences
     idx_diffs = {}
@@ -108,13 +120,13 @@ def compare_results(d1, i1, d2, i2):
     # Invalid results should be the same for both
     # (except if we happen to hit different centroids)
     for inv1, inv2 in zip(invalid1, invalid2):
-        if (len(inv1) != len(inv2)):
-            print('mismatch ', len(inv1), len(inv2), inv2[0])
+        if len(inv1) != len(inv2):
+            print("mismatch ", len(inv1), len(inv2), inv2[0])
 
-        assert(len(inv1) == len(inv2))
+        assert len(inv1) == len(inv2)
         idx_invalid += len(inv2)
         for x1, x2 in zip(inv1, inv2):
-            assert(x1 == x2)
+            assert x1 == x2
 
     for _, (query1, query2) in enumerate(zip(valid1, valid2)):
         for idx1, order_d1 in query1.items():
@@ -131,6 +143,7 @@ def compare_results(d1, i1, d2, i2):
 
     return idx_diffs, idx_diffs_inf, idx_invalid
 
+
 def check_diffs(total_num, in_window_thresh, diffs, diff_inf, invalid):
     # We require a certain fraction of results to be within +/- diff_window
     # index differences
@@ -141,9 +154,10 @@ def check_diffs(total_num, in_window_thresh, diffs, diff_inf, invalid):
         if abs(diff) <= diff_window:
             in_window += diffs[diff] / total_num
 
-    if (in_window < in_window_thresh):
-        print('error {} {}'.format(in_window, in_window_thresh))
-        assert(in_window >= in_window_thresh)
+    if in_window < in_window_thresh:
+        print("error {} {}".format(in_window, in_window_thresh))
+        assert in_window >= in_window_thresh
+
 
 def do_test_with_index(ci, gi, nprobe, k, clamp, in_window_thresh):
     num_query = 11
@@ -153,29 +167,30 @@ def do_test_with_index(ci, gi, nprobe, k, clamp, in_window_thresh):
     gi.nprobe = gi.nprobe
 
     total_num = num_query * k
-    check_diffs(total_num, in_window_thresh,
-                *compare_results(*ci.search(to_query, k),
-                                 *gi.search(to_query, k)))
+    check_diffs(
+        total_num,
+        in_window_thresh,
+        *compare_results(*ci.search(to_query, k), *gi.search(to_query, k))
+    )
+
 
 def do_test(nlist, d, qtype, by_residual, metric, nprobe, k):
-    clamp = (qtype == faiss.ScalarQuantizer.QT_8bit_direct)
-    ci, gi = make_indices_copy_from_cpu(nlist, d, qtype,
-                                        by_residual, metric, clamp)
+    clamp = qtype == faiss.ScalarQuantizer.QT_8bit_direct
+    ci, gi = make_indices_copy_from_cpu(nlist, d, qtype, by_residual, metric, clamp)
     # A direct copy should be much more closely in agreement
     # (except for fp accumulation order differences)
     do_test_with_index(ci, gi, nprobe, k, clamp, 0.99)
 
-    ci, gi = make_indices_copy_from_gpu(nlist, d, qtype,
-                                        by_residual, metric, clamp)
+    ci, gi = make_indices_copy_from_gpu(nlist, d, qtype, by_residual, metric, clamp)
     # A direct copy should be much more closely in agreement
     # (except for fp accumulation order differences)
     do_test_with_index(ci, gi, nprobe, k, clamp, 0.99)
 
-    ci, gi = make_indices_train(nlist, d, qtype,
-                                by_residual, metric, clamp)
+    ci, gi = make_indices_train(nlist, d, qtype, by_residual, metric, clamp)
     # Separate training can produce a slightly different coarse quantizer
     # and residuals
     do_test_with_index(ci, gi, nprobe, k, clamp, 0.8)
+
 
 def do_multi_test(qtype):
     nlist = 100
@@ -183,18 +198,18 @@ def do_multi_test(qtype):
     k = 50
 
     for d in [11, 64]:
-        if (qtype != faiss.ScalarQuantizer.QT_8bit_direct):
+        if qtype != faiss.ScalarQuantizer.QT_8bit_direct:
             # residual doesn't make sense here
-            do_test(nlist, d, qtype, True,
-                    faiss.METRIC_L2, nprobe, k)
-            do_test(nlist, d, qtype, True,
-                    faiss.METRIC_INNER_PRODUCT, nprobe, k)
+            do_test(nlist, d, qtype, True, faiss.METRIC_L2, nprobe, k)
+            do_test(nlist, d, qtype, True, faiss.METRIC_INNER_PRODUCT, nprobe, k)
         do_test(nlist, d, qtype, False, faiss.METRIC_L2, nprobe, k)
         do_test(nlist, d, qtype, False, faiss.METRIC_INNER_PRODUCT, nprobe, k)
+
 
 #
 # Test
 #
+
 
 class TestSQ(unittest.TestCase):
     def test_fp16(self):
@@ -211,9 +226,9 @@ class TestSQ(unittest.TestCase):
             do_multi_test(faiss.ScalarQuantizer.QT_6bit)
             # should not reach here; QT_6bit is unimplemented
         except:
-            print('QT_6bit exception thrown (is expected)')
+            print("QT_6bit exception thrown (is expected)")
         else:
-            assert(False)
+            assert False
 
     def test_4bit(self):
         do_multi_test(faiss.ScalarQuantizer.QT_4bit)
@@ -225,5 +240,5 @@ class TestSQ(unittest.TestCase):
         do_multi_test(faiss.ScalarQuantizer.QT_8bit_direct)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

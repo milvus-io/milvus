@@ -1,16 +1,22 @@
-import pytest
 from time import sleep
 
-from pymilvus import connections
-from chaos.checker import (CreateChecker, InsertFlushChecker,
-                           SearchChecker, QueryChecker, IndexChecker, Op)
+import pytest
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.checker import (
+    CreateChecker,
+    IndexChecker,
+    InsertFlushChecker,
+    Op,
+    QueryChecker,
+    SearchChecker,
+)
+from common.common_type import CaseLabel
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
+from delayed_assert import assert_expectations, expect
+from pymilvus import connections
 from utils.util_log import test_log as log
-from chaos import chaos_commons as cc
-from common.common_type import CaseLabel
-from chaos import constants
-from delayed_assert import expect, assert_expectations
 
 
 def assert_statistic(checkers, expectations=None):
@@ -20,14 +26,18 @@ def assert_statistic(checkers, expectations=None):
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
-        if expectations.get(k, '') == constants.FAIL:
+        if expectations.get(k, "") == constants.FAIL:
             log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
-            expect(succ_rate < 0.49 or total < 2,
-                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
+            expect(
+                succ_rate < 0.49 or total < 2,
+                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}",
+            )
         else:
             log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
-            expect(succ_rate > 0.90 or total > 2,
-                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
+            expect(
+                succ_rate > 0.90 or total > 2,
+                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}",
+            )
 
 
 class TestChaosBase:
@@ -37,30 +47,38 @@ class TestChaosBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
     checker_threads = {}
 
     def parser_testcase_config(self, chaos_yaml):
-        tests_yaml = constants.TESTS_CONFIG_LOCATION + 'testcases.yaml'
+        tests_yaml = constants.TESTS_CONFIG_LOCATION + "testcases.yaml"
         tests_config = cc.gen_experiment_config(tests_yaml)
-        test_collections = tests_config.get('Collections', None)
+        test_collections = tests_config.get("Collections", None)
         ms = MilvusSys(alias="default")
         node_map = {
             "querynode": "query_nodes",
             "datanode": "data_nodes",
-            "indexnode": "index_nodes"
+            "indexnode": "index_nodes",
         }
         for t in test_collections:
-            test_chaos = t.get('testcase', {}).get('chaos', {})
+            test_chaos = t.get("testcase", {}).get("chaos", {})
             if test_chaos in chaos_yaml:
-                expects = t.get('testcase', {}).get('expectation', {}).get('cluster_1_node', {})
+                expects = (
+                    t.get("testcase", {})
+                    .get("expectation", {})
+                    .get("cluster_1_node", {})
+                )
                 # for cluster_n_node mode
                 for node in node_map:
                     if node in test_chaos and len(getattr(ms, node_map[node])) > 1:
-                        expects = t.get('testcase', {}).get('expectation', {}).get('cluster_n_node', {})
+                        expects = (
+                            t.get("testcase", {})
+                            .get("expectation", {})
+                            .get("cluster_n_node", {})
+                        )
                 log.info(f"yaml.expects: {expects}")
                 self.expect_create = expects.get(Op.create.value, constants.SUCC)
                 self.expect_insert = expects.get(Op.insert.value, constants.SUCC)
@@ -68,20 +86,21 @@ class TestChaosBase:
                 self.expect_index = expects.get(Op.index.value, constants.SUCC)
                 self.expect_search = expects.get(Op.search.value, constants.SUCC)
                 self.expect_query = expects.get(Op.query.value, constants.SUCC)
-                log.info(f"self.expects: create:{self.expect_create}, insert:{self.expect_insert}, "
-                         f"flush:{self.expect_flush}, index:{self.expect_index}, "
-                         f"search:{self.expect_search}, query:{self.expect_query}")
+                log.info(
+                    f"self.expects: create:{self.expect_create}, insert:{self.expect_insert}, "
+                    f"flush:{self.expect_flush}, index:{self.expect_index}, "
+                    f"search:{self.expect_search}, query:{self.expect_query}"
+                )
                 return True
 
         return False
 
 
 class TestChaos(TestChaosBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port):
         connections.add_connection(default={"host": host, "port": port})
-        conn = connections.connect(alias='default')
+        conn = connections.connect(alias="default")
         if conn is None:
             raise Exception("no connections")
         self.host = host
@@ -96,16 +115,18 @@ class TestChaos(TestChaosBase):
             Op.flush: InsertFlushChecker(flush=True),
             Op.index: IndexChecker(),
             Op.search: SearchChecker(),
-            Op.query: QueryChecker()
+            Op.query: QueryChecker(),
         }
         self.health_checkers = checkers
 
     def teardown(self):
-        chaos_res = CusResource(kind=self._chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
-        meta_name = self._chaos_config.get('metadata', None).get('name', None)
+        chaos_res = CusResource(
+            kind=self._chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
+        meta_name = self._chaos_config.get("metadata", None).get("name", None)
         chaos_res.delete(meta_name, raise_ex=False)
         for k, ch in self.health_checkers.items():
             ch.terminate()
@@ -115,11 +136,11 @@ class TestChaos(TestChaosBase):
             log.info(f"Thread {k} is_alive(): {t.is_alive()}")
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize('chaos_yaml', cc.get_chaos_yamls())
+    @pytest.mark.parametrize("chaos_yaml", cc.get_chaos_yamls())
     def test_chaos(self, chaos_yaml):
         # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         self.checker_threads = cc.start_monitor_threads(self.health_checkers)
 
         # parse chaos object
@@ -140,10 +161,12 @@ class TestChaos(TestChaosBase):
         assert_statistic(self.health_checkers)
 
         # apply chaos object
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         log.info("chaos injected")
         sleep(constants.WAIT_PER_OP * 2.1)
@@ -158,17 +181,20 @@ class TestChaos(TestChaosBase):
 
         # assert statistic
         log.info("******2nd assert after chaos injected: ")
-        assert_statistic(self.health_checkers,
-                         expectations={Op.create: self.expect_create,
-                                       Op.insert: self.expect_insert,
-                                       Op.flush: self.expect_flush,
-                                       Op.index: self.expect_index,
-                                       Op.search: self.expect_search,
-                                       Op.query: self.expect_query
-                                       })
+        assert_statistic(
+            self.health_checkers,
+            expectations={
+                Op.create: self.expect_create,
+                Op.insert: self.expect_insert,
+                Op.flush: self.expect_flush,
+                Op.index: self.expect_index,
+                Op.search: self.expect_search,
+                Op.query: self.expect_query,
+            },
+        )
 
         # delete chaos
-        meta_name = chaos_config.get('metadata', None).get('name', None)
+        meta_name = chaos_config.get("metadata", None).get("name", None)
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
         for k, t in self.checker_threads.items():
@@ -177,7 +203,7 @@ class TestChaos(TestChaosBase):
 
         # reconnect if needed
         sleep(constants.WAIT_PER_OP * 2)
-        cc.reconnect(connections, alias='default')
+        cc.reconnect(connections, alias="default")
 
         # reset counting again
         cc.reset_counting(self.health_checkers)

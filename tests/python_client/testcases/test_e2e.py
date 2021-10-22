@@ -1,6 +1,6 @@
 import time
-import pytest
 
+import pytest
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
@@ -11,7 +11,8 @@ prefix = "e2e_"
 
 
 class TestE2e(TestcaseBase):
-    """ Test case of end to end"""
+    """Test case of end to end"""
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_default(self):
         # create
@@ -43,9 +44,12 @@ class TestE2e(TestcaseBase):
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
         t0 = time.time()
-        res_1, _ = collection_w.search(data=search_vectors,
-                                       anns_field=ct.default_float_vec_field_name,
-                                       param=search_params, limit=1)
+        res_1, _ = collection_w.search(
+            data=search_vectors,
+            anns_field=ct.default_float_vec_field_name,
+            param=search_params,
+            limit=1,
+        )
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
         assert len(res_1) == 1
@@ -55,11 +59,17 @@ class TestE2e(TestcaseBase):
         d = cf.gen_default_list_data()
         collection_w.insert(d)
         log.info(f"assert index entities: {collection_w.num_entities}")
-        _index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
+        _index_params = {
+            "index_type": "IVF_SQ8",
+            "params": {"nlist": 64},
+            "metric_type": "L2",
+        }
         t0 = time.time()
-        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                             index_params=_index_params,
-                                             name=cf.gen_unique_str())
+        index, _ = collection_w.create_index(
+            field_name=ct.default_float_vec_field_name,
+            index_params=_index_params,
+            name=cf.gen_unique_str(),
+        )
         tt = time.time() - t0
         log.info(f"assert index: {tt}")
         assert len(collection_w.indexes) == 1
@@ -71,14 +81,17 @@ class TestE2e(TestcaseBase):
         log.info(f"assert load: {tt}")
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         t0 = time.time()
-        res_1, _ = collection_w.search(data=search_vectors,
-                                       anns_field=ct.default_float_vec_field_name,
-                                       param=search_params, limit=1)
+        res_1, _ = collection_w.search(
+            data=search_vectors,
+            anns_field=ct.default_float_vec_field_name,
+            param=search_params,
+            limit=1,
+        )
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
 
         # query
-        term_expr = f'{ct.default_int64_field_name} in [1001,1201,4999,2999]'
+        term_expr = f"{ct.default_int64_field_name} in [1001,1201,4999,2999]"
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0

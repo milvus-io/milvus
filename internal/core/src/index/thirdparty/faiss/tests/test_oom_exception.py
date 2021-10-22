@@ -5,13 +5,14 @@
 
 #! /usr/bin/env python2
 
-import sys
-import faiss
-import unittest
 import resource
+import sys
+import unittest
+
+import faiss
+
 
 class TestOOMException(unittest.TestCase):
-
     def test_outrageous_alloc(self):
         # Disable test on OSX.
         if sys.platform == "darwin":
@@ -24,14 +25,14 @@ class TestOOMException(unittest.TestCase):
         try:
             x = faiss.IntVector()
             try:
-                x.resize(10**11)   # 400 G of RAM
+                x.resize(10 ** 11)  # 400 G of RAM
             except MemoryError:
-                pass               # good, that's what we expect
+                pass  # good, that's what we expect
             else:
                 assert False, "should raise exception"
         finally:
             resource.setrlimit(resource.RLIMIT_AS, (soft_as, hard_as))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

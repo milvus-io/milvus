@@ -6,6 +6,7 @@
 #!/usr/bin/env python3
 
 import os
+
 import faiss
 import numpy as np
 
@@ -18,15 +19,14 @@ class CombinedIndex:
     the info on how to perform searches
     """
 
-    def __init__(self, invlist_fnames, empty_index_fname,
-                 masked_index_fname=None):
+    def __init__(self, invlist_fnames, empty_index_fname, masked_index_fname=None):
 
         self.indexes = indexes = []
         ilv = faiss.InvertedListsPtrVector()
 
         for fname in invlist_fnames:
             if os.path.exists(fname):
-                print('reading', fname, end='\r', flush=True)
+                print("reading", fname, end="\r", flush=True)
                 index = faiss.read_index(fname)
                 indexes.append(index)
                 il = faiss.extract_index_ivf(index).invlists
@@ -38,23 +38,23 @@ class CombinedIndex:
         self.big_il = faiss.VStackInvertedLists(ilv.size(), ilv.data())
         if masked_index_fname:
             self.big_il_base = self.big_il
-            print('loading', masked_index_fname)
+            print("loading", masked_index_fname)
             self.masked_index = faiss.read_index(
-                masked_index_fname,
-                faiss.IO_FLAG_MMAP | faiss.IO_FLAG_READ_ONLY)
+                masked_index_fname, faiss.IO_FLAG_MMAP | faiss.IO_FLAG_READ_ONLY
+            )
             self.big_il = faiss.MaskedInvertedLists(
-                faiss.extract_index_ivf(self.masked_index).invlists,
-                self.big_il_base)
+                faiss.extract_index_ivf(self.masked_index).invlists, self.big_il_base
+            )
 
-        print('loading empty index', empty_index_fname)
+        print("loading empty index", empty_index_fname)
         self.index = faiss.read_index(empty_index_fname)
         ntotal = self.big_il.compute_ntotal()
 
-        print('replace invlists')
+        print("replace invlists")
         index_ivf = faiss.extract_index_ivf(self.index)
         index_ivf.replace_invlists(self.big_il, False)
         index_ivf.ntotal = self.index.ntotal = ntotal
-        index_ivf.parallel_mode = 1   # seems reasonable to do this all the time
+        index_ivf.parallel_mode = 1  # seems reasonable to do this all the time
 
         quantizer = faiss.downcast_index(index_ivf.quantizer)
         quantizer.hnsw.efSearch = 1024
@@ -83,7 +83,6 @@ class CombinedIndex:
         coarse_dis, list_nos = quantizer.search(xq, index_ivf.nprobe)
         return xq, list_nos, coarse_dis
 
-
     def ivf_search_preassigned(self, xq, list_nos, coarse_dis, k):
         index_ivf = faiss.extract_index_ivf(self.index)
         n, d = xq.shape
@@ -92,14 +91,19 @@ class CombinedIndex:
         assert list_nos.shape == coarse_dis.shape
         assert n2 == n
         assert d2 == index_ivf.nprobe
-        D = np.empty((n, k), dtype='float32')
-        I = np.empty((n, k), dtype='int64')
+        D = np.empty((n, k), dtype="float32")
+        I = np.empty((n, k), dtype="int64")
         index_ivf.search_preassigned(
-            n, faiss.swig_ptr(xq), k,
-            faiss.swig_ptr(list_nos), faiss.swig_ptr(coarse_dis),
-            faiss.swig_ptr(D), faiss.swig_ptr(I), False)
+            n,
+            faiss.swig_ptr(xq),
+            k,
+            faiss.swig_ptr(list_nos),
+            faiss.swig_ptr(coarse_dis),
+            faiss.swig_ptr(D),
+            faiss.swig_ptr(I),
+            False,
+        )
         return D, I
-
 
     def ivf_range_search_preassigned(self, xq, list_nos, coarse_dis, radius):
         index_ivf = faiss.extract_index_ivf(self.index)
@@ -112,9 +116,13 @@ class CombinedIndex:
         res = faiss.RangeSearchResult(n)
 
         index_ivf.range_search_preassigned(
-            n, faiss.swig_ptr(xq), radius,
-            faiss.swig_ptr(list_nos), faiss.swig_ptr(coarse_dis),
-            res)
+            n,
+            faiss.swig_ptr(xq),
+            radius,
+            faiss.swig_ptr(list_nos),
+            faiss.swig_ptr(coarse_dis),
+            res,
+        )
 
         lims = faiss.rev_swig_ptr(res.lims, n + 1).copy()
         nd = int(lims[-1])
@@ -135,46 +143,46 @@ class CombinedIndex:
 
     def set_prefetch_nthread(self, nt):
         for idx in self.indexes:
-            il = faiss.downcast_InvertedLists(
-                faiss.extract_index_ivf(idx).invlists)
+            il = faiss.downcast_InvertedLists(faiss.extract_index_ivf(idx).invlists)
             il.prefetch_nthread = nt
 
     def set_omp_num_threads(self, nt):
         faiss.omp_set_num_threads(nt)
 
+
 class CombinedIndexDeep1B(CombinedIndex):
-    """ loads a CombinedIndex with the data from the big photodna index """
+    """loads a CombinedIndex with the data from the big photodna index"""
 
     def __init__(self):
         # set some paths
         workdir = "/checkpoint/matthijs/ondisk_distributed/"
 
         # empty index with the proper quantizer
-        indexfname = workdir + 'trained.faissindex'
+        indexfname = workdir + "trained.faissindex"
 
         # index that has some invlists that override the big one
         masked_index_fname = None
         invlist_fnames = [
-            '%s/hslices/slice%d.faissindex' % (workdir, i)
-            for i in range(50)
+            "%s/hslices/slice%d.faissindex" % (workdir, i) for i in range(50)
         ]
         CombinedIndex.__init__(self, invlist_fnames, indexfname, masked_index_fname)
 
 
 def ivecs_read(fname):
-    a = np.fromfile(fname, dtype='int32')
+    a = np.fromfile(fname, dtype="int32")
     d = a[0]
     return a.reshape(-1, d + 1)[:, 1:].copy()
 
 
 def fvecs_read(fname):
-    return ivecs_read(fname).view('float32')
+    return ivecs_read(fname).view("float32")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import time
+
     ci = CombinedIndexDeep1B()
-    print('loaded index of size ', ci.index.ntotal)
+    print("loaded index of size ", ci.index.ntotal)
 
     deep1bdir = "/datasets01_101/simsearch/041218/deep1b/"
 
@@ -187,7 +195,7 @@ if __name__ == '__main__':
         t0 = time.time()
         D, I = ci.search(xq, 100)
         t1 = time.time()
-        print('nprobe=%d 1-recall@1=%.4f t=%.2fs' % (
-            nprobe, (I[:, 0] == gt[:, 0]).sum() / len(xq),
-            t1 - t0
-        ))
+        print(
+            "nprobe=%d 1-recall@1=%.4f t=%.2fs"
+            % (nprobe, (I[:, 0] == gt[:, 0]).sum() / len(xq), t1 - t0)
+        )

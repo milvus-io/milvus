@@ -1,4 +1,5 @@
 import logging
+
 from milvus_benchmark.env.base import BaseEnv
 
 logger = logging.getLogger("milvus_benchmark.env.docker")
@@ -6,6 +7,7 @@ logger = logging.getLogger("milvus_benchmark.env.docker")
 
 class DockerEnv(BaseEnv):
     """docker env class wrapper"""
+
     env_mode = "docker"
 
     def __init__(self, deploy_mode=None):

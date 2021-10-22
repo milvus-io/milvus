@@ -1,13 +1,13 @@
-import time
-import random
-import pdb
-import threading
-import logging
 import json
+import logging
+import pdb
+import random
+import threading
+import time
 from multiprocessing import Pool, Process
+
 import pytest
 from utils import *
-
 
 uid = "wal"
 TIMEOUT = 120
@@ -15,15 +15,20 @@ insert_interval_time = 1.5
 big_nb = 100000
 field_name = "float_vector"
 big_entities = gen_entities(big_nb)
-default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+default_index = {
+    "index_type": "IVF_FLAT",
+    "params": {"nlist": 128},
+    "metric_type": "L2",
+}
 
 
 class TestRestartBase:
     """
     ******************************************************************
-      The following cases are used to test `create_partition` function 
+      The following cases are used to test `create_partition` function
     ******************************************************************
     """
+
     @pytest.fixture(scope="module", autouse=True)
     def skip_check(self, args):
         logging.getLogger().info(args)
@@ -38,11 +43,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_flush(self, connect, collection, args):
-        '''
+        """
         target: return the same row count after server restart
         method: call function: create collection, then insert/flush, restart server and assert row count
         expected: row count keep the same
-        '''
+        """
         ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         ids = connect.bulk_insert(collection, default_entities)
@@ -61,11 +66,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection, then insert/flushing, restart server and assert row count
         expected: row count equals 0
-        '''
+        """
         # disable_autoflush()
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection], _async=True)
@@ -80,7 +85,9 @@ class TestRestartBase:
             logging.getLogger().info(res_count_2)
             timeout = 300
             start_time = time.time()
-            while new_connect.count_entities(collection) != big_nb and (time.time() - start_time < timeout):
+            while new_connect.count_entities(collection) != big_nb and (
+                time.time() - start_time < timeout
+            ):
                 time.sleep(10)
                 logging.getLogger().info(new_connect.count_entities(collection))
             res_count_3 = new_connect.count_entities(collection)
@@ -89,16 +96,16 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_delete_during_flushing(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection, then delete/flushing, restart server and assert row count
         expected: row count equals (nb - delete_length)
-        '''
+        """
         # disable_autoflush()
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         delete_length = 1000
-        delete_ids = ids[big_nb//4:big_nb//4+delete_length]
+        delete_ids = ids[big_nb // 4 : big_nb // 4 + delete_length]
         delete_res = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
@@ -106,12 +113,14 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
         timeout = 100
         start_time = time.time()
-        while new_connect.count_entities(collection) != big_nb - delete_length and (time.time() - start_time < timeout):
+        while new_connect.count_entities(collection) != big_nb - delete_length and (
+            time.time() - start_time < timeout
+        ):
             time.sleep(10)
             logging.getLogger().info(new_connect.count_entities(collection))
         if new_connect.count_entities(collection) == big_nb - delete_length:
@@ -122,11 +131,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_during_indexed(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection, then indexed, restart server and assert row count
         expected: row count equals nb
-        '''
+        """
         # disable_autoflush()
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
@@ -139,7 +148,7 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         assert new_connect.count_entities(collection) == big_nb
         stats = connect.get_collection_stats(collection)
         for file in stats["partitions"][0]["segments"][0]["files"]:
@@ -152,11 +161,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_during_indexing(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection, then indexing, restart server and assert row count
         expected: row count equals nb, server contitue to build index after restart
-        '''
+        """
         # disable_autoflush()
         loop = 5
         for i in range(loop):
@@ -170,7 +179,7 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
         assert res_count_2 == loop * big_nb
@@ -199,35 +208,35 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_delete_flush_during_compacting(self, connect, collection, args):
-        '''
+        """
         target: verify server work after restart during compaction
         method: call function: create collection, then delete/flush/compacting, restart server and assert row count
             call `compact` again, compact pass
         expected: row count equals (nb - delete_length)
-        '''
+        """
         # disable_autoflush()
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         delete_length = 1000
         loop = 10
         for i in range(loop):
-            delete_ids = ids[i*delete_length:(i+1)*delete_length]
+            delete_ids = ids[i * delete_length : (i + 1) * delete_length]
             delete_res = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         connect.compact(collection, _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        assert res_count == big_nb - delete_length*loop
+        assert res_count == big_nb - delete_length * loop
         info = connect.get_collection_stats(collection)
         size_old = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(size_old)
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
-        assert res_count_2 == big_nb - delete_length*loop
+        assert res_count_2 == big_nb - delete_length * loop
         info = connect.get_collection_stats(collection)
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(collection)
@@ -236,14 +245,13 @@ class TestRestartBase:
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert size_before > size_after
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing_multi_collections(self, connect, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collections, then insert/flushing, restart server and assert row count
         expected: row count equals 0
-        '''
+        """
         # disable_autoflush()
         collection_num = 2
         collection_list = []
@@ -259,7 +267,7 @@ class TestRestartBase:
             # restart server
             assert restart_server(args["service_name"])
             # assert row count again
-            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
             res_count_2 = new_connect.count_entities(collection_list[-1])
             logging.getLogger().info(res_count_2)
             timeout = 300
@@ -282,11 +290,11 @@ class TestRestartBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing_multi_partitions(self, connect, collection, args):
-        '''
+        """
         target: flushing will recover
         method: call function: create collection/partition, then insert/flushing, restart server and assert row count
         expected: row count equals 0
-        '''
+        """
         # disable_autoflush()
         partitions_num = 2
         partitions = []
@@ -302,12 +310,14 @@ class TestRestartBase:
             # restart server
             assert restart_server(args["service_name"])
             # assert row count again
-            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
             res_count_2 = new_connect.count_entities(collection)
             logging.getLogger().info(res_count_2)
             timeout = 300
             start_time = time.time()
-            while new_connect.count_entities(collection) != big_nb * 2 and (time.time() - start_time < timeout):
+            while new_connect.count_entities(collection) != big_nb * 2 and (
+                time.time() - start_time < timeout
+            ):
                 time.sleep(10)
                 logging.getLogger().info(new_connect.count_entities(collection))
             res_count_3 = new_connect.count_entities(collection)

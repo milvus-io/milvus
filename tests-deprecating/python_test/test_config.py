@@ -1,12 +1,13 @@
-import time
-import random
-import pdb
-import threading
 import logging
+import pdb
+import random
+import threading
+import time
 from multiprocessing import Pool, Process
+
 import pytest
-from utils import *
 import ujson
+from utils import *
 
 CONFIG_TIMEOUT = 80
 
@@ -1399,4 +1400,3 @@ CONFIG_TIMEOUT = 80
 #         expected: status ok, set successfully
 #         '''
 #         relpy = connect.set_config("wal.path", "/var/lib/milvus/wal")
-

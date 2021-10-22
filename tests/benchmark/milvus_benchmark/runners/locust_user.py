@@ -1,20 +1,22 @@
 import logging
-import random
+import math
 import pdb
+import random
+
 import gevent
+import locust.stats
+
 # import gevent.monkey
 # gevent.monkey.patch_all()
-from locust import User, between, events, stats
+from locust import LoadTestShape, User, between, events, stats
 from locust.env import Environment
-import locust.stats
-import math
-from locust import LoadTestShape
-from locust.stats import stats_printer, print_stats
-from locust.log import setup_logging, greenlet_exception_logger
+from locust.log import greenlet_exception_logger, setup_logging
+from locust.stats import print_stats, stats_printer
 from milvus_benchmark.client import MilvusClient
+
+from . import utils
 from .locust_task import MilvusTask
 from .locust_tasks import Tasks
-from . import utils
 
 locust.stats.CONSOLE_STATS_INTERVAL_SEC = 20
 logger = logging.getLogger("milvus_benchmark.runners.locust_user")
@@ -54,7 +56,9 @@ class MyUser(User):
     pass
 
 
-def locust_executor(host, port, collection_name, connection_type="single", run_params=None):
+def locust_executor(
+    host, port, collection_name, connection_type="single", run_params=None
+):
     m = MilvusClient(host=host, port=port, collection_name=collection_name)
     MyUser.tasks = {}
     MyUser.op_info = run_params["op_info"]
@@ -68,15 +72,25 @@ def locust_executor(host, port, collection_name, connection_type="single", run_p
     MyUser.values = {
         "ids": [random.randint(1000000, 10000000) for _ in range(nb)],
         "get_ids": [random.randint(1, 10000000) for _ in range(nb)],
-        "X": utils.generate_vectors(nq, MyUser.op_info["dimension"])
+        "X": utils.generate_vectors(nq, MyUser.op_info["dimension"]),
     }
 
     # MyUser.tasks = {Tasks.query: 1, Tasks.flush: 1}
-    MyUser.client = MilvusTask(host=host, port=port, collection_name=collection_name, connection_type=connection_type,
-                               m=m)
+    MyUser.client = MilvusTask(
+        host=host,
+        port=port,
+        collection_name=collection_name,
+        connection_type=connection_type,
+        m=m,
+    )
     if "load_shape" in run_params and run_params["load_shape"]:
-        test = StepLoadShape() 
-        test.init(run_params["step_time"], run_params["step_load"], run_params["spawn_rate"], run_params["during_time"])
+        test = StepLoadShape()
+        test.init(
+            run_params["step_time"],
+            run_params["step_load"],
+            run_params["spawn_rate"],
+            run_params["during_time"],
+        )
         env = Environment(events=events, user_classes=[MyUser], shape_class=test)
         runner = env.create_local_runner()
         env.runner.start_shape()
@@ -100,10 +114,16 @@ def locust_executor(host, port, collection_name, connection_type="single", run_p
     runner.greenlet.join()
     print_stats(env.stats)
     result = {
-        "rps": round(env.stats.total.current_rps, 1),  # Number of interface requests per second
+        "rps": round(
+            env.stats.total.current_rps, 1
+        ),  # Number of interface requests per second
         "fail_ratio": env.stats.total.fail_ratio,  # Interface request failure rate
-        "max_response_time": round(env.stats.total.max_response_time, 1),  # Maximum interface response time
-        "avg_response_time": round(env.stats.total.avg_response_time, 1)  # ratio of average response time
+        "max_response_time": round(
+            env.stats.total.max_response_time, 1
+        ),  # Maximum interface response time
+        "avg_response_time": round(
+            env.stats.total.avg_response_time, 1
+        ),  # ratio of average response time
     }
     runner.stop()
     return result

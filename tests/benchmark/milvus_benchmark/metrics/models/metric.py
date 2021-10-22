@@ -1,17 +1,18 @@
-import time
 import datetime
-import json
 import hashlib
+import json
+import time
+
 from .env import Env
-from .server import Server
 from .hardware import Hardware
+from .server import Server
 
 
 class Metric(object):
     def __init__(self):
         # format of report data
-        self._version = '0.1'
-        self._type = 'metric'
+        self._version = "0.1"
+        self._type = "metric"
         self.run_id = None
         self.mode = None
         self.server = Server()
@@ -44,7 +45,7 @@ class Metric(object):
 
     def json_md5(self):
         json_str = json.dumps(vars(self), sort_keys=True)
-        return hashlib.md5(json_str.encode('utf-8')).hexdigest()
+        return hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
     def update_status(self, status):
         # Set the final result of the test run: RUN_SUCC or RUN_FAILED

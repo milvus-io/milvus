@@ -1,12 +1,13 @@
-import time
-import random
-import pdb
-import threading
 import logging
+import pdb
+import random
+import threading
+import time
 from multiprocessing import Pool, Process
+
 import pytest
-from utils import *
 from constants import *
+from utils import *
 
 uid = "list_id_in_segment"
 

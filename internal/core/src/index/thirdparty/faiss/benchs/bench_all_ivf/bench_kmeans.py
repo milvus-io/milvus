@@ -6,11 +6,13 @@
 #!/usr/bin/env python2
 
 from __future__ import print_function
-import os
-import numpy as np
-import faiss
+
 import argparse
+import os
+
 import datasets
+import faiss
+import numpy as np
 from datasets import sanitize
 
 ######################################################
@@ -24,28 +26,30 @@ def aa(*args, **kwargs):
     group.add_argument(*args, **kwargs)
 
 
-group = parser.add_argument_group('dataset options')
+group = parser.add_argument_group("dataset options")
 
-aa('--db', default='deep1M', help='dataset')
-aa('--nt', default=65536, type=int)
-aa('--nb', default=100000, type=int)
-aa('--nt_sample', default=0, type=int)
+aa("--db", default="deep1M", help="dataset")
+aa("--nt", default=65536, type=int)
+aa("--nb", default=100000, type=int)
+aa("--nt_sample", default=0, type=int)
 
-group = parser.add_argument_group('kmeans options')
-aa('--k', default=256, type=int)
-aa('--seed', default=12345, type=int)
-aa('--pcadim', default=-1, type=int, help='PCA to this dimension')
-aa('--niter', default=25, type=int)
-aa('--eval_freq', default=100, type=int)
+group = parser.add_argument_group("kmeans options")
+aa("--k", default=256, type=int)
+aa("--seed", default=12345, type=int)
+aa("--pcadim", default=-1, type=int, help="PCA to this dimension")
+aa("--niter", default=25, type=int)
+aa("--eval_freq", default=100, type=int)
 
 
 args = parser.parse_args()
 
 print("args:", args)
 
-os.system('echo -n "nb processors "; '
-          'cat /proc/cpuinfo | grep ^processor | wc -l; '
-          'cat /proc/cpuinfo | grep ^"model name" | tail -1')
+os.system(
+    'echo -n "nb processors "; '
+    "cat /proc/cpuinfo | grep ^processor | wc -l; "
+    'cat /proc/cpuinfo | grep ^"model name" | tail -1'
+)
 
 ngpu = faiss.get_num_gpus()
 print("nb GPUs:", ngpu)
@@ -58,15 +62,15 @@ xt, xb, xq, gt = datasets.load_data(dataset=args.db)
 
 
 if args.nt_sample == 0:
-    xt_pca = xt[args.nt:args.nt + 10000]
-    xt = xt[:args.nt]
+    xt_pca = xt[args.nt : args.nt + 10000]
+    xt = xt[: args.nt]
 else:
-    xt_pca = xt[args.nt_sample:args.nt_sample + 10000]
+    xt_pca = xt[args.nt_sample : args.nt_sample + 10000]
     rs = np.random.RandomState(args.seed)
     idx = rs.choice(args.nt_sample, size=args.nt, replace=False)
     xt = xt[idx]
 
-xb = xb[:args.nb]
+xb = xb[: args.nb]
 
 d = xb.shape[1]
 
@@ -95,7 +99,7 @@ clustering = faiss.Clustering(d, args.k)
 
 clustering.verbose = True
 clustering.seed = args.seed
-clustering.max_points_per_centroid = 10**6
+clustering.max_points_per_centroid = 10 ** 6
 clustering.min_points_per_centroid = 1
 
 

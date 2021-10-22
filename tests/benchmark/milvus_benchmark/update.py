@@ -1,11 +1,12 @@
-import sys
-import re
-import logging
-import traceback
 import argparse
-from yaml import full_load, dump
+import logging
+import re
+import sys
+import traceback
+
 import config
 import utils
+from yaml import dump, full_load
 
 
 def parse_server_tag(server_tag):
@@ -33,6 +34,8 @@ def parse_server_tag(server_tag):
 description: update values.yaml
 return: no return
 """
+
+
 def update_values(src_values_file, deploy_params_file):
     # deploy_mode, hostname, server_tag, milvus_config, server_config=None
     try:
@@ -64,11 +67,13 @@ def update_values(src_values_file, deploy_params_file):
     # TODO: update milvus config
     # # update values.yaml with the given host
     # node_config = None
-    perf_tolerations = [{
+    perf_tolerations = [
+        {
             "key": "node-role.kubernetes.io/benchmark",
             "operator": "Exists",
-            "effect": "NoSchedule"
-        }]  
+            "effect": "NoSchedule",
+        }
+    ]
     # if server_name:
     #     node_config = {'kubernetes.io/hostname': server_name}
     # elif server_tag:
@@ -84,33 +89,29 @@ def update_values(src_values_file, deploy_params_file):
         gpus = res["gpus"]
     if cpus:
         resources = {
-            "limits": {
-                "cpu": str(int(cpus)) + ".0"
-            },
+            "limits": {"cpu": str(int(cpus)) + ".0"},
             "requests": {
-                "cpu": str(int(cpus) // 2 + 1) + ".0"
+                "cpu": str(int(cpus) // 2 + 1)
+                + ".0"
                 # "cpu": "4.0"
                 # "cpu": str(int(cpus) - 1) + ".0"
-            }
+            },
         }
     if cpus and mems:
         resources_cluster = {
-            "limits": {
-                "cpu": str(int(cpus)) + ".0",
-                "memory": str(int(mems)) + "Gi"
-            },
+            "limits": {"cpu": str(int(cpus)) + ".0", "memory": str(int(mems)) + "Gi"},
             "requests": {
                 "cpu": str(int(cpus) // 2 + 1) + ".0",
                 "memory": str(int(mems) // 2 + 1) + "Gi"
                 # "cpu": "4.0"
                 # "cpu": str(int(cpus) - 1) + ".0"
-            }
+            },
         }
     # use external minio/s3
-    
+
     # TODO: disable temp
     # values_dict['minio']['enabled'] = False
-    values_dict['minio']['enabled'] = True
+    values_dict["minio"]["enabled"] = True
     # values_dict["externalS3"]["enabled"] = True
     values_dict["externalS3"]["enabled"] = False
     values_dict["externalS3"]["host"] = config.MINIO_HOST
@@ -127,16 +128,20 @@ def update_values(src_values_file, deploy_params_file):
             # values_dict['minio']['nodeSelector'] = node_config
             # values_dict['etcd']['nodeSelector'] = node_config
             # # set limit/request cpus in resources
-            values_dict['standalone']['resources'] = resources
+            values_dict["standalone"]["resources"] = resources
         if mems:
-            values_dict['standalone']['resources']["limits"].update({"memory": str(int(mems)) + "Gi"})
-            values_dict['standalone']['resources']["requests"].update({"memory": str(int(mems) // 2 + 1) + "Gi"})
+            values_dict["standalone"]["resources"]["limits"].update(
+                {"memory": str(int(mems)) + "Gi"}
+            )
+            values_dict["standalone"]["resources"]["requests"].update(
+                {"memory": str(int(mems) // 2 + 1) + "Gi"}
+            )
         if gpus:
             logging.info("TODO: Need to schedule pod on GPU server")
         logging.debug("Add tolerations into standalone server")
-        values_dict['standalone']['tolerations'] = perf_tolerations
-        values_dict['minio']['tolerations'] = perf_tolerations
-        values_dict['etcd']['tolerations'] = perf_tolerations
+        values_dict["standalone"]["tolerations"] = perf_tolerations
+        values_dict["minio"]["tolerations"] = perf_tolerations
+        values_dict["etcd"]["tolerations"] = perf_tolerations
     else:
         # TODO: mem limits on distributed mode
         # values_dict['pulsar']["broker"]["configData"].update({"maxMessageSize": "52428800", "PULSAR_MEM": BOOKKEEPER_PULSAR_MEM})
@@ -147,9 +152,9 @@ def update_values(src_values_file, deploy_params_file):
             # values_dict['etcd']['nodeSelector'] = node_config
             # # set limit/request cpus in resources
             # values_dict['proxy']['resources'] = resources
-            values_dict['queryNode']['resources'] = resources_cluster
-            values_dict['indexNode']['resources'] = resources_cluster
-            values_dict['dataNode']['resources'] = resources_cluster
+            values_dict["queryNode"]["resources"] = resources_cluster
+            values_dict["indexNode"]["resources"] = resources_cluster
+            values_dict["dataNode"]["resources"] = resources_cluster
             # values_dict['minio']['resources'] = resources
             # values_dict['pulsarStandalone']['resources'] = resources
         if mems:
@@ -161,16 +166,16 @@ def update_values(src_values_file, deploy_params_file):
         # values_dict['pulsar']['broker']['nodeSelector'] = node_config
         # values_dict['pulsar']['bookkeeper']['nodeSelector'] = node_config
         # values_dict['pulsar']['zookeeper']['nodeSelector'] = node_config
-        
+
         logging.debug("Add tolerations into cluster server")
-        values_dict['proxy']['tolerations'] = perf_tolerations
-        values_dict['queryNode']['tolerations'] = perf_tolerations
-        values_dict['indexNode']['tolerations'] = perf_tolerations
-        values_dict['dataNode']['tolerations'] = perf_tolerations
-        values_dict['etcd']['tolerations'] = perf_tolerations
-        values_dict['minio']['tolerations'] = perf_tolerations
+        values_dict["proxy"]["tolerations"] = perf_tolerations
+        values_dict["queryNode"]["tolerations"] = perf_tolerations
+        values_dict["indexNode"]["tolerations"] = perf_tolerations
+        values_dict["dataNode"]["tolerations"] = perf_tolerations
+        values_dict["etcd"]["tolerations"] = perf_tolerations
+        values_dict["minio"]["tolerations"] = perf_tolerations
         if deploy_mode == config.SINGLE_DEPLOY_MODE:
-            values_dict['pulsarStandalone']['tolerations'] = perf_tolerations
+            values_dict["pulsarStandalone"]["tolerations"] = perf_tolerations
         # TODO: for distributed deployment
         # values_dict['pulsar']['autoRecovery']['tolerations'] = perf_tolerations
         # values_dict['pulsar']['proxy']['tolerations'] = perf_tolerations
@@ -180,53 +185,53 @@ def update_values(src_values_file, deploy_params_file):
         milvus_params = deploy_params["milvus"]
         if "datanode" in milvus_params:
             if "replicas" in milvus_params["datanode"]:
-                values_dict['dataNode']["replicas"] = milvus_params["datanode"]["replicas"]
-        if "querynode"in milvus_params:
+                values_dict["dataNode"]["replicas"] = milvus_params["datanode"][
+                    "replicas"
+                ]
+        if "querynode" in milvus_params:
             if "replicas" in milvus_params["querynode"]:
-                values_dict['queryNode']["replicas"] = milvus_params["querynode"]["replicas"]
-        if "indexnode"in milvus_params:
+                values_dict["queryNode"]["replicas"] = milvus_params["querynode"][
+                    "replicas"
+                ]
+        if "indexnode" in milvus_params:
             if "replicas" in milvus_params["indexnode"]:
-                values_dict['indexNode']["replicas"] = milvus_params["indexnode"]["replicas"]
-        if "proxy"in milvus_params:
+                values_dict["indexNode"]["replicas"] = milvus_params["indexnode"][
+                    "replicas"
+                ]
+        if "proxy" in milvus_params:
             if "replicas" in milvus_params["proxy"]:
-                values_dict['proxy']["replicas"] = milvus_params["proxy"]["replicas"]
+                values_dict["proxy"]["replicas"] = milvus_params["proxy"]["replicas"]
     # add extra volumes
-    values_dict['extraVolumes'] = [{
-        'name': 'test',
-        'flexVolume': {
-            'driver': "fstab/cifs",
-            'fsType': "cifs",
-            'secretRef': {
-                'name': "cifs-test-secret"
+    values_dict["extraVolumes"] = [
+        {
+            "name": "test",
+            "flexVolume": {
+                "driver": "fstab/cifs",
+                "fsType": "cifs",
+                "secretRef": {"name": "cifs-test-secret"},
+                "options": {
+                    "networkPath": config.IDC_NAS_URL,
+                    "mountOptions": "vers=1.0",
+                },
             },
-            'options': {
-                'networkPath': config.IDC_NAS_URL,
-                'mountOptions': "vers=1.0"
-            }
         }
-    }]
-    values_dict['extraVolumeMounts'] = [{
-        'name': 'test',
-        'mountPath': '/test'
-    }]
+    ]
+    values_dict["extraVolumeMounts"] = [{"name": "test", "mountPath": "/test"}]
 
     print(values_dict)
     # Update content of src_values_file
-    with open(src_values_file, 'w') as f:
+    with open(src_values_file, "w") as f:
         dump(values_dict, f, default_flow_style=False)
     f.close()
 
 
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
 
-    arg_parser.add_argument(
-        '--src-values',
-        help='src values.yaml')
-    arg_parser.add_argument(
-        '--deploy-params',
-        help='deploy params')
+    arg_parser.add_argument("--src-values", help="src values.yaml")
+    arg_parser.add_argument("--deploy-params", help="deploy params")
 
     args = arg_parser.parse_args()
     src_values_file = args.src_values

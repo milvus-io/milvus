@@ -1,15 +1,14 @@
 import pytest
-
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from utils.util_log import test_log as log
 from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 
 prefix = "delete"
 half_nb = ct.default_nb // 2
 tmp_nb = 100
-tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
+tmp_expr = f"{ct.default_int64_field_name} in {[0]}"
 exp_res = "exp_res"
 
 
@@ -24,7 +23,7 @@ class TestDeleteParams(TestcaseBase):
 
     @pytest.mark.skip(reason="Issues #10273")
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize('is_binary', [False, True])
+    @pytest.mark.parametrize("is_binary", [False, True])
     def test_delete_entities(self, is_binary):
         """
         target: test delete data from collection
@@ -33,8 +32,10 @@ class TestDeleteParams(TestcaseBase):
         expected: assert num entities
         """
         # init collection with default_nb default data
-        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True, is_binary=is_binary)[0:4]
-        expr = f'{ct.default_int64_field_name} in {ids[:half_nb]}'
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, insert_data=True, is_binary=is_binary
+        )[0:4]
+        expr = f"{ct.default_int64_field_name} in {ids[:half_nb]}"
 
         # delete half of data
         del_res = collection_w.delete(expr)[0]
@@ -51,14 +52,18 @@ class TestDeleteParams(TestcaseBase):
         expected: raise exception
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
 
         # remove connection and delete
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
         error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
-        collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.skip(reason="Issue #10271")
     @pytest.mark.tags(CaseLabel.L1)
@@ -69,7 +74,9 @@ class TestDeleteParams(TestcaseBase):
         expected: raise exception
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
         error = {ct.err_code: 0, ct.err_msg: "todo"}
         collection_w.delete(expr=None, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.num_entities == tmp_nb
@@ -84,7 +91,9 @@ class TestDeleteParams(TestcaseBase):
         expected: raise exception
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
         error = {ct.err_code: 0, ct.err_msg: "..."}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -96,8 +105,10 @@ class TestDeleteParams(TestcaseBase):
         expected: assert num entities
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[]}'
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
+        expr = f"{ct.default_int64_field_name} in {[]}"
 
         # delete empty entities
         collection_w.delete(expr)
@@ -112,8 +123,10 @@ class TestDeleteParams(TestcaseBase):
         expected: Describe num entities by one
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0]}'
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
+        expr = f"{ct.default_int64_field_name} in {[0]}"
         del_res, _ = collection_w.delete(expr)
         assert del_res.delete_count == 1
         assert collection_w.num_entities == tmp_nb - 1
@@ -127,8 +140,10 @@ class TestDeleteParams(TestcaseBase):
         expected: num entities unchanged and deleted data will be not be queried
         """
         # init collection with default_nb default data
-        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
-        expr = f'{ct.default_int64_field_name} in {ids}'
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, insert_data=True
+        )[0:4]
+        expr = f"{ct.default_int64_field_name} in {ids}"
         del_res, _ = collection_w.delete(expr)
 
         # assert results
@@ -146,10 +161,12 @@ class TestDeleteParams(TestcaseBase):
         expected: No exception
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
 
         # No exception
-        expr = f'{ct.default_int64_field_name} in {[tmp_nb]}'
+        expr = f"{ct.default_int64_field_name} in {[tmp_nb]}"
         res = collection_w.delete(expr=expr)[0]
         # todo assert res.delete_count == 0
 
@@ -162,14 +179,20 @@ class TestDeleteParams(TestcaseBase):
         expected: delete any entities
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0, tmp_nb]}'
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
+        expr = f"{ct.default_int64_field_name} in {[0, tmp_nb]}"
         res, _ = collection_w.delete(expr)
 
         # todo assert res.delete_count == 0
         assert collection_w.num_entities == tmp_nb
         query_res = [{ct.default_int64_field_name: 0}]
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: query_res})
+        collection_w.query(
+            tmp_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: query_res},
+        )
 
     # PASS
     @pytest.mark.tags(CaseLabel.L1)
@@ -180,8 +203,10 @@ class TestDeleteParams(TestcaseBase):
         expected: raise exception
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0.0, 1.0]}'
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
+        expr = f"{ct.default_int64_field_name} in {[0.0, 1.0]}"
 
         # Bad exception message
         error = {ct.err_code: 1, ct.err_msg: "failed to create expr plan,"}
@@ -196,8 +221,10 @@ class TestDeleteParams(TestcaseBase):
         expected: raise exception
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0, 1.0]}'
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
+        expr = f"{ct.default_int64_field_name} in {[0, 1.0]}"
 
         # Bad exception message
         error = {ct.err_code: 1, ct.err_msg: "failed to create expr plan"}
@@ -234,8 +261,12 @@ class TestDeleteParams(TestcaseBase):
         expected: assert delete successfully
         """
         # init collection with tmp_nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        del_res, _ = collection_w.delete(tmp_expr, partition_name=[ct.default_partition_name])
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
+        del_res, _ = collection_w.delete(
+            tmp_expr, partition_name=[ct.default_partition_name]
+        )
         assert del_res.delete_cnt == 1
         assert collection_w.num_entities == tmp_nb - 1
 
@@ -293,12 +324,16 @@ class TestDeleteOperation(TestcaseBase):
         expected: raise exception
         """
         # init collection with nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
         # assert delete successfully
         collection_w.delete(expr=tmp_expr)
         # raise exception
         error = {ct.err_code: 0, ct.err_msg: "..."}
-        collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.skip(reason="Delete function is not implemented")
     @pytest.mark.tags(CaseLabel.L1)
@@ -309,10 +344,16 @@ class TestDeleteOperation(TestcaseBase):
         expected: assert index and num entities
         """
         # init collection with nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
 
         # create index
-        index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        index_params = {
+            "index_type": "IVF_SQ8",
+            "metric_type": "L2",
+            "params": {"nlist": 64},
+        }
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
         # delete entity
@@ -329,7 +370,9 @@ class TestDeleteOperation(TestcaseBase):
         expected: query result is empty
         """
         # init collection with nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
         # assert delete successfully
         collection_w.delete(expr=tmp_expr)
         res = collection_w.query(expr=tmp_expr)[0]
@@ -346,14 +389,22 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         entity, _ = collection_w.query(tmp_expr, output_fields=["%"])
         default_search_exp = "int64 >= 0"
-        search_res, _ = collection_w.search(entity[ct.default_float_vec_field_name], ct.default_float_vec_field_name,
-                                            ct.default_search_params, limit=1)
+        search_res, _ = collection_w.search(
+            entity[ct.default_float_vec_field_name],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            limit=1,
+        )
         # assert search results contains entity
         # todo
         del_res, _ = collection_w.delete(tmp_expr)
         assert del_res.delete_cnt == 1
-        search_res_2, _ = collection_w.search(entity[ct.default_float_vec_field_name], ct.default_float_vec_field_name,
-                                              ct.default_search_params, limit=1)
+        search_res_2, _ = collection_w.search(
+            entity[ct.default_float_vec_field_name],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            limit=1,
+        )
         # assert search result is not equal to entity
         # todo
 
@@ -366,8 +417,10 @@ class TestDeleteOperation(TestcaseBase):
         expected: delete one entity
         """
         # init collection with nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0, 0, 0]}'
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
+        expr = f"{ct.default_int64_field_name} in {[0, 0, 0]}"
         del_res, _ = collection_w.delete(expr)
         assert del_res.delete_count == 1
         assert collection_w.num_entities == tmp_nb - 1
@@ -402,8 +455,12 @@ class TestDeleteOperation(TestcaseBase):
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
 
         error = {ct.err_code: 0, ct.err_msg: "..."}
-        collection_w.delete(tmp_expr, partition_name=[partition_w.name], check_task=CheckTasks.err_res,
-                            check_items=error)
+        collection_w.delete(
+            tmp_expr,
+            partition_name=[partition_w.name],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_not_existed_partition(self):
@@ -413,11 +470,18 @@ class TestDeleteOperation(TestcaseBase):
         expected: raise exception
         """
         # init collection with tmp_nb data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
 
         # raise exception
         error = {ct.err_code: 0, ct.err_msg: "..."}
-        collection_w.delete(tmp_expr, partition_name=[ct.default_tag], check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            tmp_expr,
+            partition_name=[ct.default_tag],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_part_not_existed_partition(self):
@@ -427,12 +491,18 @@ class TestDeleteOperation(TestcaseBase):
         expected: raise exception
         """
         # init collection with tmp_nb data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True
+        )[0]
 
         # raise exception
         error = {ct.err_code: 0, ct.err_msg: "..."}
-        collection_w.delete(tmp_expr, partition_name=[ct.default_partition_name, ct.default_tag],
-                            check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            tmp_expr,
+            partition_name=[ct.default_partition_name, ct.default_tag],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         assert collection_w.num_entities == tmp_nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -445,9 +515,16 @@ class TestDeleteOperation(TestcaseBase):
         expected: two entities are deleted
         """
         half = ct.default_nb // 2
-        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
-        expr = f'{ct.default_int64_field_name} in {[0, half]}'
-        collection_w.delete(expr, partition_name=[ct.default_partition_name, partition_w.name])
+        (
+            collection_w,
+            partition_w,
+            _,
+            _,
+        ) = self.insert_entities_into_two_partitions_in_half(half)
+        expr = f"{ct.default_int64_field_name} in {[0, half]}"
+        collection_w.delete(
+            expr, partition_name=[ct.default_partition_name, partition_w.name]
+        )
         assert collection_w.num_entities == ct.default_nb - 2
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -459,10 +536,15 @@ class TestDeleteOperation(TestcaseBase):
         expected: No entities will be deleted
         """
         half = ct.default_nb // 2
-        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
+        (
+            collection_w,
+            partition_w,
+            _,
+            _,
+        ) = self.insert_entities_into_two_partitions_in_half(half)
 
         # delete entities from another partition
-        expr = f'{ct.default_int64_field_name} in {[0]}'
+        expr = f"{ct.default_int64_field_name} in {[0]}"
         collection_w.delete(expr, partition_name=[ct.default_partition_name])
         assert collection_w.num_entities == ct.default_nb
 
@@ -475,10 +557,15 @@ class TestDeleteOperation(TestcaseBase):
         expected: verify entities is deleted
         """
         half = ct.default_nb // 2
-        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
+        (
+            collection_w,
+            partition_w,
+            _,
+            _,
+        ) = self.insert_entities_into_two_partitions_in_half(half)
 
         # delete entities from another partition
-        expr = f'{ct.default_int64_field_name} in {[0]}'
+        expr = f"{ct.default_int64_field_name} in {[0]}"
         collection_w.delete(expr, partition_name=[partition_w.name])
         assert collection_w.num_entities == ct.default_nb - 1
 
@@ -501,7 +588,9 @@ class TestDeleteOperation(TestcaseBase):
         assert collection_w.num_entities == tmp_nb * 2
 
         # delete same ids from two partition
-        collection_w.delete(tmp_expr, partition_name=[ct.default_partition_name, partition_w.name])
+        collection_w.delete(
+            tmp_expr, partition_name=[ct.default_partition_name, partition_w.name]
+        )
         assert collection_w.num_entities == tmp_nb - 2
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -512,10 +601,12 @@ class TestDeleteOperation(TestcaseBase):
         expected: versify delete successfully
         """
         # init an auto_id collection and insert tmp_nb data
-        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, auto_id=True)[0:4]
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, auto_id=True
+        )[0:4]
 
         # delete with insert ids
-        expr = f'{ct.default_int64_field_name} in {[ids[0]]}'
+        expr = f"{ct.default_int64_field_name} in {[ids[0]]}"
         res, _ = collection_w.delete(expr)
 
         # verify delete result
@@ -544,8 +635,13 @@ class TestDeleteOperation(TestcaseBase):
         assert res.delete_count == 1
 
         # query without loading and raise exception
-        error = {ct.err_code: 1, ct.err_msg: f"collection {collection_w.name} was not loaded into memory"}
-        collection_w.query(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"collection {collection_w.name} was not loaded into memory",
+        }
+        collection_w.query(
+            expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.skip(reason="Issues #10382")
     @pytest.mark.tags(CaseLabel.L1)
@@ -669,8 +765,12 @@ class TestDeleteOperation(TestcaseBase):
 
         # query entity one
         collection_w.load()
-        res = df.iloc[0:1, :1].to_dict('records')
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})
+        res = df.iloc[0:1, :1].to_dict("records")
+        collection_w.query(
+            tmp_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_entity_loop(self):
@@ -680,19 +780,21 @@ class TestDeleteOperation(TestcaseBase):
         expected: No exception
         """
         # init an auto_id collection and insert tmp_nb data
-        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, auto_id=True)
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, auto_id=True
+        )
 
         for del_id in ids:
-            expr = f'{ct.default_int64_field_name} in {[del_id]}'
+            expr = f"{ct.default_int64_field_name} in {[del_id]}"
             res, _ = collection_w.delete(expr)
             assert res.delete_count == 1
 
         # query with first and last id
         collection_w.load()
-        first_expr = f'{ct.default_int64_field_name} in {ids[0]}'
+        first_expr = f"{ct.default_int64_field_name} in {ids[0]}"
         first_res, _ = collection_w.query(first_expr)
         assert len(first_res) == 0
-        last_expr = f'{ct.default_int64_field_name} in {ids[-1]}'
+        last_expr = f"{ct.default_int64_field_name} in {ids[-1]}"
         last_res, _ = collection_w.query(last_expr)
         assert len(last_res) == 0
 
@@ -704,21 +806,23 @@ class TestDeleteOperation(TestcaseBase):
         expected: No exception
         """
         # init an auto_id collection and insert tmp_nb data
-        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, auto_id=True)
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, auto_id=True
+        )
 
         batch = 10
         for i in range(tmp_nb // batch):
-            expr = f'{ct.default_int64_field_name} in {ids[i * batch: (i + 1) * batch]}'
+            expr = f"{ct.default_int64_field_name} in {ids[i * batch: (i + 1) * batch]}"
             res, _ = collection_w.delete(expr)
             assert res.delete_count == batch
             assert collection_w.num_entities == tmp_nb
 
         # query with first and last id
         collection_w.load()
-        first_expr = f'{ct.default_int64_field_name} in {ids[0]}'
+        first_expr = f"{ct.default_int64_field_name} in {ids[0]}"
         first_res, _ = collection_w.query(first_expr)
         assert len(first_res) == 0
-        last_expr = f'{ct.default_int64_field_name} in {ids[-1]}'
+        last_expr = f"{ct.default_int64_field_name} in {ids[-1]}"
         last_res, _ = collection_w.query(last_expr)
         assert len(last_res) == 0
 

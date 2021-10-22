@@ -1,2 +1,2 @@
-from locust import User, events
 import gevent
+from locust import User, events

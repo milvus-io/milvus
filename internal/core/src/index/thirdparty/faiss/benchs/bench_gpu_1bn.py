@@ -6,14 +6,15 @@
 #! /usr/bin/env python2
 
 from __future__ import print_function
-import numpy as np
-import time
-import os
-import sys
-import faiss
-import re
 
+import os
+import re
+import sys
+import time
 from multiprocessing.dummy import Pool as ThreadPool
+
+import faiss
+import numpy as np
 from datasets import ivecs_read
 
 ####################################################################
@@ -22,7 +23,8 @@ from datasets import ivecs_read
 
 
 def usage():
-    print("""
+    print(
+        """
 
 Usage: bench_gpu_1bn.py dataset indextype [options]
 
@@ -61,7 +63,9 @@ indextype: any index type supported by index_factory that runs on GPU.
                    %d will be replaced with the nprobe
 -oD xx%d.npy       output the search result distances to this file
 
-""", file=sys.stderr)
+""",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -91,27 +95,43 @@ args = sys.argv[1:]
 
 while args:
     a = args.pop(0)
-    if a == '-h': usage()
-    elif a == '-ngpu':      ngpu = int(args.pop(0))
-    elif a == '-R':         replicas = int(args.pop(0))
-    elif a == '-noptables': use_precomputed_tables = False
-    elif a == '-abs':       add_batch_size = int(args.pop(0))
-    elif a == '-qbs':       query_batch_size = int(args.pop(0))
-    elif a == '-nnn':       nnn = int(args.pop(0))
-    elif a == '-tempmem':   tempmem = int(args.pop(0))
-    elif a == '-nocache':   use_cache = False
-    elif a == '-knngraph':  knngraph = True
-    elif a == '-altadd':    altadd = True
-    elif a == '-float16':   use_float16 = True
-    elif a == '-nprobe':    nprobes = [int(x) for x in args.pop(0).split(',')]
-    elif a == '-max_add':   max_add = int(args.pop(0))
-    elif not dbname:        dbname = a
-    elif not index_key:     index_key = a
+    if a == "-h":
+        usage()
+    elif a == "-ngpu":
+        ngpu = int(args.pop(0))
+    elif a == "-R":
+        replicas = int(args.pop(0))
+    elif a == "-noptables":
+        use_precomputed_tables = False
+    elif a == "-abs":
+        add_batch_size = int(args.pop(0))
+    elif a == "-qbs":
+        query_batch_size = int(args.pop(0))
+    elif a == "-nnn":
+        nnn = int(args.pop(0))
+    elif a == "-tempmem":
+        tempmem = int(args.pop(0))
+    elif a == "-nocache":
+        use_cache = False
+    elif a == "-knngraph":
+        knngraph = True
+    elif a == "-altadd":
+        altadd = True
+    elif a == "-float16":
+        use_float16 = True
+    elif a == "-nprobe":
+        nprobes = [int(x) for x in args.pop(0).split(",")]
+    elif a == "-max_add":
+        max_add = int(args.pop(0))
+    elif not dbname:
+        dbname = a
+    elif not index_key:
+        index_key = a
     else:
         print("argument %s unknown" % a, file=sys.stderr)
         sys.exit(1)
 
-cacheroot = '/tmp/bench_gpu_1bn'
+cacheroot = "/tmp/bench_gpu_1bn"
 
 if not os.path.isdir(cacheroot):
     print("%s does not exist, creating it" % cacheroot)
@@ -124,14 +144,16 @@ if not os.path.isdir(cacheroot):
 # we mem-map the biggest files to avoid having them in memory all at
 # once
 
+
 def mmap_fvecs(fname):
-    x = np.memmap(fname, dtype='int32', mode='r')
+    x = np.memmap(fname, dtype="int32", mode="r")
     d = x[0]
-    return x.view('float32').reshape(-1, d + 1)[:, 1:]
+    return x.view("float32").reshape(-1, d + 1)[:, 1:]
+
 
 def mmap_bvecs(fname):
-    x = np.memmap(fname, dtype='uint8', mode='r')
-    d = x[:4].view('int32')[0]
+    x = np.memmap(fname, dtype="uint8", mode="r")
+    d = x[:4].view("int32")[0]
     return x.reshape(-1, d + 4)[:, 4:]
 
 
@@ -141,7 +163,7 @@ def rate_limited_imap(f, l):
     pool = ThreadPool(1)
     res = None
     for i in l:
-        res_next = pool.apply_async(f, (i, ))
+        res_next = pool.apply_async(f, (i,))
         if res:
             yield res.get()
         res = res_next
@@ -159,16 +181,15 @@ class IdentPreproc:
 
 
 def sanitize(x):
-    """ convert array to a c-contiguous float array """
-    return np.ascontiguousarray(x.astype('float32'))
+    """convert array to a c-contiguous float array"""
+    return np.ascontiguousarray(x.astype("float32"))
 
 
 def dataset_iterator(x, preproc, bs):
-    """ iterate over the lines of x in blocks of size bs"""
+    """iterate over the lines of x in blocks of size bs"""
 
     nb = x.shape[0]
-    block_ranges = [(i0, min(nb, i0 + bs))
-                    for i0 in range(0, nb, bs)]
+    block_ranges = [(i0, min(nb, i0 + bs)) for i0 in range(0, nb, bs)]
 
     def prepare_block(i01):
         i0, i1 = i01
@@ -179,14 +200,17 @@ def dataset_iterator(x, preproc, bs):
 
 
 def eval_intersection_measure(gt_I, I):
-    """ measure intersection measure (used for knngraph)"""
+    """measure intersection measure (used for knngraph)"""
     inter = 0
     rank = I.shape[1]
     assert gt_I.shape[1] >= rank
     for q in range(nq_gt):
         inter += faiss.ranklist_intersection_size(
-            rank, faiss.swig_ptr(gt_I[q, :]),
-            rank, faiss.swig_ptr(I[q, :].astype('int64')))
+            rank,
+            faiss.swig_ptr(gt_I[q, :]),
+            rank,
+            faiss.swig_ptr(I[q, :].astype("int64")),
+        )
     return inter / float(rank * nq_gt)
 
 
@@ -196,28 +220,28 @@ def eval_intersection_measure(gt_I, I):
 
 print("Preparing dataset", dbname)
 
-if dbname.startswith('SIFT'):
+if dbname.startswith("SIFT"):
     # SIFT1M to SIFT1000M
     dbsize = int(dbname[4:-1])
-    xb = mmap_bvecs('bigann/bigann_base.bvecs')
-    xq = mmap_bvecs('bigann/bigann_query.bvecs')
-    xt = mmap_bvecs('bigann/bigann_learn.bvecs')
+    xb = mmap_bvecs("bigann/bigann_base.bvecs")
+    xq = mmap_bvecs("bigann/bigann_query.bvecs")
+    xt = mmap_bvecs("bigann/bigann_learn.bvecs")
 
     # trim xb to correct size
-    xb = xb[:dbsize * 1000 * 1000]
+    xb = xb[: dbsize * 1000 * 1000]
 
-    gt_I = ivecs_read('bigann/gnd/idx_%dM.ivecs' % dbsize)
+    gt_I = ivecs_read("bigann/gnd/idx_%dM.ivecs" % dbsize)
 
-elif dbname == 'Deep1B':
-    xb = mmap_fvecs('deep1b/base.fvecs')
-    xq = mmap_fvecs('deep1b/deep1B_queries.fvecs')
-    xt = mmap_fvecs('deep1b/learn.fvecs')
+elif dbname == "Deep1B":
+    xb = mmap_fvecs("deep1b/base.fvecs")
+    xq = mmap_fvecs("deep1b/deep1B_queries.fvecs")
+    xt = mmap_fvecs("deep1b/learn.fvecs")
     # deep1B's train is is outrageously big
-    xt = xt[:10 * 1000 * 1000]
-    gt_I = ivecs_read('deep1b/deep1B_groundtruth.ivecs')
+    xt = xt[: 10 * 1000 * 1000]
+    gt_I = ivecs_read("deep1b/deep1B_groundtruth.ivecs")
 
 else:
-    print('unknown dataset', dbname, file=sys.stderr)
+    print("unknown dataset", dbname, file=sys.stderr)
     sys.exit(1)
 
 
@@ -233,10 +257,10 @@ if knngraph:
     gt_I = None
 
 
-print("sizes: B %s Q %s T %s gt %s" % (
-    xb.shape, xq.shape, xt.shape,
-    gt_I.shape if gt_I is not None else None))
-
+print(
+    "sizes: B %s Q %s T %s gt %s"
+    % (xb.shape, xq.shape, xt.shape, gt_I.shape if gt_I is not None else None)
+)
 
 
 #################################################################
@@ -247,13 +271,13 @@ print("sizes: B %s Q %s T %s gt %s" % (
 #################################################################
 
 
-pat = re.compile('(OPQ[0-9]+(_[0-9]+)?,|PCAR[0-9]+,)?' +
-                 '(IVF[0-9]+),' +
-                 '(PQ[0-9]+|Flat)')
+pat = re.compile(
+    "(OPQ[0-9]+(_[0-9]+)?,|PCAR[0-9]+,)?" + "(IVF[0-9]+)," + "(PQ[0-9]+|Flat)"
+)
 
 matchobject = pat.match(index_key)
 
-assert matchobject, 'could not parse ' + index_key
+assert matchobject, "could not parse " + index_key
 
 mog = matchobject.groups()
 
@@ -263,26 +287,41 @@ pqflat_str = mog[3]
 
 ncent = int(ivf_str[3:])
 
-prefix = ''
+prefix = ""
 
 if knngraph:
-    gt_cachefile = '%s/BK_gt_%s.npy' % (cacheroot, dbname)
-    prefix = 'BK_'
+    gt_cachefile = "%s/BK_gt_%s.npy" % (cacheroot, dbname)
+    prefix = "BK_"
     # files must be kept distinct because the training set is not the
     # same for the knngraph
 
 if preproc_str:
-    preproc_cachefile = '%s/%spreproc_%s_%s.vectrans' % (
-        cacheroot, prefix, dbname, preproc_str[:-1])
+    preproc_cachefile = "%s/%spreproc_%s_%s.vectrans" % (
+        cacheroot,
+        prefix,
+        dbname,
+        preproc_str[:-1],
+    )
 else:
     preproc_cachefile = None
-    preproc_str = ''
+    preproc_str = ""
 
-cent_cachefile = '%s/%scent_%s_%s%s.npy' % (
-    cacheroot, prefix, dbname, preproc_str, ivf_str)
+cent_cachefile = "%s/%scent_%s_%s%s.npy" % (
+    cacheroot,
+    prefix,
+    dbname,
+    preproc_str,
+    ivf_str,
+)
 
-index_cachefile = '%s/%s%s_%s%s,%s.index' % (
-    cacheroot, prefix, dbname, preproc_str, ivf_str, pqflat_str)
+index_cachefile = "%s/%s%s_%s%s,%s.index" % (
+    cacheroot,
+    prefix,
+    dbname,
+    preproc_str,
+    ivf_str,
+    pqflat_str,
+)
 
 
 if not use_cache:
@@ -312,7 +351,7 @@ for i in range(ngpu):
 
 
 def make_vres_vdev(i0=0, i1=-1):
-    " return vectors of device ids and resources useful for gpu_multiple"
+    "return vectors of device ids and resources useful for gpu_multiple"
     vres = faiss.GpuResourcesVector()
     vdev = faiss.IntVector()
     if i1 == -1:
@@ -332,8 +371,8 @@ def compute_GT():
     print("compute GT")
     t0 = time.time()
 
-    gt_I = np.zeros((nq_gt, gt_sl), dtype='int64')
-    gt_D = np.zeros((nq_gt, gt_sl), dtype='float32')
+    gt_I = np.zeros((nq_gt, gt_sl), dtype="int64")
+    gt_D = np.zeros((nq_gt, gt_sl), dtype="float32")
     heaps = faiss.float_maxheap_array_t()
     heaps.k = gt_sl
     heaps.nh = nq_gt
@@ -347,18 +386,16 @@ def compute_GT():
 
     db_gt = faiss.IndexFlatL2(d)
     vres, vdev = make_vres_vdev()
-    db_gt_gpu = faiss.index_cpu_to_gpu_multiple(
-        vres, vdev, db_gt)
+    db_gt_gpu = faiss.index_cpu_to_gpu_multiple(vres, vdev, db_gt)
 
     # compute ground-truth by blocks of bs, and add to heaps
     for i0, xsl in dataset_iterator(xb, IdentPreproc(d), bs):
         db_gt_gpu.add(xsl)
         D, I = db_gt_gpu.search(xqs, gt_sl)
         I += i0
-        heaps.addn_with_ids(
-            gt_sl, faiss.swig_ptr(D), faiss.swig_ptr(I), gt_sl)
+        heaps.addn_with_ids(gt_sl, faiss.swig_ptr(D), faiss.swig_ptr(I), gt_sl)
         db_gt_gpu.reset()
-        print("\r   %d/%d, %.3f s" % (i0, n, time.time() - t0), end=' ')
+        print("\r   %d/%d, %.3f s" % (i0, n, time.time() - t0), end=" ")
     print()
     heaps.reorder()
 
@@ -386,12 +423,12 @@ def train_preprocessor():
     print("train preproc", preproc_str)
     d = xt.shape[1]
     t0 = time.time()
-    if preproc_str.startswith('OPQ'):
-        fi = preproc_str[3:-1].split('_')
+    if preproc_str.startswith("OPQ"):
+        fi = preproc_str[3:-1].split("_")
         m = int(fi[0])
         dout = int(fi[1]) if len(fi) == 2 else d
         preproc = faiss.OPQMatrix(d, m, dout)
-    elif preproc_str.startswith('PCAR'):
+    elif preproc_str.startswith("PCAR"):
         dout = int(preproc_str[4:-1])
         preproc = faiss.PCAMatrix(d, dout, 0, True)
     else:
@@ -429,15 +466,13 @@ def train_coarse_quantizer(x, k, preproc):
     # clus.niter = 2
     clus.max_points_per_centroid = 10000000
 
-    print("apply preproc on shape", x.shape, 'k=', k)
+    print("apply preproc on shape", x.shape, "k=", k)
     t0 = time.time()
     x = preproc.apply_py(sanitize(x))
-    print("   preproc %.3f s output shape %s" % (
-        time.time() - t0, x.shape))
+    print("   preproc %.3f s output shape %s" % (time.time() - t0, x.shape))
 
     vres, vdev = make_vres_vdev()
-    index = faiss.index_cpu_to_gpu_multiple(
-        vres, vdev, faiss.IndexFlatL2(d))
+    index = faiss.index_cpu_to_gpu_multiple(vres, vdev, faiss.IndexFlatL2(d))
 
     clus.train(x, index)
     centroids = faiss.vector_float_to_array(clus.centroids)
@@ -475,10 +510,9 @@ def prepare_trained_index(preproc):
 
     coarse_quantizer = prepare_coarse_quantizer(preproc)
     d = preproc.d_out
-    if pqflat_str == 'Flat':
+    if pqflat_str == "Flat":
         print("making an IVFFlat index")
-        idx_model = faiss.IndexIVFFlat(coarse_quantizer, d, ncent,
-                                       faiss.METRIC_L2)
+        idx_model = faiss.IndexIVFFlat(coarse_quantizer, d, ncent, faiss.METRIC_L2)
     else:
         m = int(pqflat_str[2:])
         assert m < 56 or use_float16, "PQ%d will work only with -float16" % m
@@ -500,7 +534,7 @@ def prepare_trained_index(preproc):
 
 def compute_populated_index(preproc):
     """Add elements to a sharded index. Return the index and if available
-    a sharded gpu_index that contains the same data. """
+    a sharded gpu_index that contains the same data."""
 
     indexall = prepare_trained_index(preproc)
 
@@ -514,8 +548,7 @@ def compute_populated_index(preproc):
     co.shard = True
     assert co.shard_type in (0, 1, 2)
     vres, vdev = make_vres_vdev()
-    gpu_index = faiss.index_cpu_to_gpu_multiple(
-        vres, vdev, indexall, co)
+    gpu_index = faiss.index_cpu_to_gpu_multiple(vres, vdev, indexall, co)
 
     print("add...")
     t0 = time.time()
@@ -534,15 +567,14 @@ def compute_populated_index(preproc):
                 index_src_gpu.reserveMemory(max_add)
             gpu_index.sync_with_shard_indexes()
 
-        print('\r%d/%d (%.3f s)  ' % (
-            i0, nb, time.time() - t0), end=' ')
+        print("\r%d/%d (%.3f s)  " % (i0, nb, time.time() - t0), end=" ")
         sys.stdout.flush()
     print("Add time: %.3f s" % (time.time() - t0))
 
     print("Aggregate indexes to CPU")
     t0 = time.time()
 
-    if hasattr(gpu_index, 'at'):
+    if hasattr(gpu_index, "at"):
         # it is a sharded index
         for i in range(ngpu):
             index_src = faiss.index_gpu_to_cpu(gpu_index.at(i))
@@ -561,6 +593,7 @@ def compute_populated_index(preproc):
 
     return gpu_index, indexall
 
+
 def compute_populated_index_2(preproc):
 
     indexall = prepare_trained_index(preproc)
@@ -574,7 +607,8 @@ def compute_populated_index_2(preproc):
 
     vres, vdev = make_vres_vdev()
     coarse_quantizer_gpu = faiss.index_cpu_to_gpu_multiple(
-        vres, vdev, indexall.quantizer)
+        vres, vdev, indexall.quantizer
+    )
 
     def quantize(args):
         (i0, xs) = args
@@ -590,21 +624,19 @@ def compute_populated_index_2(preproc):
     for i0, xs, assign in stage2:
         i1 = i0 + xs.shape[0]
         if indexall.__class__ == faiss.IndexIVFPQ:
-            indexall.add_core_o(i1 - i0, faiss.swig_ptr(xs),
-                                None, None, faiss.swig_ptr(assign))
+            indexall.add_core_o(
+                i1 - i0, faiss.swig_ptr(xs), None, None, faiss.swig_ptr(assign)
+            )
         elif indexall.__class__ == faiss.IndexIVFFlat:
-            indexall.add_core(i1 - i0, faiss.swig_ptr(xs), None,
-                              faiss.swig_ptr(assign))
+            indexall.add_core(i1 - i0, faiss.swig_ptr(xs), None, faiss.swig_ptr(assign))
         else:
             assert False
 
-        print('\r%d/%d (%.3f s)  ' % (
-            i0, nb, time.time() - t0), end=' ')
+        print("\r%d/%d (%.3f s)  " % (i0, nb, time.time() - t0), end=" ")
         sys.stdout.flush()
     print("Add time: %.3f s" % (time.time() - t0))
 
     return None, indexall
-
 
 
 def get_populated_index(preproc):
@@ -628,7 +660,7 @@ def get_populated_index(preproc):
     co.usePrecomputed = use_precomputed_tables
     co.indicesOptions = 0
     co.verbose = True
-    co.shard = True    # the replicas will be made "manually"
+    co.shard = True  # the replicas will be made "manually"
     t0 = time.time()
     print("CPU index contains %d vectors, move to GPU" % indexall.ntotal)
     if replicas == 1:
@@ -636,13 +668,12 @@ def get_populated_index(preproc):
         if not gpu_index:
             print("copying loaded index to GPUs")
             vres, vdev = make_vres_vdev()
-            index = faiss.index_cpu_to_gpu_multiple(
-                vres, vdev, indexall, co)
+            index = faiss.index_cpu_to_gpu_multiple(vres, vdev, indexall, co)
         else:
             index = gpu_index
 
     else:
-        del gpu_index # We override the GPU index
+        del gpu_index  # We override the GPU index
 
         print("Copy CPU index to %d sharded GPU indexes" % replicas)
 
@@ -655,15 +686,13 @@ def get_populated_index(preproc):
 
             print("   dispatch to GPUs %d:%d" % (gpu0, gpu1))
 
-            index1 = faiss.index_cpu_to_gpu_multiple(
-                vres, vdev, indexall, co)
+            index1 = faiss.index_cpu_to_gpu_multiple(vres, vdev, indexall, co)
             index1.this.disown()
             index.addIndex(index1)
         index.own_fields = True
     del indexall
     print("move to GPU done in %.3f s" % (time.time() - t0))
     return index
-
 
 
 #################################################################
@@ -681,20 +710,22 @@ def eval_dataset(index, preproc):
     sl = query_batch_size
     nq = xq.shape[0]
     for nprobe in nprobes:
-        ps.set_index_parameter(index, 'nprobe', nprobe)
+        ps.set_index_parameter(index, "nprobe", nprobe)
         t0 = time.time()
 
         if sl == 0:
             D, I = index.search(preproc.apply_py(sanitize(xq)), nnn)
         else:
-            I = np.empty((nq, nnn), dtype='int32')
-            D = np.empty((nq, nnn), dtype='float32')
+            I = np.empty((nq, nnn), dtype="int32")
+            D = np.empty((nq, nnn), dtype="float32")
 
-            inter_res = ''
+            inter_res = ""
 
             for i0, xs in dataset_iterator(xq, preproc, sl):
-                print('\r%d/%d (%.3f s%s)   ' % (
-                    i0, nq, time.time() - t0, inter_res), end=' ')
+                print(
+                    "\r%d/%d (%.3f s%s)   " % (i0, nq, time.time() - t0, inter_res),
+                    end=" ",
+                )
                 sys.stdout.flush()
 
                 i1 = i0 + xs.shape[0]
@@ -704,23 +735,25 @@ def eval_dataset(index, preproc):
                 D[i0:i1] = Di
 
                 if knngraph and not inter_res and i1 >= nq_gt:
-                    ires = eval_intersection_measure(
-                        gt_I[:, :nnn], I[:nq_gt])
-                    inter_res = ', %.4f' % ires
+                    ires = eval_intersection_measure(gt_I[:, :nnn], I[:nq_gt])
+                    inter_res = ", %.4f" % ires
 
         t1 = time.time()
         if knngraph:
             ires = eval_intersection_measure(gt_I[:, :nnn], I[:nq_gt])
-            print("  probe=%-3d: %.3f s rank-%d intersection results: %.4f" % (
-                nprobe, t1 - t0, nnn, ires))
+            print(
+                "  probe=%-3d: %.3f s rank-%d intersection results: %.4f"
+                % (nprobe, t1 - t0, nnn, ires)
+            )
         else:
-            print("  probe=%-3d: %.3f s" % (nprobe, t1 - t0), end=' ')
+            print("  probe=%-3d: %.3f s" % (nprobe, t1 - t0), end=" ")
             gtc = gt_I[:, :1]
             nq = xq.shape[0]
             for rank in 1, 10, 100:
-                if rank > nnn: continue
+                if rank > nnn:
+                    continue
                 nok = (I[:, :rank] == gtc).sum()
-                print("1-R@%d: %.4f" % (rank, nok / float(nq)), end=' ')
+                print("1-R@%d: %.4f" % (rank, nok / float(nq)), end=" ")
             print()
         if I_fname:
             I_fname_i = I_fname % I

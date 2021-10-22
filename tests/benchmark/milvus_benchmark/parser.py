@@ -1,5 +1,5 @@
-import pdb
 import logging
+import pdb
 
 logger = logging.getLogger("milvus_benchmark.parser")
 
@@ -50,7 +50,7 @@ def parse_ann_collection_name(collection_name):
     metric = collection_name.split("_")[2]
     # metric = collection_name.attrs['distance']
     # dimension = len(collection_name["train"][0])
-    metric_type = ''
+    metric_type = ""
     if metric == "euclidean":
         metric_type = "l2"
     elif metric == "angular":
@@ -97,6 +97,6 @@ def search_params_parser(param):
     elif isinstance(nprobes, list):
         nprobes = list(nprobes)
     else:
-        logger.warning("Invalid format nprobes: %s" % str(nprobes))    
+        logger.warning("Invalid format nprobes: %s" % str(nprobes))
 
     return top_ks, nqs, nprobes

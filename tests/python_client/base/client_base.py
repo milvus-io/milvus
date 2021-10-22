@@ -1,17 +1,18 @@
-import pytest
 import sys
+
+import pytest
 from pymilvus import DefaultConfig
 
 sys.path.append("..")
-from base.connections_wrapper import ApiConnectionsWrapper
 from base.collection_wrapper import ApiCollectionWrapper
-from base.partition_wrapper import ApiPartitionWrapper
+from base.connections_wrapper import ApiConnectionsWrapper
 from base.index_wrapper import ApiIndexWrapper
-from base.utility_wrapper import ApiUtilityWrapper
+from base.partition_wrapper import ApiPartitionWrapper
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
-from utils.util_log import test_log as log
+from base.utility_wrapper import ApiUtilityWrapper
 from common import common_func as cf
 from common import common_type as ct
+from utils.util_log import test_log as log
 
 
 class ParamInfo:
@@ -30,7 +31,8 @@ param_info = ParamInfo()
 
 
 class Base:
-    """ Initialize class object """
+    """Initialize class object"""
+
     connection_wrap = None
     collection_wrap = None
     partition_wrap = None
@@ -62,31 +64,46 @@ class Base:
         log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
 
         try:
-            """ Drop collection before disconnect """
-            if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
-                self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
-                                             port=param_info.param_port)
+            """Drop collection before disconnect"""
+            if (
+                self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[
+                    0
+                ]
+                is None
+            ):
+                self.connection_wrap.connect(
+                    alias=DefaultConfig.DEFAULT_USING,
+                    host=param_info.param_host,
+                    port=param_info.param_port,
+                )
 
             if self.collection_wrap.collection is not None:
                 self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
 
             collection_list = self.utility_wrap.list_collections()[0]
             for collection_object in self.collection_object_list:
-                if collection_object.collection is not None and collection_object.name in collection_list:
+                if (
+                    collection_object.collection is not None
+                    and collection_object.name in collection_list
+                ):
                     collection_object.drop(check_task=ct.CheckTasks.check_nothing)
 
         except Exception as e:
             log.debug(str(e))
 
         try:
-            """ Delete connection and reset configuration"""
+            """Delete connection and reset configuration"""
             res = self.connection_wrap.list_connections()
             for i in res[0]:
                 self.connection_wrap.remove_connection(i[0])
 
             # because the connection is in singleton mode, it needs to be restored to the original state after teardown
-            self.connection_wrap.add_connection(default={"host": DefaultConfig.DEFAULT_HOST,
-                                                         "port": DefaultConfig.DEFAULT_PORT})
+            self.connection_wrap.add_connection(
+                default={
+                    "host": DefaultConfig.DEFAULT_HOST,
+                    "port": DefaultConfig.DEFAULT_PORT,
+                }
+            )
         except Exception as e:
             log.debug(str(e))
 
@@ -98,18 +115,32 @@ class TestcaseBase(Base):
     """
 
     def _connect(self):
-        """ Add an connection and create the connect """
-        res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
-                                                    port=param_info.param_port)
+        """Add an connection and create the connect"""
+        res, is_succ = self.connection_wrap.connect(
+            alias=DefaultConfig.DEFAULT_USING,
+            host=param_info.param_host,
+            port=param_info.param_port,
+        )
         return res
 
-    def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None, **kwargs):
-        name = cf.gen_unique_str('coll_') if name is None else name
+    def init_collection_wrap(
+        self, name=None, schema=None, check_task=None, check_items=None, **kwargs
+    ):
+        name = cf.gen_unique_str("coll_") if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
-        if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
+        if (
+            self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0]
+            is None
+        ):
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=name, schema=schema, check_task=check_task, check_items=check_items, **kwargs)
+        collection_w.init_collection(
+            name=name,
+            schema=schema,
+            check_task=check_task,
+            check_items=check_items,
+            **kwargs
+        )
         self.collection_object_list.append(collection_w)
         return collection_w
 
@@ -122,20 +153,45 @@ class TestcaseBase(Base):
         assert collection_w.num_entities == ct.default_nb
         return collection_w, df
 
-    def init_partition_wrap(self, collection_wrap=None, name=None, description=None,
-                            check_task=None, check_items=None, **kwargs):
+    def init_partition_wrap(
+        self,
+        collection_wrap=None,
+        name=None,
+        description=None,
+        check_task=None,
+        check_items=None,
+        **kwargs
+    ):
         name = cf.gen_unique_str("partition_") if name is None else name
-        description = cf.gen_unique_str("partition_des_") if description is None else description
-        collection_wrap = self.init_collection_wrap() if collection_wrap is None else collection_wrap
+        description = (
+            cf.gen_unique_str("partition_des_") if description is None else description
+        )
+        collection_wrap = (
+            self.init_collection_wrap() if collection_wrap is None else collection_wrap
+        )
         partition_wrap = ApiPartitionWrapper()
-        partition_wrap.init_partition(collection_wrap.collection, name, description,
-                                      check_task=check_task, check_items=check_items,
-                                      **kwargs)
+        partition_wrap.init_partition(
+            collection_wrap.collection,
+            name,
+            description,
+            check_task=check_task,
+            check_items=check_items,
+            **kwargs
+        )
         return partition_wrap
 
-    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
-                                partition_num=0, is_binary=False, is_all_data_type=False,
-                                auto_id=False, dim=ct.default_dim, is_index=False):
+    def init_collection_general(
+        self,
+        prefix,
+        insert_data=False,
+        nb=ct.default_nb,
+        partition_num=0,
+        is_binary=False,
+        is_all_data_type=False,
+        auto_id=False,
+        dim=ct.default_dim,
+        is_index=False,
+    ):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -154,19 +210,31 @@ class TestcaseBase(Base):
         # 1 create collection
         default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim)
         if is_binary:
-            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim)
+            default_schema = cf.gen_default_binary_collection_schema(
+                auto_id=auto_id, dim=dim
+            )
         if is_all_data_type:
-            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim)
+            default_schema = cf.gen_collection_schema_all_datatype(
+                auto_id=auto_id, dim=dim
+            )
         log.info("init_collection_general: collection creation")
-        collection_w = self.init_collection_wrap(name=collection_name,
-                                                 schema=default_schema)
+        collection_w = self.init_collection_wrap(
+            name=collection_name, schema=default_schema
+        )
         # 2 add extra partitions if specified (default is 1 partition named "_default")
         if partition_num > 0:
             cf.gen_partitions(collection_w, partition_num)
         # 3 insert data if specified
         if insert_data:
-            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
-                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim)
+            (
+                collection_w,
+                vectors,
+                binary_raw_vectors,
+                insert_ids,
+                time_stamp,
+            ) = cf.insert_data(
+                collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim
+            )
             assert collection_w.is_empty is False
             assert collection_w.num_entities == nb
             # This condition will be removed after auto index feature
@@ -175,7 +243,7 @@ class TestcaseBase(Base):
 
         return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
-    def insert_entities_into_two_partitions_in_half(self, half, prefix='query'):
+    def insert_entities_into_two_partitions_in_half(self, half, prefix="query"):
         """
         insert default entities into two partitions(partition_w and _default) in half(int64 and float fields values)
         :param half: half of nb

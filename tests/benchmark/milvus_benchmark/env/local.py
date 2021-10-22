@@ -1,4 +1,5 @@
 import logging
+
 from milvus_benchmark.env.base import BaseEnv
 
 logger = logging.getLogger("milvus_benchmark.env.local")
@@ -6,6 +7,7 @@ logger = logging.getLogger("milvus_benchmark.env.local")
 
 class LocalEnv(BaseEnv):
     """docker env class wrapper"""
+
     """ The current method of using the deployed Kubernetes environment to call """
     env_mode = "local"
 

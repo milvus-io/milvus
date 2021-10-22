@@ -1,33 +1,28 @@
 import copy
 import logging
 import pdb
+import threading
 import time
 from operator import methodcaller
-from yaml import full_load, dump
-import threading
-from milvus_benchmark import utils
-from milvus_benchmark.runners import utils as runner_utils
-from milvus_benchmark.chaos import utils as chaos_utils
-from milvus_benchmark.runners.base import BaseRunner
+
 from chaos.chaos_opt import ChaosOpt
-from milvus_benchmark import config
-from milvus_benchmark.chaos.chaos_mesh import PodChaos, NetworkChaos
+from milvus_benchmark import config, utils
+from milvus_benchmark.chaos import utils as chaos_utils
+from milvus_benchmark.chaos.chaos_mesh import NetworkChaos, PodChaos
+from milvus_benchmark.runners import utils as runner_utils
+from milvus_benchmark.runners.base import BaseRunner
+from yaml import dump, full_load
 
 logger = logging.getLogger("milvus_benchmark.runners.chaos")
 
-kind_chaos_mapping = {
-    "PodChaos": PodChaos,
-    "NetworkChaos": NetworkChaos
-}
+kind_chaos_mapping = {"PodChaos": PodChaos, "NetworkChaos": NetworkChaos}
 
-assert_func_mapping = {
-    "fail": chaos_utils.assert_fail,
-    "pass": chaos_utils.assert_pass
-}
+assert_func_mapping = {"fail": chaos_utils.assert_fail, "pass": chaos_utils.assert_pass}
 
 
 class SimpleChaosRunner(BaseRunner):
     """run chaos"""
+
     name = "simple_chaos"
 
     async def async_call(self, func, **kwargs):
@@ -44,15 +39,23 @@ class SimpleChaosRunner(BaseRunner):
         elif interface_name == "insert":
             batch_size = interface_params["batch_size"]
             collection_size = interface_params["collection_size"]
-            self.insert(self.milvus, self.milvus.collection_name, self.data_type, self.dimension, collection_size,
-                        batch_size)
+            self.insert(
+                self.milvus,
+                self.milvus.collection_name,
+                self.data_type,
+                self.dimension,
+                collection_size,
+                batch_size,
+            )
         elif interface_name == "create_index":
             metric_type = interface_params["metric_type"]
             index_type = interface_params["index_type"]
             index_param = interface_params["index_param"]
             vector_type = runner_utils.get_vector_type(self.data_type)
             field_name = runner_utils.get_default_field_name(vector_type)
-            self.milvus.create_index(field_name, index_type, metric_type, index_param=index_param)
+            self.milvus.create_index(
+                field_name, index_type, metric_type, index_param=index_param
+            )
         elif interface_name == "flush":
             self.milvus.flush()
 
@@ -61,11 +64,9 @@ class SimpleChaosRunner(BaseRunner):
         after = collection["after"] if "after" in collection else None
         processing = collection["processing"]
         case_metrics = []
-        case_params = [{
-            "before_steps": before_steps,
-            "after": after,
-            "processing": processing
-        }]
+        case_params = [
+            {"before_steps": before_steps, "after": after, "processing": processing}
+        ]
         self.init_metric(self.name, {}, {}, None)
         case_metric = copy.deepcopy(self.metric)
         case_metric.set_case_metric_type()
@@ -90,7 +91,9 @@ class SimpleChaosRunner(BaseRunner):
         process_assertion = processing["assertion"]
         after_assertion = after["assertion"]
         # load yaml from default template to generate stand chaos dict
-        chaos_mesh = kind_chaos_mapping[kind](config.DEFAULT_API_VERSION, kind, metadata, spec)
+        chaos_mesh = kind_chaos_mapping[kind](
+            config.DEFAULT_API_VERSION, kind, metadata, spec
+        )
         experiment_config = chaos_mesh.gen_experiment_config()
         process_func = processing["interface_name"]
         process_params = processing["params"] if "params" in processing else {}
@@ -107,7 +110,14 @@ class SimpleChaosRunner(BaseRunner):
         #     f.close()
         # concurrent inject chaos and run func
         # logger.debug(experiment_config)
-        t_milvus = threading.Thread(target=assert_func_mapping[process_assertion], args=(process_func, self.milvus,), kwargs=process_params)
+        t_milvus = threading.Thread(
+            target=assert_func_mapping[process_assertion],
+            args=(
+                process_func,
+                self.milvus,
+            ),
+            kwargs=process_params,
+        )
         try:
             t_milvus.start()
             chaos_opt.create_chaos_object(experiment_config)
@@ -118,7 +128,9 @@ class SimpleChaosRunner(BaseRunner):
             chaos_opt.delete_chaos_object(chaos_mesh.metadata["name"])
             # TODO retry connect milvus
             time.sleep(15)
-            assert_func_mapping[after_assertion](after_func, self.milvus, **after_params)
+            assert_func_mapping[after_assertion](
+                after_func, self.milvus, **after_params
+            )
         finally:
             chaos_opt.delete_all_chaos_object()
             logger.info(chaos_opt.list_chaos_object())

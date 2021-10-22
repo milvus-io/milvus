@@ -1,18 +1,27 @@
-import time
+import logging
 import pdb
 import threading
-import logging
+import time
 from multiprocessing import Pool, Process
+
 import pytest
-from utils import *
 from constants import *
+from utils import *
 
 DELETE_TIMEOUT = 60
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, default_dim),
-                                                       "metric_type": "L2", "params": {"nprobe": 10}}}}
+            {
+                "vector": {
+                    default_float_vec_field_name: {
+                        "topk": 10,
+                        "query": gen_vectors(1, default_dim),
+                        "metric_type": "L2",
+                        "params": {"nprobe": 10},
+                    }
+                }
+            }
         ]
     }
 }
@@ -25,52 +34,51 @@ class TestFlushBase:
     ******************************************************************
     """
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
+    @pytest.fixture(scope="function", params=gen_simple_index())
     def get_simple_index(self, request, connect):
         # if str(connect._cmd("mode")[1]) == "GPU":
         #     if request.param["index_type"] not in ivf():
         #         pytest.skip("Only support index_type: idmap/flat")
         return request.param
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_filter_fields()
-    )
+    @pytest.fixture(scope="function", params=gen_single_filter_fields())
     def get_filter_field(self, request):
         yield request.param
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_vector_fields()
-    )
+    @pytest.fixture(scope="function", params=gen_single_vector_fields())
     def get_vector_field(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_flush_collection_not_existed(self, connect, collection):
-        '''
+        """
         target: test flush, params collection_name not existed
         method: flush, with collection not existed
         expected: error raised
-        '''
+        """
         collection_new = gen_unique_str("test_flush_1")
         try:
             connect.flush([collection_new])
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_new
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message
+                == "describe collection failed: can't find collection: %s"
+                % collection_new
+            )
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_flush_empty_collection(self, connect, collection):
-        '''
+        """
         method: flush collection with no vectors
         expected: no error raised
-        '''
+        """
         connect.flush([collection])
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
@@ -85,17 +93,19 @@ class TestFlushBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_partition_flush(self, connect, id_collection):
-        '''
+        """
         method: add entities into partition in collection, flush serveral times
         expected: the length of ids and the collection row count
-        '''
+        """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
         ids = connect.insert(id_collection, default_entities)
         connect.flush([id_collection])
         res_count = connect.get_collection_stats(id_collection)
         assert res_count["row_count"] == default_nb
-        ids = connect.insert(id_collection, default_entities, partition_name=default_tag)
+        ids = connect.insert(
+            id_collection, default_entities, partition_name=default_tag
+        )
         assert len(ids) == default_nb
         connect.flush([id_collection])
         res_count = connect.get_collection_stats(id_collection)
@@ -103,10 +113,10 @@ class TestFlushBase:
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_add_partitions_flush(self, connect, id_collection):
-        '''
+        """
         method: add entities into partitions in collection, flush one
         expected: the length of ids and the collection row count
-        '''
+        """
         tag_new = gen_unique_str()
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(id_collection, tag_new)
@@ -120,10 +130,10 @@ class TestFlushBase:
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_add_collections_flush(self, connect, id_collection):
-        '''
+        """
         method: add entities into collections, flush one
         expected: the length of ids and the collection row count
-        '''
+        """
         collection_new = gen_unique_str()
         default_fields = gen_default_fields(False)
         connect.create_collection(collection_new, default_fields)
@@ -142,11 +152,13 @@ class TestFlushBase:
         assert res["row_count"] == default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_add_collections_fields_flush(self, connect, id_collection, get_filter_field, get_vector_field):
-        '''
+    def test_add_collections_fields_flush(
+        self, connect, id_collection, get_filter_field, get_vector_field
+    ):
+        """
         method: create collection with different fields, and add entities into collections, flush one
         expected: the length of ids and the collection row count
-        '''
+        """
         nb_new = 5
         filter_field = get_filter_field
         vector_field = get_vector_field
@@ -154,7 +166,7 @@ class TestFlushBase:
         fields = {
             "fields": [gen_primary_field(), filter_field, vector_field],
             "segment_row_limit": default_segment_row_limit,
-            "auto_id": False
+            "auto_id": False,
         }
         connect.create_collection(collection_new, fields)
         connect.create_partition(id_collection, default_tag)
@@ -172,10 +184,10 @@ class TestFlushBase:
     # TODO ci failed
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_add_flush_multiable_times(self, connect, collection):
-        '''
+        """
         method: add entities, flush serveral times
         expected: no error raised
-        '''
+        """
         ids = connect.insert(collection, default_entities)
         for i in range(10):
             connect.flush([collection])
@@ -191,17 +203,17 @@ class TestFlushBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_flush_auto(self, connect, id_collection):
-        '''
+        """
         method: add entities
         expected: no error raised
-        '''
+        """
         ids = [i for i in range(default_nb)]
         ids = connect.insert(id_collection, default_entities)
         # add flush
         connect.flush([id_collection])
         timeout = 20
         start_time = time.time()
-        while (time.time() - start_time < timeout):
+        while time.time() - start_time < timeout:
             time.sleep(1)
             res = connect.get_collection_stats(id_collection)
             if res["row_count"] == default_nb:
@@ -211,20 +223,17 @@ class TestFlushBase:
 
     @pytest.fixture(
         scope="function",
-        params=[
-            1,
-            100
-        ],
+        params=[1, 100],
     )
     def same_ids(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_add_flush_same_ids(self, connect, id_collection, same_ids):
-        '''
+        """
         method: add entities, with same ids, count(same ids) < 15, > 15
         expected: the length of ids and the collection row count
-        '''
+        """
         ids = [i for i in range(default_nb)]
         for i, item in enumerate(ids):
             if item <= same_ids:
@@ -236,10 +245,10 @@ class TestFlushBase:
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_delete_flush_multiable_times(self, connect, collection):
-        '''
+        """
         method: delete entities, flush serveral times
         expected: no error raised
-        '''
+        """
         ids = connect.insert(collection, default_entities)
         # status = connect.delete_entity_by_id(collection, [ids[-1]])
         # assert status.OK()
@@ -254,13 +263,13 @@ class TestFlushBase:
         logging.getLogger().debug(res)
         # assert res
 
-    # TODO: unable to set config 
+    # TODO: unable to set config
     @pytest.mark.tags(CaseLabel.L2)
     def _test_collection_count_during_flush(self, connect, collection, args):
-        '''
+        """
         method: flush collection at background, call `get_collection_stats`
         expected: no timeout
-        '''
+        """
         ids = []
         for i in range(5):
             tmp_ids = connect.insert(collection, default_entities)
@@ -286,10 +295,10 @@ class TestFlushBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_flush_during_search(self, connect, collection, args):
-        '''
+        """
         method: search at background, call `delete and flush`
         expected: no timeout
-        '''
+        """
         ids = []
         loops = 5
         for i in range(loops):
@@ -297,7 +306,9 @@ class TestFlushBase:
             connect.flush([collection])
             ids.extend(tmp_ids)
         nq = 10000
-        query, query_vecs = gen_query_vectors(default_float_vec_field_name, default_entities, default_top_k, nq)
+        query, query_vecs = gen_query_vectors(
+            default_float_vec_field_name, default_entities, default_top_k, nq
+        )
         time.sleep(0.1)
         connect.load_collection(collection)
         future = connect.search(collection, query, _async=True)
@@ -326,10 +337,10 @@ class TestFlushAsync:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_empty_collection(self, connect, collection):
-        '''
+        """
         method: flush collection with no vectors
         expected: status ok
-        '''
+        """
         future = connect.flush([collection], _async=True)
         status = future.result()
         assert status is None
@@ -372,13 +383,15 @@ class TestCollectionNameInvalid(object):
     @pytest.fixture(
         scope="function",
         # params=gen_invalid_collection_names()
-        params=gen_invalid_strs()
+        params=gen_invalid_strs(),
     )
     def get_invalid_collection_name(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_flush_with_invalid_collection_name(self, connect, get_invalid_collection_name):
+    def test_flush_with_invalid_collection_name(
+        self, connect, get_invalid_collection_name
+    ):
         collection_name = get_invalid_collection_name
         if collection_name is None or not collection_name:
             pytest.skip("while collection_name is None, then flush all collections")

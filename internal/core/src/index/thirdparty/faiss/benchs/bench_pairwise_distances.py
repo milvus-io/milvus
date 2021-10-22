@@ -10,10 +10,10 @@ distance computations for the additional metrics. Call eg. with L1 to
 get L1 distance computations.
 """
 
-import faiss
-
 import sys
 import time
+
+import faiss
 
 d = 64
 nq = 4096

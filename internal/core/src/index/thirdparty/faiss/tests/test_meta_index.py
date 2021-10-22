@@ -5,13 +5,14 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-# translation of test_meta_index.lua
-
-import numpy as np
-import faiss
 import unittest
 
+import faiss
+import numpy as np
 from common import Randu10k
+
+# translation of test_meta_index.lua
+
 
 ru = Randu10k()
 
@@ -23,7 +24,6 @@ nq, d = xq.shape
 
 
 class IDRemap(unittest.TestCase):
-
     def test_id_remap_idmap(self):
         # reference: index without remapping
 
@@ -53,8 +53,7 @@ class IDRemap(unittest.TestCase):
 
         # reference: index without remapping
 
-        index = faiss.IndexIVFPQ(coarse_quantizer, d,
-                                        ncentroids, 8, 8)
+        index = faiss.IndexIVFPQ(coarse_quantizer, d, ncentroids, 8, 8)
         index.nprobe = 5
         k = 10
         index.train(xt)
@@ -64,8 +63,7 @@ class IDRemap(unittest.TestCase):
         # try a remapping
         ids = np.arange(nb)[::-1].copy()
 
-        index2 = faiss.IndexIVFPQ(coarse_quantizer, d,
-                                        ncentroids, 8, 8)
+        index2 = faiss.IndexIVFPQ(coarse_quantizer, d, ncentroids, 8, 8)
         index2.nprobe = 5
 
         index2.train(xt)
@@ -76,12 +74,11 @@ class IDRemap(unittest.TestCase):
 
 
 class Shards(unittest.TestCase):
-
     def test_shards(self):
         k = 32
         ref_index = faiss.IndexFlatL2(d)
 
-        print('ref search')
+        print("ref search")
         ref_index.add(xb)
         _Dref, Iref = ref_index.search(xq, k)
         print(Iref[:5, :6])
@@ -108,7 +105,7 @@ class Shards(unittest.TestCase):
         for test_no in range(3):
             with_threads = test_no == 1
 
-            print('shard search test_no = %d' % test_no)
+            print("shard search test_no = %d" % test_no)
             if with_threads:
                 remember_nt = faiss.omp_get_max_threads()
                 faiss.omp_set_num_threads(1)
@@ -128,12 +125,11 @@ class Shards(unittest.TestCase):
 
             ndiff = (I != Iref).sum()
 
-            print('%d / %d differences' % (ndiff, nq * k))
-            assert(ndiff < nq * k / 1000.)
+            print("%d / %d differences" % (ndiff, nq * k))
+            assert ndiff < nq * k / 1000.0
 
 
 class Merge(unittest.TestCase):
-
     def make_index_for_merge(self, quant, index_type, master_index):
         ncent = 40
         if index_type == 1:
@@ -164,7 +160,7 @@ class Merge(unittest.TestCase):
         # trains the quantizer
         ref_index.train(xt)
 
-        print('ref search')
+        print("ref search")
         ref_index.add(xb)
         _Dref, Iref = ref_index.search(xq, k)
         print(Iref[:5, :6])
@@ -182,16 +178,17 @@ class Merge(unittest.TestCase):
         index = indexes[0]
 
         for i in range(1, ni):
-            print('merge ntotal=%d other.ntotal=%d ' % (
-                index.ntotal, indexes[i].ntotal))
+            print(
+                "merge ntotal=%d other.ntotal=%d " % (index.ntotal, indexes[i].ntotal)
+            )
             index.merge_from(indexes[i], index.ntotal)
 
         _D, I = index.search(xq, k)
         print(I[:5, :6])
 
         ndiff = (I != Iref).sum()
-        print('%d / %d differences' % (ndiff, nq * k))
-        assert(ndiff < nq * k / 1000.)
+        print("%d / %d differences" % (ndiff, nq * k))
+        assert ndiff < nq * k / 1000.0
 
     def test_merge(self):
         self.do_test_merge(1)
@@ -213,8 +210,7 @@ class Merge(unittest.TestCase):
             id_list = gen.permutation(nb * 7)[:nb]
             index.add_with_ids(xb, id_list)
 
-
-        print('ref search ntotal=%d' % index.ntotal)
+        print("ref search ntotal=%d" % index.ntotal)
         Dref, Iref = index.search(xq, k)
 
         toremove = np.zeros(nq * k, dtype=int)
@@ -227,17 +223,16 @@ class Merge(unittest.TestCase):
                     nr = nr + 1
                     toremove[nr] = Iref[i, j]
 
-        print('nr=', nr)
+        print("nr=", nr)
 
-        idsel = faiss.IDSelectorBatch(
-            nr, faiss.swig_ptr(toremove))
+        idsel = faiss.IDSelectorBatch(nr, faiss.swig_ptr(toremove))
 
         for i in range(nr):
-            assert(idsel.is_member(int(toremove[i])))
+            assert idsel.is_member(int(toremove[i]))
 
         nremoved = index.remove_ids(idsel)
 
-        print('nremoved=%d ntotal=%d' % (nremoved, index.ntotal))
+        print("nremoved=%d ntotal=%d" % (nremoved, index.ntotal))
 
         D, I = index.search(xq, k)
 
@@ -256,9 +251,5 @@ class Merge(unittest.TestCase):
         self.do_test_remove(4)
 
 
-
-
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

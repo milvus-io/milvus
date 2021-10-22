@@ -1,11 +1,13 @@
-import time
-import random
-import pdb
-import threading
 import logging
+import pdb
+import random
+import threading
+import time
 from multiprocessing import Pool, Process
+
 import pytest
 from utils import *
+
 
 class TestMysql:
     """
@@ -13,6 +15,7 @@ class TestMysql:
       The following cases are used to test mysql failure
     ******************************************************************
     """
+
     @pytest.fixture(scope="function", autouse=True)
     def skip_check(self, connect, args):
         if args["service_name"].find("shards") != -1:
@@ -26,7 +29,9 @@ class TestMysql:
         index_param = {"nlist": 1024, "m": 16}
         index_type = IndexType.IVF_PQ
         vectors = gen_vectors(big_nb, default_dim)
-        status, ids = connect.bulk_insert(collection, vectors, ids=[i for i in range(big_nb)])
+        status, ids = connect.bulk_insert(
+            collection, vectors, ids=[i for i in range(big_nb)]
+        )
         status = connect.flush([collection])
         assert status.OK()
         status, res_count = connect.count_entities(collection)

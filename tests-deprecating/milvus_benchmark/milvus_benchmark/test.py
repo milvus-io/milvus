@@ -1,8 +1,10 @@
 import random
-from pymilvus import Milvus, DataType
+
+from pymilvus import DataType, Milvus
 
 dim = 128
 name = "sift_1m_128_l2"
+
 
 def generate_values(data_type, vectors, ids):
     values = None
@@ -22,7 +24,12 @@ def generate_entities(info, vectors, ids=None):
             continue
         field_type = field["type"]
         entities.append(
-            {"name": field["name"], "type": field_type, "values": generate_values(field_type, vectors, ids)})
+            {
+                "name": field["name"],
+                "type": field_type,
+                "values": generate_values(field_type, vectors, ids),
+            }
+        )
     return entities
 
 

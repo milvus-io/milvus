@@ -1,6 +1,6 @@
 from annoy import AnnoyIndex
 
-a = AnnoyIndex(3, 'angular')
+a = AnnoyIndex(3, "angular")
 a.add_item(0, [1, 0, 0])
 a.add_item(1, [0, 1, 0])
 a.add_item(2, [0, 0, 1])

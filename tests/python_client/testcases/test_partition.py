@@ -1,11 +1,12 @@
-import threading
 import logging
+import threading
 import time
 from multiprocessing import Pool, Process
+
 import pytest
-from utils import utils as ut
-from common.constants import default_entities, default_fields
 from common.common_type import CaseLabel
+from common.constants import default_entities, default_fields
+from utils import utils as ut
 
 TIMEOUT = 120
 default_nb = ut.default_nb
@@ -15,9 +16,10 @@ default_tag = ut.default_tag
 class TestCreateBase:
     """
     ******************************************************************
-      The following cases are used to test `create_partition` function 
+      The following cases are used to test `create_partition` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_a(self, connect, collection):
         """
@@ -47,7 +49,9 @@ class TestCreateBase:
                 connect.create_partition(collection, tag_tmp)
 
         for i in range(threads_num):
-            m = ut.get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
+            m = ut.get_milvus(
+                host=args["ip"], port=args["port"], handler=args["handler"]
+            )
             t = threading.Thread(target=create, args=(m, threads_num))
             threads.append(t)
             t.start()
@@ -68,11 +72,21 @@ class TestCreateBase:
         try:
             connect.create_partition(collection, default_tag)
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "create partition failed: partition name = %s already exists" % default_tag
-        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message
+                == "create partition failed: partition name = %s already exists"
+                % default_tag
+            )
+        assert ut.compare_list_elements(
+            connect.list_partitions(collection), [default_tag, "_default"]
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_collection_not_existed(self, connect):
@@ -85,10 +99,18 @@ class TestCreateBase:
         try:
             connect.create_partition(collection_name, default_tag)
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "create partition failed: can't find collection: %s" % collection_name
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message
+                == "create partition failed: can't find collection: %s"
+                % collection_name
+            )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_name_name_none(self, connect, collection):
@@ -113,7 +135,9 @@ class TestCreateBase:
         connect.create_partition(collection, default_tag)
         tag_name = ut.gen_unique_str()
         connect.create_partition(collection, tag_name)
-        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, tag_name, '_default'])
+        assert ut.compare_list_elements(
+            connect.list_partitions(collection), [default_tag, tag_name, "_default"]
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_default(self, connect, id_collection):
@@ -137,7 +161,9 @@ class TestCreateBase:
         """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        result = connect.insert(id_collection, default_entities, partition_name=default_tag)
+        result = connect.insert(
+            id_collection, default_entities, partition_name=default_tag
+        )
         assert len(result.primary_keys) == len(ids)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -154,10 +180,16 @@ class TestCreateBase:
         try:
             connect.insert(collection, default_entities, partition_name=tag_new)
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "partitionID of partitionName:%s can not be find" % tag_new
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message == "partitionID of partitionName:%s can not be find" % tag_new
+            )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_same_tags(self, connect, id_collection):
@@ -168,17 +200,23 @@ class TestCreateBase:
         """
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        result = connect.insert(id_collection, default_entities, partition_name=default_tag)
+        result = connect.insert(
+            id_collection, default_entities, partition_name=default_tag
+        )
         assert len(result.primary_keys) == default_nb
-        ids = [(i+default_nb) for i in range(default_nb)]
-        new_result = connect.insert(id_collection, default_entities, partition_name=default_tag)
+        ids = [(i + default_nb) for i in range(default_nb)]
+        new_result = connect.insert(
+            id_collection, default_entities, partition_name=default_tag
+        )
         assert len(new_result.primary_keys) == default_nb
         connect.flush([id_collection])
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == default_nb * 2
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
+    def test_create_partition_insert_same_tags_two_collections(
+        self, connect, collection
+    ):
         """
         target: test create two partitions, and insert vectors with the same tag to each collection, check status returned
         method: call function: create_partition
@@ -188,9 +226,13 @@ class TestCreateBase:
         collection_new = ut.gen_unique_str()
         connect.create_collection(collection_new, default_fields)
         connect.create_partition(collection_new, default_tag)
-        result = connect.insert(collection, default_entities, partition_name=default_tag)
+        result = connect.insert(
+            collection, default_entities, partition_name=default_tag
+        )
         assert len(result.primary_keys) == default_nb
-        new_result = connect.insert(collection_new, default_entities, partition_name=default_tag)
+        new_result = connect.insert(
+            collection_new, default_entities, partition_name=default_tag
+        )
         assert len(new_result.primary_keys) == default_nb
         connect.flush([collection, collection_new])
         res = connect.get_collection_stats(collection)
@@ -203,9 +245,10 @@ class TestShowBase:
 
     """
     ******************************************************************
-      The following cases are used to test `list_partitions` function 
+      The following cases are used to test `list_partitions` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_list_partitions(self, connect, collection):
         """
@@ -214,7 +257,9 @@ class TestShowBase:
         expected: status ok, partition correct
         """
         connect.create_partition(collection, default_tag)
-        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
+        assert ut.compare_list_elements(
+            connect.list_partitions(collection), [default_tag, "_default"]
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_list_partitions_no_partition(self, connect, collection):
@@ -224,7 +269,7 @@ class TestShowBase:
         expected: status ok, partitions correct
         """
         res = connect.list_partitions(collection)
-        assert ut.compare_list_elements(res, ['_default'])
+        assert ut.compare_list_elements(res, ["_default"])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_show_multi_partitions(self, connect, collection):
@@ -237,7 +282,7 @@ class TestShowBase:
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
         res = connect.list_partitions(collection)
-        assert ut.compare_list_elements(res, [default_tag, tag_new, '_default'])
+        assert ut.compare_list_elements(res, [default_tag, tag_new, "_default"])
 
 
 class TestHasBase:
@@ -247,10 +292,8 @@ class TestHasBase:
       The following cases are used to test `has_partition` function
     ******************************************************************
     """
-    @pytest.fixture(
-        scope="function",
-        params=ut.gen_invalid_strs()
-    )
+
+    @pytest.fixture(scope="function", params=ut.gen_invalid_strs())
     def get_tag_name(self, request):
         yield request.param
 
@@ -301,13 +344,22 @@ class TestHasBase:
         try:
             connect.has_partition(collection_name, default_tag)
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "HasPartition failed: can't find collection: %s" % collection_name
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message
+                == "HasPartition failed: can't find collection: %s" % collection_name
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
+    def test_has_partition_with_invalid_tag_name(
+        self, connect, collection, get_tag_name
+    ):
         """
         target: test has partition, with invalid tag name, check status returned
         method: call function: has_partition
@@ -323,9 +375,10 @@ class TestDropBase:
 
     """
     ******************************************************************
-      The following cases are used to test `drop_partition` function 
+      The following cases are used to test `drop_partition` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_a(self, connect, collection):
         """
@@ -352,10 +405,16 @@ class TestDropBase:
         try:
             connect.drop_partition(collection, new_tag)
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DropPartition failed: partition %s does not exist" % new_tag
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message == "DropPartition failed: partition %s does not exist" % new_tag
+            )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_name_not_existed_A(self, connect, collection):
@@ -369,10 +428,17 @@ class TestDropBase:
         try:
             connect.drop_partition(new_collection, default_tag)
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DropPartition failed: can't find collection: %s" % new_collection
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message
+                == "DropPartition failed: can't find collection: %s" % new_collection
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_repeatedly(self, connect, collection):
@@ -387,10 +453,17 @@ class TestDropBase:
         try:
             connect.drop_partition(collection, default_tag)
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DropPartition failed: partition %s does not exist" % default_tag
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message
+                == "DropPartition failed: partition %s does not exist" % default_tag
+            )
         tag_list = connect.list_partitions(collection)
         assert default_tag not in tag_list
 
@@ -402,31 +475,33 @@ class TestDropBase:
         expected: status not ok, partition in db
         """
         connect.create_partition(collection, default_tag)
-        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
+        assert ut.compare_list_elements(
+            connect.list_partitions(collection), [default_tag, "_default"]
+        )
         connect.drop_partition(collection, default_tag)
-        assert ut.compare_list_elements(connect.list_partitions(collection), ['_default'])
+        assert ut.compare_list_elements(
+            connect.list_partitions(collection), ["_default"]
+        )
         time.sleep(2)
         connect.create_partition(collection, default_tag)
-        assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
+        assert ut.compare_list_elements(
+            connect.list_partitions(collection), [default_tag, "_default"]
+        )
 
 
 class TestNameInvalid(object):
-    @pytest.fixture(
-        scope="function",
-        params=ut.gen_invalid_strs()
-    )
+    @pytest.fixture(scope="function", params=ut.gen_invalid_strs())
     def get_tag_name(self, request):
         yield request.param
 
-    @pytest.fixture(
-        scope="function",
-        params=ut.gen_invalid_strs()
-    )
+    @pytest.fixture(scope="function", params=ut.gen_invalid_strs())
     def get_collection_name(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_partition_with_invalid_collection_name(self, connect, collection, get_collection_name):
+    def test_drop_partition_with_invalid_collection_name(
+        self, connect, collection, get_collection_name
+    ):
         """
         target: test drop partition, with invalid collection name, check status returned
         method: call function: drop_partition
@@ -438,7 +513,9 @@ class TestNameInvalid(object):
             connect.drop_partition(collection_name, default_tag)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
+    def test_drop_partition_with_invalid_tag_name(
+        self, connect, collection, get_tag_name
+    ):
         """
         target: test drop partition, with invalid tag name, check status returned
         method: call function: drop_partition
@@ -450,7 +527,9 @@ class TestNameInvalid(object):
             connect.drop_partition(collection, tag_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_list_partitions_with_invalid_collection_name(self, connect, collection, get_collection_name):
+    def test_list_partitions_with_invalid_collection_name(
+        self, connect, collection, get_collection_name
+    ):
         """
         target: test show partitions, with invalid collection name, check status returned
         method: call function: list_partitions
@@ -463,7 +542,6 @@ class TestNameInvalid(object):
 
 
 class TestNewCase(object):
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_default_partition_A(self, connect, collection):
         """
@@ -472,14 +550,20 @@ class TestNewCase(object):
         expected: status not ok
         """
         try:
-            connect.drop_partition(collection, partition_name='_default')
+            connect.drop_partition(collection, partition_name="_default")
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DropPartition failed: default partition cannot be deleted"
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message == "DropPartition failed: default partition cannot be deleted"
+            )
         list_partition = connect.list_partitions(collection)
-        assert '_default' in list_partition
+        assert "_default" in list_partition
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_default_partition_B(self, connect, collection):
@@ -490,11 +574,17 @@ class TestNewCase(object):
         """
         connect.create_partition(collection, default_tag)
         try:
-            connect.drop_partition(collection, partition_name='_default')
+            connect.drop_partition(collection, partition_name="_default")
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DropPartition failed: default partition cannot be deleted"
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message == "DropPartition failed: default partition cannot be deleted"
+            )
         list_partition = connect.list_partitions(collection)
-        assert '_default' in list_partition
+        assert "_default" in list_partition

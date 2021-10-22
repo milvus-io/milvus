@@ -1,15 +1,15 @@
 import pytest
-from utils.utils import *
-from common.constants import default_entities
 from common.common_type import CaseLabel
+from common.constants import default_entities
+from utils.utils import *
 
 DELETE_TIMEOUT = 60
 default_single_query = {
-            "data": gen_vectors(1, default_dim),
-            "anns_field": default_float_vec_field_name,
-            "param": {"metric_type": "L2", "params": {"nprobe": 10}},
-            "limit": 10,
-        }
+    "data": gen_vectors(1, default_dim),
+    "anns_field": default_float_vec_field_name,
+    "param": {"metric_type": "L2", "params": {"nprobe": 10}},
+    "limit": 10,
+}
 
 
 class TestFlushBase:
@@ -19,27 +19,18 @@ class TestFlushBase:
     ******************************************************************
     """
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
+    @pytest.fixture(scope="function", params=gen_simple_index())
     def get_simple_index(self, request, connect):
         # if str(connect._cmd("mode")[1]) == "GPU":
         #     if request.param["index_type"] not in ivf():
         #         pytest.skip("Only support index_type: idmap/flat")
         return request.param
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_filter_fields()
-    )
+    @pytest.fixture(scope="function", params=gen_single_filter_fields())
     def get_filter_field(self, request):
         yield request.param
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_vector_fields()
-    )
+    @pytest.fixture(scope="function", params=gen_single_vector_fields())
     def get_vector_field(self, request):
         yield request.param
 
@@ -54,10 +45,18 @@ class TestFlushBase:
         try:
             connect.flush([collection_new])
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_new
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message
+                == "describe collection failed: can't find collection: %s"
+                % collection_new
+            )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_flush_empty_collection(self, connect, collection):
@@ -88,7 +87,9 @@ class TestFlushBase:
         connect.flush([id_collection])
         res_count = connect.get_collection_stats(id_collection)
         assert res_count["row_count"] == default_nb
-        result = connect.insert(id_collection, default_entities, partition_name=default_tag)
+        result = connect.insert(
+            id_collection, default_entities, partition_name=default_tag
+        )
         assert len(result.primary_keys) == default_nb
         connect.flush([id_collection])
         res_count = connect.get_collection_stats(id_collection)
@@ -135,7 +136,9 @@ class TestFlushBase:
         assert res["row_count"] == default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_add_collections_fields_flush(self, connect, id_collection, get_filter_field, get_vector_field):
+    def test_add_collections_fields_flush(
+        self, connect, id_collection, get_filter_field, get_vector_field
+    ):
         """
         method: create collection with different fields, and add entities into collections, flush one
         expected: the length of ids and the collection row count
@@ -147,7 +150,7 @@ class TestFlushBase:
         fields = {
             "fields": [gen_primary_field(), filter_field, vector_field],
             "segment_row_limit": default_segment_row_limit,
-            "auto_id": False
+            "auto_id": False,
         }
         connect.create_collection(collection_new, fields)
         connect.create_partition(id_collection, default_tag)
@@ -193,7 +196,7 @@ class TestFlushBase:
         connect.flush([id_collection])
         timeout = 20
         start_time = time.time()
-        while (time.time() - start_time < timeout):
+        while time.time() - start_time < timeout:
             time.sleep(1)
             res = connect.get_collection_stats(id_collection)
             if res["row_count"] == default_nb:
@@ -203,10 +206,7 @@ class TestFlushBase:
 
     @pytest.fixture(
         scope="function",
-        params=[
-            1,
-            100
-        ],
+        params=[1, 100],
     )
     def same_ids(self, request):
         yield request.param
@@ -289,7 +289,9 @@ class TestFlushBase:
             connect.flush([collection])
             ids.extend(tmp.primary_keys)
         nq = 10000
-        query, _ = gen_search_vectors_params(default_float_vec_field_name, default_entities, default_top_k, nq)
+        query, _ = gen_search_vectors_params(
+            default_float_vec_field_name, default_entities, default_top_k, nq
+        )
         time.sleep(0.1)
         connect.load_collection(collection)
         future = connect.search(collection, **query, _async=True)
@@ -375,15 +377,14 @@ class TestCollectionNameInvalid(object):
     Test adding vectors with invalid collection names
     """
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
+    @pytest.fixture(scope="function", params=gen_invalid_strs())
     def get_invalid_collection_name(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_flush_with_invalid_collection_name(self, connect, get_invalid_collection_name):
+    def test_flush_with_invalid_collection_name(
+        self, connect, get_invalid_collection_name
+    ):
         """
         target: test flush when collection is invalid
         method: flush collection with invalid name
@@ -408,4 +409,3 @@ class TestCollectionNameInvalid(object):
             connect.flush()
         except Exception as e:
             assert e.args[0] == "Collection name list can not be None or empty"
-

@@ -1,6 +1,7 @@
 import logging
-from .helm import HelmEnv
+
 from .docker import DockerEnv
+from .helm import HelmEnv
 from .local import LocalEnv
 
 logger = logging.getLogger("milvus_benchmark.env")

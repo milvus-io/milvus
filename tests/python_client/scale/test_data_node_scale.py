@@ -1,22 +1,24 @@
 import pytest
-
 from base.collection_wrapper import ApiCollectionWrapper
-from common.common_type import CaseLabel
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
+from common.common_type import CaseLabel
+from pymilvus import connections, utility
 from scale import constants
 from scale.helm_env import HelmEnv
-from pymilvus import connections, utility
+from utils.util_log import test_log as log
 
 prefix = "data_scale"
 default_schema = cf.gen_default_collection_schema()
 default_search_exp = "int64 >= 0"
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_index_params = {
+    "index_type": "IVF_SQ8",
+    "metric_type": "L2",
+    "params": {"nlist": 64},
+}
 
 
 class TestDataNodeScale:
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_expand_data_node(self):
         """
@@ -33,11 +35,13 @@ class TestDataNodeScale:
 
         # connect
         connections.add_connection(default={"host": host, "port": 19530})
-        connections.connect(alias='default')
+        connections.connect(alias="default")
         # create
         c_name = cf.gen_unique_str(prefix)
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
+        collection_w.init_collection(
+            name=c_name, schema=cf.gen_default_collection_schema()
+        )
         # # insert
         data = cf.gen_default_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data)
@@ -50,14 +54,16 @@ class TestDataNodeScale:
         # assert new operations
         new_cname = cf.gen_unique_str(prefix)
         new_collection_w = ApiCollectionWrapper()
-        new_collection_w.init_collection(name=new_cname, schema=cf.gen_default_collection_schema())
+        new_collection_w.init_collection(
+            name=new_cname, schema=cf.gen_default_collection_schema()
+        )
         new_mutation_res, _ = new_collection_w.insert(data)
         assert new_mutation_res.insert_count == ct.default_nb
         assert new_collection_w.num_entities == ct.default_nb
         # assert old collection ddl
         mutation_res_2, _ = collection_w.insert(data)
         assert mutation_res.insert_count == ct.default_nb
-        assert collection_w.num_entities == ct.default_nb*2
+        assert collection_w.num_entities == ct.default_nb * 2
 
         collection_w.drop()
         new_collection_w.drop()
@@ -72,23 +78,29 @@ class TestDataNodeScale:
         """
         release_name = "scale-data"
         env = HelmEnv(release_name=release_name, dataNode=2)
-        host = env.helm_install_cluster_milvus(image_pull_policy=constants.IF_NOT_PRESENT)
+        host = env.helm_install_cluster_milvus(
+            image_pull_policy=constants.IF_NOT_PRESENT
+        )
 
         # connect
         connections.add_connection(default={"host": host, "port": 19530})
-        connections.connect(alias='default')
+        connections.connect(alias="default")
 
         c_name = "data_scale_one"
         data = cf.gen_default_list_data(ct.default_nb)
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
+        collection_w.init_collection(
+            name=c_name, schema=cf.gen_default_collection_schema()
+        )
         mutation_res, _ = collection_w.insert(data)
         assert mutation_res.insert_count == ct.default_nb
         assert collection_w.num_entities == ct.default_nb
 
         c_name_2 = "data_scale_two"
         collection_w2 = ApiCollectionWrapper()
-        collection_w2.init_collection(name=c_name_2, schema=cf.gen_default_collection_schema())
+        collection_w2.init_collection(
+            name=c_name_2, schema=cf.gen_default_collection_schema()
+        )
         mutation_res2, _ = collection_w2.insert(data)
         assert mutation_res2.insert_count == ct.default_nb
         assert collection_w2.num_entities == ct.default_nb
@@ -97,7 +109,7 @@ class TestDataNodeScale:
 
         assert collection_w.num_entities == ct.default_nb
         mutation_res2, _ = collection_w2.insert(data)
-        assert collection_w2.num_entities == ct.default_nb*2
+        assert collection_w2.num_entities == ct.default_nb * 2
         collection_w.drop()
         collection_w2.drop()
 

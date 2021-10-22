@@ -63,11 +63,11 @@ def run_parallel(cmds, **kwargs):
     return complete
 
 
-_source_extensions = '''
+_source_extensions = """
 .h
 .cc
 .cpp
-'''.split()
+""".split()
 
 
 def get_sources(source_dir, exclude_globs=None):
@@ -75,8 +75,7 @@ def get_sources(source_dir, exclude_globs=None):
         exclude_globs = []
     sources = []
     for directory, subdirs, basenames in os.walk(source_dir):
-        for path in [os.path.join(directory, basename)
-                     for basename in basenames]:
+        for path in [os.path.join(directory, basename) for basename in basenames]:
             # filter out non-source files
             if os.path.splitext(path)[1] not in _source_extensions:
                 continue
@@ -100,13 +99,12 @@ def stdout_pathcolonline(completed_process, filenames):
     returncode, stdout, stderr = completed_process
     bfilenames = set()
     for filename in filenames:
-        bfilenames.add(filename.encode('utf-8') + b':')
+        bfilenames.add(filename.encode("utf-8") + b":")
     problem_files = set()
     for line in stdout.splitlines():
         for filename in bfilenames:
             if line.startswith(filename):
-                problem_files.add(filename.decode('utf-8'))
+                problem_files.add(filename.decode("utf-8"))
                 bfilenames.remove(filename)
                 break
     return problem_files, stdout
-

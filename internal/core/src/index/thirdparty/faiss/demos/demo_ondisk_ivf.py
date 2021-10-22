@@ -6,9 +6,9 @@
 #!/usr/bin/env python2
 
 import sys
-import numpy as np
-import faiss
 
+import faiss
+import numpy as np
 
 #################################################################
 # Small I/O functions
@@ -16,13 +16,13 @@ import faiss
 
 
 def ivecs_read(fname):
-    a = np.fromfile(fname, dtype='int32')
+    a = np.fromfile(fname, dtype="int32")
     d = a[0]
     return a.reshape(-1, d + 1)[:, 1:].copy()
 
 
 def fvecs_read(fname):
-    return ivecs_read(fname).view('float32')
+    return ivecs_read(fname).view("float32")
 
 
 #################################################################
@@ -31,7 +31,7 @@ def fvecs_read(fname):
 
 stage = int(sys.argv[1])
 
-tmpdir = '/tmp/'
+tmpdir = "/tmp/"
 
 if stage == 0:
     # train the index
@@ -64,8 +64,7 @@ if stage == 5:
         # the total size of the inverted lists can exceed the
         # available RAM
         print("read " + tmpdir + "block_%d.index" % bno)
-        index = faiss.read_index(tmpdir + "block_%d.index" % bno,
-                                 faiss.IO_FLAG_MMAP)
+        index = faiss.read_index(tmpdir + "block_%d.index" % bno, faiss.IO_FLAG_MMAP)
         ivfs.append(index.invlists)
 
         # avoid that the invlists get deallocated with the index
@@ -77,8 +76,8 @@ if stage == 5:
     # prepare the output inverted lists. They will be written
     # to merged_index.ivfdata
     invlists = faiss.OnDiskInvertedLists(
-        index.nlist, index.code_size,
-        tmpdir + "merged_index.ivfdata")
+        index.nlist, index.code_size, tmpdir + "merged_index.ivfdata"
+    )
 
     # merge all the inverted lists
     ivf_vector = faiss.InvertedListsPtrVector()

@@ -1,32 +1,23 @@
-import pytest
 import logging
 import time
-from utils import *
+
+import pytest
 from constants import *
+from utils import *
 
 uid = "describe_collection"
 
 
 class TestDescribeCollection:
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_filter_fields()
-    )
+    @pytest.fixture(scope="function", params=gen_single_filter_fields())
     def get_filter_field(self, request):
         yield request.param
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_vector_fields()
-    )
+    @pytest.fixture(scope="function", params=gen_single_vector_fields())
     def get_vector_field(self, request):
         yield request.param
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
+    @pytest.fixture(scope="function", params=gen_simple_index())
     def get_simple_index(self, request, connect):
         logging.getLogger().info(request.param)
         # if str(connect._cmd("mode")) == "CPU":
@@ -39,13 +30,14 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, no data in collection
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_collection_fields(self, connect, get_filter_field, get_vector_field):
-        '''
+        """
         target: test create normal collection with different fields, check info returned
         method: create collection with diff fields: metric/field_type/..., calling `describe_collection`
         expected: no exception raised, and value returned correct
-        '''
+        """
         filter_field = get_filter_field
         vector_field = get_vector_field
         collection_name = gen_unique_str(uid)
@@ -65,7 +57,9 @@ class TestDescribeCollection:
                 assert field["params"] == vector_field["params"]
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    def test_describe_collection_after_index_created(self, connect, collection, get_simple_index):
+    def test_describe_collection_after_index_created(
+        self, connect, collection, get_simple_index
+    ):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
             index = connect.describe_index(collection, "")
@@ -75,22 +69,22 @@ class TestDescribeCollection:
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_without_connection(self, collection, dis_connect):
-        '''
+        """
         target: test get collection info, without connection
         method: calling get collection info with correct params, with a disconnected instance
         expected: get collection info raise exception
-        '''
+        """
         with pytest.raises(Exception) as e:
             dis_connect.describe_collection(collection)
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_describe_collection_not_existed(self, connect):
-        '''
+        """
         target: test if collection not created
         method: random a collection name, create this collection then drop it,
             assert the value returned by describe_collection method
         expected: False
-        '''
+        """
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         connect.describe_collection(collection_name)
@@ -98,18 +92,26 @@ class TestDescribeCollection:
         try:
             connect.describe_collection(collection_name)
         except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            code = getattr(
+                e, "code", "The exception does not contain the field of code."
+            )
             assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_name
+            message = getattr(
+                e, "message", "The exception does not contain the field of message."
+            )
+            assert (
+                message
+                == "describe collection failed: can't find collection: %s"
+                % collection_name
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_multithread(self, connect):
-        '''
+        """
         target: test create collection with multithread
         method: create collection using multithread,
         expected: collections are created
-        '''
+        """
         threads_num = 4
         threads = []
         collection_name = gen_unique_str(uid)
@@ -131,13 +133,16 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, and insert data in collection
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    def test_describe_collection_fields_after_insert(self, connect, get_filter_field, get_vector_field):
-        '''
+    def test_describe_collection_fields_after_insert(
+        self, connect, get_filter_field, get_vector_field
+    ):
+        """
         target: test create normal collection with different fields, check info returned
         method: create collection with diff fields: metric/field_type/..., calling `describe_collection`
         expected: no exception raised, and value returned correct
-        '''
+        """
         filter_field = get_filter_field
         vector_field = get_vector_field
         collection_name = gen_unique_str(uid)
@@ -146,7 +151,9 @@ class TestDescribeCollection:
             # "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
-        entities = gen_entities_by_fields(fields["fields"], default_nb, vector_field["params"]["dim"])
+        entities = gen_entities_by_fields(
+            fields["fields"], default_nb, vector_field["params"]["dim"]
+        )
         res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.describe_collection(collection_name)
@@ -164,21 +171,23 @@ class TestDescribeCollectionInvalid(object):
     """
     Test describe collection with invalid params
     """
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
+
+    @pytest.fixture(scope="function", params=gen_invalid_strs())
     def get_collection_name(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_describe_collection_with_invalid_collection_name(self, connect, get_collection_name):
+    def test_describe_collection_with_invalid_collection_name(
+        self, connect, get_collection_name
+    ):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("collection_name", ('', None))
-    def test_describe_collection_with_empty_or_None_collection_name(self, connect, collection_name):
+    @pytest.mark.parametrize("collection_name", ("", None))
+    def test_describe_collection_with_empty_or_None_collection_name(
+        self, connect, collection_name
+    ):
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)

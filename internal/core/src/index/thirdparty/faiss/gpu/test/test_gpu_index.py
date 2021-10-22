@@ -7,12 +7,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import time
 import unittest
-import numpy as np
+
 import faiss
+import numpy as np
 
 
 class EvalIVFPQAccuracy(unittest.TestCase):
-
     def get_dataset(self, small_one=False):
         if not small_one:
             d = 128
@@ -31,16 +31,15 @@ class EvalIVFPQAccuracy(unittest.TestCase):
         d1 = 16
         q, r = np.linalg.qr(np.random.randn(d, d))
         qc = q[:d1, :]
+
         def make_mat(n):
-            return np.dot(
-                np.random.random(size=(nb, d1)), qc).astype('float32')
+            return np.dot(np.random.random(size=(nb, d1)), qc).astype("float32")
 
         return (make_mat(nt), make_mat(nb), make_mat(nq))
 
-
     def test_mm(self):
         # trouble with MKL+fbmake that appears only at runtime. Check it here
-        x = np.random.random(size=(100, 20)).astype('float32')
+        x = np.random.random(size=(100, 20)).astype("float32")
         mat = faiss.PCAMatrix(20, 10)
         mat.train(x)
         mat.apply_py(x)
@@ -77,7 +76,7 @@ class EvalIVFPQAccuracy(unittest.TestCase):
 
         D, Inew = gpu_index.search(xq, 10)
         ts.append(time.time())
-        print('times:', [t - ts[0] for t in ts])
+        print("times:", [t - ts[0] for t in ts])
 
         self.assertGreaterEqual((Iref == Inew).sum(), Iref.size)
 
@@ -93,8 +92,7 @@ class EvalIVFPQAccuracy(unittest.TestCase):
 
             gpu_index = faiss.index_cpu_to_gpu_multiple_py(res, index, co)
 
-            faiss.GpuParameterSpace().set_index_parameter(
-                gpu_index, 'nprobe', 4)
+            faiss.GpuParameterSpace().set_index_parameter(gpu_index, "nprobe", 4)
 
             D, Inew = gpu_index.search(xq, 10)
 
@@ -103,10 +101,10 @@ class EvalIVFPQAccuracy(unittest.TestCase):
             self.assertGreaterEqual((Iref == Inew).sum(), Iref.size * 0.99)
 
     def test_cpu_to_gpu_IVFPQ(self):
-        self.do_cpu_to_gpu('IVF128,PQ4')
+        self.do_cpu_to_gpu("IVF128,PQ4")
 
     def test_cpu_to_gpu_IVFFlat(self):
-        self.do_cpu_to_gpu('IVF128,Flat')
+        self.do_cpu_to_gpu("IVF128,Flat")
 
     def test_set_gpu_param(self):
         index = faiss.index_factory(12, "PCAR8,IVF10,PQ4")
@@ -118,12 +116,12 @@ class EvalIVFPQAccuracy(unittest.TestCase):
 class ReferencedObject(unittest.TestCase):
 
     d = 16
-    xb = np.random.rand(256, d).astype('float32')
+    xb = np.random.rand(256, d).astype("float32")
     nlist = 128
 
     d_bin = 256
-    xb_bin = np.random.randint(256, size=(10000, d_bin // 8)).astype('uint8')
-    xq_bin = np.random.randint(256, size=(1000, d_bin // 8)).astype('uint8')
+    xb_bin = np.random.randint(256, size=(10000, d_bin // 8)).astype("uint8")
+    xq_bin = np.random.randint(256, size=(1000, d_bin // 8)).astype("uint8")
 
     def test_proxy(self):
         index = faiss.IndexReplicas()
@@ -136,32 +134,33 @@ class ReferencedObject(unittest.TestCase):
 
     def test_resources(self):
         # this used to crash!
-        index = faiss.index_cpu_to_gpu(faiss.StandardGpuResources(), 0,
-                                       faiss.IndexFlatL2(self.d))
+        index = faiss.index_cpu_to_gpu(
+            faiss.StandardGpuResources(), 0, faiss.IndexFlatL2(self.d)
+        )
         index.add(self.xb)
 
     def test_flat(self):
-        index = faiss.GpuIndexFlat(faiss.StandardGpuResources(),
-                                   self.d, faiss.METRIC_L2)
+        index = faiss.GpuIndexFlat(
+            faiss.StandardGpuResources(), self.d, faiss.METRIC_L2
+        )
         index.add(self.xb)
 
     def test_ivfflat(self):
         index = faiss.GpuIndexIVFFlat(
-            faiss.StandardGpuResources(),
-            self.d, self.nlist, faiss.METRIC_L2)
+            faiss.StandardGpuResources(), self.d, self.nlist, faiss.METRIC_L2
+        )
         index.train(self.xb)
 
     def test_ivfpq(self):
         index_cpu = faiss.IndexIVFPQ(
-            faiss.IndexFlatL2(self.d),
-            self.d, self.nlist, 2, 8)
+            faiss.IndexFlatL2(self.d), self.d, self.nlist, 2, 8
+        )
         # speed up test
         index_cpu.pq.cp.niter = 2
         index_cpu.do_polysemous_training = False
         index_cpu.train(self.xb)
 
-        index = faiss.GpuIndexIVFPQ(
-            faiss.StandardGpuResources(), index_cpu)
+        index = faiss.GpuIndexIVFPQ(faiss.StandardGpuResources(), index_cpu)
         index.add(self.xb)
 
     def test_binary_flat(self):
@@ -171,8 +170,7 @@ class ReferencedObject(unittest.TestCase):
         index_ref.add(self.xb_bin)
         D_ref, I_ref = index_ref.search(self.xq_bin, k)
 
-        index = faiss.GpuIndexBinaryFlat(faiss.StandardGpuResources(),
-                                         self.d_bin)
+        index = faiss.GpuIndexBinaryFlat(faiss.StandardGpuResources(), self.d_bin)
         index.add(self.xb_bin)
         D, I = index.search(self.xq_bin, k)
 
@@ -192,14 +190,14 @@ class ReferencedObject(unittest.TestCase):
 
     def test_stress(self):
         # a mixture of the above, from issue #631
-        target = np.random.rand(50, 16).astype('float32')
+        target = np.random.rand(50, 16).astype("float32")
 
         index = faiss.IndexReplicas()
         size, dim = target.shape
         num_gpu = 4
         for _i in range(num_gpu):
             config = faiss.GpuIndexFlatConfig()
-            config.device = 0   # simulate on a single GPU
+            config.device = 0  # simulate on a single GPU
             sub_index = faiss.GpuIndexFlatIP(faiss.StandardGpuResources(), dim, config)
             index.addIndex(sub_index)
 
@@ -208,17 +206,15 @@ class ReferencedObject(unittest.TestCase):
         index.add_with_ids(target, ids)
 
 
-
 class TestShardedFlat(unittest.TestCase):
-
     def test_sharded(self):
         d = 32
         nb = 1000
         nq = 200
         k = 10
         rs = np.random.RandomState(123)
-        xb = rs.rand(nb, d).astype('float32')
-        xq = rs.rand(nq, d).astype('float32')
+        xb = rs.rand(nb, d).astype("float32")
+        xq = rs.rand(nq, d).astype("float32")
 
         index_cpu = faiss.IndexFlatL2(d)
 
@@ -251,13 +247,12 @@ class TestShardedFlat(unittest.TestCase):
 
 
 class TestGPUKmeans(unittest.TestCase):
-
     def test_kmeans(self):
         d = 32
         nb = 1000
         k = 10
         rs = np.random.RandomState(123)
-        xb = rs.rand(nb, d).astype('float32')
+        xb = rs.rand(nb, d).astype("float32")
 
         km1 = faiss.Kmeans(d, k)
         obj1 = km1.train(xb)
@@ -270,7 +265,6 @@ class TestGPUKmeans(unittest.TestCase):
 
 
 class TestAlternativeDistances(unittest.TestCase):
-
     def do_test(self, metric, metric_arg=0):
         res = faiss.StandardGpuResources()
         d = 32
@@ -278,8 +272,8 @@ class TestAlternativeDistances(unittest.TestCase):
         nq = 100
 
         rs = np.random.RandomState(123)
-        xb = rs.rand(nb, d).astype('float32')
-        xq = rs.rand(nq, d).astype('float32')
+        xb = rs.rand(nb, d).astype("float32")
+        xq = rs.rand(nq, d).astype("float32")
 
         index_ref = faiss.IndexFlat(d, metric)
         index_ref.metric_arg = metric_arg
@@ -310,5 +304,5 @@ class TestAlternativeDistances(unittest.TestCase):
         self.do_test(faiss.METRIC_Lp, 0.7)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

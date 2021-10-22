@@ -1,4 +1,5 @@
 from enum import Enum
+
 from pymilvus import ExceptionsMessage
 
 
@@ -7,8 +8,7 @@ class ErrorCode(Enum):
     Error = 1
 
 
-ErrorMessage = {ErrorCode.ErrorOk: "",
-                ErrorCode.Error: "is illegal"}
+ErrorMessage = {ErrorCode.ErrorOk: "", ErrorCode.Error: "is illegal"}
 
 
 class ErrorMap:

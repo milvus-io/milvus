@@ -1,21 +1,20 @@
+import argparse
+import logging
 import os
 import sys
 import time
-import argparse
-import logging
 import traceback
-from yaml import full_load, dump
-from milvus_benchmark.metrics.models.server import Server
-from milvus_benchmark.metrics.models.hardware import Hardware
-from milvus_benchmark.metrics.models.env import Env
 
-from milvus_benchmark.env import get_env
-from milvus_benchmark.runners import get_runner
-from milvus_benchmark.metrics import api
-from milvus_benchmark import config, utils
-from milvus_benchmark import parser
 # from scheduler import back_scheduler
 from logs import log
+from milvus_benchmark import config, parser, utils
+from milvus_benchmark.env import get_env
+from milvus_benchmark.metrics import api
+from milvus_benchmark.metrics.models.env import Env
+from milvus_benchmark.metrics.models.hardware import Hardware
+from milvus_benchmark.metrics.models.server import Server
+from milvus_benchmark.runners import get_runner
+from yaml import dump, full_load
 
 log.setup_logging()
 logger = logging.getLogger("milvus_benchmark.main")
@@ -33,7 +32,7 @@ def positive_int(s):
 
 
 def get_image_tag(image_version):
-    """ Set the image version to the latest version """
+    """Set the image version to the latest version"""
     return "%s-latest" % str(image_version)
 
 
@@ -50,12 +49,18 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
         # Initialize the class of the reported metric
         metric = api.Metric()
         deploy_mode = env_params["deploy_mode"]
-        deploy_opology = env_params["deploy_opology"] if "deploy_opology" in env_params else None
+        deploy_opology = (
+            env_params["deploy_opology"] if "deploy_opology" in env_params else None
+        )
         env = get_env(env_mode, deploy_mode)
         metric.set_run_id()
         metric.set_mode(env_mode)
         metric.env = Env()
-        metric.server = Server(version=config.SERVER_VERSION, mode=deploy_mode, deploy_opology=deploy_opology)
+        metric.server = Server(
+            version=config.SERVER_VERSION,
+            mode=deploy_mode,
+            deploy_opology=deploy_opology,
+        )
         logger.info(env_params)
         if env_mode == "local":
             metric.hardware = Hardware("")
@@ -65,12 +70,18 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
         elif env_mode == "helm":
             helm_params = env_params["helm_params"]
             helm_path = env_params["helm_path"]
-            server_name = helm_params["server_name"] if "server_name" in helm_params else None
-            server_tag = helm_params["server_tag"] if "server_tag" in helm_params else None
+            server_name = (
+                helm_params["server_name"] if "server_name" in helm_params else None
+            )
+            server_tag = (
+                helm_params["server_tag"] if "server_tag" in helm_params else None
+            )
             if not server_name and not server_tag:
                 metric.hardware = Hardware("")
             else:
-                metric.hardware = Hardware(server_name) if server_name else Hardware(server_tag)
+                metric.hardware = (
+                    Hardware(server_name) if server_name else Hardware(server_tag)
+                )
             start_status = env.start_up(helm_path, helm_params)
         if start_status:
             metric.update_status(status="DEPLOYE_SUCC")
@@ -130,46 +141,41 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
 def main():
     # Parse the incoming parameters and run the corresponding test cases
     arg_parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     # helm mode with scheduler
-    arg_parser.add_argument(
-        "--image-version",
-        default="",
-        help="image version")
+    arg_parser.add_argument("--image-version", default="", help="image version")
     arg_parser.add_argument(
         "--schedule-conf",
-        metavar='FILE',
-        default='',
-        help="load test schedule from FILE")
+        metavar="FILE",
+        default="",
+        help="load test schedule from FILE",
+    )
 
     # local mode
     # Use the deployed milvus server, and pass host and port
     arg_parser.add_argument(
-        '--local',
-        action='store_true',
-        help='use local milvus server')
+        "--local", action="store_true", help="use local milvus server"
+    )
     arg_parser.add_argument(
-        '--host',
-        help='server host ip param for local mode',
-        default='127.0.0.1')
+        "--host", help="server host ip param for local mode", default="127.0.0.1"
+    )
     arg_parser.add_argument(
-        '--port',
-        help='server port param for local mode',
-        default='19530')
+        "--port", help="server port param for local mode", default="19530"
+    )
 
     # Client configuration file
     arg_parser.add_argument(
-        '--suite',
-        metavar='FILE',
-        help='load test suite from FILE',
-        default='')
+        "--suite", metavar="FILE", help="load test suite from FILE", default=""
+    )
 
     # Milvus deploy config file
     arg_parser.add_argument(
-        '--server-config',
-        metavar='FILE',
-        help='load server config from FILE',
-        default='')
+        "--server-config",
+        metavar="FILE",
+        help="load server config from FILE",
+        default="",
+    )
 
     args = arg_parser.parse_args()
 
@@ -187,7 +193,11 @@ def main():
         for item in schedule_config:
             server_host = item["server"] if "server" in item else ""
             server_tag = item["server_tag"] if "server_tag" in item else ""
-            deploy_mode = item["deploy_mode"] if "deploy_mode" in item else config.DEFAULT_DEPLOY_MODE
+            deploy_mode = (
+                item["deploy_mode"]
+                if "deploy_mode" in item
+                else config.DEFAULT_DEPLOY_MODE
+            )
             suite_params = item["suite_params"]
             for suite_param in suite_params:
                 suite_file = "suites/" + suite_param["suite"]
@@ -211,12 +221,12 @@ def main():
                         "server_config": server_config,
                         "milvus_config": milvus_config,
                         "image_tag": image_tag,
-                        "image_type": image_type
+                        "image_type": image_type,
                     }
                     env_params = {
                         "deploy_mode": deploy_mode,
                         "helm_path": helm_path,
-                        "helm_params": helm_params
+                        "helm_params": helm_params,
                     }
                     # job = back_scheduler.add_job(run_suite, args=[run_type, suite, env_mode, env_params],
                     #                              misfire_grace_time=36000)
@@ -239,7 +249,7 @@ def main():
             "port": args.port,
             "deploy_mode": deploy_mode,
             "server_tag": server_tag,
-            "deploy_opology": deploy_params_dict
+            "deploy_opology": deploy_params_dict,
         }
         suite_file = args.suite
         with open(suite_file) as f:

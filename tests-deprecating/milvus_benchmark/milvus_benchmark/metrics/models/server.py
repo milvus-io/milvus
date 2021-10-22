@@ -1,5 +1,5 @@
-import json
 import hashlib
+import json
 
 
 class Server:
@@ -14,8 +14,8 @@ class Server:
     """
 
     def __init__(self, version=None, mode=None, build_commit=None, deploy_opology=None):
-        self._version = '0.1'
-        self._type = 'server'
+        self._version = "0.1"
+        self._type = "server"
         self.version = version
         self.mode = mode
         self.build_commit = build_commit
@@ -24,4 +24,4 @@ class Server:
 
     def json_md5(self):
         json_str = json.dumps(vars(self), sort_keys=True)
-        return hashlib.md5(json_str.encode('utf-8')).hexdigest()
+        return hashlib.md5(json_str.encode("utf-8")).hexdigest()

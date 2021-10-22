@@ -5,11 +5,11 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import faiss
 import unittest
+
+import faiss
 
 
 class TestOpenMP(unittest.TestCase):
-
     def test_openmp(self):
         assert faiss.check_openmp()

@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-import time
 import logging
-import string
 import random
-from yaml.representer import SafeRepresenter
-# from yaml import full_load, dump
-import yaml
-import tableprint as tp
+import string
+import time
+
 # from pprint import pprint
 import config
+import tableprint as tp
+
+# from yaml import full_load, dump
+import yaml
+from yaml.representer import SafeRepresenter
 
 logger = logging.getLogger("milvus_benchmark.utils")
 
 
 def timestr_to_int(time_str):
-    """ Parse the test time set in the yaml configuration file and convert it to int type """
+    """Parse the test time set in the yaml configuration file and convert it to int type"""
     # time_int = 0
     if isinstance(time_str, int) or time_str.isdigit():
         time_int = int(time_str)
@@ -29,7 +31,8 @@ def timestr_to_int(time_str):
     return time_int
 
 
-class literal_str(str): pass
+class literal_str(str):
+    pass
 
 
 def change_style(style, representer):
@@ -45,7 +48,7 @@ def change_style(style, representer):
 
 # represent_str does handle some corner cases, so use that
 # instead of calling represent_scalar directly
-represent_literal_str = change_style('|', SafeRepresenter.represent_str)
+represent_literal_str = change_style("|", SafeRepresenter.represent_str)
 
 yaml.add_representer(literal_str, represent_literal_str)
 
@@ -54,6 +57,7 @@ def retry(times):
     """
     This decorator prints the execution time for the decorated function.
     """
+
     def wrapper(func):
         def newfn(*args, **kwargs):
             attempt = 0
@@ -69,7 +73,9 @@ def retry(times):
                     time.sleep(3)
                     attempt += 1
             return result
+
         return newfn
+
     return wrapper
 
 
@@ -83,11 +89,11 @@ def convert_nested(dct):
 
     result = dict()
 
-    # create an iterator of lists  
-    # representing nested or hierarchial flow 
+    # create an iterator of lists
+    # representing nested or hierarchial flow
     lsts = ([*k.split("."), v] for k, v in dct.items())
 
-    # insert each list into the result 
+    # insert each list into the result
     for lst in lsts:
         insert(result, lst)
     return result
@@ -96,11 +102,16 @@ def convert_nested(dct):
 def get_unique_name(prefix=None):
     if prefix is None:
         prefix = "distributed-benchmark-test-"
-    return prefix + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8)).lower()
+    return (
+        prefix
+        + "".join(
+            random.choice(string.ascii_letters + string.digits) for _ in range(8)
+        ).lower()
+    )
 
 
 def get_current_time():
-    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
 
 def print_table(headers, columns, data):
@@ -126,7 +137,10 @@ def get_deploy_mode(deploy_params):
             deploy_mode = config.DEFUALT_DEPLOY_MODE
         elif "deploy_mode" in milvus_params:
             deploy_mode = milvus_params["deploy_mode"]
-            if deploy_mode not in [config.SINGLE_DEPLOY_MODE, config.CLUSTER_DEPLOY_MODE]:
+            if deploy_mode not in [
+                config.SINGLE_DEPLOY_MODE,
+                config.CLUSTER_DEPLOY_MODE,
+            ]:
                 raise Exception("Invalid deploy mode: %s" % deploy_mode)
     return deploy_mode
 
@@ -146,7 +160,7 @@ def get_server_tag(deploy_params):
 
 
 def search_param_analysis(vector_query, filter_query):
-    """ Search parameter adjustment, applicable pymilvus version >= 2.0.0rc7.dev24 """
+    """Search parameter adjustment, applicable pymilvus version >= 2.0.0rc7.dev24"""
 
     if "vector" in vector_query:
         vector = vector_query["vector"]
@@ -162,30 +176,41 @@ def search_param_analysis(vector_query, filter_query):
         for key in vector:
             anns_field = key
             data = vector[key]["query"]
-            param = {"metric_type": vector[key]["metric_type"],
-                     "params": vector[key]["params"]}
+            param = {
+                "metric_type": vector[key]["metric_type"],
+                "params": vector[key]["params"],
+            }
             limit = vector[key]["topk"]
     else:
-        logger.error("[search_param_analysis] vector not dict or len != 1: %s" % str(vector))
+        logger.error(
+            "[search_param_analysis] vector not dict or len != 1: %s" % str(vector)
+        )
         return False
 
-    if isinstance(filter_query, list) and len(filter_query) != 0 and "range" in filter_query[0]:
+    if (
+        isinstance(filter_query, list)
+        and len(filter_query) != 0
+        and "range" in filter_query[0]
+    ):
         filter_range = filter_query[0]["range"]
         if isinstance(filter_range, dict) and len(filter_range) == 1:
             for key in filter_range:
                 field_name = filter_range[key]
                 expression = None
-                if 'GT' in filter_range[key]:
-                    exp1 = "%s > %s" % (field_name, str(filter_range[key]['GT']))
+                if "GT" in filter_range[key]:
+                    exp1 = "%s > %s" % (field_name, str(filter_range[key]["GT"]))
                     expression = exp1
-                if 'LT' in filter_range[key]:
-                    exp2 = "%s < %s" % (field_name, str(filter_range[key]['LT']))
+                if "LT" in filter_range[key]:
+                    exp2 = "%s < %s" % (field_name, str(filter_range[key]["LT"]))
                     if expression:
-                        expression = expression + ' && ' + exp2
+                        expression = expression + " && " + exp2
                     else:
                         expression = exp2
         else:
-            logger.error("[search_param_analysis] filter_range not dict or len != 1: %s" % str(filter_range))
+            logger.error(
+                "[search_param_analysis] filter_range not dict or len != 1: %s"
+                % str(filter_range)
+            )
             return False
     else:
         # logger.debug("[search_param_analysis] range not in filter_query: %s" % str(filter_query))
@@ -196,7 +221,7 @@ def search_param_analysis(vector_query, filter_query):
         "anns_field": anns_field,
         "param": param,
         "limit": limit,
-        "expression": expression
+        "expression": expression,
     }
     # logger.debug("[search_param_analysis] search_param_analysis: %s" % str(result))
     return result

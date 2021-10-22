@@ -6,16 +6,23 @@
 from __future__ import absolute_import, division, print_function
 
 import unittest
+
 import faiss
 import numpy as np
 
-class TestIVFlib(unittest.TestCase):
 
+class TestIVFlib(unittest.TestCase):
     def test_methods_exported(self):
-        methods = ['check_compatible_for_merge', 'extract_index_ivf',
-                   'merge_into', 'search_centroid',
-                   'search_and_return_centroids', 'get_invlist_range',
-                   'set_invlist_range', 'search_with_parameters']
+        methods = [
+            "check_compatible_for_merge",
+            "extract_index_ivf",
+            "merge_into",
+            "search_centroid",
+            "search_and_return_centroids",
+            "get_invlist_range",
+            "set_invlist_range",
+            "search_with_parameters",
+        ]
 
         for method in methods:
             assert callable(getattr(faiss, method, None))
@@ -46,10 +53,15 @@ def search_single_scan(index, xq, k, bs=128):
         sub_assign[skip_rows, skip_cols] = -1
 
         index.search_preassigned(
-            nq, faiss.swig_ptr(xq), k,
-            faiss.swig_ptr(sub_assign), faiss.swig_ptr(coarse_dis),
-            faiss.swig_ptr(rh.D), faiss.swig_ptr(rh.I),
-            False, None
+            nq,
+            faiss.swig_ptr(xq),
+            k,
+            faiss.swig_ptr(sub_assign),
+            faiss.swig_ptr(coarse_dis),
+            faiss.swig_ptr(rh.D),
+            faiss.swig_ptr(rh.I),
+            False,
+            None,
         )
 
     rh.finalize()
@@ -58,18 +70,17 @@ def search_single_scan(index, xq, k, bs=128):
 
 
 class TestSequentialScan(unittest.TestCase):
-
     def test_sequential_scan(self):
         d = 20
-        index = faiss.index_factory(d, 'IVF100,SQ8')
+        index = faiss.index_factory(d, "IVF100,SQ8")
 
         rs = np.random.RandomState(123)
-        xt = rs.rand(5000, d).astype('float32')
-        xb = rs.rand(10000, d).astype('float32')
+        xt = rs.rand(5000, d).astype("float32")
+        xb = rs.rand(10000, d).astype("float32")
         index.train(xt)
         index.add(xb)
         k = 15
-        xq = rs.rand(200, d).astype('float32')
+        xq = rs.rand(200, d).astype("float32")
 
         ref_D, ref_I = index.search(xq, k)
         D, I = search_single_scan(index, xq, k, bs=10)

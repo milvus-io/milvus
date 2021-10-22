@@ -1,20 +1,28 @@
-import time
-import random
-import pdb
+import concurrent.futures
 import copy
 import logging
+import pdb
+import random
+import time
 from multiprocessing import Pool, Process
-import concurrent.futures
 from threading import current_thread
+
 import pytest
-from utils import *
 from constants import *
+from utils import *
 
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {
-                default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, default_dim), "params": {"nprobe": 10}}}}
+            {
+                "vector": {
+                    default_float_vec_field_name: {
+                        "topk": 10,
+                        "query": gen_vectors(1, default_dim),
+                        "params": {"nprobe": 10},
+                    }
+                }
+            }
         ]
     }
 }

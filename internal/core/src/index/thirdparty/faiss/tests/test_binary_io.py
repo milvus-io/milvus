@@ -7,20 +7,21 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
-import unittest
-import faiss
 import os
 import tempfile
+import unittest
+
+import faiss
+import numpy as np
+
 
 def make_binary_dataset(d, nb, nt, nq):
     assert d % 8 == 0
-    x = np.random.randint(256, size=(nb + nq + nt, int(d / 8))).astype('uint8')
+    x = np.random.randint(256, size=(nb + nq + nt, int(d / 8))).astype("uint8")
     return x[:nt], x[nt:-nq], x[-nq:]
 
 
 class TestBinaryFlat(unittest.TestCase):
-
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
         d = 32
@@ -53,7 +54,6 @@ class TestBinaryFlat(unittest.TestCase):
 
 
 class TestBinaryIVF(unittest.TestCase):
-
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
         d = 32
@@ -68,7 +68,7 @@ class TestBinaryIVF(unittest.TestCase):
 
         quantizer = faiss.IndexBinaryFlat(d)
         index = faiss.IndexBinaryIVF(quantizer, d, 8)
-        index.cp.min_points_per_centroid = 5    # quiet warning
+        index.cp.min_points_per_centroid = 5  # quiet warning
         index.nprobe = 4
         index.train(self.xt)
         index.add(self.xb)
@@ -91,7 +91,6 @@ class TestBinaryIVF(unittest.TestCase):
 
 
 class TestObjectOwnership(unittest.TestCase):
-
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
         d = 32
@@ -119,7 +118,6 @@ class TestObjectOwnership(unittest.TestCase):
 
 
 class TestBinaryFromFloat(unittest.TestCase):
-
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
         d = 32
@@ -154,7 +152,6 @@ class TestBinaryFromFloat(unittest.TestCase):
 
 
 class TestBinaryHNSW(unittest.TestCase):
-
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
         d = 32
@@ -191,7 +188,7 @@ class TestBinaryHNSW(unittest.TestCase):
 
         quantizer = faiss.IndexBinaryHNSW(d)
         index = faiss.IndexBinaryIVF(quantizer, d, 8)
-        index.cp.min_points_per_centroid = 5    # quiet warning
+        index.cp.min_points_per_centroid = 5  # quiet warning
         index.nprobe = 4
         index.train(self.xt)
         index.add(self.xb)
@@ -213,5 +210,5 @@ class TestBinaryHNSW(unittest.TestCase):
             os.remove(tmpnam)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

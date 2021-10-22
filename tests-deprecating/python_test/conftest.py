@@ -1,11 +1,12 @@
-import pdb
-import logging
 import functools
+import logging
+import pdb
 import socket
+
 import pytest
-from utils import gen_unique_str
-from pymilvus import Milvus, DataType
+from pymilvus import DataType, Milvus
 from utils import *
+from utils import gen_unique_str
 
 timeout = 60
 dimension = 128
@@ -18,8 +19,10 @@ def pytest_addoption(parser):
     parser.addoption("--port", action="store", default=19530)
     parser.addoption("--http-port", action="store", default=19121)
     parser.addoption("--handler", action="store", default="GRPC")
-    parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
-    parser.addoption('--dry-run', action='store_true', default=False)
+    parser.addoption(
+        "--tag", action="store", default="all", help="only run tests matching the tag."
+    )
+    parser.addoption("--dry-run", action="store_true", default=False)
 
 
 def pytest_configure(config):
@@ -41,7 +44,7 @@ def pytest_runtest_setup(item):
 
 
 def pytest_runtestloop(session):
-    if session.config.getoption('--dry-run'):
+    if session.config.getoption("--dry-run"):
         total_num = 0
         file_num = 0
         tags_num = 0
@@ -66,9 +69,9 @@ def check_server_connection(request):
     port = request.config.getoption("--port")
 
     connected = True
-    if ip and (ip not in ['localhost', '127.0.0.1']):
+    if ip and (ip not in ["localhost", "127.0.0.1"]):
         try:
-            socket.getaddrinfo(ip, port, 0, 0, socket.IPPROTO_TCP) 
+            socket.getaddrinfo(ip, port, 0, 0, socket.IPPROTO_TCP)
         except Exception as e:
             print("Socket connnet failed: %s" % str(e))
             connected = False
@@ -84,9 +87,11 @@ def change_mutation_result_to_primary_keys():
                 return func(*args, **kwargs).primary_keys
             except Exception as e:
                 raise e
+
         return change
 
     from pymilvus import MutationFuture
+
     MutationFuture.result = insert_future_decorator(MutationFuture.result)
 
     def insert_decorator(func):
@@ -98,7 +103,9 @@ def change_mutation_result_to_primary_keys():
                 return func(*args, **kwargs).primary_keys
             except Exception as e:
                 raise e
+
         return change
+
     Milvus.insert = insert_decorator(Milvus.insert)
     yield
 
@@ -118,12 +125,14 @@ def connect(request):
     except Exception as e:
         logging.getLogger().error(str(e))
         pytest.exit("Milvus server can not connected, exit pytest ...")
+
     def fin():
         try:
             milvus.close()
             pass
         except Exception as e:
             logging.getLogger().info(str(e))
+
     request.addfinalizer(fin)
     return milvus
 
@@ -175,9 +184,11 @@ def collection(request, connect):
         connect.create_collection(collection_name, default_fields)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -193,9 +204,11 @@ def id_collection(request, connect):
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -210,10 +223,12 @@ def binary_collection(request, connect):
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         collection_names = connect.list_collections()
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -229,9 +244,11 @@ def binary_id_collection(request, connect):
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
