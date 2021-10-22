@@ -111,7 +111,7 @@ class InsertGetRunner(GetRunner):
             time.sleep(utils.DELETE_INTERVAL_TIME)
         self.milvus.create_collection(dimension, data_type=vector_type, other_fields=other_fields)
         self.insert(self.milvus, collection_name, case_param["data_type"], dimension,
-                               case_param["collection_size"], case_param["ni_per"])
+                    case_param["collection_size"], case_param["ni_per"])
         start_time = time.time()
         self.milvus.flush()
         flush_time = round(time.time() - start_time, 2)
