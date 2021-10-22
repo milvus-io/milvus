@@ -376,12 +376,6 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	err = checkSegmentMemory(l.req.Infos, l.node.historical.replica, l.node.streaming.replica)
-	if err != nil {
-		log.Warn(err.Error())
-		return err
-	}
-
 	err = l.node.historical.loader.loadSegment(l.req)
 	if err != nil {
 		log.Warn(err.Error())
