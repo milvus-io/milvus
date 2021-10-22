@@ -382,17 +382,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	switch l.req.LoadCondition {
-	case queryPb.TriggerCondition_handoff:
-		err = l.node.historical.loader.loadSegmentOfConditionHandOff(l.req)
-	case queryPb.TriggerCondition_loadBalance:
-		err = l.node.historical.loader.loadSegmentOfConditionLoadBalance(l.req)
-	case queryPb.TriggerCondition_grpcRequest:
-		err = l.node.historical.loader.loadSegmentOfConditionGRPC(l.req)
-	case queryPb.TriggerCondition_nodeDown:
-		err = l.node.historical.loader.loadSegmentOfConditionNodeDown(l.req)
-	}
-
+	err = l.node.historical.loader.loadSegment(l.req)
 	if err != nil {
 		log.Warn(err.Error())
 		return err

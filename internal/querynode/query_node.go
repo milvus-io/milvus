@@ -52,7 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const changeInfoMetaPrefix = "query-changeInfo"
+const changeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"
 
 // make sure QueryNode implements types.QueryNode
 var _ types.QueryNode = (*QueryNode)(nil)

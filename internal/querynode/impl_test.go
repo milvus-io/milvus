@@ -273,7 +273,7 @@ func TestImpl_LoadSegments(t *testing.T) {
 			MsgType: commonpb.MsgType_WatchQueryChannels,
 			MsgID:   rand.Int63(),
 		},
-		NodeID:        0,
+		DstNodeID:     0,
 		Schema:        schema,
 		LoadCondition: queryPb.TriggerCondition_grpcRequest,
 	}

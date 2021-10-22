@@ -230,3 +230,49 @@ func TestReleaseCollectionOnOfflineNode(t *testing.T) {
 
 	cancel()
 }
+
+func TestSealedSegmentChangeAfterQueryNodeStop(t *testing.T) {
+	refreshParams()
+	baseCtx := context.Background()
+
+	queryCoord, err := startQueryCoord(baseCtx)
+	assert.Nil(t, err)
+
+	queryNode1, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode1.queryNodeID)
+
+	queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: defaultCollectionID,
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	})
+
+	queryNode2, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode2.queryNodeID)
+
+	queryNode1.stop()
+	err = removeNodeSession(queryNode1.queryNodeID)
+	assert.Nil(t, err)
+
+	for {
+		segmentInfos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
+		recoverDone := true
+		for _, info := range segmentInfos {
+			if info.NodeID != queryNode2.queryNodeID {
+				recoverDone = false
+				break
+			}
+		}
+		if recoverDone {
+			break
+		}
+	}
+
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
