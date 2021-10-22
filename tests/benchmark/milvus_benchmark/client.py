@@ -195,7 +195,7 @@ class MilvusClient(object):
                 logger.error(str(e))
             if not len(segment_ids):
                 continue
-            elif len(segment_ids) > length:
+            if len(segment_ids) > length:
                 return random.sample(segment_ids, length)
             else:
                 logger.debug("Reset length: %d" % len(segment_ids))

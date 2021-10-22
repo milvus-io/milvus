@@ -374,28 +374,27 @@ def restart_server(helm_release_name, namespace):
             logger.error(pod_name_tmp)
             if pod_name_tmp == pod_name:
                 continue
-            elif pod_name_tmp.find(helm_release_name) == -1 or pod_name_tmp.find("mysql") != -1:
+            if pod_name_tmp.find(helm_release_name) == -1 or pod_name_tmp.find("mysql") != -1:
                 continue
-            else:
+            status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
+            logger.error(status_res.status.phase)
+            start_time = time.time()
+            ready_break = False
+            while time.time() - start_time <= timeout:
+                logger.error(time.time())
                 status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
-                logger.error(status_res.status.phase)
-                start_time = time.time()
-                ready_break = False
-                while time.time() - start_time <= timeout:
-                    logger.error(time.time())
-                    status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
-                    if status_res.status.phase == "Running":
-                        logger.error("Already running")
-                        ready_break = True
-                        break
-                    else:
-                        time.sleep(5)
-                if time.time() - start_time > timeout:
-                    logger.error("Restart pod: %s timeout" % pod_name_tmp)
-                    res = False
-                    return res
-                if ready_break:
+                if status_res.status.phase == "Running":
+                    logger.error("Already running")
+                    ready_break = True
                     break
+                else:
+                    time.sleep(5)
+            if time.time() - start_time > timeout:
+                logger.error("Restart pod: %s timeout" % pod_name_tmp)
+                res = False
+                return res
+            if ready_break:
+                break
     else:
         raise Exception("Pod: %s not found" % pod_name)
     follow = True
