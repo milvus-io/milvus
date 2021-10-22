@@ -41,7 +41,8 @@ class BuildRunner(BaseRunner):
         flush = True
         if "flush" in collection and collection["flush"] == "no":
             flush = False
-        self.init_metric(self.name, collection_info, index_info, search_info=None)
+        self.init_metric(self.name, collection_info,
+                         index_info, search_info=None)
         case_metric = copy.deepcopy(self.metric)
         case_metric.set_case_metric_type()
         case_metrics = []

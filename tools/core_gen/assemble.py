@@ -26,7 +26,8 @@ def assemble(template, **kwargs):
             k = info[0]
             rep = info[1]
             new_v = "\n\n".join(
-                [new_v.replace("@@" + rep + "@@", rep_v) for rep_v in rep_map[rep]]
+                [new_v.replace("@@" + rep + "@@", rep_v)
+                 for rep_v in rep_map[rep]]
             )
         mapping[k] = new_v
     return mapping["main"]

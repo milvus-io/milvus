@@ -36,7 +36,8 @@ class AccuracyRunner(BaseRunner):
             "dataset_name": collection_name,
             "collection_size": collection_size,
         }
-        index_info = self.milvus.describe_index(index_field_name, collection_name)
+        index_info = self.milvus.describe_index(
+            index_field_name, collection_name)
         filters = collection["filters"] if "filters" in collection else []
         filter_query = []
         top_ks = collection["top_ks"]
@@ -45,7 +46,8 @@ class AccuracyRunner(BaseRunner):
         search_params = utils.generate_combinations(search_params)
         cases = []
         case_metrics = []
-        self.init_metric(self.name, collection_info, index_info, search_info=None)
+        self.init_metric(self.name, collection_info,
+                         index_info, search_info=None)
         for search_param in search_params:
             if not filters:
                 filters.append(None)
@@ -75,7 +77,8 @@ class AccuracyRunner(BaseRunner):
                             "search_param": search_param,
                             "filter": filter_param,
                         }
-                        vector_query = {"vector": {index_field_name: search_info}}
+                        vector_query = {"vector": {
+                            index_field_name: search_info}}
                         case = {
                             "collection_name": collection_name,
                             "index_field_name": index_field_name,
@@ -109,7 +112,8 @@ class AccuracyRunner(BaseRunner):
         logger.debug({"true_ids": [len(true_ids[0]), len(true_ids[0])]})
         result_ids = self.milvus.get_ids(query_res)
         logger.debug({"result_ids": len(result_ids[0])})
-        acc_value = utils.get_recall_value(true_ids[:nq, :top_k].tolist(), result_ids)
+        acc_value = utils.get_recall_value(
+            true_ids[:nq, :top_k].tolist(), result_ids)
         tmp_result = {"acc": acc_value}
         return tmp_result
 
@@ -154,7 +158,8 @@ class AccAccuracyRunner(AccuracyRunner):
         true_ids = np.array(dataset["neighbors"])
         for index_type in index_types:
             for index_param in index_params:
-                index_info = {"index_type": index_type, "index_param": index_param}
+                index_info = {"index_type": index_type,
+                              "index_param": index_param}
                 for search_param in search_params:
                     if not filters:
                         filters.append(None)
@@ -223,14 +228,16 @@ class AccAccuracyRunner(AccuracyRunner):
             self.milvus.drop()
         dataset = case_param["dataset"]
         self.milvus.create_collection(dimension, data_type=vector_type)
-        insert_vectors = utils.normalize(metric_type, np.array(dataset["train"]))
+        insert_vectors = utils.normalize(
+            metric_type, np.array(dataset["train"]))
         if len(insert_vectors) != dataset["train"].shape[0]:
             raise Exception(
                 "Row count of insert vectors: %d is not equal to dataset size: %d"
                 % (len(insert_vectors), dataset["train"].shape[0])
             )
         logger.debug(
-            "The row count of entities to be inserted: %d" % len(insert_vectors)
+            "The row count of entities to be inserted: %d" % len(
+                insert_vectors)
         )
         # Insert batch once
         # milvus_instance.insert(insert_vectors)
@@ -243,7 +250,8 @@ class AccAccuracyRunner(AccuracyRunner):
                 tmp_vectors = insert_vectors[start:end]
                 ids = [i for i in range(start, end)]
                 if not isinstance(tmp_vectors, list):
-                    entities = utils.generate_entities(info, tmp_vectors.tolist(), ids)
+                    entities = utils.generate_entities(
+                        info, tmp_vectors.tolist(), ids)
                     res_ids = self.milvus.insert(entities)
                 else:
                     entities = utils.generate_entities(tmp_vectors, ids)
@@ -276,6 +284,7 @@ class AccAccuracyRunner(AccuracyRunner):
             case_param["vector_query"], filter_query=case_param["filter_query"]
         )
         result_ids = self.milvus.get_ids(query_res)
-        acc_value = utils.get_recall_value(true_ids[:nq, :top_k].tolist(), result_ids)
+        acc_value = utils.get_recall_value(
+            true_ids[:nq, :top_k].tolist(), result_ids)
         tmp_result = {"acc": acc_value}
         return tmp_result

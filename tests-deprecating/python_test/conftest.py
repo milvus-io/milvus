@@ -160,7 +160,8 @@ def args(request):
     handler = request.config.getoption("--handler")
     if handler == "HTTP":
         port = http_port
-    args = {"ip": ip, "port": port, "handler": handler, "service_name": service_name}
+    args = {"ip": ip, "port": port, "handler": handler,
+            "service_name": service_name}
     return args
 
 

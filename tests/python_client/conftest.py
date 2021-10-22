@@ -22,10 +22,14 @@ delete_timeout = 60
 
 
 def pytest_addoption(parser):
-    parser.addoption("--host", action="store", default="localhost", help="service's ip")
-    parser.addoption("--service", action="store", default="", help="service address")
-    parser.addoption("--port", action="store", default=19530, help="service's port")
-    parser.addoption("--http_port", action="store", default=19121, help="http's port")
+    parser.addoption("--host", action="store",
+                     default="localhost", help="service's ip")
+    parser.addoption("--service", action="store",
+                     default="", help="service address")
+    parser.addoption("--port", action="store",
+                     default=19530, help="service's port")
+    parser.addoption("--http_port", action="store",
+                     default=19121, help="http's port")
     parser.addoption(
         "--handler", action="store", default="GRPC", help="handler of request"
     )
@@ -66,7 +70,8 @@ def pytest_addoption(parser):
         default="index_param",
         help="index_param of index",
     )
-    parser.addoption("--data", action="store", default="data", help="data of request")
+    parser.addoption("--data", action="store",
+                     default="data", help="data of request")
     parser.addoption(
         "--clean_log",
         action="store_true",
@@ -205,13 +210,12 @@ def initialize_env(request):
     port = request.config.getoption("--port")
     handler = request.config.getoption("--handler")
     clean_log = request.config.getoption("--clean_log")
-
     """ params check """
     assert ip_check(host) and number_check(port)
-
     """ modify log files """
     cf.modify_file(
-        file_path_list=[log_config.log_debug, log_config.log_info, log_config.log_err],
+        file_path_list=[log_config.log_debug,
+                        log_config.log_info, log_config.log_err],
         is_modify=clean_log,
     )
 
@@ -398,7 +402,8 @@ def args(request):
     handler = request.config.getoption("--handler")
     if handler == "HTTP":
         port = http_port
-    args = {"ip": host, "port": port, "handler": handler, "service_name": service_name}
+    args = {"ip": host, "port": port,
+            "handler": handler, "service_name": service_name}
     return args
 
 
