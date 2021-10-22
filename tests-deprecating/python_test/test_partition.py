@@ -143,7 +143,7 @@ class TestCreateBase:
         expected: status ok
         """
         connect.create_partition(id_collection, default_tag)
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         insert_ids = connect.insert(id_collection, default_entities)
         assert len(insert_ids) == len(ids)
 
@@ -155,7 +155,7 @@ class TestCreateBase:
         expected: status ok
         """
         connect.create_partition(id_collection, default_tag)
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         insert_ids = connect.insert(
             id_collection, default_entities, partition_name=default_tag
         )
@@ -170,7 +170,7 @@ class TestCreateBase:
         """
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         try:
             connect.insert(collection, default_entities, partition_name=tag_new)
         except Exception as e:
@@ -193,7 +193,7 @@ class TestCreateBase:
         expected: status ok
         """
         connect.create_partition(id_collection, default_tag)
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         insert_ids = connect.insert(
             id_collection, default_entities, partition_name=default_tag
         )

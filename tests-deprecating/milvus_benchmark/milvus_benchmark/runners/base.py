@@ -80,7 +80,7 @@ class BaseRunner(object):
         # start insert vectors
         end_id = start_id + len(vectors)
         logger.debug("Start id: %s, end id: %s" % (start_id, end_id))
-        ids = [k for k in range(start_id, end_id)]
+        ids = list(range(start_id, end_id))
         entities = utils.generate_entities(info, vectors, ids)
         ni_start_time = time.time()
         try:

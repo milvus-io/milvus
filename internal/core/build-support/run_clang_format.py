@@ -132,10 +132,7 @@ if __name__ == "__main__":
         error = False
         checker = partial(
             _check_one_file,
-            {
-                filename: result
-                for filename, result in zip(formatted_filenames, results)
-            },
+            dict(zip(formatted_filenames, results)),
         )
         pool = mp.Pool()
         try:

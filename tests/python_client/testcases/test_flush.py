@@ -104,7 +104,7 @@ class TestFlushBase:
         tag_new = gen_unique_str()
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(id_collection, tag_new)
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         connect.insert(id_collection, default_entities, partition_name=default_tag)
         connect.flush([id_collection])
         connect.insert(id_collection, default_entities, partition_name=tag_new)
@@ -123,7 +123,7 @@ class TestFlushBase:
         connect.create_collection(collection_new, default_fields)
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(collection_new, default_tag)
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         # ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
         # ids = connect.insert(collection_new, default_entities, ids, partition_name=default_tag)
         connect.insert(id_collection, default_entities, partition_name=default_tag)
@@ -190,7 +190,7 @@ class TestFlushBase:
         method: add entities
         expected: no error raised
         """
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         result = connect.insert(id_collection, default_entities)
         # add flush
         connect.flush([id_collection])
@@ -217,7 +217,7 @@ class TestFlushBase:
         method: add entities, with same ids, count(same ids) < 15, > 15
         expected: the length of ids and the collection row count
         """
-        ids = [i for i in range(default_nb)]
+        ids = list(range(default_nb))
         for i, item in enumerate(ids):
             if item <= same_ids:
                 ids[i] = 0

@@ -532,16 +532,16 @@ class DockerRunner(Runner):
                         # for p in processes:
                         #     p.join()
                         milvus_instance = MilvusClient(collection_name)
-                        top_ks = random.sample([x for x in range(1, 100)], 3)
-                        nqs = random.sample([x for x in range(1, 1000)], 3)
-                        nprobe = random.choice([x for x in range(1, 500)])
+                        top_ks = random.sample(list(range(1, 100)), 3)
+                        nqs = random.sample(list(range(1, 1000)), 3)
+                        nprobe = random.choice(list(range(1, 500)))
                         res = self.do_query(
                             milvus, collection_name, top_ks, nqs, nprobe, run_count
                         )
                         if i % 10 == 0:
                             status, res = milvus_instance.insert(
                                 insert_vectors,
-                                ids=[x for x in range(len(insert_vectors))],
+                                ids=list(range(len(insert_vectors))),
                             )
                             if not status.OK():
                                 logger.error(status)

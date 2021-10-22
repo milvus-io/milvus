@@ -261,7 +261,7 @@ def gen_binary_vectors(num, dim):
 
 
 def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
-    int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    int_values = pd.Series(data=list(range(start, start + nb)))
     float_values = pd.Series(
         data=[float(i) for i in range(start, start + nb)], dtype="float32"
     )
@@ -283,7 +283,7 @@ def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
     :param vec_fields: list of FieldSchema
     :return: dataframe
     """
-    int_values = pd.Series(data=[i for i in range(0, nb)])
+    int_values = pd.Series(data=list(range(0, nb)))
     float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
     df = pd.DataFrame(
         {
@@ -303,7 +303,7 @@ def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
 
 
 def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
-    int64_values = pd.Series(data=[i for i in range(start, start + nb)])
+    int64_values = pd.Series(data=list(range(start, start + nb)))
     int32_values = pd.Series(
         data=[np.int32(i) for i in range(start, start + nb)], dtype="int32"
     )
@@ -341,7 +341,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
 
 
 def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
-    int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    int_values = pd.Series(data=list(range(start, start + nb)))
     float_values = pd.Series(
         data=[float(i) for i in range(start, start + nb)], dtype="float32"
     )
@@ -357,7 +357,7 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
 
 
 def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = [i for i in range(nb)]
+    int_values = list(range(nb))
     float_values = [np.float32(i) for i in range(nb)]
     float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, float_vec_values]
@@ -365,7 +365,7 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
 
 
 def gen_default_tuple_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = [i for i in range(nb)]
+    int_values = list(range(nb))
     float_values = [float(i) for i in range(nb)]
     float_vec_values = gen_vectors(nb, dim)
     data = (int_values, float_values, float_vec_values)
@@ -381,7 +381,7 @@ def gen_numpy_data(nb=ct.default_nb, dim=ct.default_dim):
 
 
 def gen_default_binary_list_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = [i for i in range(nb)]
+    int_values = list(range(nb))
     float_values = [np.float32(i) for i in range(nb)]
     binary_raw_values, binary_vec_values = gen_binary_vectors(nb, dim)
     data = [int_values, float_values, binary_vec_values]

@@ -10,7 +10,7 @@ raw_vectors, default_binary_entities = ut.gen_binary_entities(ut.default_nb)
 default_int_field_name = "int64"
 default_float_field_name = "float"
 default_pos = 5
-default_term_expr = f"{default_int_field_name} in {[i for i in range(default_pos)]}"
+default_term_expr = f"{default_int_field_name} in {list(range(default_pos))}"
 
 
 def init_data(
@@ -28,7 +28,7 @@ def init_data(
             ids = connect.insert(collection, insert_entities)
         else:
             ids = connect.insert(
-                collection, insert_entities, ids=[i for i in range(nb)]
+                collection, insert_entities, ids=list(range(nb))
             )
     else:
         if auto_id:
@@ -39,7 +39,7 @@ def init_data(
             ids = connect.insert(
                 collection,
                 insert_entities,
-                ids=[i for i in range(nb)],
+                ids=list(range(nb)),
                 partition_name=partition_names,
             )
     connect.flush([collection])
@@ -759,7 +759,7 @@ def insert_entities_into_two_partitions_in_half(connect, collection):
         {
             "name": "int64",
             "type": DataType.INT64,
-            "values": [i for i in range(half, ut.default_nb)],
+            "values": list(range(half, ut.default_nb)),
         },
         {
             "name": "float",

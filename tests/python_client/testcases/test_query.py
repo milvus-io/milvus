@@ -222,7 +222,7 @@ class TestQueryParams(TestcaseBase):
         df = pd.DataFrame(
             {
                 ct.default_int64_field_name: pd.Series(
-                    data=[i for i in range(ct.default_nb)]
+                    data=list(range(ct.default_nb))
                 ),
                 ct.default_int32_field_name: pd.Series(
                     data=[np.int32(i) for i in range(ct.default_nb)], dtype="int32"
@@ -449,7 +449,7 @@ class TestQueryParams(TestcaseBase):
         assert self.collection_wrap.num_entities == 50
         self.collection_wrap.load()
 
-        random_values = [i for i in range(10, 50)]
+        random_values = list(range(10, 50))
         log.debug(f"random values: {random_values}")
         random.shuffle(random_values)
         term_expr = f"{ct.default_int64_field_name} not in {random_values}"
@@ -1468,7 +1468,7 @@ def init_data(
             res = connect.insert(collection, insert_entities)
         else:
             res = connect.insert(
-                collection, insert_entities, ids=[i for i in range(nb)]
+                collection, insert_entities, ids=list(range(nb))
             )
     else:
         if auto_id:
@@ -1479,7 +1479,7 @@ def init_data(
             res = connect.insert(
                 collection,
                 insert_entities,
-                ids=[i for i in range(nb)],
+                ids=list(range(nb)),
                 partition_name=partition_names,
             )
     connect.flush([collection])
@@ -1601,7 +1601,7 @@ class TestQueryBase:
             connect, collection, partition_names=ut.default_tag)
         assert len(ids) == ut.default_nb
         connect.load_partitions(collection, [ut.default_tag])
-        term_expr = f"{default_int_field_name} in {[i for i in range(default_pos)]}"
+        term_expr = f"{default_int_field_name} in {list(range(default_pos))}"
         res = connect.query(
             collection,
             term_expr,

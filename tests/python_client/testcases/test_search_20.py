@@ -1640,7 +1640,7 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
         vectors_tmp = [[random.random() for _ in range(dim)] for _ in range(nb)]
         data = [
-            [i for i in range(nb)],
+            list(range(nb)),
             [np.float32(i) for i in range(nb)],
             vectors,
             vectors_tmp,
