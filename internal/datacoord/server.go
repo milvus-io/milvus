@@ -683,7 +683,7 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 	var useUnflushedPosition bool
 	for _, s := range segments {
 		if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
-			flushed = append(flushed, s.SegmentInfo)
+			flushed = append(flushed, trimSegmentInfo(s.SegmentInfo))
 			if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
 				seekPosition = s.DmlPosition
 			}
@@ -694,7 +694,7 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 			continue
 		}
 
-		unflushed = append(unflushed, s.SegmentInfo)
+		unflushed = append(unflushed, trimSegmentInfo(s.SegmentInfo))
 
 		if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
 			useUnflushedPosition = true
@@ -726,5 +726,21 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 		SeekPosition:      seekPosition,
 		FlushedSegments:   flushed,
 		UnflushedSegments: unflushed,
+	}
+}
+
+// trimSegmentInfo returns a shallow copy of datapb.SegmentInfo and sets ALL binlog info to nil
+func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
+	return &datapb.SegmentInfo{
+		ID:             info.ID,
+		CollectionID:   info.CollectionID,
+		PartitionID:    info.PartitionID,
+		InsertChannel:  info.InsertChannel,
+		NumOfRows:      info.NumOfRows,
+		State:          info.State,
+		MaxRowNum:      info.MaxRowNum,
+		LastExpireTime: info.LastExpireTime,
+		StartPosition:  info.StartPosition,
+		DmlPosition:    info.DmlPosition,
 	}
 }
