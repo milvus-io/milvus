@@ -70,7 +70,7 @@ func ValidateCollectionAlias(collAlias string) error {
 	return validateCollectionNameOrAlias(collAlias, "alias")
 }
 
-func ValidateCollectionName(collName string) error {
+func validateCollectionName(collName string) error {
 	return validateCollectionNameOrAlias(collName, "name")
 }
 

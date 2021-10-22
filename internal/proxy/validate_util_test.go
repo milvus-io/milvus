@@ -20,9 +20,9 @@ import (
 )
 
 func TestValidateCollectionName(t *testing.T) {
-	assert.Nil(t, ValidateCollectionName("abc"))
-	assert.Nil(t, ValidateCollectionName("_123abc"))
-	assert.Nil(t, ValidateCollectionName("abc123_$"))
+	assert.Nil(t, validateCollectionName("abc"))
+	assert.Nil(t, validateCollectionName("_123abc"))
+	assert.Nil(t, validateCollectionName("abc123_$"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -39,7 +39,7 @@ func TestValidateCollectionName(t *testing.T) {
 	}
 
 	for _, name := range invalidNames {
-		assert.NotNil(t, ValidateCollectionName(name))
+		assert.NotNil(t, validateCollectionName(name))
 		assert.NotNil(t, validateCollectionNameOrAlias(name, "name"))
 		assert.NotNil(t, validateCollectionNameOrAlias(name, "alias"))
 	}
