@@ -57,8 +57,8 @@ def dbsize_from_name(dbname):
     for s in sufs:
         if dbname.endswith(s):
             return sufs[s]
-    else:
-        assert False
+        
+    assert False
 
 
 def keep_latest_stdout(fnames):
