@@ -65,7 +65,8 @@ class HelmEnv(BaseEnv):
                     milvus_config,
                     server_config,
                 )
-                logger.debug("Config file has been updated, remove the lock file")
+                logger.debug(
+                    "Config file has been updated, remove the lock file")
             os.system("rm -rf %s" % lock_file_path)
             logger.debug("Start install server")
             hostname = helm_utils.helm_install_server(
@@ -84,7 +85,7 @@ class HelmEnv(BaseEnv):
                 self.set_hostname(hostname)
                 while not helm_utils.running_status(self.name, self._name_space):
                     pass
-                    
+
                 return hostname
         except Exception as e:
             os.system("rm -rf %s" % lock_file_path)
@@ -93,5 +94,6 @@ class HelmEnv(BaseEnv):
             return False
 
     def tear_down(self):
-        logger.debug("Start clean up: {}.{}".format(self.name, self._name_space))
+        logger.debug("Start clean up: {}.{}".format(
+            self.name, self._name_space))
         helm_utils.helm_del_server(self.name, self._name_space)

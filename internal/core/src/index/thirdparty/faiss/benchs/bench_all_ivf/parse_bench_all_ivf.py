@@ -16,7 +16,6 @@ from matplotlib import pyplot
 basedir = "/mnt/vol/gfsai-east/ai-group/users/matthijs/bench_all_ivf/"
 logdir = basedir + "logs/"
 
-
 # which plot to output
 db = "bigann1B"
 code_size = 8
@@ -57,7 +56,7 @@ def dbsize_from_name(dbname):
     for s in sufs:
         if dbname.endswith(s):
             return sufs[s]
-        
+
     assert False
 
 
@@ -95,7 +94,7 @@ def parse_result_file(fname):
             if l.startswith("  add in"):
                 stats["add_time"] = float(l.split()[-2])
             if l.startswith("args:"):
-                args = eval(l[l.find(" ") :])
+                args = eval(l[l.find(" "):])
                 indexkey = args.indexkey
             elif "R@1   R@10  R@100" in l:
                 st = 1
@@ -129,7 +128,8 @@ for fname in fnames:
     indexkey, res, _, stats = parse_result_file(logdir + fname)
     if res.size == 0:
         missing.append(fname)
-        errorline = open(logdir + fname.replace(".stdout", ".stderr")).readlines()
+        errorline = open(
+            logdir + fname.replace(".stdout", ".stderr")).readlines()
         if len(errorline) > 0:
             errorline = errorline[-1]
         else:
@@ -166,7 +166,8 @@ def plot_tradeoffs(allres, code_size, recall_rank):
         perf = v[:, recall_idx]
         times = v[:, 3]
         bigtab.append(
-            np.vstack((np.ones(times.size, dtype=int) * len(names), perf, times))
+            np.vstack((np.ones(times.size, dtype=int)
+                      * len(names), perf, times))
         )
         names.append(k)
 
@@ -178,7 +179,8 @@ def plot_tradeoffs(allres, code_size, recall_rank):
     times = np.minimum.accumulate(bigtab[2, ::-1])[::-1]
     selection = np.where(bigtab[2, :] == times)
 
-    selected_methods = [names[i] for i in np.unique(bigtab[0, selection].astype(int))]
+    selected_methods = [names[i]
+                        for i in np.unique(bigtab[0, selection].astype(int))]
     not_selected = list(set(names) - set(selected_methods))
 
     print("methods without an optimal OP: ", not_selected)
@@ -266,7 +268,8 @@ def plot_tradeoffs(allres, code_size, recall_rank):
     pyplot.ylabel("search time per query (ms, %d threads)" % n_threads)
     pyplot.legend()
     pyplot.grid()
-    pyplot.savefig("figs/tradeoffs_%s_cs%d_r%d.png" % (db, code_size, recall_rank))
+    pyplot.savefig("figs/tradeoffs_%s_cs%d_r%d.png" %
+                   (db, code_size, recall_rank))
     return selected_methods, not_selected
 
 
