@@ -402,15 +402,14 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 		return err
 	}
 
-	// TODO yukun: implements segment.Delete
 	//rowCount := len(deltaData.Data)
-	pks := make([]string, 0)
+	pks := make([]int64, 0)
 	tss := make([]int64, 0)
 	for pk, ts := range deltaData.Data {
 		pks = append(pks, pk)
 		tss = append(tss, ts)
 	}
-	// segment.Delete(pks, tss, rowCount)
+	//segment.Delete(pks, tss, rowCount)
 	return nil
 }
 
