@@ -246,7 +246,8 @@ class TestInsertBase:
         }
         connect.create_collection(collection_name, fields)
         ids = [i for i in range(nb)]
-        entities = ut.gen_entities_by_fields(fields["fields"], nb, ut.default_dim, ids)
+        entities = ut.gen_entities_by_fields(
+            fields["fields"], nb, ut.default_dim, ids)
         logging.getLogger().info(entities)
         result = connect.insert(collection_name, entities)
         assert result.primary_keys == ids
@@ -359,7 +360,8 @@ class TestInsertBase:
         ids = [i for i in range(default_nb)]
         entities = ut.gen_entities(default_nb)
         entities[0]["values"] = ids
-        result = connect.insert(id_collection, entities, partition_name=default_tag)
+        result = connect.insert(id_collection, entities,
+                                partition_name=default_tag)
         assert result.primary_keys == ids
         logging.getLogger().info(connect.describe_collection(id_collection))
 
@@ -653,7 +655,8 @@ class TestInsertBinary:
         method: build index and insert entities
         expected: no error raised
         """
-        connect.create_index(binary_collection, binary_field_name, get_binary_index)
+        connect.create_index(
+            binary_collection, binary_field_name, get_binary_index)
         result = connect.insert(binary_collection, default_binary_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([binary_collection])
@@ -674,7 +677,8 @@ class TestInsertBinary:
         result = connect.insert(binary_collection, default_binary_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([binary_collection])
-        connect.create_index(binary_collection, binary_field_name, get_binary_index)
+        connect.create_index(
+            binary_collection, binary_field_name, get_binary_index)
         index = connect.describe_index(binary_collection, "")
         ut.create_target_index(get_binary_index, binary_field_name)
         assert index == get_binary_index
@@ -1080,7 +1084,8 @@ class TestInsertInvalid(object):
         connect.create_partition(collection, default_tag)
         if tag_name is not None:
             with pytest.raises(Exception):
-                connect.insert(collection, default_entity, partition_name=tag_name)
+                connect.insert(collection, default_entity,
+                               partition_name=tag_name)
         else:
             connect.insert(collection, default_entity, partition_name=tag_name)
 
