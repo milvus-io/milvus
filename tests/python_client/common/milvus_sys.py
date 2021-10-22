@@ -14,7 +14,8 @@ class MilvusSys:
         self.alias = alias
         self.client = connections.get_connection(alias=self.alias)
         if self.client is None:
-            raise Exception(f"Connection {alias} is disconnected or nonexistent")
+            raise Exception(
+                f"Connection {alias} is disconnected or nonexistent")
 
         # TODO: for now it only supports non_orm style API for getMetricsRequest
         with self.client._connection() as handler:
@@ -48,7 +49,7 @@ class MilvusSys:
         return the first query node's simd type
         """
         for node in self.nodes:
-            if "QueryNode" == node.get("infos").get("type"):
+            if node.get("infos").get("type") == "QueryNode":
                 return node.get("infos").get("system_configurations").get("simd_type")
         raise Exception("No query node found")
 
@@ -57,7 +58,7 @@ class MilvusSys:
         """get all query nodes in Milvus deployment"""
         query_nodes = []
         for node in self.nodes:
-            if "QueryNode" == node.get("infos").get("type"):
+            if node.get("infos").get("type") == "QueryNode":
                 query_nodes.append(node)
         return query_nodes
 
@@ -66,7 +67,7 @@ class MilvusSys:
         """get all data nodes in Milvus deployment"""
         data_nodes = []
         for node in self.nodes:
-            if "DataNode" == node.get("infos").get("type"):
+            if node.get("infos").get("type") == "DataNode":
                 data_nodes.append(node)
         return data_nodes
 
@@ -75,7 +76,7 @@ class MilvusSys:
         """get all index nodes in Milvus deployment"""
         index_nodes = []
         for node in self.nodes:
-            if "IndexNode" == node.get("infos").get("type"):
+            if node.get("infos").get("type") == "IndexNode":
                 index_nodes.append(node)
         return index_nodes
 
@@ -84,7 +85,7 @@ class MilvusSys:
         """get all proxy nodes in Milvus deployment"""
         proxy_nodes = []
         for node in self.nodes:
-            if "Proxy" == node.get("infos").get("type"):
+            if node.get("infos").get("type") == "Proxy":
                 proxy_nodes.append(node)
         return proxy_nodes
 
