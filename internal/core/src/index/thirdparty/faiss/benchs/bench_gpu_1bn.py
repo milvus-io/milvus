@@ -244,7 +244,6 @@ else:
     print("unknown dataset", dbname, file=sys.stderr)
     sys.exit(1)
 
-
 if knngraph:
     # convert to knn-graph dataset
     xq = xb
@@ -256,12 +255,10 @@ if knngraph:
     # ground truth will be computed below
     gt_I = None
 
-
 print(
     "sizes: B %s Q %s T %s gt %s"
     % (xb.shape, xq.shape, xt.shape, gt_I.shape if gt_I is not None else None)
 )
-
 
 #################################################################
 # Parse index_key and set cache files
@@ -269,7 +266,6 @@ print(
 # The index_key is a valid factory key that would work, but we
 # decompose the training to do it faster
 #################################################################
-
 
 pat = re.compile(
     "(OPQ[0-9]+(_[0-9]+)?,|PCAR[0-9]+,)?" + "(IVF[0-9]+)," + "(PQ[0-9]+|Flat)"
@@ -323,7 +319,6 @@ index_cachefile = "%s/%s%s_%s%s,%s.index" % (
     pqflat_str,
 )
 
-
 if not use_cache:
     preproc_cachefile = None
     cent_cachefile = None
@@ -333,7 +328,6 @@ print("cachefiles:")
 print(preproc_cachefile)
 print(cent_cachefile)
 print(index_cachefile)
-
 
 #################################################################
 # Wake up GPUs
@@ -512,7 +506,8 @@ def prepare_trained_index(preproc):
     d = preproc.d_out
     if pqflat_str == "Flat":
         print("making an IVFFlat index")
-        idx_model = faiss.IndexIVFFlat(coarse_quantizer, d, ncent, faiss.METRIC_L2)
+        idx_model = faiss.IndexIVFFlat(
+            coarse_quantizer, d, ncent, faiss.METRIC_L2)
     else:
         m = int(pqflat_str[2:])
         assert m < 56 or use_float16, "PQ%d will work only with -float16" % m
@@ -628,7 +623,8 @@ def compute_populated_index_2(preproc):
                 i1 - i0, faiss.swig_ptr(xs), None, None, faiss.swig_ptr(assign)
             )
         elif indexall.__class__ == faiss.IndexIVFFlat:
-            indexall.add_core(i1 - i0, faiss.swig_ptr(xs), None, faiss.swig_ptr(assign))
+            indexall.add_core(i1 - i0, faiss.swig_ptr(xs),
+                              None, faiss.swig_ptr(assign))
         else:
             assert False
 
@@ -673,7 +669,6 @@ def get_populated_index(preproc):
             index = gpu_index
 
     else:
-        del gpu_index  # We override the GPU index
 
         print("Copy CPU index to %d sharded GPU indexes" % replicas)
 
@@ -690,7 +685,6 @@ def get_populated_index(preproc):
             index1.this.disown()
             index.addIndex(index1)
         index.own_fields = True
-    del indexall
     print("move to GPU done in %.3f s" % (time.time() - t0))
     return index
 
@@ -723,7 +717,8 @@ def eval_dataset(index, preproc):
 
             for i0, xs in dataset_iterator(xq, preproc, sl):
                 print(
-                    "\r%d/%d (%.3f s%s)   " % (i0, nq, time.time() - t0, inter_res),
+                    "\r%d/%d (%.3f s%s)   " % (i0, nq,
+                                               time.time() - t0, inter_res),
                     end=" ",
                 )
                 sys.stdout.flush()
@@ -768,7 +763,6 @@ def eval_dataset(index, preproc):
 #################################################################
 # Driver
 #################################################################
-
 
 preproc = get_preprocessor()
 

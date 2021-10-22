@@ -2,7 +2,6 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
 """make sure that the referenced objects are kept"""
 from __future__ import absolute_import, division, print_function, unicode_literals
 
@@ -24,7 +23,6 @@ class TestReferenced(unittest.TestCase):
         index = faiss.IndexIVFFlat(quantizer, d, 10)
         index.train(xt)
         index.add(xb)
-        del quantizer
         gc.collect()
         index.add(xb)
 
@@ -32,7 +30,6 @@ class TestReferenced(unittest.TestCase):
         quantizer = faiss.IndexFlatL2(d)
         index = faiss.IndexIVFFlat(quantizer, d, 10)
         refc1 = sys.getrefcount(quantizer)
-        del index
         gc.collect()
         refc2 = sys.getrefcount(quantizer)
         assert refc2 == refc1 - 1
@@ -47,10 +44,8 @@ class TestReferenced(unittest.TestCase):
         sub_index = faiss.IndexFlatL2(d)
         index = faiss.IndexPreTransform(ltrans, sub_index)
         index.add(xb)
-        del ltrans
         gc.collect()
         index.add(xb)
-        del sub_index
         gc.collect()
         index.add(xb)
 
@@ -60,10 +55,8 @@ class TestReferenced(unittest.TestCase):
         ltrans = faiss.NormalizationTransform(d)
         index.prepend_transform(ltrans)
         index.add(xb)
-        del ltrans
         gc.collect()
         index.add(xb)
-        del sub_index
         gc.collect()
         index.add(xb)
 
@@ -71,7 +64,6 @@ class TestReferenced(unittest.TestCase):
         sub_index = faiss.IndexFlatL2(d)
         index = faiss.IndexIDMap(sub_index)
         index.add_with_ids(xb, np.arange(len(xb)))
-        del sub_index
         gc.collect()
         index.add_with_ids(xb, np.arange(len(xb)))
 
