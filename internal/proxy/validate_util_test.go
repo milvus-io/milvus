@@ -46,10 +46,10 @@ func TestValidateCollectionName(t *testing.T) {
 }
 
 func TestValidatePartitionTag(t *testing.T) {
-	assert.Nil(t, ValidatePartitionTag("abc", true))
-	assert.Nil(t, ValidatePartitionTag("123abc", true))
-	assert.Nil(t, ValidatePartitionTag("_123abc", true))
-	assert.Nil(t, ValidatePartitionTag("abc123_$", true))
+	assert.Nil(t, validatePartitionTag("abc", true))
+	assert.Nil(t, validatePartitionTag("123abc", true))
+	assert.Nil(t, validatePartitionTag("_123abc", true))
+	assert.Nil(t, validatePartitionTag("abc123_$", true))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -65,11 +65,11 @@ func TestValidatePartitionTag(t *testing.T) {
 	}
 
 	for _, name := range invalidNames {
-		assert.NotNil(t, ValidatePartitionTag(name, true))
+		assert.NotNil(t, validatePartitionTag(name, true))
 	}
 
-	assert.Nil(t, ValidatePartitionTag("ab cd", false))
-	assert.Nil(t, ValidatePartitionTag("ab*", false))
+	assert.Nil(t, validatePartitionTag("ab cd", false))
+	assert.Nil(t, validatePartitionTag("ab*", false))
 }
 
 func TestValidateFieldName(t *testing.T) {
