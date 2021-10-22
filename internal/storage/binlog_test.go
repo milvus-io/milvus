@@ -66,7 +66,7 @@ func TestInsertBinlog(t *testing.T) {
 	buf, err := w.GetBuffer()
 	assert.Nil(t, err)
 
-	//magic number
+	// magic number
 	magicNum := UnsafeReadInt32(buf, 0)
 	assert.Equal(t, magicNum, MagicNumber)
 	pos := int(unsafe.Sizeof(MagicNumber))
