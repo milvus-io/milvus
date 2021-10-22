@@ -120,12 +120,12 @@ IndexNode for execution, and update the index status in the MetaTable.
 
 Delete useless index files, including lower version index files and index files corresponding to the deleted index.
 In order to distinguish whether the low version index file corresponding to the index has been cleaned up, recycled is
-introduced as a mark. Only after the index task is completed will the lower version index files be cleaned up, and the
-index file corresponding to the lower version index file that has been cleaned up is marked as True.
+introduced as a mark. Only after the index task is completed, the lower version index files will be cleaned up, and the
+index file corresponding to the lower version index file will be marked as True.
 
 This is also a timer, which periodically traverses the MetaTable to obtain the index corresponding to the index file
-that needs to be cleaned up. If the index is marked as deleted, the information corresponding to the index is deleted
-in the MetaTable. Otherwise, it just cleans up the index file of the lower version.
+that need to be cleaned up. If the index is marked as deleted, the information corresponding to the index is deleted
+in the MetaTable. Otherwise, only the lower version index file is cleaned up.
 
 ## 8.4 IndexNode Create Index
 
