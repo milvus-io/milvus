@@ -559,6 +559,7 @@ func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, 
 	colReplica.excludedSegments[collectionID] = append(colReplica.excludedSegments[collectionID], segmentInfos...)
 }
 
+// getExcludedSegments returns excludedSegments of collectionReplica
 func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
