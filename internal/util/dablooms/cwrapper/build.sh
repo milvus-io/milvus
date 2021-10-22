@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Copyright (C) 2019-2020 Zilliz. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
@@ -9,7 +11,6 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#!/bin/bash
 
 SOURCE=${BASH_SOURCE[0]}
 while [ -h $SOURCE ]; do # resolve $SOURCE until the file is no longer a symlink
