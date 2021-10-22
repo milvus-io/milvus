@@ -546,6 +546,7 @@ func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueI
 	delete(colReplica.excludedSegments, collectionID)
 }
 
+// addExcludedSegments will add excludedSegments to collectionReplica
 func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
