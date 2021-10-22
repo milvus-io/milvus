@@ -14,7 +14,8 @@ class MilvusSys:
         self.alias = alias
         self.client = connections.get_connection(alias=self.alias)
         if self.client is None:
-            raise Exception(f"Connection {alias} is disconnected or nonexistent")
+            raise Exception(
+                f"Connection {alias} is disconnected or nonexistent")
 
         # TODO: for now it only supports non_orm style API for getMetricsRequest
         with self.client._connection() as handler:
