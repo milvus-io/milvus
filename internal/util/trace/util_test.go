@@ -114,7 +114,7 @@ func TestTraceError(t *testing.T) {
 	assert.Nil(t, ctx)
 	assert.NotNil(t, sp)
 
-	sp, ctx = StartSpanFromContextWithOperationName(nil, "test")
+	sp, ctx = StartSpanFromContextWithOperationName(context.TODO(), "test")
 	assert.Nil(t, ctx)
 	assert.NotNil(t, sp)
 
