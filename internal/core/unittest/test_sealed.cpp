@@ -314,3 +314,70 @@ TEST(Sealed, LoadFieldData) {
 ])");
     ASSERT_EQ(std_json.dump(-2), json.dump(-2));
 }
+
+TEST(Sealed, Delete) {
+    auto dim = 16;
+    auto topK = 5;
+    auto N = 10;
+    auto metric_type = MetricType::METRIC_L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+
+    auto dataset = DataGen(schema, N);
+
+    auto fakevec = dataset.get_col<float>(0);
+
+    auto segment = CreateSealedSegment(schema);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "double": {
+                        "GE": -1,
+                        "LT": 1
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5,
+                        "round_decimal": 3
+                    }
+                }
+            }
+            ]
+        }
+    })";
+
+    Timestamp time = 1000000;
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
+
+    SealedLoader(dataset, *segment);
+
+    int64_t row_count = 5;
+    std::vector<idx_t> pks{1, 2, 3, 4, 5};
+    std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+
+    LoadDeletedRecordInfo info = {timestamps.data(), pks.data(), row_count};
+    segment->LoadDeletedRecord(info);
+
+    std::vector<uint8_t> tmp_block{0, 0};
+    auto view = BitsetView(tmp_block.data(), 10);
+    auto bitset = segment->get_filtered_bitmap(view, 10, 11);
+    ASSERT_EQ(bitset.size(), N);
+}

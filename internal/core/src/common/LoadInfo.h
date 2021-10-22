@@ -29,3 +29,9 @@ struct LoadFieldDataInfo {
     const void* blob = nullptr;
     int64_t row_count = -1;
 };
+
+struct LoadDeletedRecordInfo {
+    const void* timestamps = nullptr;
+    const void* primary_keys = nullptr;
+    int64_t row_count = -1;
+};
