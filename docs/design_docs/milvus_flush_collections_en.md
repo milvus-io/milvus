@@ -3,7 +3,7 @@ The `Flush` operation is used to make sure that inserted data will be written in
 
 ![flush_collections](./graphs/flush_data_coord.png)
 
-1. Firstly, `SDK` starts a `Flush` request to `Proxy` via `Grpc`, the `proto` is defined as follows:
+1. Firstly, `SDK` sends a `Flush` request to `Proxy` via `Grpc`, the `proto` is defined as follows:
 ```proto
 service MilvusService {
   ...
