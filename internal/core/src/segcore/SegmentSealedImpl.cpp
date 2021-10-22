@@ -574,6 +574,17 @@ SegmentSealedImpl::search_ids(const boost::dynamic_bitset<>& bitset, Timestamp t
     return std::move(dst_offset);
 }
 
+std::vector<SegOffset>
+SegmentSealedImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) const {
+    std::vector<SegOffset> dst_offset;
+    for (int i = 0; i < bitset.size(); i++) {
+        if (!bitset.test(i)) {
+            dst_offset.emplace_back(SegOffset(i));
+        }
+    }
+    return std::move(dst_offset);
+}
+
 std::string
 SegmentSealedImpl::debug() const {
     std::string log_str;

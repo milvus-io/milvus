@@ -149,6 +149,9 @@ class SegmentSealedImpl : public SegmentSealed {
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
+    search_ids(const BitsetView& view, Timestamp timestamp) const override;
+
+    std::vector<SegOffset>
     search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
 
     void

@@ -191,6 +191,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::vector<SegOffset>
     search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
 
+    std::vector<SegOffset>
+    search_ids(const BitsetView& view, Timestamp timestamp) const override;
+
  protected:
     int64_t
     num_chunk() const override;
