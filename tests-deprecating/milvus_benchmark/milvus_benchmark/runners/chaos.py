@@ -30,9 +30,6 @@ class SimpleChaosRunner(BaseRunner):
     """run chaos"""
     name = "simple_chaos"
 
-    def __init__(self, env, metric):
-        super(SimpleChaosRunner, self).__init__(env, metric)
-
     async def async_call(self, func, **kwargs):
         future = methodcaller(func, **kwargs)(self.milvus)
 

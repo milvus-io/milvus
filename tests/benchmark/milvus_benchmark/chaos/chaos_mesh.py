@@ -47,9 +47,6 @@ class BaseChaos(object):
 class PodChaos(BaseChaos):
     default_yaml = BaseChaos.cur_path + '/template/PodChaos.yaml'
 
-    def __init__(self, api_version, kind, metadata, spec):
-        super(PodChaos, self).__init__(api_version, kind, metadata, spec)
-
     def gen_experiment_config(self):
         with open(self.default_yaml) as f:
             default_config = full_load(f)
@@ -64,8 +61,6 @@ class PodChaos(BaseChaos):
 
 
 class NetworkChaos(BaseChaos):
-    def __init__(self, api_version, kind, metadata, spec):
-        super(NetworkChaos, self).__init__(api_version, kind, metadata, spec)
 
     def gen_experiment_config(self):
         pass

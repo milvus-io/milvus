@@ -12,8 +12,6 @@ logger = logging.getLogger("milvus_benchmark.runners.locust")
 
 
 class LocustRunner(BaseRunner):
-    def __init__(self, env, metric):
-        super(LocustRunner, self).__init__(env, metric)
 
     def run_case(self, case_metric, **case_param):
         """ start running locust test """
@@ -51,9 +49,6 @@ class LocustRunner(BaseRunner):
 class LocustInsertRunner(LocustRunner):
     """run insert"""
     name = "locust_insert_performance"
-
-    def __init__(self, env, metric):
-        super(LocustInsertRunner, self).__init__(env, metric)
 
     def extract_cases(self, collection):
         collection_name = collection["collection_name"] if "collection_name" in collection else None
@@ -154,9 +149,6 @@ class LocustInsertRunner(LocustRunner):
 class LocustSearchRunner(LocustRunner):
     """run search"""
     name = "locust_search_performance"
-
-    def __init__(self, env, metric):
-        super(LocustSearchRunner, self).__init__(env, metric)
 
     def extract_cases(self, collection):
         collection_name = collection["collection_name"] if "collection_name" in collection else None

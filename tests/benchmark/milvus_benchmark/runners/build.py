@@ -12,9 +12,6 @@ class BuildRunner(BaseRunner):
     """run build"""
     name = "build_performance"
 
-    def __init__(self, env, metric):
-        super(BuildRunner, self).__init__(env, metric)
-
     def extract_cases(self, collection):
         collection_name = collection["collection_name"] if "collection_name" in collection else None
         (data_type, collection_size, dimension, metric_type) = parser.collection_parser(collection_name)
@@ -82,9 +79,6 @@ class BuildRunner(BaseRunner):
 class InsertBuildRunner(BuildRunner):
     """run insert and build"""
     name = "insert_build_performance"
-
-    def __init__(self, env, metric):
-        super(InsertBuildRunner, self).__init__(env, metric)
 
     def prepare(self, **case_param):
         collection_name = case_param["collection_name"]

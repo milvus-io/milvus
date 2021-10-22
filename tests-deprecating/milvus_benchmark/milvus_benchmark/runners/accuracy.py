@@ -16,9 +16,6 @@ class AccuracyRunner(BaseRunner):
     """run accuracy"""
     name = "accuracy"
 
-    def __init__(self, env, metric):
-        super(AccuracyRunner, self).__init__(env, metric)
-
     def extract_cases(self, collection):
         collection_name = collection["collection_name"] if "collection_name" in collection else None
         (data_type, collection_size, dimension, metric_type) = parser.collection_parser(collection_name)
@@ -114,9 +111,6 @@ class AccAccuracyRunner(AccuracyRunner):
     2. one collection test different index
     """
     name = "ann_accuracy"
-
-    def __init__(self, env, metric):
-        super(AccAccuracyRunner, self).__init__(env, metric)
 
     def extract_cases(self, collection):
         collection_name = collection["collection_name"] if "collection_name" in collection else None
