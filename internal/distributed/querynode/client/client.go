@@ -256,6 +256,7 @@ func (c *Client) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChann
 	return ret.(*commonpb.Status), err
 }
 
+// RemoveQueryChannel removes the query channel for QueryNode component.
 func (c *Client) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
