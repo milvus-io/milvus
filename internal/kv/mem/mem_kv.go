@@ -50,7 +50,7 @@ func (kv *MemoryKV) Load(key string) (string, error) {
 	return item.(memoryKVItem).value, nil
 }
 
-func (kv *MemoryKV) LoadWithDefault(key string, defaultValue string) (string, error) {
+func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key, ""})

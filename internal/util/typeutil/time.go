@@ -35,6 +35,6 @@ func ParseTimestamp(data []byte) (time.Time, error) {
 }
 
 // SubTimeByWallClock returns the duration between two different timestamps.
-func SubTimeByWallClock(after time.Time, before time.Time) time.Duration {
+func SubTimeByWallClock(after, before time.Time) time.Duration {
 	return time.Duration(after.UnixNano() - before.UnixNano())
 }
