@@ -2,9 +2,9 @@ import operator
 import sys
 
 from common import common_type as ct
+from utils.util_log import test_log as log
 
 sys.path.append("..")
-from utils.util_log import test_log as log
 
 
 def ip_check(ip):
@@ -58,7 +58,8 @@ def dict_equal_check(dict1, dict2):
 
 def list_de_duplication(_list):
     if not isinstance(_list, list):
-        log.error("[LIST_DE_DUPLICATION] Type of list(%s) is not a list." % str(_list))
+        log.error(
+            "[LIST_DE_DUPLICATION] Type of list(%s) is not a list." % str(_list))
         return _list
 
     # de-duplication of _list
@@ -126,7 +127,8 @@ def get_connect_object_name(_list):
     """get the name of the objects that returned by the connection"""
     if not isinstance(_list, list):
         log.error(
-            "[GET_CONNECT_OBJECT_NAME] Type of list(%s) is not a list." % str(_list)
+            "[GET_CONNECT_OBJECT_NAME] Type of list(%s) is not a list." % str(
+                _list)
         )
         return _list
 
