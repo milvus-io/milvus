@@ -170,7 +170,8 @@ class ReferencedObject(unittest.TestCase):
         index_ref.add(self.xb_bin)
         D_ref, I_ref = index_ref.search(self.xq_bin, k)
 
-        index = faiss.GpuIndexBinaryFlat(faiss.StandardGpuResources(), self.d_bin)
+        index = faiss.GpuIndexBinaryFlat(
+            faiss.StandardGpuResources(), self.d_bin)
         index.add(self.xb_bin)
         D, I = index.search(self.xq_bin, k)
 
@@ -198,7 +199,8 @@ class ReferencedObject(unittest.TestCase):
         for _i in range(num_gpu):
             config = faiss.GpuIndexFlatConfig()
             config.device = 0  # simulate on a single GPU
-            sub_index = faiss.GpuIndexFlatIP(faiss.StandardGpuResources(), dim, config)
+            sub_index = faiss.GpuIndexFlatIP(
+                faiss.StandardGpuResources(), dim, config)
             index.addIndex(sub_index)
 
         index = faiss.IndexIDMap(index)

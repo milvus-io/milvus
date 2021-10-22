@@ -75,7 +75,8 @@ class TestCallbacks(unittest.TestCase):
 
         self.assertEqual(index.d, index2.d)
         self.assertTrue(
-            np.all(faiss.vector_to_array(index.xb) == faiss.vector_to_array(index2.xb))
+            np.all(faiss.vector_to_array(index.xb) ==
+                   faiss.vector_to_array(index2.xb))
         )
 
         # This is not a callable function: shoudl raise an exception
@@ -125,7 +126,8 @@ class TestCallbacks(unittest.TestCase):
 
             self.assertEqual(index.d, index2.d)
             np.testing.assert_array_equal(
-                faiss.vector_to_array(index.xb), faiss.vector_to_array(index2.xb)
+                faiss.vector_to_array(
+                    index.xb), faiss.vector_to_array(index2.xb)
             )
 
             # This is not a callable function: should raise an exception
@@ -165,7 +167,8 @@ class TestCallbacks(unittest.TestCase):
 
             self.assertEqual(index.d, index2.d)
             np.testing.assert_array_equal(
-                faiss.vector_to_array(index.xb), faiss.vector_to_array(index2.xb)
+                faiss.vector_to_array(
+                    index.xb), faiss.vector_to_array(index2.xb)
             )
 
         finally:
