@@ -789,6 +789,20 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 	return nil
 }
 
+func (s *Segment) LoadDeletedRecord(primaryKeys []IntPrimaryKey) error {
+	s.segPtrMu.RLock()
+	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
+	if s.segmentPtr == nil {
+		return errors.New("null seg core pointer")
+	}
+	if s.segmentType != segmentTypeSealed {
+		errMsg := fmt.Sprintln("segmentLoadFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+		return errors.New(errMsg)
+	}
+
+	return nil
+}
+
 func (s *Segment) dropFieldData(fieldID int64) error {
 	/*
 		CStatus
