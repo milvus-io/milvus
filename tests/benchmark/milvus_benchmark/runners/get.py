@@ -110,6 +110,7 @@ class InsertGetRunner(GetRunner):
             logger.debug("Start drop collection")
             self.milvus.drop()
             time.sleep(utils.DELETE_INTERVAL_TIME)
+
         self.milvus.create_collection(
             dimension, data_type=vector_type, other_fields=other_fields
         )
@@ -121,6 +122,7 @@ class InsertGetRunner(GetRunner):
             case_param["collection_size"],
             case_param["ni_per"],
         )
+
         start_time = time.time()
         self.milvus.flush()
         flush_time = round(time.time() - start_time, 2)

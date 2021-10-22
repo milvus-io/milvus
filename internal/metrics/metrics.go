@@ -40,7 +40,7 @@ var (
 			Help:      "Counter of create collection",
 		}, []string{"client_id", "type"})
 
-	// RootCoordDropCollectionCounter used to count the num of calls of DropCollection
+	// RootCoordDropCollectionCounter counts the num of calls of DropCollection
 	RootCoordDropCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -49,7 +49,7 @@ var (
 			Help:      "Counter of drop collection",
 		}, []string{"client_id", "type"})
 
-	// RootCoordHasCollectionCounter used to count the num of calls of HasCollection
+	// RootCoordHasCollectionCounter counts the num of calls of HasCollection
 	RootCoordHasCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -58,7 +58,7 @@ var (
 			Help:      "Counter of has collection",
 		}, []string{"client_id", "type"})
 
-	// RootCoordDescribeCollectionCounter used to count the num of calls of DescribeCollection
+	// RootCoordDescribeCollectionCounter counts the num of calls of DescribeCollection
 	RootCoordDescribeCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -67,7 +67,7 @@ var (
 			Help:      "Counter of describe collection",
 		}, []string{"client_id", "type"})
 
-	// RootCoordShowCollectionsCounter used to count the num of calls of ShowCollections
+	// RootCoordShowCollectionsCounter counts the num of calls of ShowCollections
 	RootCoordShowCollectionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -76,7 +76,7 @@ var (
 			Help:      "Counter of show collections",
 		}, []string{"client_id", "type"})
 
-	// RootCoordCreatePartitionCounter used to count the num of calls of CreatePartition
+	// RootCoordCreatePartitionCounter counts the num of calls of CreatePartition
 	RootCoordCreatePartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -85,7 +85,7 @@ var (
 			Help:      "Counter of create partition",
 		}, []string{"client_id", "type"})
 
-	// RootCoordDropPartitionCounter used to count the num of calls of DropPartition
+	// RootCoordDropPartitionCounter counts the num of calls of DropPartition
 	RootCoordDropPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -94,7 +94,7 @@ var (
 			Help:      "Counter of drop partition",
 		}, []string{"client_id", "type"})
 
-	// RootCoordHasPartitionCounter used to count the num of calls of HasPartition
+	// RootCoordHasPartitionCounter counts the num of calls of HasPartition
 	RootCoordHasPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -103,7 +103,7 @@ var (
 			Help:      "Counter of has partition",
 		}, []string{"client_id", "type"})
 
-	// RootCoordShowPartitionsCounter used to count the num of calls of ShowPartitions
+	// RootCoordShowPartitionsCounter counts the num of calls of ShowPartitions
 	RootCoordShowPartitionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -112,7 +112,7 @@ var (
 			Help:      "Counter of show partitions",
 		}, []string{"client_id", "type"})
 
-	// RootCoordCreateIndexCounter used to count the num of calls of CreateIndex
+	// RootCoordCreateIndexCounter counts the num of calls of CreateIndex
 	RootCoordCreateIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -121,7 +121,7 @@ var (
 			Help:      "Counter of create index",
 		}, []string{"client_id", "type"})
 
-	// RootCoordDropIndexCounter used to count the num of calls of DropIndex
+	// RootCoordDropIndexCounter counts the num of calls of DropIndex
 	RootCoordDropIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -130,7 +130,7 @@ var (
 			Help:      "Counter of drop index",
 		}, []string{"client_id", "type"})
 
-	// RootCoordDescribeIndexCounter used to count the num of calls of DescribeIndex
+	// RootCoordDescribeIndexCounter counts the num of calls of DescribeIndex
 	RootCoordDescribeIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -139,7 +139,7 @@ var (
 			Help:      "Counter of describe index",
 		}, []string{"client_id", "type"})
 
-	// RootCoordDescribeSegmentCounter used to count the num of calls of DescribeSegment
+	// RootCoordDescribeSegmentCounter counts the num of calls of DescribeSegment
 	RootCoordDescribeSegmentCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -148,7 +148,7 @@ var (
 			Help:      "Counter of describe segment",
 		}, []string{"client_id", "type"})
 
-	// RootCoordShowSegmentsCounter used to count the num of calls of ShowSegments
+	// RootCoordShowSegmentsCounter counts the num of calls of ShowSegments
 	RootCoordShowSegmentsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
