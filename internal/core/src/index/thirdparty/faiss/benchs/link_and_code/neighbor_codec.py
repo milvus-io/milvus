@@ -124,7 +124,7 @@ def regress_opt_beta(x, x_coded, Inn):
 # Find the best encoding by minimizing the reconstruction error using
 # a set of pre-computed beta values
 def assign_beta(beta_centroids, x, x_coded, Inn, verbose=True):
-    if type(Inn) == tuple:
+    if type(Inn) is tuple:
         return assign_beta_2(beta_centroids, x, x_coded, Inn)
     (N, knn) = Inn.shape
     x_ibeta = np.zeros((N), dtype="int32")
