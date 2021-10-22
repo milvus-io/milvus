@@ -233,7 +233,7 @@ def gen_file_name(idx, dimension, data_type):
         fname = JACCARD_SRC_DATA_DIR + fname
     elif data_type == "hamming":
         fname = HAMMING_SRC_DATA_DIR + fname
-    elif data_type == "sub" or data_type == "super":
+    elif data_type in ("sub", "super"):
         fname = STRUCTURE_SRC_DATA_DIR + fname
     return fname
 
