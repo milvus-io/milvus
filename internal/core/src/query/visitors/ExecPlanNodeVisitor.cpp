@@ -140,7 +140,15 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     segment->mask_with_timestamps(bitset_holder, timestamp_);
 
-    auto seg_offsets = std::move(segment->search_ids(bitset_holder, MAX_TIMESTAMP));
+    BitsetView view;
+    if (!bitset_holder.empty()) {
+        bitset_holder.flip();
+        view = BitsetView((uint8_t*)boost_ext::get_data(bitset_holder), bitset_holder.size());
+    }
+
+    auto final_bitset = segment->get_filtered_bitmap(view, active_count, MAX_TIMESTAMP);
+
+    auto seg_offsets = std::move(segment->search_ids(final_bitset, MAX_TIMESTAMP));
     ret.result_offsets_.assign((int64_t*)seg_offsets.data(), (int64_t*)seg_offsets.data() + seg_offsets.size());
     retrieve_ret_ = ret;
 }
