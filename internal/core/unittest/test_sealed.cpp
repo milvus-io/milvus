@@ -380,4 +380,9 @@ TEST(Sealed, Delete) {
     auto view = BitsetView(tmp_block.data(), 10);
     auto bitset = segment->get_filtered_bitmap(view, 10, 11);
     ASSERT_EQ(bitset.size(), N);
+
+    int64_t new_count = 3;
+    std::vector<idx_t> new_pks{6, 7, 8};
+    std::vector<idx_t> new_timestamps{10, 10, 10};
+    segment->Delete(new_count, reinterpret_cast<const int64_t*>(new_pks.data()), reinterpret_cast<const Timestamp*>(new_timestamps.data()));
 }

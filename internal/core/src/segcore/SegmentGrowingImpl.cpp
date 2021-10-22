@@ -248,12 +248,10 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     std::vector<idx_t> uids(size);
     std::vector<Timestamp> timestamps(size);
     // #pragma omp parallel for
-    std::cout << "zzzz: " << size << std::endl;
     for (int index = 0; index < size; ++index) {
         auto [t, uid] = ordering[index];
         timestamps[index] = t;
         uids[index] = uid;
-        std::cout << "In Segcore Delete: " << uid << std::endl;
     }
     deleted_record_.timestamps_.set_data(reserved_begin, timestamps.data(), size);
     deleted_record_.uids_.set_data(reserved_begin, uids.data(), size);

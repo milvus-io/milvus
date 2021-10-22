@@ -155,7 +155,7 @@ class SegmentSealedImpl : public SegmentSealed {
     search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
 
     void
-    Delete(int64_t row_count, const int64_t* uids_raw, const Timestamp* timestamps_raw);
+    Delete(int64_t row_count, const int64_t* uids_raw, const Timestamp* timestamps_raw) override;
 
     //    virtual void
     //    build_index_if_primary_key(FieldId field_id);
