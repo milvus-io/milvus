@@ -37,7 +37,8 @@ class ResponseChecker:
 
         elif self.check_task == CheckTasks.err_res:
             # Interface return error code and error message check
-            result = self.assert_exception(self.response, self.succ, self.check_items)
+            result = self.assert_exception(
+                self.response, self.succ, self.check_items)
 
         elif self.check_task == CheckTasks.check_nothing:
             return self.succ
@@ -98,7 +99,8 @@ class ResponseChecker:
             error_code = error_dict[ct.err_code]
             assert res.code == error_code or error_dict[ct.err_msg] in res.message
         else:
-            log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
+            log.error(
+                "[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
         return True
 
@@ -220,7 +222,8 @@ class ResponseChecker:
         log.info("search_results_check: checking the searching results")
         if func_name != "search":
             log.warning(
-                "The function name is {} rather than {}".format(func_name, "search")
+                "The function name is {} rather than {}".format(
+                    func_name, "search")
             )
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
@@ -231,7 +234,8 @@ class ResponseChecker:
         if len(search_res) != check_items["nq"]:
             log.error(
                 "search_results_check: Numbers of query searched (%d) "
-                "is not equal with expected (%d)" % (len(search_res), check_items["nq"])
+                "is not equal with expected (%d)" % (
+                    len(search_res), check_items["nq"])
             )
             assert len(search_res) == check_items["nq"]
         else:
@@ -278,7 +282,8 @@ class ResponseChecker:
         """
         if func_name != "query":
             log.warning(
-                "The function name is {} rather than {}".format(func_name, "query")
+                "The function name is {} rather than {}".format(
+                    func_name, "query")
             )
         if not isinstance(query_res, list):
             raise Exception("The query result to check isn't list type object")
@@ -307,7 +312,8 @@ class ResponseChecker:
         """
         if func_name != "query":
             log.warning(
-                "The function name is {} rather than {}".format(func_name, "query")
+                "The function name is {} rather than {}".format(
+                    func_name, "query")
             )
         if not isinstance(query_res, list):
             raise Exception("The query result to check isn't list type object")
@@ -322,13 +328,15 @@ class ResponseChecker:
                 )
             )
         if not isinstance(distance_res, list):
-            raise Exception("The distance result to check isn't list type object")
+            raise Exception(
+                "The distance result to check isn't list type object")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
         vectors_l = check_items["vectors_l"]
         vectors_r = check_items["vectors_r"]
         metric = check_items.get("metric", "L2")
         sqrt = check_items.get("sqrt", False)
-        cf.compare_distance_2d_vector(vectors_l, vectors_r, distance_res, metric, sqrt)
+        cf.compare_distance_2d_vector(
+            vectors_l, vectors_r, distance_res, metric, sqrt)
 
         return True
