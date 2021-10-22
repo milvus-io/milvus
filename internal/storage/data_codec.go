@@ -239,8 +239,8 @@ func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 // For each field, it will create a binlog writer, and write a event to the binlog.
 // It returns binlog buffer in the end.
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, []*Blob, error) {
-	var blobs []*Blob
-	var statsBlobs []*Blob
+	blobs := make([]*Blob, 0)
+	statsBlobs := make([]*Blob, 0)
 	var writer *InsertBinlogWriter
 	timeFieldData, ok := data.Data[rootcoord.TimeStampField]
 	if !ok {
@@ -327,19 +327,19 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		})
 
 		// stats fields
-		statsWriter := &StatsWriter{}
 		switch field.DataType {
 		case schemapb.DataType_Int64:
+			statsWriter := &StatsWriter{}
 			err = statsWriter.StatsInt64(field.FieldID, field.IsPrimaryKey, singleData.(*Int64FieldData).Data)
+			if err != nil {
+				return nil, nil, err
+			}
+			statsBuffer := statsWriter.GetBuffer()
+			statsBlobs = append(statsBlobs, &Blob{
+				Key:   blobKey,
+				Value: statsBuffer,
+			})
 		}
-		if err != nil {
-			return nil, nil, err
-		}
-		statsBuffer := statsWriter.GetBuffer()
-		statsBlobs = append(statsBlobs, &Blob{
-			Key:   blobKey,
-			Value: statsBuffer,
-		})
 	}
 
 	return blobs, statsBlobs, nil
@@ -600,7 +600,7 @@ func (insertCodec *InsertCodec) Close() error {
 // DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
 // timestamp represents the time when this instance was deleted
 type DeleteData struct {
-	Data map[string]int64 // primary key to timestamp
+	Data map[int64]int64 // primary key to timestamp
 }
 
 // DeleteCodec serializes and deserializes the delete data
@@ -631,11 +631,11 @@ func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if value > int64(endTs) {
 			endTs = int(value)
 		}
-		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%s,%d", key, value))
+		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", key, value))
 		if err != nil {
 			return nil, err
 		}
-		sizeTotal += len(key)
+		sizeTotal += binary.Size(key)
 		sizeTotal += binary.Size(value)
 	}
 	eventWriter.SetEventTimestamp(uint64(startTs), uint64(endTs))
@@ -672,7 +672,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	}
 
 	var pid, sid UniqueID
-	result := &DeleteData{Data: make(map[string]int64)}
+	result := &DeleteData{Data: make(map[int64]int64)}
 	for _, blob := range blobs {
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
@@ -701,12 +701,17 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect")
 			}
 
+			pk, err := strconv.ParseInt(splits[0], 10, 64)
+			if err != nil {
+				return InvalidUniqueID, InvalidUniqueID, nil, err
+			}
+
 			ts, err := strconv.ParseInt(splits[1], 10, 64)
 			if err != nil {
 				return InvalidUniqueID, InvalidUniqueID, nil, err
 			}
 
-			result.Data[splits[0]] = ts
+			result.Data[pk] = ts
 		}
 
 		deleteCodec.readerCloseFunc = append(deleteCodec.readerCloseFunc, readerClose(binlogReader))

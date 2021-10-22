@@ -47,6 +47,33 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
     }
     return {std::move(res_ids), std::move(dst_offsets)};
 }
+
+std::pair<std::vector<idx_t>, std::vector<SegOffset>>
+ScalarIndexVector::do_search_ids(const std::vector<idx_t>& ids) const {
+    std::vector<SegOffset> dst_offsets;
+    std::vector<idx_t> dst_ids;
+
+    for (auto id : ids) {
+        using Pair = std::pair<T, SegOffset>;
+        auto [iter_beg, iter_end] =
+            std::equal_range(mapping_.begin(), mapping_.end(), std::make_pair(id, SegOffset(0)),
+                             [](const Pair& left, const Pair& right) { return left.first < right.first; });
+
+        if (iter_beg == iter_end) {
+            // no data
+            continue;
+        }
+        // TODO: for repeated key, decide the final offset with Timestamp
+        // no repeated key, simplified logic
+        AssertInfo(iter_beg + 1 == iter_end, "There are no repeated keys in more than one results");
+        auto [entry_id, entry_offset] = *iter_beg;
+
+        dst_ids.push_back(entry_id);
+        dst_offsets.push_back(entry_offset);
+    }
+    return {std::move(dst_ids), std::move(dst_offsets)};
+}
+
 void
 ScalarIndexVector::append_data(const ScalarIndexVector::T* ids, int64_t count, SegOffset base) {
     for (int64_t i = 0; i < count; ++i) {

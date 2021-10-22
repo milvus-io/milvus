@@ -158,6 +158,21 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
     }
 }
 
+void
+SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
+    AssertInfo(info.row_count > 0, "The row count of deleted record is 0");
+    AssertInfo(info.primary_keys, "Deleted primary keys is null");
+    AssertInfo(info.timestamps, "Deleted timestamps is null");
+    auto primary_keys = reinterpret_cast<const idx_t*>(info.primary_keys);
+    auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
+    int64_t size = info.row_count;
+
+    deleted_record_.uids_.set_data(0, primary_keys, size);
+    deleted_record_.timestamps_.set_data(0, timestamps, size);
+    deleted_record_.ack_responder_.AddSegment(0, size);
+    deleted_record_.record_size_ = size;
+}
+
 int64_t
 SegmentSealedImpl::num_chunk_index(FieldOffset field_offset) const {
     return 1;
@@ -212,10 +227,74 @@ SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
 
+std::shared_ptr<DeletedRecord::TmpBitmap>
+SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
+                                      Timestamp query_timestamp,
+                                      int64_t insert_barrier,
+                                      bool force) const {
+    auto old = deleted_record_.get_lru_entry();
+
+    if (old->bitmap_ptr->count() == insert_barrier) {
+        if (old->del_barrier == del_barrier) {
+            return old;
+        }
+    }
+
+    auto current = old->clone(insert_barrier);
+    current->del_barrier = del_barrier;
+    auto bitmap = current->bitmap_ptr;
+    // Sealed segment only has one chunk with chunk_id 0
+    auto span = deleted_record_.uids_.get_span_base(0);
+    auto uids_ptr = reinterpret_cast<const idx_t*>(span.data());
+    auto del_size = deleted_record_.record_size_;
+    std::vector<idx_t> ids(del_size);
+    std::copy_n(uids_ptr, del_size, ids.data());
+
+    auto [uids, seg_offsets] = primary_key_index_->do_search_ids(ids);
+
+    if (del_barrier < old->del_barrier) {
+        for (auto del_index = del_barrier; del_index < old->del_barrier; ++del_index) {
+            int64_t the_offset = seg_offsets[del_index].get();
+            AssertInfo(the_offset > 0, "Seg offset is invalid");
+            if (deleted_record_.timestamps_[del_index] < query_timestamp) {
+                bitmap->clear(the_offset);
+            }
+        }
+        return current;
+    } else {
+        for (auto del_index = old->del_barrier; del_index < del_barrier; ++del_index) {
+            int64_t the_offset = seg_offsets[del_index].get();
+            AssertInfo(the_offset > 0, "Seg offset is invalid");
+            if (deleted_record_.timestamps_[del_index] < query_timestamp) {
+                bitmap->set(the_offset);
+            }
+        }
+        this->deleted_record_.insert_lru_entry(current);
+    }
+    return current;
+}
+
 BitsetView
 SegmentSealedImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const {
-    // TODO(yukun)
-    return bitset;
+    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    if (del_barrier == 0) {
+        return bitset;
+    }
+    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
+    if (bitmap_holder == nullptr) {
+        return bitset;
+    }
+    AssertInfo(bitmap_holder, "bitmap_holder is null");
+    auto deleted_bitmap = bitmap_holder->bitmap_ptr;
+    if (bitset.size() == 0) {
+        return BitsetView(deleted_bitmap);
+    }
+    AssertInfo(deleted_bitmap->count() == bitset.size(), "Deleted bitmap count not equal to filtered bitmap count");
+
+    auto filtered_bitmap = std::make_shared<faiss::ConcurrentBitset>(bitset.size(), bitset.data());
+
+    auto final_bitmap = (*deleted_bitmap.get()) | (*filtered_bitmap.get());
+    return BitsetView(final_bitmap);
 }
 
 void
@@ -461,6 +540,27 @@ SegmentSealedImpl::search_ids(const IdArray& id_array, Timestamp timestamp) cons
     auto arr = id_array.int_id();
     AssertInfo(primary_key_index_, "Primary key index is null");
     return primary_key_index_->do_search_ids(id_array);
+}
+
+void
+SegmentSealedImpl::Delete(int64_t row_count, const int64_t* uids_raw, const Timestamp* timestamps_raw) {
+    std::vector<std::tuple<Timestamp, idx_t>> ordering(row_count);
+    for (int i = 0; i < row_count; i++) {
+        ordering[i] = std::make_tuple(timestamps_raw[i], uids_raw[i]);
+    }
+    std::sort(ordering.begin(), ordering.end());
+    std::vector<idx_t> src_uids(row_count);
+    std::vector<Timestamp> src_timestamps(row_count);
+
+    for (int i = 0; i < row_count; i++) {
+        auto [t, uid] = ordering[i];
+        src_timestamps[i] = t;
+        src_uids[i] = uid;
+    }
+    deleted_record_.timestamps_.set_data(0, src_timestamps.data(), row_count);
+    deleted_record_.uids_.set_data(0, src_uids.data(), row_count);
+    deleted_record_.ack_responder_.AddSegment(0, row_count);
+    return;
 }
 
 std::vector<SegOffset>

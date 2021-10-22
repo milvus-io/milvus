@@ -25,10 +25,12 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"strconv"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/common"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 
 	"go.uber.org/zap"
 
@@ -55,6 +57,7 @@ type ReplicaInterface interface {
 	getCollectionNum() int
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
 	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error)
+	getPKFieldIDByCollectionID(collectionID UniqueID) (FieldID, error)
 
 	// partition
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
@@ -240,6 +243,24 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID U
 		}
 	}
 	return vecFields, nil
+}
+
+// getPKFieldIDsByCollectionID returns vector field ids of collection
+func (colReplica *collectionReplica) getPKFieldIDByCollectionID(collectionID UniqueID) (FieldID, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	fields, err := colReplica.getFieldsByCollectionIDPrivate(collectionID)
+	if err != nil {
+		return common.InvalidFieldID, err
+	}
+
+	for _, field := range fields {
+		if field.IsPrimaryKey {
+			return field.FieldID, nil
+		}
+	}
+	return common.InvalidFieldID, nil
 }
 
 // getFieldsByCollectionIDPrivate is the private function in collectionReplica, to return vector field ids of collection

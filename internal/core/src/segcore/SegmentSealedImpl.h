@@ -10,9 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <tbb/concurrent_priority_queue.h>
+#include <tbb/concurrent_unordered_map.h>
+#include <tbb/concurrent_vector.h>
+
 #include <segcore/TimestampIndex.h>
 #include "segcore/SegmentSealed.h"
+#include "ConcurrentVector.h"
 #include "SealedIndexingRecord.h"
+#include "segcore/DeletedRecord.h"
 #include "ScalarIndex.h"
 #include <deque>
 #include <map>
@@ -29,6 +35,8 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadIndex(const LoadIndexInfo& info) override;
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
+    void
+    LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
     LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& segment_meta) override;
     void
@@ -49,6 +57,12 @@ class SegmentSealedImpl : public SegmentSealed {
 
     const Schema&
     get_schema() const override;
+
+    std::shared_ptr<DeletedRecord::TmpBitmap>
+    get_deleted_bitmap(int64_t del_barrier,
+                       Timestamp query_timestamp,
+                       int64_t insert_barrier,
+                       bool force = false) const;
 
  public:
     int64_t
@@ -126,11 +140,19 @@ class SegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 2;
     }
 
+    const DeletedRecord&
+    get_deleted_record() const {
+        return deleted_record_;
+    }
+
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
     search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
+
+    void
+    Delete(int64_t row_count, const int64_t* uids_raw, const Timestamp* timestamps_raw);
 
     //    virtual void
     //    build_index_if_primary_key(FieldId field_id);
@@ -151,6 +173,7 @@ class SegmentSealedImpl : public SegmentSealed {
     std::unique_ptr<ScalarIndexBase> primary_key_index_;
 
     std::vector<aligned_vector<char>> fields_data_;
+    mutable DeletedRecord deleted_record_;
 
     SealedIndexingRecord vecindexs_;
     aligned_vector<idx_t> row_ids_;

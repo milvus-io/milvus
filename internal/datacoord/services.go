@@ -375,7 +375,11 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	}
 	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	segment2StatsBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	segment2DeltaBinlogs := make(map[UniqueID][]*datapb.DeltaLogInfo)
 	segmentsNumOfRows := make(map[UniqueID]int64)
+
+	flushedIDs := make(map[int64]struct{})
 	for _, id := range segmentIDs {
 		segment := s.meta.GetSegment(id)
 		if segment == nil {
@@ -386,6 +390,10 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}
 		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing {
 			continue
+		}
+		_, ok := flushedIDs[id]
+		if !ok {
+			flushedIDs[id] = struct{}{}
 		}
 
 		binlogs := segment.GetBinlogs()
@@ -403,14 +411,32 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}
 
 		segmentsNumOfRows[id] = segment.NumOfRows
+
+		statsBinlogs := segment.GetStatslogs()
+		field2StatsBinlog := make(map[UniqueID][]string)
+		for _, field := range statsBinlogs {
+			field2StatsBinlog[field.GetFieldID()] = append(field2StatsBinlog[field.GetFieldID()], field.GetBinlogs()...)
+		}
+
+		for f, paths := range field2StatsBinlog {
+			fieldBinlogs := &datapb.FieldBinlog{
+				FieldID: f,
+				Binlogs: paths,
+			}
+			segment2StatsBinlogs[id] = append(segment2StatsBinlogs[id], fieldBinlogs)
+		}
+
+		segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], segment.GetDeltalogs()...)
 	}
 
 	binlogs := make([]*datapb.SegmentBinlogs, 0, len(segment2Binlogs))
-	for segmentID, fieldBinlogs := range segment2Binlogs {
+	for segmentID := range flushedIDs {
 		sbl := &datapb.SegmentBinlogs{
 			SegmentID:    segmentID,
 			NumOfRows:    segmentsNumOfRows[segmentID],
-			FieldBinlogs: fieldBinlogs,
+			FieldBinlogs: segment2Binlogs[segmentID],
+			Statslogs:    segment2StatsBinlogs[segmentID],
+			Deltalogs:    segment2DeltaBinlogs[segmentID],
 		}
 		binlogs = append(binlogs, sbl)
 	}
