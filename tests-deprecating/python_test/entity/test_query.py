@@ -28,8 +28,7 @@ def init_data(
             ids = connect.insert(collection, insert_entities)
         else:
             ids = connect.insert(
-                collection, insert_entities, ids=list(range(nb))
-            )
+                collection, insert_entities, ids=list(range(nb)))
     else:
         if auto_id:
             ids = connect.insert(
@@ -116,7 +115,8 @@ class TestQueryBase:
                     res[index][default_float_field_name] == entities[1]["values"][index]
                 )
         res = connect.query(
-            collection, term_expr, output_fields=[ut.default_float_vec_field_name]
+            collection, term_expr, output_fields=[
+                ut.default_float_vec_field_name]
         )
         assert len(res) == default_pos
         for _id, index in enumerate(ids[:default_pos]):
@@ -379,7 +379,8 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.load_collection(binary_collection)
         term_expr = f"{default_int_field_name} in [0]"
-        res = connect.query(binary_collection, term_expr, output_fields=["*", "%"])
+        res = connect.query(binary_collection, term_expr,
+                            output_fields=["*", "%"])
         assert len(res) == 1
         assert res[0][default_int_field_name] == binary_entities[0]["values"][0]
         assert res[1][default_float_field_name] == binary_entities[1]["values"][0]
@@ -494,7 +495,8 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
         res = connect.query(
-            collection, default_term_expr, output_fields=[default_int_field_name]
+            collection, default_term_expr, output_fields=[
+                default_int_field_name]
         )
         assert default_int_field_name in res[0].keys()
         assert len(res[0].keys()) == 1
@@ -511,7 +513,8 @@ class TestQueryBase:
         connect.load_collection(collection)
         # fields = [default_int_field_name, default_float_field_name, ut.default_float_vec_field_name]
         fields = [default_int_field_name, default_float_field_name]
-        res = connect.query(collection, default_term_expr, output_fields=fields)
+        res = connect.query(collection, default_term_expr,
+                            output_fields=fields)
         for field in fields:
             assert field in res[0].keys()
 
@@ -555,7 +558,8 @@ class TestQueryBase:
         entities, ids = init_data(connect, collection)
         connect.load_collection(collection)
         with pytest.raises(Exception):
-            connect.query(collection, default_term_expr, output_fields=[fields])
+            connect.query(collection, default_term_expr,
+                          output_fields=[fields])
 
 
 class TestQueryPartition:
@@ -572,7 +576,8 @@ class TestQueryPartition:
         expected: verify query result
         """
         connect.create_partition(collection, ut.default_tag)
-        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
+        entities, ids = init_data(
+            connect, collection, partition_names=ut.default_tag)
         assert len(ids) == ut.default_nb
         connect.load_partitions(collection, [ut.default_tag])
         res = connect.query(
@@ -599,7 +604,8 @@ class TestQueryPartition:
         expected: raise exception
         """
         connect.create_partition(collection, ut.default_tag)
-        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
+        entities, ids = init_data(
+            connect, collection, partition_names=ut.default_tag)
         assert len(ids) == ut.default_nb
         with pytest.raises(Exception):
             connect.query(
@@ -642,7 +648,8 @@ class TestQueryPartition:
         connect.create_partition(collection, ut.default_tag)
         connect.load_partitions(collection, [ut.default_partition_name])
         res = connect.query(
-            collection, default_term_expr, partition_names=[ut.default_partition_name]
+            collection, default_term_expr, partition_names=[
+                ut.default_partition_name]
         )
         assert len(res) == 0
 
@@ -666,7 +673,8 @@ class TestQueryPartition:
         expected: verify query result
         """
         connect.create_partition(collection, ut.default_tag)
-        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
+        entities, ids = init_data(
+            connect, collection, partition_names=ut.default_tag)
         assert len(ids) == ut.default_nb
         connect.load_partitions(collection, [ut.default_tag])
         res_one = connect.query(
@@ -688,7 +696,8 @@ class TestQueryPartition:
         insert_entities_into_two_partitions_in_half(connect, collection)
         half = ut.default_nb // 2
         term_expr = f"{default_int_field_name} in [{half}]"
-        res = connect.query(collection, term_expr, partition_names=[ut.default_tag])
+        res = connect.query(collection, term_expr,
+                            partition_names=[ut.default_tag])
         assert len(res) == 0
 
     @pytest.mark.tags(ut.CaseLabel.tags_smoke)

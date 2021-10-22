@@ -149,7 +149,8 @@ if __name__ == "__main__":
                     diff_out = []
                     for diff_str in diff:
                         diff_out.append(
-                            diff_str.encode("raw_unicode_escape").decode("ascii")
+                            diff_str.encode(
+                                "raw_unicode_escape").decode("ascii")
                         )
                     sys.stderr.writelines(diff_out)
         except Exception:

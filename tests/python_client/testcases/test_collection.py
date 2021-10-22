@@ -96,7 +96,8 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = ""
-        error = {ct.err_code: 1, ct.err_msg: f"`collection_name` value is illegal"}
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"`collection_name` value is illegal"}
         self.collection_wrap.init_collection(
             c_name,
             schema=default_schema,
@@ -127,7 +128,8 @@ class TestCollectionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))]
+        "name", ["12-s", "12 s", "(mn)", "中文", "%$#",
+                 "a".join("a" for i in range(256))]
     )
     def test_collection_invalid_name(self, name):
         """
@@ -136,7 +138,8 @@ class TestCollectionParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(name)}
+        error = {ct.err_code: 1,
+                 ct.err_msg: "Invalid collection name: {}".format(name)}
         self.collection_wrap.init_collection(
             name,
             schema=default_schema,
@@ -173,7 +176,8 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(description=ct.collection_desc)
+        schema = cf.gen_default_collection_schema(
+            description=ct.collection_desc)
         collection_w = self.init_collection_wrap(
             name=c_name,
             schema=schema,
@@ -226,7 +230,8 @@ class TestCollectionParams(TestcaseBase):
         int_field_one = cf.gen_int64_field()
         int_field_two = cf.gen_int64_field(name="int2")
         fields = [int_field_one, int_field_two, cf.gen_float_vec_field()]
-        schema = cf.gen_collection_schema(fields, primary_field=int_field_one.name)
+        schema = cf.gen_collection_schema(
+            fields, primary_field=int_field_one.name)
         collection_w = self.init_collection_wrap(
             name=c_name,
             schema=schema,
@@ -237,7 +242,8 @@ class TestCollectionParams(TestcaseBase):
                 exp_primary: int_field_one.name,
             },
         )
-        new_schema = cf.gen_collection_schema(fields, primary_field=int_field_two.name)
+        new_schema = cf.gen_collection_schema(
+            fields, primary_field=int_field_two.name)
         error = {
             ct.err_code: 0,
             ct.err_msg: "The collection already exist, but the schema is not the same as the "
@@ -372,7 +378,8 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         fields = get_invalid_type_fields
-        error = {ct.err_code: 0, ct.err_msg: "The fields of schema must be type list"}
+        error = {ct.err_code: 0,
+                 ct.err_msg: "The fields of schema must be type list"}
         self.collection_schema_wrap.init_collection_schema(
             fields=fields, check_task=CheckTasks.err_res, check_items=error
         )
@@ -416,7 +423,8 @@ class TestCollectionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))]
+        "name", ["12-s", "12 s", "(mn)", "中文", "%$#",
+                 "a".join("a" for i in range(256))]
     )
     def test_collection_invalid_field_name(self, name):
         """
@@ -449,8 +457,10 @@ class TestCollectionParams(TestcaseBase):
         field, _ = self.field_schema_wrap.init_field_schema(
             name=None, dtype=DataType.INT64, is_primary=True
         )
-        schema = cf.gen_collection_schema(fields=[field, cf.gen_float_vec_field()])
-        error = {ct.err_code: 1, ct.err_msg: "You should specify the name of field"}
+        schema = cf.gen_collection_schema(
+            fields=[field, cf.gen_float_vec_field()])
+        error = {ct.err_code: 1,
+                 ct.err_msg: "You should specify the name of field"}
         self.collection_wrap.init_collection(
             c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error
         )
@@ -486,7 +496,8 @@ class TestCollectionParams(TestcaseBase):
         field, _ = self.field_schema_wrap.init_field_schema(
             name=ct.default_int64_field_name, dtype=5.0, is_primary=True
         )
-        schema = cf.gen_collection_schema(fields=[field, cf.gen_float_vec_field()])
+        schema = cf.gen_collection_schema(
+            fields=[field, cf.gen_float_vec_field()])
         error = {ct.err_code: 0, ct.err_msg: "Field type must be of DataType!"}
         self.collection_wrap.init_collection(
             c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error
@@ -597,7 +608,8 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_collection_schema([cf.gen_int64_field(is_primary=True)])
+        schema = cf.gen_collection_schema(
+            [cf.gen_int64_field(is_primary=True)])
         error = {ct.err_code: 0, ct.err_msg: "No vector field is found."}
         self.collection_wrap.init_collection(
             c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error
@@ -664,7 +676,8 @@ class TestCollectionParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "primary_field",
-        ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))],
+        ["12-s", "12 s", "(mn)", "中文", "%$#",
+         "a".join("a" for i in range(256))],
     )
     def test_collection_invalid_primary_field(self, primary_field):
         """
@@ -748,7 +761,8 @@ class TestCollectionParams(TestcaseBase):
             cf.gen_float_vec_field(),
         ]
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields)
-        self.collection_wrap.init_collection(cf.gen_unique_str(prefix), schema=schema)
+        self.collection_wrap.init_collection(
+            cf.gen_unique_str(prefix), schema=schema)
         assert self.collection_wrap.primary_field.name == ct.default_int64_field_name
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -762,7 +776,8 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         field = get_unsupported_primary_field
         vec_field = cf.gen_float_vec_field(name="vec")
-        error = {ct.err_code: 1, ct.err_msg: "Primary key type must be DataType.INT64."}
+        error = {ct.err_code: 1,
+                 ct.err_msg: "Primary key type must be DataType.INT64."}
         self.collection_schema_wrap.init_collection_schema(
             fields=[field, vec_field],
             primary_field=field.name,
@@ -1103,7 +1118,8 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(description=ct.collection_desc)
+        schema = cf.gen_default_collection_schema(
+            description=ct.collection_desc)
         self.collection_wrap.init_collection(
             c_name,
             schema=schema,
@@ -1435,9 +1451,11 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = pd.DataFrame(
-            columns=[ct.default_int64_field_name, ct.default_float_vec_field_name]
+            columns=[ct.default_int64_field_name,
+                     ct.default_float_vec_field_name]
         )
-        error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
+        error = {ct.err_code: 0,
+                 ct.err_msg: "Cannot infer schema from empty dataframe"}
         self.collection_wrap.construct_from_dataframe(
             c_name,
             df,
@@ -1479,7 +1497,8 @@ class TestCollectionDataframe(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 0, ct.err_msg: "Data type must be pandas.DataFrame."}
+        error = {ct.err_code: 0,
+                 ct.err_msg: "Data type must be pandas.DataFrame."}
         df = get_non_df
         self.collection_wrap.construct_from_dataframe(
             c_name, df, check_task=CheckTasks.err_res, check_items=error
@@ -1522,7 +1541,8 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = pd.DataFrame(
-            {"%$#": cf.gen_vectors(3, 2), ct.default_int64_field_name: [1, 2, 3]}
+            {"%$#": cf.gen_vectors(
+                3, 2), ct.default_int64_field_name: [1, 2, 3]}
         )
         error = {ct.err_code: 1, ct.err_msg: "Invalid field name"}
         self.collection_wrap.construct_from_dataframe(
@@ -1543,7 +1563,8 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        error = {ct.err_code: 0, ct.err_msg: "Schema must have a primary key field."}
+        error = {ct.err_code: 0,
+                 ct.err_msg: "Schema must have a primary key field."}
         self.collection_wrap.construct_from_dataframe(
             c_name,
             df,
@@ -1679,7 +1700,8 @@ class TestCollectionDataframe(TestcaseBase):
         nb = 100
         df = cf.gen_default_dataframe_data(nb)
         df.iloc[:, 0] = numpy.NaN
-        error = {ct.err_code: 0, ct.err_msg: "Primary key type must be DataType.INT64"}
+        error = {ct.err_code: 0,
+                 ct.err_msg: "Primary key type must be DataType.INT64"}
         self.collection_wrap.construct_from_dataframe(
             cf.gen_unique_str(prefix),
             df,
@@ -1710,7 +1732,8 @@ class TestCollectionDataframe(TestcaseBase):
         assert collection_w.num_entities == nb
         mutation_res = res[1]
         assert (
-            mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+            mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist(
+            )
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1836,7 +1859,8 @@ class TestCollectionCountIP:
         entities = gen_entities(insert_count)
         connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        connect.create_index(
+            collection, default_float_vec_field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == insert_count
 
@@ -1956,7 +1980,8 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid_count)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, cons.default_binary_fields)
+            connect.create_collection(
+                collection_name, cons.default_binary_fields)
             connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
@@ -1982,7 +2007,8 @@ class TestCollectionMultiCollections:
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(uid_count)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, cons.default_binary_fields)
+            connect.create_collection(
+                collection_name, cons.default_binary_fields)
             res = connect.insert(collection_name, cons.default_binary_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
@@ -2186,11 +2212,13 @@ class TestGetCollectionStats:
         new_tag = "new_tag"
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, new_tag)
-        connect.insert(collection, cons.default_entities, partition_name=default_tag)
+        connect.insert(collection, cons.default_entities,
+                       partition_name=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb
-        connect.insert(collection, cons.default_entities, partition_name=new_tag)
+        connect.insert(collection, cons.default_entities,
+                       partition_name=new_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb * 2
@@ -2281,7 +2309,8 @@ class TestGetCollectionStats:
         """
         connect.insert(collection, cons.default_entities)
         connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        connect.create_index(
+            collection, default_float_vec_field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb
 
@@ -2300,7 +2329,8 @@ class TestGetCollectionStats:
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         get_simple_index.update({"metric_type": "IP"})
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        connect.create_index(
+            collection, default_float_vec_field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb
 
@@ -2635,7 +2665,8 @@ class TestDescribeCollection:
     def test_describe_collection_after_index_created(
         self, connect, collection, get_simple_index
     ):
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        connect.create_index(
+            collection, default_float_vec_field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
             index = connect.describe_index(collection, "")
             assert index["index_type"] == get_simple_index["index_type"]
@@ -3095,7 +3126,8 @@ class TestLoadCollection:
         """
         connect.insert(collection, cons.default_entities)
         connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        connect.create_index(
+            collection, default_float_vec_field_name, get_simple_index)
         connect.load_collection(collection)
         connect.release_collection(collection)
 
@@ -3108,12 +3140,14 @@ class TestLoadCollection:
         method: insert and create index, load binary_collection with correct params
         expected: no error raised
         """
-        result = connect.insert(binary_collection, cons.default_binary_entities)
+        result = connect.insert(
+            binary_collection, cons.default_binary_entities)
         assert len(result.primary_keys) == default_nb
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
             get_binary_index["metric_type"] = metric_type
-            connect.drop_index(binary_collection, default_binary_vec_field_name)
+            connect.drop_index(binary_collection,
+                               default_binary_vec_field_name)
             if (
                 get_binary_index["index_type"] == "BIN_IVF_FLAT"
                 and metric_type in structure_metrics()
@@ -3129,7 +3163,8 @@ class TestLoadCollection:
                     binary_collection, default_binary_vec_field_name, get_binary_index
                 )
                 index = connect.describe_index(binary_collection, "")
-                create_target_index(get_binary_index, default_binary_vec_field_name)
+                create_target_index(
+                    get_binary_index, default_binary_vec_field_name)
                 assert index == get_binary_index
             connect.load_collection(binary_collection)
             connect.release_collection(binary_collection)
@@ -3392,7 +3427,8 @@ class TestLoadCollection:
         assert len(result.primary_keys) == default_nb
         connect.flush([collection])
         connect.load_collection(collection)
-        connect.release_partitions(collection, [default_partition_name, default_tag])
+        connect.release_partitions(
+            collection, [default_partition_name, default_tag])
         res = connect.search(collection, **default_single_query)
         assert len(res[0]) == 0
 
@@ -3450,7 +3486,8 @@ class TestReleaseAdvanced:
         query, _ = gen_search_vectors_params(
             field_name, cons.default_entities, top_k, nq
         )
-        connect.insert(collection, cons.default_entities, partition_name=default_tag)
+        connect.insert(collection, cons.default_entities,
+                       partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, **query, _async=True)
@@ -3471,7 +3508,8 @@ class TestReleaseAdvanced:
         query, _ = gen_search_vectors_params(
             field_name, cons.default_entities, top_k, nq
         )
-        connect.insert(collection, cons.default_entities, partition_name=default_tag)
+        connect.insert(collection, cons.default_entities,
+                       partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, **query, _async=True)
@@ -3504,7 +3542,8 @@ class TestReleaseAdvanced:
         expected:
         """
         connect.create_partition(collection, default_tag)
-        connect.insert(collection, cons.default_entities, partition_name=default_tag)
+        connect.insert(collection, cons.default_entities,
+                       partition_name=default_tag)
         connect.flush([collection])
 
         def load():

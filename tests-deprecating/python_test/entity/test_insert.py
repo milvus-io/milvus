@@ -240,7 +240,8 @@ class TestInsertBase:
         }
         connect.create_collection(collection_name, fields)
         ids = list(range(nb))
-        entities = gen_entities_by_fields(fields["fields"], nb, default_dim, ids)
+        entities = gen_entities_by_fields(
+            fields["fields"], nb, default_dim, ids)
         logging.getLogger().info(entities)
         res_ids = connect.insert(collection_name, entities)
         assert res_ids == ids
@@ -331,7 +332,8 @@ class TestInsertBase:
         expected: the collection row count equals to nq
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_name=default_tag)
+        ids = connect.insert(collection, default_entities,
+                             partition_name=default_tag)
         assert len(ids) == default_nb
         assert connect.has_partition(collection, default_tag)
         connect.flush([collection])
@@ -351,7 +353,8 @@ class TestInsertBase:
         ids = list(range(default_nb))
         entities = gen_entities(default_nb)
         entities[0]["values"] = ids
-        res_ids = connect.insert(id_collection, entities, partition_name=default_tag)
+        res_ids = connect.insert(
+            id_collection, entities, partition_name=default_tag)
         assert res_ids == ids
         logging.getLogger().info(connect.describe_collection(id_collection))
 
@@ -392,8 +395,10 @@ class TestInsertBase:
         expected: the collection row count equals to nq
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_name=default_tag)
-        ids = connect.insert(collection, default_entities, partition_name=default_tag)
+        ids = connect.insert(collection, default_entities,
+                             partition_name=default_tag)
+        ids = connect.insert(collection, default_entities,
+                             partition_name=default_tag)
         connect.flush([collection])
         res = connect.get_collection_stats(collection)
         assert res[row_count] == 2 * default_nb
@@ -641,7 +646,8 @@ class TestInsertBinary:
         method: build index and insert entities
         expected: no error raised
         """
-        connect.create_index(binary_collection, binary_field_name, get_binary_index)
+        connect.create_index(
+            binary_collection, binary_field_name, get_binary_index)
         ids = connect.insert(binary_collection, default_binary_entities)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
@@ -662,7 +668,8 @@ class TestInsertBinary:
         ids = connect.insert(binary_collection, default_binary_entities)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
-        connect.create_index(binary_collection, binary_field_name, get_binary_index)
+        connect.create_index(
+            binary_collection, binary_field_name, get_binary_index)
         index = connect.describe_index(binary_collection, "")
         create_target_index(get_binary_index, binary_field_name)
         assert index == get_binary_index
@@ -1059,7 +1066,8 @@ class TestInsertInvalid(object):
         connect.create_partition(collection, default_tag)
         if tag_name is not None:
             with pytest.raises(Exception):
-                connect.insert(collection, default_entity, partition_name=tag_name)
+                connect.insert(collection, default_entity,
+                               partition_name=tag_name)
         else:
             connect.insert(collection, default_entity, partition_name=tag_name)
 

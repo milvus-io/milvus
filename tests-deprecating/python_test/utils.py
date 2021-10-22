@@ -128,7 +128,8 @@ def tanimoto(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return -np.log2(
-        np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
+        np.double(np.bitwise_and(x, y).sum()) /
+        np.double(np.bitwise_or(x, y).sum())
     )
 
 
@@ -151,7 +152,8 @@ def get_milvus(host, port, uri=None, handler=None, **kwargs):
     if uri is not None:
         milvus = Milvus(uri=uri, handler=handler, try_connect=try_connect)
     else:
-        milvus = Milvus(host=host, port=port, handler=handler, try_connect=try_connect)
+        milvus = Milvus(host=host, port=port, handler=handler,
+                        try_connect=try_connect)
     return milvus
 
 
@@ -165,7 +167,8 @@ def disable_flush(connect):
 
 def enable_flush(connect):
     # reset auto_flush_interval=1
-    connect.set_config("storage", "auto_flush_interval", default_flush_interval)
+    connect.set_config("storage", "auto_flush_interval",
+                       default_flush_interval)
     config_value = connect.get_config("storage", "auto_flush_interval")
     assert config_value == str(default_flush_interval)
 
@@ -446,7 +449,8 @@ def gen_query_vectors(
         query_vectors = replace_vecs
     must_param = {
         "vector": {
-            field_name: {"topk": top_k, "query": query_vectors, "params": search_params}
+            field_name: {"topk": top_k, "query": query_vectors,
+                         "params": search_params}
         }
     }
     must_param["vector"][field_name]["metric_type"] = metric_type
@@ -521,7 +525,8 @@ def gen_invalid_term():
         {"term": 1},
         {"term": []},
         {"term": {}},
-        {"term": {"term": {"int64": {"values": list(range(default_nb // 2))}}}},
+        {"term": {
+            "term": {"int64": {"values": list(range(default_nb // 2))}}}},
     ]
     return terms
 
@@ -552,7 +557,8 @@ def add_field(entities, field_name=None):
 def add_vector_field(entities, is_normal=False):
     nb = len(entities[0]["values"])
     vectors = gen_vectors(nb, default_dim, is_normal)
-    field = {"name": gen_unique_str(), "type": DataType.FLOAT_VECTOR, "values": vectors}
+    field = {"name": gen_unique_str(), "type": DataType.FLOAT_VECTOR,
+             "values": vectors}
     entities.append(field)
     return entities
 
@@ -827,7 +833,8 @@ def gen_invalid_index():
         index_param = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}}
         index_params.append(index_param)
     for M in gen_invalid_params():
-        index_param = {"index_type": "HNSW", "params": {"M": M, "efConstruction": 100}}
+        index_param = {"index_type": "HNSW",
+                       "params": {"M": M, "efConstruction": 100}}
         index_param = {
             "index_type": "RHNSW_PQ",
             "params": {"M": M, "efConstruction": 100},
@@ -884,15 +891,18 @@ def gen_invalid_index():
             },
         }
         index_params.append(index_param)
-    index_params.append({"index_type": "IVF_FLAT", "params": {"invalid_key": 1024}})
+    index_params.append(
+        {"index_type": "IVF_FLAT", "params": {"invalid_key": 1024}})
     index_params.append(
         {"index_type": "HNSW", "params": {"invalid_key": 16, "efConstruction": 100}}
     )
     index_params.append(
-        {"index_type": "RHNSW_PQ", "params": {"invalid_key": 16, "efConstruction": 100}}
+        {"index_type": "RHNSW_PQ", "params": {
+            "invalid_key": 16, "efConstruction": 100}}
     )
     index_params.append(
-        {"index_type": "RHNSW_SQ", "params": {"invalid_key": 16, "efConstruction": 100}}
+        {"index_type": "RHNSW_SQ", "params": {
+            "invalid_key": 16, "efConstruction": 100}}
     )
     index_params.append(
         {
@@ -1055,7 +1065,8 @@ def restart_server(helm_release_name):
             v1.delete_namespaced_pod(pod_name, namespace)
         except Exception as e:
             logging.error(str(e))
-            logging.error("Exception when calling CoreV1Api->delete_namespaced_pod")
+            logging.error(
+                "Exception when calling CoreV1Api->delete_namespaced_pod")
             res = False
             return res
         logging.error("Sleep 10s after pod deleted")
@@ -1100,9 +1111,12 @@ def restart_server(helm_release_name):
         raise Exception("Pod: %s not found" % pod_name)
     follow = True
     pretty = True
-    previous = True  # bool | Return previous terminated container logs. Defaults to false. (optional)
-    since_seconds = 56  # int | A relative time in seconds before the current time from which to show logs. If this value precedes the time a pod was started, only logs since the pod start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified. (optional)
-    timestamps = True  # bool | If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line of log output. Defaults to false. (optional)
+    # bool | Return previous terminated container logs. Defaults to false. (optional)
+    previous = True
+    # int | A relative time in seconds before the current time from which to show logs. If this value precedes the time a pod was started, only logs since the pod start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified. (optional)
+    since_seconds = 56
+    # bool | If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line of log output. Defaults to false. (optional)
+    timestamps = True
     container = "milvus"
     # start_time = time.time()
     # while time.time() - start_time <= timeout:

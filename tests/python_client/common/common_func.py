@@ -167,7 +167,8 @@ def gen_default_collection_schema(
     auto_id=False,
     dim=ct.default_dim,
 ):
-    fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field(dim=dim)]
+    fields = [gen_int64_field(), gen_float_field(),
+              gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
         fields=fields,
         description=description,
@@ -220,7 +221,8 @@ def gen_default_binary_collection_schema(
     auto_id=False,
     dim=ct.default_dim,
 ):
-    fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field(dim=dim)]
+    fields = [gen_int64_field(), gen_float_field(),
+              gen_binary_vec_field(dim=dim)]
     binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
         fields=fields,
         description=description,
@@ -284,7 +286,8 @@ def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
     :return: dataframe
     """
     int_values = pd.Series(data=list(range(0, nb)))
-    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+    float_values = pd.Series(data=[float(i)
+                             for i in range(nb)], dtype="float32")
     df = pd.DataFrame(
         {
             ct.default_int64_field_name: int_values,
@@ -457,13 +460,17 @@ def gen_invaild_search_params_type():
 
 def gen_search_param(index_type, metric_type="L2"):
     search_params = []
-    if index_type in [
-        "FLAT",
-        "IVF_FLAT",
-        "IVF_SQ8",
-        "IVF_SQ8H",
-        "IVF_PQ",
-    ] or index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
+    if (
+        index_type
+        in [
+            "FLAT",
+            "IVF_FLAT",
+            "IVF_SQ8",
+            "IVF_SQ8H",
+            "IVF_PQ",
+        ]
+        or index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]
+    ):
         for nprobe in [64, 128]:
             ivf_search_params = {
                 "metric_type": metric_type,
@@ -472,7 +479,8 @@ def gen_search_param(index_type, metric_type="L2"):
             search_params.append(ivf_search_params)
     elif index_type in ["HNSW", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ"]:
         for ef in [64, 32768]:
-            hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
+            hnsw_search_param = {
+                "metric_type": metric_type, "params": {"ef": ef}}
             search_params.append(hnsw_search_param)
     elif index_type in ["NSG", "RNSG"]:
         for search_length in [100, 300]:
@@ -561,7 +569,8 @@ def tanimoto(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return -np.log2(
-        np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
+        np.double(np.bitwise_and(x, y).sum()) /
+        np.double(np.bitwise_or(x, y).sum())
     )
 
 
@@ -626,7 +635,8 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
             log.error("[modify_file] file(%s) is not exist." % file_path)
         else:
             if is_modify is True:
-                log.debug("[modify_file] start modifying file(%s)..." % file_path)
+                log.debug(
+                    "[modify_file] start modifying file(%s)..." % file_path)
                 with open(file_path, "r+") as f:
                     f.seek(0)
                     f.truncate()
@@ -692,16 +702,19 @@ def insert_data(
         % (collection_w.name, nb)
     )
     for i in range(num):
-        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start)
+        default_data = gen_default_dataframe_data(
+            nb // num, dim=dim, start=start)
         if is_binary:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(
                 nb // num, dim=dim, start=start
             )
             binary_raw_vectors.extend(binary_raw_data)
         if is_all_data_type:
-            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start)
+            default_data = gen_dataframe_all_data_type(
+                nb // num, dim=dim, start=start)
         if auto_id:
-            default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
+            default_data.drop(ct.default_int64_field_name,
+                              axis=1, inplace=True)
         insert_res = collection_w.insert(default_data, par[i].name)[0]
         time_stamp = insert_res.timestamp
         insert_ids.extend(insert_res.primary_keys)

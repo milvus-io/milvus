@@ -48,7 +48,8 @@ class DockerRunner(Runner):
                         for k, v in param.items():
                             if k.startswith("server."):
                                 # Update server config
-                                utils.modify_config(k, v, type="server", db_slave=None)
+                                utils.modify_config(
+                                    k, v, type="server", db_slave=None)
                         container = utils.run_server(
                             self.image,
                             test_type="remote",
@@ -115,7 +116,8 @@ class DockerRunner(Runner):
                         index_types = param["index.index_types"]
                         nlists = param["index.nlists"]
                         # parse top-k, nq, nprobe
-                        top_ks, nqs, nprobes = parser.search_params_parser(param)
+                        top_ks, nqs, nprobes = parser.search_params_parser(
+                            param)
                         for index_type in index_types:
                             for nlist in nlists:
                                 result = milvus.describe_index()
@@ -147,7 +149,8 @@ class DockerRunner(Runner):
                                         run_count,
                                     )
                                     headers = ["Nq/Top-k"]
-                                    headers.extend([str(top_k) for top_k in top_ks])
+                                    headers.extend([str(top_k)
+                                                   for top_k in top_ks])
                                     utils.print_collection(headers, nqs, res)
                         utils.remove_container(container)
 
@@ -175,7 +178,8 @@ class DockerRunner(Runner):
                     for k, v in param.items():
                         if k.startswith("server."):
                             # Update server config
-                            utils.modify_config(k, v, type="server", db_slave=None)
+                            utils.modify_config(
+                                k, v, type="server", db_slave=None)
                     container = utils.run_server(
                         self.image,
                         test_type="remote",
@@ -260,7 +264,8 @@ class DockerRunner(Runner):
                             # preload index
                             milvus.preload_collection()
                             logger.info("Start warm up query")
-                            res = self.do_query(milvus, collection_name, [1], [1], 1, 1)
+                            res = self.do_query(
+                                milvus, collection_name, [1], [1], 1, 1)
                             logger.info("End warm up query")
                             # Run query test
                             for nprobe in nprobes:
@@ -277,7 +282,8 @@ class DockerRunner(Runner):
                                     run_count,
                                 )
                                 headers = ["Nq/Top-k"]
-                                headers.extend([str(top_k) for top_k in top_ks])
+                                headers.extend([str(top_k)
+                                               for top_k in top_ks])
                                 utils.print_collection(headers, nqs, res)
                     utils.remove_container(container)
 
@@ -345,7 +351,8 @@ class DockerRunner(Runner):
                     top_ks, nqs, nprobes = parser.search_params_parser(param)
                     if sift_acc is True:
                         # preload groundtruth data
-                        true_ids_all = self.get_groundtruth_ids(collection_size)
+                        true_ids_all = self.get_groundtruth_ids(
+                            collection_size)
                     acc_dict = {}
                     for index_type in index_types:
                         for nlist in nlists:
@@ -363,17 +370,14 @@ class DockerRunner(Runner):
                                 for top_k in top_ks:
                                     for nq in nqs:
                                         result_ids = []
-                                        id_prefix = (
-                                            "%s_index_%s_nlist_%s_metric_type_%s_nprobe_%s_top_k_%s_nq_%s"
-                                            % (
-                                                collection_name,
-                                                index_type,
-                                                nlist,
-                                                metric_type,
-                                                nprobe,
-                                                top_k,
-                                                nq,
-                                            )
+                                        id_prefix = "%s_index_%s_nlist_%s_metric_type_%s_nprobe_%s_top_k_%s_nq_%s" % (
+                                            collection_name,
+                                            index_type,
+                                            nlist,
+                                            metric_type,
+                                            nprobe,
+                                            top_k,
+                                            nq,
                                         )
                                         if sift_acc is False:
                                             self.do_query_acc(
@@ -386,16 +390,13 @@ class DockerRunner(Runner):
                                             )
                                             if index_type != "flat":
                                                 # Compute accuracy
-                                                base_name = (
-                                                    "%s_index_flat_nlist_%s_metric_type_%s_nprobe_%s_top_k_%s_nq_%s"
-                                                    % (
-                                                        collection_name,
-                                                        nlist,
-                                                        metric_type,
-                                                        nprobe,
-                                                        top_k,
-                                                        nq,
-                                                    )
+                                                base_name = "%s_index_flat_nlist_%s_metric_type_%s_nprobe_%s_top_k_%s_nq_%s" % (
+                                                    collection_name,
+                                                    nlist,
+                                                    metric_type,
+                                                    nprobe,
+                                                    top_k,
+                                                    nq,
                                                 )
                                                 avg_acc = self.compute_accuracy(
                                                     base_name, id_prefix
@@ -435,10 +436,13 @@ class DockerRunner(Runner):
                                                         "query: N-%d, intersection: %d, total: %d\n"
                                                         % (index, len(tmp), total)
                                                     )
-                                                    fd.write("%s\n" % str(item))
-                                                    fd.write("%s\n" % str(true_item))
+                                                    fd.write("%s\n" %
+                                                             str(item))
+                                                    fd.write("%s\n" %
+                                                             str(true_item))
                                             acc_value = self.get_recall_value(
-                                                true_ids_all[:nq, :top_k].tolist(),
+                                                true_ids_all[:nq,
+                                                             :top_k].tolist(),
                                                 result_ids,
                                             )
                                             logger.info(

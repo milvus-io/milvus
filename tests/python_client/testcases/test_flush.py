@@ -105,7 +105,8 @@ class TestFlushBase:
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(id_collection, tag_new)
         ids = list(range(default_nb))
-        connect.insert(id_collection, default_entities, partition_name=default_tag)
+        connect.insert(id_collection, default_entities,
+                       partition_name=default_tag)
         connect.flush([id_collection])
         connect.insert(id_collection, default_entities, partition_name=tag_new)
         connect.flush([id_collection])
@@ -126,8 +127,10 @@ class TestFlushBase:
         ids = list(range(default_nb))
         # ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
         # ids = connect.insert(collection_new, default_entities, ids, partition_name=default_tag)
-        connect.insert(id_collection, default_entities, partition_name=default_tag)
-        connect.insert(collection_new, default_entities, partition_name=default_tag)
+        connect.insert(id_collection, default_entities,
+                       partition_name=default_tag)
+        connect.insert(collection_new, default_entities,
+                       partition_name=default_tag)
         connect.flush([id_collection])
         connect.flush([collection_new])
         res = connect.get_collection_stats(id_collection)
@@ -155,9 +158,12 @@ class TestFlushBase:
         connect.create_collection(collection_new, fields)
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(collection_new, default_tag)
-        entities_new = gen_entities_by_fields(fields["fields"], nb_new, default_dim)
-        connect.insert(id_collection, default_entities, partition_name=default_tag)
-        connect.insert(collection_new, entities_new, partition_name=default_tag)
+        entities_new = gen_entities_by_fields(
+            fields["fields"], nb_new, default_dim)
+        connect.insert(id_collection, default_entities,
+                       partition_name=default_tag)
+        connect.insert(collection_new, entities_new,
+                       partition_name=default_tag)
         connect.flush([id_collection])
         connect.flush([collection_new])
         res = connect.get_collection_stats(id_collection)
@@ -259,10 +265,12 @@ class TestFlushBase:
             connect.flush([collection])
             ids.extend(tmp_ids)
         disable_flush(connect)
+
         # status = connect.delete_entity_by_id(collection, ids)
 
         def flush():
-            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
+            milvus = get_milvus(args["ip"], args["port"],
+                                handler=args["handler"])
             logging.error("start flush")
             milvus.flush([collection])
             logging.error("end flush")
@@ -365,7 +373,8 @@ class TestFlushAsync:
         """
         connect.insert(collection, default_entities)
         logging.getLogger().info("before")
-        future = connect.flush([collection], _async=True, _callback=self.check_status)
+        future = connect.flush([collection], _async=True,
+                               _callback=self.check_status)
         logging.getLogger().info("after")
         future.done()
         status = future.result()
@@ -392,7 +401,8 @@ class TestCollectionNameInvalid(object):
         """
         collection_name = get_invalid_collection_name
         if collection_name is None or not collection_name:
-            pytest.skip("while collection_name is None, then flush all collections")
+            pytest.skip(
+                "while collection_name is None, then flush all collections")
         with pytest.raises(Exception) as e:
             connect.flush(collection_name)
 

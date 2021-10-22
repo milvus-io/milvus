@@ -136,7 +136,8 @@ class TestCreateBase:
         tag_name = ut.gen_unique_str()
         connect.create_partition(collection, tag_name)
         assert ut.compare_list_elements(
-            connect.list_partitions(collection), [default_tag, tag_name, "_default"]
+            connect.list_partitions(collection), [
+                default_tag, tag_name, "_default"]
         )
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -178,7 +179,8 @@ class TestCreateBase:
         connect.create_partition(collection, default_tag)
         ids = list(range(default_nb))
         try:
-            connect.insert(collection, default_entities, partition_name=tag_new)
+            connect.insert(collection, default_entities,
+                           partition_name=tag_new)
         except Exception as e:
             code = getattr(
                 e, "code", "The exception does not contain the field of code."
@@ -242,7 +244,6 @@ class TestCreateBase:
 
 
 class TestShowBase:
-
     """
     ******************************************************************
       The following cases are used to test `list_partitions` function
@@ -282,11 +283,11 @@ class TestShowBase:
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
         res = connect.list_partitions(collection)
-        assert ut.compare_list_elements(res, [default_tag, tag_new, "_default"])
+        assert ut.compare_list_elements(
+            res, [default_tag, tag_new, "_default"])
 
 
 class TestHasBase:
-
     """
     ******************************************************************
       The following cases are used to test `has_partition` function
@@ -372,7 +373,6 @@ class TestHasBase:
 
 
 class TestDropBase:
-
     """
     ******************************************************************
       The following cases are used to test `drop_partition` function

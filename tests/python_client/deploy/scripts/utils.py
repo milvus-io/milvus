@@ -52,11 +52,13 @@ def gen_search_param(index_type, metric_type="L2"):
             search_params.append(ivf_search_params)
     elif index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
         for nprobe in [10]:
-            bin_search_params = {"metric_type": "HAMMING", "params": {"nprobe": nprobe}}
+            bin_search_params = {"metric_type": "HAMMING",
+                                 "params": {"nprobe": nprobe}}
             search_params.append(bin_search_params)
     elif index_type in ["HNSW", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ"]:
         for ef in [64]:
-            hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
+            hnsw_search_param = {
+                "metric_type": metric_type, "params": {"ef": ef}}
             search_params.append(hnsw_search_param)
     elif index_type in ["NSG", "RNSG"]:
         for search_length in [100]:

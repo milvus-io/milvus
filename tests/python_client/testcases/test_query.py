@@ -221,9 +221,7 @@ class TestQueryParams(TestcaseBase):
         # construct dataframe and inert data
         df = pd.DataFrame(
             {
-                ct.default_int64_field_name: pd.Series(
-                    data=list(range(ct.default_nb))
-                ),
+                ct.default_int64_field_name: pd.Series(data=list(range(ct.default_nb))),
                 ct.default_int32_field_name: pd.Series(
                     data=[np.int32(i) for i in range(ct.default_nb)], dtype="int32"
                 ),
@@ -1468,8 +1466,7 @@ def init_data(
             res = connect.insert(collection, insert_entities)
         else:
             res = connect.insert(
-                collection, insert_entities, ids=list(range(nb))
-            )
+                collection, insert_entities, ids=list(range(nb)))
     else:
         if auto_id:
             res = connect.insert(
