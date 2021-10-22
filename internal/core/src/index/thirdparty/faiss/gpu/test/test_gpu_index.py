@@ -231,8 +231,6 @@ class TestShardedFlat(unittest.TestCase):
         D_ref, I_ref = index_cpu.search(xq, k)
 
         assert np.all(I == I_ref)
-
-        del index
         index2 = faiss.index_cpu_to_all_gpus(index_cpu, co, ngpu=2)
         D2, I2 = index2.search(xq, k)
 

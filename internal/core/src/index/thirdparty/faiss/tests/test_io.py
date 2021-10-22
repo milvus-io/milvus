@@ -65,7 +65,6 @@ class TestCallbacks(unittest.TestCase):
             writer = faiss.BufferedIOWriter(writer, bsz)
 
         faiss.write_index(index, writer)
-        del writer  # make sure all writes committed
 
         if sys.version_info[0] < 3:
             buf = f.getvalue()

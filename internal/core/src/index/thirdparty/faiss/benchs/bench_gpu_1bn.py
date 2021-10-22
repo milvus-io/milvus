@@ -673,7 +673,6 @@ def get_populated_index(preproc):
             index = gpu_index
 
     else:
-        del gpu_index  # We override the GPU index
 
         print("Copy CPU index to %d sharded GPU indexes" % replicas)
 
@@ -690,7 +689,6 @@ def get_populated_index(preproc):
             index1.this.disown()
             index.addIndex(index1)
         index.own_fields = True
-    del indexall
     print("move to GPU done in %.3f s" % (time.time() - t0))
     return index
 
