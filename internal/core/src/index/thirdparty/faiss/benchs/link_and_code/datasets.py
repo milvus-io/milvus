@@ -4,7 +4,6 @@
 # LICENSE file in the root directory of this source tree.
 
 #! /usr/bin/env python2
-
 """
 Common functions to load datasets and compute their ground-truth
 """
@@ -94,7 +93,8 @@ class ResultHeap:
         assert D.shape == (self.nq, self.k)
         assert I.shape == (self.nq, self.k)
         I += i0
-        self.heaps.addn_with_ids(self.k, faiss.swig_ptr(D), faiss.swig_ptr(I), self.k)
+        self.heaps.addn_with_ids(
+            self.k, faiss.swig_ptr(D), faiss.swig_ptr(I), self.k)
 
     def finalize(self):
         self.heaps.reorder()
@@ -198,7 +198,8 @@ def load_data(dataset="deep1M", compute_gt=False):
     else:
         assert False
 
-    print("dataset %s sizes: B %s Q %s T %s" % (dataset, xb.shape, xq.shape, xt.shape))
+    print("dataset %s sizes: B %s Q %s T %s" %
+          (dataset, xb.shape, xq.shape, xt.shape))
 
     return xt, xb, xq, gt
 
@@ -236,5 +237,5 @@ def evaluate(xq, gt, index, k=100, endl=True):
         )
         rank *= 10
     if endl:
-        print
+        pass
     return D, I

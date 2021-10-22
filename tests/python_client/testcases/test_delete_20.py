@@ -78,7 +78,8 @@ class TestDeleteParams(TestcaseBase):
             prefix, nb=tmp_nb, insert_data=True
         )[0]
         error = {ct.err_code: 0, ct.err_msg: "todo"}
-        collection_w.delete(expr=None, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            expr=None, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.num_entities == tmp_nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -95,7 +96,8 @@ class TestDeleteParams(TestcaseBase):
             prefix, nb=tmp_nb, insert_data=True
         )[0]
         error = {ct.err_code: 0, ct.err_msg: "..."}
-        collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_empty_value(self):
@@ -210,7 +212,8 @@ class TestDeleteParams(TestcaseBase):
 
         # Bad exception message
         error = {ct.err_code: 1, ct.err_msg: "failed to create expr plan,"}
-        collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
     # PASS
     @pytest.mark.tags(CaseLabel.L2)
@@ -228,7 +231,8 @@ class TestDeleteParams(TestcaseBase):
 
         # Bad exception message
         error = {ct.err_code: 1, ct.err_msg: "failed to create expr plan"}
-        collection_w.delete(expr=expr, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.delete(
+            expr=expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_delete_partition(self):
@@ -238,7 +242,8 @@ class TestDeleteParams(TestcaseBase):
         expected: verify partition entities is deleted
         """
         # init collection and partition
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
 
         # insert data to partition
@@ -246,7 +251,8 @@ class TestDeleteParams(TestcaseBase):
         partition_w.insert(df)
         assert partition_w.num_entities == tmp_nb
         collection_w.load()
-        del_res, _ = collection_w.delete(tmp_expr, partition_name=[partition_w.name])
+        del_res, _ = collection_w.delete(
+            tmp_expr, partition_name=[partition_w.name])
 
         # verify partition num entities
         assert del_res.delete_cnt == 1
@@ -278,7 +284,8 @@ class TestDeleteParams(TestcaseBase):
         expected: delete from all partitions
         """
         # init collection and partition
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
 
         # insert data to partition
@@ -354,7 +361,8 @@ class TestDeleteOperation(TestcaseBase):
             "metric_type": "L2",
             "params": {"nlist": 64},
         }
-        collection_w.create_index(ct.default_float_vec_field_name, index_params)
+        collection_w.create_index(
+            ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
         # delete entity
         collection_w.delete(tmp_expr)
@@ -386,7 +394,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: deleted entity is not in the search result
         """
         # init collection with nb default data
-        collection_w = self.init_collection_general(prefix, insert_data=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, insert_data=True)[0]
         entity, _ = collection_w.query(tmp_expr, output_fields=["%"])
         default_search_exp = "int64 >= 0"
         search_res, _ = collection_w.search(
@@ -433,7 +442,8 @@ class TestDeleteOperation(TestcaseBase):
                 2.delete with repeated or not values
         expected: delete all entities
         """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(nb=tmp_nb)
         df[ct.default_int64_field_name] = 0
         collection_w.insert(df)
@@ -451,7 +461,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: raise exception
         """
         # init collection and partition
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
 
         error = {ct.err_code: 0, ct.err_msg: "..."}
@@ -578,7 +589,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: The data in both partitions will be deleted
         """
         # init collection and partition
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
 
         # insert same data into partition_w and default partition
@@ -589,7 +601,8 @@ class TestDeleteOperation(TestcaseBase):
 
         # delete same ids from two partition
         collection_w.delete(
-            tmp_expr, partition_name=[ct.default_partition_name, partition_w.name]
+            tmp_expr, partition_name=[
+                ct.default_partition_name, partition_w.name]
         )
         assert collection_w.num_entities == tmp_nb - 2
 
@@ -625,7 +638,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: Raise exception
         """
         # create collection, insert data without flush
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(tmp_nb)
         collection_w.insert(df)
         assert collection_w.num_entities == tmp_nb
@@ -654,7 +668,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: No query result
         """
         # create collection, insert data without flush
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(tmp_nb)
         collection_w.insert(df)
         assert collection_w.num_entities == tmp_nb
@@ -680,7 +695,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: No query result
         """
         # create collection
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         # load collection and the queryNode watch the insertChannel
         collection_w.load()
         # insert data
@@ -703,7 +719,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: Delete successfully and no query result
         """
         # create collection and insert flush data
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(tmp_nb)
         collection_w.insert(df)
         assert collection_w.num_entities == tmp_nb
@@ -727,7 +744,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: No query result
         """
         # create collection
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         # insert and flush data
         df = cf.gen_default_dataframe_data(tmp_nb)
         collection_w.insert(df)
@@ -735,7 +753,6 @@ class TestDeleteOperation(TestcaseBase):
         # delete id 0 and flush
         del_res = collection_w.delete(tmp_expr)[0]
         assert del_res.delete_count == 1
-        collection_w.num_entities
         # load and query id 0
         collection_w.load()
         query_res = collection_w.query(tmp_expr)[0]
@@ -751,7 +768,8 @@ class TestDeleteOperation(TestcaseBase):
         expected: verify query result
         """
         # init collection and insert data without flush
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(tmp_nb)
         collection_w.insert(df)
 
