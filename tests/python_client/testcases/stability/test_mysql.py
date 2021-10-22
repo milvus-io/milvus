@@ -32,8 +32,7 @@ class TestMysql:
         index_type = IndexType.IVF_PQ
         vectors = gen_vectors(big_nb, default_dim)
         status, ids = connect.bulk_insert(
-            collection, vectors, ids=list(range(big_nb))
-        )
+            collection, vectors, ids=list(range(big_nb)))
         status = connect.flush([collection])
         assert status.OK()
         status, res_count = connect.count_entities(collection)
@@ -41,11 +40,13 @@ class TestMysql:
         assert status.OK()
         assert res_count == big_nb
         logging.getLogger().info("Start create index async")
-        status = connect.create_index(collection, index_type, index_param, _async=True)
+        status = connect.create_index(
+            collection, index_type, index_param, _async=True)
         time.sleep(2)
         logging.getLogger().info("Start play mysql failure")
         # pass
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        new_connect = get_milvus(
+            args["ip"], args["port"], handler=args["handler"])
         status, res_count = new_connect.count_entities(collection)
         assert status.OK()
         assert res_count == big_nb

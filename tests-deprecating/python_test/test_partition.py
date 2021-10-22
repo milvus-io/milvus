@@ -47,7 +47,8 @@ class TestCreateBase:
                 connect.create_partition(collection, tag_tmp)
 
         for i in range(threads_num):
-            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
+            m = get_milvus(
+                host=args["ip"], port=args["port"], handler=args["handler"])
             t = threading.Thread(target=create, args=(m, threads_num))
             threads.append(t)
             t.start()
@@ -132,7 +133,8 @@ class TestCreateBase:
         tag_name = gen_unique_str()
         connect.create_partition(collection, tag_name)
         assert compare_list_elements(
-            connect.list_partitions(collection), [default_tag, tag_name, "_default"]
+            connect.list_partitions(collection), [
+                default_tag, tag_name, "_default"]
         )
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -172,7 +174,8 @@ class TestCreateBase:
         connect.create_partition(collection, default_tag)
         ids = list(range(default_nb))
         try:
-            connect.insert(collection, default_entities, partition_name=tag_new)
+            connect.insert(collection, default_entities,
+                           partition_name=tag_new)
         except Exception as e:
             code = getattr(
                 e, "code", "The exception does not contain the field of code."
@@ -220,7 +223,8 @@ class TestCreateBase:
         collection_new = gen_unique_str()
         connect.create_collection(collection_new, default_fields)
         connect.create_partition(collection_new, default_tag)
-        ids = connect.insert(collection, default_entities, partition_name=default_tag)
+        ids = connect.insert(collection, default_entities,
+                             partition_name=default_tag)
         assert len(ids) == default_nb
         ids_new = connect.insert(
             collection_new, default_entities, partition_name=default_tag
@@ -234,7 +238,6 @@ class TestCreateBase:
 
 
 class TestShowBase:
-
     """
     ******************************************************************
       The following cases are used to test `list_partitions` function
@@ -278,7 +281,6 @@ class TestShowBase:
 
 
 class TestHasBase:
-
     """
     ******************************************************************
       The following cases are used to test `has_partition` function
@@ -364,7 +366,6 @@ class TestHasBase:
 
 
 class TestDropBase:
-
     """
     ******************************************************************
       The following cases are used to test `drop_partition` function
@@ -471,7 +472,8 @@ class TestDropBase:
             connect.list_partitions(collection), [default_tag, "_default"]
         )
         connect.drop_partition(collection, default_tag)
-        assert compare_list_elements(connect.list_partitions(collection), ["_default"])
+        assert compare_list_elements(
+            connect.list_partitions(collection), ["_default"])
         time.sleep(2)
         connect.create_partition(collection, default_tag)
         assert compare_list_elements(

@@ -25,7 +25,8 @@ default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
-vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+vectors = [[random.random() for _ in range(default_dim)]
+           for _ in range(default_nq)]
 
 uid = "test_search"
 nq = 1
@@ -36,7 +37,8 @@ search_param = {"nprobe": 1}
 entity = gen_entities(1, is_normal=True)
 entities = gen_entities(default_nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(default_nb)
-default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
+default_query, _ = gen_search_vectors_params(
+    field_name, entities, default_top_k, nq)
 # default_binary_query, _ = gen_search_vectors_params(binary_field_name, binary_entities, default_top_k, nq)
 
 
@@ -131,7 +133,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
             default_limit,
             default_search_exp,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1, "err_msg": "should create connect first"},
+            check_items={"err_code": 1,
+                         "err_msg": "should create connect first"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -313,7 +316,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
             "test_search_param_invalid_metric_type: searching with invalid metric_type"
         )
         invalid_metric = get_invalid_metric_type
-        search_params = {"metric_type": invalid_metric, "params": {"nprobe": 10}}
+        search_params = {"metric_type": invalid_metric,
+                         "params": {"nprobe": 10}}
         collection_w.search(
             vectors[:default_nq],
             default_search_field,
@@ -326,7 +330,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
-        "index, params", zip(ct.all_index_types[:9], ct.default_index_params[:9])
+        "index, params", zip(
+            ct.all_index_types[:9], ct.default_index_params[:9])
     )
     def test_search_invalid_params_type(self, index, params):
         """
@@ -341,7 +346,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
             prefix, True, 5000, is_index=True
         )[0:4]
         # 2. create index and load
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index,
+                         "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search
@@ -488,7 +494,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search the invalid partition
         partition_name = get_invalid_partition
-        err_msg = "`partition_name_array` value {} is illegal".format(partition_name)
+        err_msg = "`partition_name_array` value {} is illegal".format(
+            partition_name)
         collection_w.search(
             vectors[:default_nq],
             default_search_field,
@@ -567,7 +574,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 10, partition_num)[0]
+        collection_w = self.init_collection_general(
+            prefix, True, 10, partition_num)[0]
         par = collection_w.partitions
         par_name = par[partition_num].name
         # 2. release partition
@@ -586,7 +594,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
             default_search_exp,
             [par_name],
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1, "err_msg": "partition has been released"},
+            check_items={"err_code": 1,
+                         "err_msg": "partition has been released"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -690,7 +699,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 6731")
     @pytest.mark.parametrize(
-        "index, params", zip(ct.all_index_types[:9], ct.default_index_params[:9])
+        "index, params", zip(
+            ct.all_index_types[:9], ct.default_index_params[:9])
     )
     def test_search_different_index_invalid_params(self, index, params):
         """
@@ -709,9 +719,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
         log.info(
             "test_search_different_index_invalid_params: Creating index-%s" % index
         )
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index,
+                         "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
-        log.info("test_search_different_index_invalid_params: Created index-%s" % index)
+        log.info(
+            "test_search_different_index_invalid_params: Created index-%s" % index)
         collection_w.load()
         # 3. search
         log.info(
@@ -725,7 +737,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
             default_limit,
             default_search_exp,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": default_nq, "ids": insert_ids, "limit": default_limit},
+            check_items={"nq": default_nq,
+                         "ids": insert_ids, "limit": default_limit},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -768,7 +781,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with binary data
-        collection_w = self.init_collection_general(prefix, True, is_binary=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, True, is_binary=True)[0]
         # 2. create index
         default_index = {
             "index_type": "BIN_IVF_FLAT",
@@ -797,9 +811,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report error
         """
         # 1. initialize with binary data
-        collection_w = self.init_collection_general(prefix, True, is_binary=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, True, is_binary=True)[0]
         # 2. search and assert
-        query_raw_vector, binary_vectors = cf.gen_binary_vectors(2, default_dim)
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(
+            2, default_dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         collection_w.search(
             binary_vectors[:default_nq],
@@ -819,7 +835,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True)[0:4]
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True)[
+            0:4]
         # 2. search
         log.info(
             "test_search_with_output_fields_not_exist: Searching collection %s"
@@ -937,7 +954,8 @@ class TestCollectionSearch(TestcaseBase):
             prefix, True, auto_id=auto_id, dim=dim
         )[0:5]
         # 2. search
-        log.info("test_search_normal: searching collection %s" % collection_w.name)
+        log.info("test_search_normal: searching collection %s" %
+                 collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(
             vectors[:nq],
@@ -1022,8 +1040,10 @@ class TestCollectionSearch(TestcaseBase):
             prefix, True, auto_id=auto_id, dim=dim
         )[0:4]
         # 2. search
-        log.info("test_search_normal: searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        log.info("test_search_normal: searching collection %s" %
+                 collection_w.name)
+        vectors = [[random.random() for _ in range(dim)]
+                   for _ in range(default_nq)]
         collection_w.search(
             vectors[:default_nq],
             default_search_field,
@@ -1070,7 +1090,8 @@ class TestCollectionSearch(TestcaseBase):
             default_search_exp,
             _async=_async,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": limit, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": limit, "_async": _async},
         )
         # 3. delete partitions
         log.info("test_search_before_after_delete: deleting a partition")
@@ -1081,7 +1102,8 @@ class TestCollectionSearch(TestcaseBase):
         log.info("test_search_before_after_delete: deleted a partition")
         collection_w.load()
         # 4. search non-deleted part after delete partitions
-        log.info("test_search_before_after_delete: searching after deleting partitions")
+        log.info(
+            "test_search_before_after_delete: searching after deleting partitions")
         collection_w.search(
             vectors[:nq],
             default_search_field,
@@ -1127,7 +1149,8 @@ class TestCollectionSearch(TestcaseBase):
             default_search_exp,
             _async=_async,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": limit, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": limit, "_async": _async},
         )
         # 3. release one partition
         log.info("test_search_partition_after_release_one: releasing a partition")
@@ -1185,7 +1208,8 @@ class TestCollectionSearch(TestcaseBase):
             default_search_exp,
             _async=_async,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": limit, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": limit, "_async": _async},
         )
         # 3. release all partitions
         log.info("test_search_partition_after_release_all: releasing a partition")
@@ -1289,7 +1313,8 @@ class TestCollectionSearch(TestcaseBase):
             _async=_async,
             travel_timestamp=time_stamp,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": limit, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": limit, "_async": _async},
         )
         # 4. Search the pre-released partition after load
         if limit > par[1].num_entities:
@@ -1308,7 +1333,7 @@ class TestCollectionSearch(TestcaseBase):
             check_task=CheckTasks.check_search_results,
             check_items={
                 "nq": nq,
-                "ids": insert_ids[par[0].num_entities :],
+                "ids": insert_ids[par[0].num_entities:],
                 "limit": limit_check,
                 "_async": _async,
             },
@@ -1324,9 +1349,11 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success with limit(topK)
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, auto_id=auto_id, dim=dim)[0]
+        collection_w = self.init_collection_general(
+            prefix, auto_id=auto_id, dim=dim)[0]
         # 2. insert data
-        insert_ids = cf.insert_data(collection_w, nb, auto_id=auto_id, dim=dim)[3]
+        insert_ids = cf.insert_data(
+            collection_w, nb, auto_id=auto_id, dim=dim)[3]
         # 3. load data
         collection_w.load()
         # 4. flush and load
@@ -1423,8 +1450,10 @@ class TestCollectionSearch(TestcaseBase):
         )[0:4]
         # 2. search
         nq = 2
-        log.info("test_search_max_dim: searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(max_dim)] for _ in range(nq)]
+        log.info("test_search_max_dim: searching collection %s" %
+                 collection_w.name)
+        vectors = [[random.random() for _ in range(max_dim)]
+                   for _ in range(nq)]
         collection_w.search(
             vectors[:nq],
             default_search_field,
@@ -1433,12 +1462,14 @@ class TestCollectionSearch(TestcaseBase):
             default_search_exp,
             _async=_async,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": nq, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": nq, "_async": _async},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
-        "index, params", zip(ct.all_index_types[:9], ct.default_index_params[:9])
+        "index, params", zip(
+            ct.all_index_types[:9], ct.default_index_params[:9])
     )
     def test_search_after_different_index_with_params(
         self, dim, index, params, auto_id, _async
@@ -1459,12 +1490,14 @@ class TestCollectionSearch(TestcaseBase):
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index,
+                         "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search
         search_params = cf.gen_search_param(index)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)]
+                   for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
             collection_w.search(
@@ -1486,7 +1519,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
-        "index, params", zip(ct.all_index_types[:9], ct.default_index_params[:9])
+        "index, params", zip(
+            ct.all_index_types[:9], ct.default_index_params[:9])
     )
     def test_search_after_index_different_metric_type(
         self, dim, index, params, auto_id, _async
@@ -1510,7 +1544,8 @@ class TestCollectionSearch(TestcaseBase):
         log.info(
             "test_search_after_index_different_metric_type: Creating index-%s" % index
         )
-        default_index = {"index_type": index, "params": params, "metric_type": "IP"}
+        default_index = {"index_type": index,
+                         "params": params, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
         log.info(
             "test_search_after_index_different_metric_type: Created index-%s" % index
@@ -1518,7 +1553,8 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.load()
         # 3. search
         search_params = cf.gen_search_param(index, "IP")
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)]
+                   for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
             collection_w.search(
@@ -1553,7 +1589,8 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         for i in range(search_num):
             log.info(
-                "test_search_collection_multiple_times: searching round %d" % (i + 1)
+                "test_search_collection_multiple_times: searching round %d" % (
+                    i + 1)
             )
             collection_w.search(
                 vectors[:nq],
@@ -1591,7 +1628,8 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         for i in range(search_num):
             log.info(
-                "test_search_sync_async_multiple_times: searching round %d" % (i + 1)
+                "test_search_sync_async_multiple_times: searching round %d" % (
+                    i + 1)
             )
             for _async in [False, True]:
                 collection_w.search(
@@ -1638,7 +1676,8 @@ class TestCollectionSearch(TestcaseBase):
         )[0]
         # 3. insert
         vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
-        vectors_tmp = [[random.random() for _ in range(dim)] for _ in range(nb)]
+        vectors_tmp = [[random.random() for _ in range(dim)]
+                       for _ in range(nb)]
         data = [
             list(range(nb)),
             [np.float32(i) for i in range(nb)],
@@ -1730,7 +1769,7 @@ class TestCollectionSearch(TestcaseBase):
             check_task=CheckTasks.check_search_results,
             check_items={
                 "nq": default_nq,
-                "ids": insert_ids[par[0].num_entities :],
+                "ids": insert_ids[par[0].num_entities:],
                 "limit": limit_check,
                 "_async": _async,
             },
@@ -1772,7 +1811,8 @@ class TestCollectionSearch(TestcaseBase):
             [par[0].name, par[1].name],
             _async=_async,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": limit, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": limit, "_async": _async},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1804,7 +1844,7 @@ class TestCollectionSearch(TestcaseBase):
         limit_check = limit
         par = collection_w.partitions
         if partition_names == ["search(.*)"]:
-            insert_ids = insert_ids[par[0].num_entities :]
+            insert_ids = insert_ids[par[0].num_entities:]
             if limit > par[1].num_entities:
                 limit_check = par[1].num_entities
         collection_w.search(
@@ -1911,12 +1951,14 @@ class TestCollectionSearch(TestcaseBase):
             _async=_async,
             travel_timestamp=time_stamp,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": 2, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": 2, "_async": _async},
         )[0]
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] -
+                   min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
@@ -1952,12 +1994,14 @@ class TestCollectionSearch(TestcaseBase):
             "int64 >= 0",
             _async=_async,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": 2, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": 2, "_async": _async},
         )[0]
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] -
+                   min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 6843")
@@ -1995,12 +2039,14 @@ class TestCollectionSearch(TestcaseBase):
             "int64 >= 0",
             _async=_async,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": nq, "ids": insert_ids, "limit": 2, "_async": _async},
+            check_items={"nq": nq, "ids": insert_ids,
+                         "limit": 2, "_async": _async},
         )[0]
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0].distances[0] -
+                   min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
@@ -2039,7 +2085,8 @@ class TestCollectionSearch(TestcaseBase):
         log.info(
             "test_search_with_expression: searching with expression: %s" % expression
         )
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)]
+                   for _ in range(default_nq)]
         search_res, _ = collection_w.search(
             vectors[:default_nq],
             default_search_field,
@@ -2104,7 +2151,8 @@ class TestCollectionSearch(TestcaseBase):
         log.info(
             "test_search_with_expression: searching with expression: %s" % expression
         )
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)]
+                   for _ in range(default_nq)]
 
         search_res, _ = collection_w.search(
             vectors[:default_nq],
@@ -2151,7 +2199,8 @@ class TestCollectionSearch(TestcaseBase):
         expression = expression.replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i, _id in enumerate(insert_ids):
-            exec(f"{default_float_field_name} = _vectors.{default_float_field_name}[i]")
+            exec(
+                f"{default_float_field_name} = _vectors.{default_float_field_name}[i]")
             if not expression or eval(expression):
                 filter_ids.append(_id)
 
@@ -2168,7 +2217,8 @@ class TestCollectionSearch(TestcaseBase):
         log.info(
             "test_search_with_expression: searching with expression: %s" % expression
         )
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)]
+                   for _ in range(default_nq)]
         search_res, _ = collection_w.search(
             vectors[:default_nq],
             default_search_field,
@@ -2413,7 +2463,8 @@ class TestCollectionSearch(TestcaseBase):
                 prefix, True, nb, auto_id=auto_id, dim=dim
             )[0:4]
             # 2. search
-            vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+            vectors = [[random.random() for _ in range(dim)]
+                       for _ in range(nq)]
             log.info(
                 "test_search_multi_collections: searching %s entities (nq = %s) from collection %s"
                 % (default_limit, nq, collection_w.name)
@@ -2449,7 +2500,8 @@ class TestCollectionSearch(TestcaseBase):
         )[0:5]
 
         def search(collection_w):
-            vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+            vectors = [[random.random() for _ in range(dim)]
+                       for _ in range(nq)]
             collection_w.search(
                 vectors[:nq],
                 default_search_field,
@@ -2689,7 +2741,8 @@ class TestSearchBase:
         assert res2[0][0].id != ids[0]
         if top_k > 1:
             assert res2[0][0].id == res[0][1].id
-            assert res2[0][0].entity.get("int64") == res[0][1].entity.get("int64")
+            assert res2[0][0].entity.get(
+                "int64") == res[0][1].entity.get("int64")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_empty_partition(
@@ -2725,7 +2778,8 @@ class TestSearchBase:
             assert check_id_result(res[0], ids[0])
             connect.release_collection(collection)
             connect.load_partitions(collection, [default_tag])
-            res = connect.search(collection, **query, partition_names=[default_tag])
+            res = connect.search(collection, **query,
+                                 partition_names=[default_tag])
             assert len(res[0]) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2745,7 +2799,8 @@ class TestSearchBase:
             pytest.skip("Skip PQ")
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, new_tag)
-        entities, ids = init_data(connect, collection, partition_names=default_tag)
+        entities, ids = init_data(
+            connect, collection, partition_names=default_tag)
         new_entities, new_ids = init_data(
             connect, collection, nb=6001, partition_names=new_tag
         )
@@ -2764,7 +2819,8 @@ class TestSearchBase:
             assert not check_id_result(res[1], new_ids[0])
             assert res[0]._distances[0] < epsilon
             assert res[1]._distances[0] < epsilon
-            res = connect.search(collection, **query, partition_names=[new_tag])
+            res = connect.search(collection, **query,
+                                 partition_names=[new_tag])
             assert res[0]._distances[0] > epsilon
             assert res[1]._distances[0] > epsilon
             connect.release_collection(collection)
@@ -2860,9 +2916,11 @@ class TestSearchBase:
             res = connect.search(collection, **query)
             assert len(res) == nq
             assert len(res[0]) >= top_k
-            assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
+            assert res[0]._distances[0] >= 1 - \
+                gen_inaccuracy(res[0]._distances[0])
             assert check_id_result(res[0], ids[0])
-            res = connect.search(collection, **query, partition_names=[default_tag])
+            res = connect.search(collection, **query,
+                                 partition_names=[default_tag])
             assert len(res[0]) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2883,7 +2941,8 @@ class TestSearchBase:
             pytest.skip("Skip PQ")
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, new_tag)
-        entities, ids = init_data(connect, collection, partition_names=default_tag)
+        entities, ids = init_data(
+            connect, collection, partition_names=default_tag)
         new_entities, new_ids = init_data(
             connect, collection, nb=6001, partition_names=new_tag
         )
@@ -3025,7 +3084,8 @@ class TestSearchBase:
         distance_1 = ip(vecs[0], inside_vecs[1])
         connect.load_collection(collection)
         res = connect.search(collection, **query)
-        assert abs(res[0]._distances[0] - max(distance_0, distance_1)) <= epsilon
+        assert abs(res[0]._distances[0] -
+                   max(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_distance_ip_after_index(
@@ -3077,7 +3137,8 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         """
         nq = 1
-        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        int_vectors, entities, ids = init_binary_data(
+            connect, binary_collection, nb=2)
         query_int_vectors, query_entities, tmp_ids = init_binary_data(
             connect, binary_collection, nb=1, insert=False
         )
@@ -3088,7 +3149,8 @@ class TestSearchBase:
         )
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, **query)
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
+        assert abs(res[0]._distances[0] -
+                   min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_binary_flat_with_L2(self, connect, binary_collection):
@@ -3098,7 +3160,8 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         """
         nq = 1
-        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        int_vectors, entities, ids = init_binary_data(
+            connect, binary_collection, nb=2)
         query_int_vectors, query_entities, tmp_ids = init_binary_data(
             connect, binary_collection, nb=1, insert=False
         )
@@ -3116,7 +3179,8 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         """
         nq = 1
-        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        int_vectors, entities, ids = init_binary_data(
+            connect, binary_collection, nb=2)
         query_int_vectors, query_entities, tmp_ids = init_binary_data(
             connect, binary_collection, nb=1, insert=False
         )
@@ -3140,7 +3204,8 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         """
         nq = 1
-        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        int_vectors, entities, ids = init_binary_data(
+            connect, binary_collection, nb=2)
         query_int_vectors, query_entities, tmp_ids = init_binary_data(
             connect, binary_collection, nb=1, insert=False
         )
@@ -3167,7 +3232,8 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         """
         top_k = 3
-        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        int_vectors, entities, ids = init_binary_data(
+            connect, binary_collection, nb=2)
         query_int_vectors, query_vecs = gen_binary_sub_vectors(int_vectors, 2)
         query, vecs = gen_search_vectors_params(
             binary_field_name,
@@ -3194,7 +3260,8 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         """
         nq = 1
-        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        int_vectors, entities, ids = init_binary_data(
+            connect, binary_collection, nb=2)
         query_int_vectors, query_entities, tmp_ids = init_binary_data(
             connect, binary_collection, nb=1, insert=False
         )
@@ -3221,8 +3288,10 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         """
         top_k = 3
-        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
-        query_int_vectors, query_vecs = gen_binary_super_vectors(int_vectors, 2)
+        int_vectors, entities, ids = init_binary_data(
+            connect, binary_collection, nb=2)
+        query_int_vectors, query_vecs = gen_binary_super_vectors(
+            int_vectors, 2)
         query, vecs = gen_search_vectors_params(
             binary_field_name,
             entities,
@@ -3248,7 +3317,8 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         """
         nq = 1
-        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        int_vectors, entities, ids = init_binary_data(
+            connect, binary_collection, nb=2)
         query_int_vectors, query_entities, tmp_ids = init_binary_data(
             connect, binary_collection, nb=1, insert=False
         )
