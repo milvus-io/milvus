@@ -14,7 +14,7 @@ BROKER_PULSAR_MEM = '"-Xms512m -Xmx1024m -XX:MaxDirectMemorySize=1024m -Dio.nett
 
 
 def get_host_cpus(hostname):
-    from kubernetes import client, config
+    from kubernetes import client
 
     config.load_kube_config()
     client.rest.logger.setLevel(logging.WARNING)
@@ -340,7 +340,8 @@ def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, nam
 def helm_del_server(name, namespace):
     # logger.debug("Sleep 600s before uninstall server")
     # time.sleep(600)
-    delete_etcd_config_map_cmd = "kubectl delete configmap -n %s %s" % (namespace, name)
+    delete_etcd_config_map_cmd = "kubectl delete configmap -n %s %s" % (
+        namespace, name)
     logger.info(delete_etcd_config_map_cmd)
     if os.system(delete_etcd_config_map_cmd):
         logger.error("Delete configmap %s:%s failed" % (namespace, name))
@@ -377,7 +378,8 @@ def restart_server(helm_release_name, namespace):
             v1.delete_namespaced_pod(pod_name, namespace)
         except Exception as e:
             logger.error(str(e))
-            logger.error("Exception when calling CoreV1Api->delete_namespaced_pod")
+            logger.error(
+                "Exception when calling CoreV1Api->delete_namespaced_pod")
             res = False
             return res
         logger.error("Sleep 10s after pod deleted")
@@ -421,9 +423,12 @@ def restart_server(helm_release_name, namespace):
         raise Exception("Pod: %s not found" % pod_name)
     follow = True
     pretty = True
-    previous = True  # bool | Return previous terminated container logs. Defaults to false. (optional)
-    since_seconds = 56  # int | A relative time in seconds before the current time from which to show logs. If this value precedes the time a pod was started, only logs since the pod start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified. (optional)
-    timestamps = True  # bool | If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line of log output. Defaults to false. (optional)
+    # bool | Return previous terminated container logs. Defaults to false. (optional)
+    previous = True
+    # int | A relative time in seconds before the current time from which to show logs. If this value precedes the time a pod was started, only logs since the pod start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified. (optional)
+    since_seconds = 56
+    # bool | If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line of log output. Defaults to false. (optional)
+    timestamps = True
     container = "milvus"
     # start_time = time.time()
     # while time.time() - start_time <= timeout:
@@ -446,7 +451,7 @@ def restart_server(helm_release_name, namespace):
 
 
 def get_pod_status(helm_release_name, namespace):
-    from kubernetes import client, config
+    from kubernetes import client
 
     config.load_kube_config()
     v1 = client.CoreV1Api()
