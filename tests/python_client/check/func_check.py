@@ -156,7 +156,7 @@ class ResponseChecker:
         """
         exp_func_name = "init_collection"
         exp_func_name_2 = "construct_from_dataframe"
-        if func_name != exp_func_name and func_name != exp_func_name_2:
+        if func_name not in (exp_func_name, exp_func_name_2):
             log.warning(
                 "The function name is {} rather than {}".format(
                     func_name, exp_func_name

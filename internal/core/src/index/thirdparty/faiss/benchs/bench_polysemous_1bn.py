@@ -204,7 +204,7 @@ ivfpq_stats = faiss.cvar.indexIVFPQ_stats
 ivf_stats = faiss.cvar.indexIVF_stats
 
 
-if parametersets == ["autotune"] or parametersets == ["autotuneMT"]:
+if parametersets in (["autotune"], ["autotuneMT"]):
 
     if parametersets == ["autotune"]:
         faiss.omp_set_num_threads(1)

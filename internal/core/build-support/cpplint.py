@@ -3453,7 +3453,7 @@ class NestingState(object):
                     if _MATCH_ASM.match(line):
                         self.stack[-1].inline_asm = _BLOCK_ASM
 
-            elif token == ";" or token == ")":
+            elif token in (";", ")"):
                 # If we haven't seen an opening brace yet, but we already saw
                 # a semicolon, this is probably a forward declaration.  Pop
                 # the stack for these.
@@ -4010,7 +4010,7 @@ def CheckComment(line, filename, linenum, next_line_start, error):
 
                 middle_whitespace = match.group(3)
                 # Comparisons made explicit for correctness -- pylint: disable=g-explicit-bool-comparison
-                if middle_whitespace != " " and middle_whitespace != "":
+                if middle_whitespace not in (" ", ""):
                     error(
                         filename,
                         linenum,
@@ -5419,7 +5419,7 @@ def CheckStyle(filename, clean_lines, linenum, file_extension, nesting_state, er
     # because the rules for how to indent those are non-trivial.
     if (
         not Search(r'[",=><] *$', prev)
-        and (initial_spaces == 1 or initial_spaces == 3)
+        and initial_spaces in (1, 3)
         and not Match(scope_or_label_pattern, cleansed_line)
         and not (clean_lines.raw_lines[linenum] != line and Match(r'^\s*""', line))
     ):
@@ -5636,9 +5636,7 @@ def _ClassifyInclude(fileinfo, include, used_angle_brackets, include_order="defa
     include_dir, include_base = os.path.split(_DropCommonSuffixes(include))
     target_dir_pub = os.path.normpath(target_dir + "/../public")
     target_dir_pub = target_dir_pub.replace("\\", "/")
-    if target_base == include_base and (
-        include_dir == target_dir or include_dir == target_dir_pub
-    ):
+    if target_base == include_base and include_dir in (target_dir, target_dir_pub):
         return _LIKELY_MY_HEADER
 
     # If the target and include share some initial basename
@@ -7739,7 +7737,7 @@ def ParseArguments(args):
             output_format = val
         elif opt == "--quiet":
             quiet = True
-        elif opt == "--verbose" or opt == "--v":
+        elif opt in ("--verbose", "--v"):
             verbosity = int(val)
         elif opt == "--filter":
             filters = val

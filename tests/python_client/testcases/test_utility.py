@@ -28,7 +28,7 @@ class TestUtilityParams(TestcaseBase):
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_invalid_metric_type(self, request):
-        if request.param == [] or request.param == "":
+        if request.param in ([], ""):
             pytest.skip("metric empty is valid for distance calculation")
         if isinstance(request.param, str):
             pytest.skip("string is valid type for metric")
@@ -36,7 +36,7 @@ class TestUtilityParams(TestcaseBase):
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_invalid_metric_value(self, request):
-        if request.param == [] or request.param == "":
+        if request.param in ([], ""):
             pytest.skip("metric empty is valid for distance calculation")
         if not isinstance(request.param, str):
             pytest.skip("Skip invalid type for metric")
