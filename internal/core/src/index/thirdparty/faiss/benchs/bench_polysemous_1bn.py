@@ -37,11 +37,9 @@ def mmap_bvecs(fname):
 # Bookkeeping
 #################################################################
 
-
 dbname = sys.argv[1]
 index_key = sys.argv[2]
 parametersets = sys.argv[3:]
-
 
 tmpdir = "/tmp/bench_polysemous"
 
@@ -49,11 +47,9 @@ if not os.path.isdir(tmpdir):
     print("%s does not exist, creating it" % tmpdir)
     os.mkdir(tmpdir)
 
-
 #################################################################
 # Prepare dataset
 #################################################################
-
 
 print("Preparing dataset", dbname)
 
@@ -81,13 +77,11 @@ else:
     print("unknown dataset", dbname, file=sys.stderr)
     sys.exit(1)
 
-
 print("sizes: B %s Q %s T %s gt %s" % (xb.shape, xq.shape, xt.shape, gt.shape))
 
 nq, d = xq.shape
 nb, d = xb.shape
 assert gt.shape[0] == nq
-
 
 #################################################################
 # Training
@@ -159,7 +153,7 @@ def matrix_slice_iterator(x, bs):
     block_ranges = [(i0, min(nb, i0 + bs)) for i0 in range(0, nb, bs)]
 
     return rate_limited_imap(
-        lambda i01: x[i01[0] : i01[1]].astype("float32").copy(), block_ranges
+        lambda i01: x[i01[0]: i01[1]].astype("float32").copy(), block_ranges
     )
 
 
@@ -203,7 +197,6 @@ xq = xq.astype("float32").copy()
 ivfpq_stats = faiss.cvar.indexIVFPQ_stats
 ivf_stats = faiss.cvar.indexIVF_stats
 
-
 if parametersets in (["autotune"], ["autotuneMT"]):
 
     if parametersets == ["autotune"]:
@@ -234,7 +227,8 @@ else:
     # we do queries in a single thread
     faiss.omp_set_num_threads(1)
 
-    print(" " * len(parametersets[0]), "\t", "R@1    R@10   R@100     time    %pass")
+    print(" " * len(parametersets[0]), "\t",
+          "R@1    R@10   R@100     time    %pass")
 
     for param in parametersets:
         print(param, "\t", end=" ")
