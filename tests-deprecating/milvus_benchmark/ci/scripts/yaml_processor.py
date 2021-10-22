@@ -203,7 +203,7 @@ def update_map_element(element, key, value, comment, _type):
     origin_comment = _map_comment(element, key)
 
     sub_element = element.get(key, None)
-    if isinstance(sub_element, CommentedMap) or isinstance(sub_element, CommentedSeq):
+    if isinstance(sub_element, (CommentedMap, CommentedSeq)):
         print("Only support update a single value")
 
     element.update({key: value})
@@ -360,9 +360,7 @@ def _merge(master, target):
             target_start_comment = _start_comment(target)
 
             m = master.get(item, default=None)
-            if m is None or (
-                not (isinstance(m, CommentedMap) or isinstance(m, CommentedSeq))
-            ):
+            if m is None or (not isinstance(m, (CommentedMap, CommentedSeq))):
                 master.update({item: target[item]})
 
             else:

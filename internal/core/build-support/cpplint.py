@@ -6377,10 +6377,7 @@ def CheckForNonConstReference(filename, clean_lines, linenum, nesting_state, err
     # We will exclude the first two cases by checking that we are not inside a
     # function body, including one that was just introduced by a trailing '{'.
     # TODO(unknown): Doesn't account for 'catch(Exception& e)' [rare].
-    if nesting_state.previous_stack_top and not (
-        isinstance(nesting_state.previous_stack_top, _ClassInfo)
-        or isinstance(nesting_state.previous_stack_top, _NamespaceInfo)
-    ):
+    if (nesting_state.previous_stack_top and not isinstance(nesting_state.previous_stack_top, (_ClassInfo, _NamespaceInfo))):
         # Not at toplevel, not within a class, and not within a namespace
         return
 
