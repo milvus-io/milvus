@@ -44,7 +44,7 @@ type indexLoader struct {
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
 
-	kv kv.BaseKV // minio kv
+	kv kv.DataKV // minio kv
 }
 
 func (loader *indexLoader) loadIndex(segment *Segment, fieldID FieldID) error {
@@ -144,6 +144,25 @@ func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexPa
 		return nil, nil, "", errors.New("cannot find index param")
 	}
 	return index, indexParams, indexName, nil
+}
+
+func (loader *indexLoader) estimateIndexBinlogSize(segment *Segment, fieldID FieldID) (int64, error) {
+	indexSize := int64(0)
+	indexPaths := segment.getIndexPaths(fieldID)
+	for _, p := range indexPaths {
+		logSize, err := storage.EstimateMemorySize(loader.kv, p)
+		if err != nil {
+			return 0, err
+		}
+		indexSize += logSize
+	}
+	log.Debug("estimate segment index size",
+		zap.Any("collectionID", segment.collectionID),
+		zap.Any("segmentID", segment.ID()),
+		zap.Any("fieldID", fieldID),
+		zap.Any("indexPaths", indexPaths),
+	)
+	return indexSize, nil
 }
 
 func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment, fieldID UniqueID) error {

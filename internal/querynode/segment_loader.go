@@ -42,7 +42,7 @@ type segmentLoader struct {
 
 	dataCoord types.DataCoord
 
-	minioKV kv.BaseKV // minio minioKV
+	minioKV kv.DataKV // minio minioKV
 	etcdKV  *etcdkv.EtcdKV
 
 	indexLoader *indexLoader
@@ -54,24 +54,18 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest) error
 		return nil
 	}
 
-	newSegments := make([]*Segment, 0)
+	newSegments := make(map[UniqueID]*Segment)
 	segmentGC := func() {
 		for _, s := range newSegments {
 			deleteSegment(s)
 		}
 	}
-	setSegments := func() error {
-		for _, s := range newSegments {
-			err := loader.historicalReplica.setSegment(s)
-			if err != nil {
-				segmentGC()
-				return err
-			}
-		}
-		return nil
-	}
 
-	// start to load
+	segmentFieldBinLogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	segmentIndexedFieldIDs := make(map[UniqueID][]FieldID)
+	segmentSizes := make(map[UniqueID]int64)
+
+	// prepare and estimate segments size
 	for _, info := range req.Infos {
 		segmentID := info.SegmentID
 		partitionID := info.PartitionID
@@ -79,62 +73,72 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest) error
 
 		collection, err := loader.historicalReplica.getCollectionByID(collectionID)
 		if err != nil {
-			log.Warn(err.Error())
 			segmentGC()
 			return err
 		}
 		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
-		err = loader.loadSegmentInternal(collectionID, segment, info)
+		newSegments[segmentID] = segment
+		fieldBinlog, indexedFieldID, err := loader.getFieldAndIndexInfo(segment, info)
 		if err != nil {
-			deleteSegment(segment)
-			log.Warn(err.Error())
 			segmentGC()
 			return err
 		}
-
-		newSegments = append(newSegments, segment)
+		segmentSize, err := loader.estimateSegmentSize(segment, fieldBinlog, indexedFieldID)
+		if err != nil {
+			segmentGC()
+			return err
+		}
+		segmentFieldBinLogs[segmentID] = fieldBinlog
+		segmentIndexedFieldIDs[segmentID] = indexedFieldID
+		segmentSizes[segmentID] = segmentSize
 	}
 
-	return setSegments()
+	// check memory limit
+	err := loader.checkSegmentSize(req.Infos[0].CollectionID, segmentSizes)
+	if err != nil {
+		segmentGC()
+		return err
+	}
+
+	// start to load
+	for _, info := range req.Infos {
+		segmentID := info.SegmentID
+		if newSegments[segmentID] == nil || segmentFieldBinLogs[segmentID] == nil || segmentIndexedFieldIDs[segmentID] == nil {
+			segmentGC()
+			return errors.New(fmt.Sprintln("unexpected error, cannot find load infos, this error should not happen, collectionID = ", req.Infos[0].CollectionID))
+		}
+		err = loader.loadSegmentInternal(newSegments[segmentID],
+			segmentFieldBinLogs[segmentID],
+			segmentIndexedFieldIDs[segmentID],
+			info)
+		if err != nil {
+			segmentGC()
+			return err
+		}
+	}
+
+	// set segments
+	for _, s := range newSegments {
+		err := loader.historicalReplica.setSegment(s)
+		if err != nil {
+			segmentGC()
+			return err
+		}
+	}
+	return nil
 }
 
-func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
-	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
-	if err != nil {
-		return err
-	}
-	if len(vectorFieldIDs) <= 0 {
-		return fmt.Errorf("no vector field in collection %d", collectionID)
-	}
-
-	// add VectorFieldInfo for vector fields
-	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
-		if funcutil.SliceContain(vectorFieldIDs, fieldBinlog.FieldID) {
-			vectorFieldInfo := newVectorFieldInfo(fieldBinlog)
-			segment.setVectorFieldInfo(fieldBinlog.FieldID, vectorFieldInfo)
-		}
-	}
-
-	indexedFieldIDs := make([]FieldID, 0)
-	for _, vecFieldID := range vectorFieldIDs {
-		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
-		if err != nil {
-			log.Warn(err.Error())
-			continue
-		}
-		indexedFieldIDs = append(indexedFieldIDs, vecFieldID)
-	}
-
-	// we don't need to load raw data for indexed vector field
-	fieldBinlogs := loader.filterFieldBinlogs(segmentLoadInfo.BinlogPaths, indexedFieldIDs)
-
+func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
+	fieldBinLogs []*datapb.FieldBinlog,
+	indexFieldIDs []FieldID,
+	segmentLoadInfo *querypb.SegmentLoadInfo) error {
 	log.Debug("loading insert...")
-	err = loader.loadSegmentFieldsData(segment, fieldBinlogs)
+	err := loader.loadSegmentFieldsData(segment, fieldBinLogs)
 	if err != nil {
 		return err
 	}
 
-	pkIDField, err := loader.historicalReplica.getPKFieldIDByCollectionID(collectionID)
+	pkIDField, err := loader.historicalReplica.getPKFieldIDByCollectionID(segment.collectionID)
 	if err != nil {
 		return err
 	}
@@ -155,7 +159,7 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		return err
 	}
 
-	for _, id := range indexedFieldIDs {
+	for _, id := range indexFieldIDs {
 		log.Debug("loading index...")
 		err = loader.indexLoader.loadIndex(segment, id)
 		if err != nil {
@@ -165,26 +169,6 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 
 	return nil
 }
-
-//func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSegmentStatesResponse, error) {
-//	ctx := context.TODO()
-//	if loader.dataCoord == nil {
-//		return nil, errors.New("null data service client")
-//	}
-//
-//	segmentStatesRequest := &datapb.GetSegmentStatesRequest{
-//		SegmentIDs: []int64{segmentID},
-//	}
-//	statesResponse, err := loader.dataCoord.GetSegmentStates(ctx, segmentStatesRequest)
-//	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-//		return nil, err
-//	}
-//	if len(statesResponse.States) != 1 {
-//		return nil, errors.New("segment states' len should be 1")
-//	}
-//
-//	return statesResponse, nil
-//}
 
 func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) []string {
 	result := make([]string, 0)
@@ -369,6 +353,112 @@ func JoinIDPath(ids ...UniqueID) string {
 		idStr = append(idStr, strconv.FormatInt(id, 10))
 	}
 	return path.Join(idStr...)
+}
+
+func (loader *segmentLoader) getFieldAndIndexInfo(segment *Segment,
+	segmentLoadInfo *querypb.SegmentLoadInfo) ([]*datapb.FieldBinlog, []FieldID, error) {
+	collectionID := segment.collectionID
+	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(vectorFieldIDs) <= 0 {
+		return nil, nil, fmt.Errorf("no vector field in collection %d", collectionID)
+	}
+
+	// add VectorFieldInfo for vector fields
+	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
+		if funcutil.SliceContain(vectorFieldIDs, fieldBinlog.FieldID) {
+			vectorFieldInfo := newVectorFieldInfo(fieldBinlog)
+			segment.setVectorFieldInfo(fieldBinlog.FieldID, vectorFieldInfo)
+		}
+	}
+
+	indexedFieldIDs := make([]FieldID, 0)
+	for _, vecFieldID := range vectorFieldIDs {
+		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
+		if err != nil {
+			log.Warn(err.Error())
+			continue
+		}
+		indexedFieldIDs = append(indexedFieldIDs, vecFieldID)
+	}
+
+	// we don't need to load raw data for indexed vector field
+	fieldBinlogs := loader.filterFieldBinlogs(segmentLoadInfo.BinlogPaths, indexedFieldIDs)
+	return fieldBinlogs, indexedFieldIDs, nil
+}
+
+func (loader *segmentLoader) estimateSegmentSize(segment *Segment,
+	fieldBinLogs []*datapb.FieldBinlog,
+	indexFieldIDs []FieldID) (int64, error) {
+	segmentSize := int64(0)
+	// get fields data size, if len(indexFieldIDs) == 0, vector field would be involved in fieldBinLogs
+	for _, fb := range fieldBinLogs {
+		log.Debug("estimate segment fields size",
+			zap.Any("collectionID", segment.collectionID),
+			zap.Any("segmentID", segment.ID()),
+			zap.Any("fieldID", fb.FieldID),
+			zap.Any("paths", fb.Binlogs),
+		)
+		for _, binlogPath := range fb.Binlogs {
+			logSize, err := storage.EstimateMemorySize(loader.minioKV, binlogPath)
+			if err != nil {
+				return 0, err
+			}
+			segmentSize += logSize
+		}
+	}
+	// get index size
+	for _, fieldID := range indexFieldIDs {
+		indexSize, err := loader.indexLoader.estimateIndexBinlogSize(segment, fieldID)
+		if err != nil {
+			return 0, err
+		}
+		segmentSize += indexSize
+	}
+	return segmentSize, nil
+}
+
+func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentSizes map[UniqueID]int64) error {
+	const thresholdFactor = 0.9
+	usedMem, err := getUsedMemory()
+	if err != nil {
+		return err
+	}
+	totalMem, err := getTotalMemory()
+	if err != nil {
+		return err
+	}
+
+	segmentTotalSize := int64(0)
+	for _, size := range segmentSizes {
+		segmentTotalSize += size
+	}
+
+	for segmentID, size := range segmentSizes {
+		log.Debug("memory stats when load segment",
+			zap.Any("collectionIDs", collectionID),
+			zap.Any("segmentID", segmentID),
+			zap.Any("totalMem", totalMem),
+			zap.Any("usedMem", usedMem),
+			zap.Any("segmentTotalSize", segmentTotalSize),
+			zap.Any("currentSegmentSize", size),
+			zap.Any("thresholdFactor", thresholdFactor),
+		)
+		if int64(usedMem)+segmentTotalSize+size > int64(float64(totalMem)*thresholdFactor) {
+			return errors.New(fmt.Sprintln("load segment failed, OOM if load, "+
+				"collectionID = ", collectionID, ", ",
+				"usedMem = ", usedMem, ", ",
+				"segmentTotalSize = ", segmentTotalSize, ", ",
+				"currentSegmentSize = ", size, ", ",
+				"totalMem = ", totalMem, ", ",
+				"thresholdFactor = ", thresholdFactor,
+			))
+		}
+	}
+
+	return nil
 }
 
 func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
