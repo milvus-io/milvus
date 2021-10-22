@@ -104,7 +104,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadSegments,
 				},
-				NodeID: tt.nodeID,
+				DstNodeID: tt.nodeID,
 			},
 			meta:           tt.meta,
 			cluster:        tt.cluster,

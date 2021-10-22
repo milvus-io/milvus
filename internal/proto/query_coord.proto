@@ -236,10 +236,12 @@ message SegmentLoadInfo {
 
 message LoadSegmentsRequest {
   common.MsgBase base = 1;
-  int64 nodeID = 2;
+  int64 dst_nodeID = 2;
   repeated SegmentLoadInfo infos = 3;
   schema.CollectionSchema schema = 4;
-  TriggerCondition load_condition = 5;
+  TriggerCondition load_condition = 5; // deprecated
+  int64 source_nodeID = 6;
+  int64 collectionID = 7;
 }
 
 message ReleaseSegmentsRequest {
@@ -275,6 +277,8 @@ message QueryChannelInfo {
   int64 collectionID = 1;
   string query_channelID = 2;
   string query_result_channelID = 3;
+  repeated SegmentInfo global_sealed_segments = 4;
+  internal.MsgPosition seek_position = 5;
 }
 
 message CollectionInfo {

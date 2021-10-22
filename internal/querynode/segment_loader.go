@@ -18,7 +18,6 @@ import (
 	"path"
 	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -34,8 +33,7 @@ import (
 )
 
 const (
-	queryCoordSegmentMetaPrefix = "queryCoord-segmentMeta"
-	queryNodeSegmentMetaPrefix  = "queryNode-segmentMeta"
+	queryNodeSegmentMetaPrefix = "queryNode-segmentMeta"
 )
 
 // segmentLoader is only responsible for loading the field data from binlog
@@ -50,23 +48,7 @@ type segmentLoader struct {
 	indexLoader *indexLoader
 }
 
-func (loader *segmentLoader) loadSegmentOfConditionHandOff(req *querypb.LoadSegmentsRequest) error {
-	return errors.New("TODO: implement hand off")
-}
-
-func (loader *segmentLoader) loadSegmentOfConditionLoadBalance(req *querypb.LoadSegmentsRequest) error {
-	return loader.loadSegment(req, false)
-}
-
-func (loader *segmentLoader) loadSegmentOfConditionGRPC(req *querypb.LoadSegmentsRequest) error {
-	return loader.loadSegment(req, true)
-}
-
-func (loader *segmentLoader) loadSegmentOfConditionNodeDown(req *querypb.LoadSegmentsRequest) error {
-	return loader.loadSegment(req, true)
-}
-
-func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onService bool) error {
+func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest) error {
 	// no segment needs to load, return
 	if len(req.Infos) == 0 {
 		return nil
@@ -101,7 +83,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			segmentGC()
 			return err
 		}
-		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, onService)
+		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
 		err = loader.loadSegmentInternal(collectionID, segment, info)
 		if err != nil {
 			deleteSegment(segment)
@@ -109,40 +91,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			segmentGC()
 			return err
 		}
-		if onService {
-			key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, segmentID)
-			value, err := loader.etcdKV.Load(key)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when load segment info from etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-			segmentInfo := &querypb.SegmentInfo{}
-			err = proto.Unmarshal([]byte(value), segmentInfo)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-			segmentInfo.SegmentState = querypb.SegmentState_sealed
-			newKey := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
-			newValue, err := proto.Marshal(segmentInfo)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when marshal segment info", zap.Error(err))
-				segmentGC()
-				return err
-			}
-			err = loader.etcdKV.Save(newKey, string(newValue))
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when update segment info to etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-		}
+
 		newSegments = append(newSegments, segment)
 	}
 

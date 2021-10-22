@@ -61,6 +61,9 @@ type ParamTable struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	// --- Pulsar ---
+	PulsarAddress string
 }
 
 // Params are variables of the ParamTable type
@@ -108,6 +111,9 @@ func (p *ParamTable) Init() {
 	p.initMinioSecretAccessKey()
 	p.initMinioUseSSLStr()
 	p.initMinioBucketName()
+
+	//--- Pulsar ----
+	p.initPulsarAddress()
 }
 
 func (p *ParamTable) initQueryCoordAddress() {
@@ -241,4 +247,12 @@ func (p *ParamTable) initMinioBucketName() {
 
 func (p *ParamTable) initRoleName() {
 	p.RoleName = "querycoord"
+}
+
+func (p *ParamTable) initPulsarAddress() {
+	addr, err := p.Load("_PulsarAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.PulsarAddress = addr
 }
