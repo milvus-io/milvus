@@ -22,7 +22,7 @@ class BaseRunner(object):
         self._metric = metric
         self._env = env
         self._run_as_group = False
-        self._result = dict()
+        self._result = {}
         self._milvus = MilvusClient(host=self._env.hostname)
 
     def run(self, run_params):

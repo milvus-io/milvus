@@ -43,8 +43,8 @@ class AccuracyRunner(BaseRunner):
         nqs = collection["nqs"]
         search_params = collection["search_params"]
         search_params = utils.generate_combinations(search_params)
-        cases = list()
-        case_metrics = list()
+        cases = []
+        case_metrics = []
         self.init_metric(self.name, collection_info, index_info, search_info=None)
         for search_param in search_params:
             if not filters:
@@ -148,8 +148,8 @@ class AccAccuracyRunner(AccuracyRunner):
         filter_query = []
         search_params = utils.generate_combinations(search_params)
         index_params = utils.generate_combinations(index_params)
-        cases = list()
-        case_metrics = list()
+        cases = []
+        case_metrics = []
         self.init_metric(self.name, collection_info, {}, search_info=None)
         true_ids = np.array(dataset["neighbors"])
         for index_type in index_types:

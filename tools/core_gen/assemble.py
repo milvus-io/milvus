@@ -8,8 +8,8 @@ def assemble(template, **kwargs):
     pattern = re.compile("@@@@(.*?)\n((.|\n)*?)\n####", re.MULTILINE)
     temp_info = pattern.findall(template)
     # print(temp_info)
-    mapping = dict()
-    rep_map = dict()
+    mapping = {}
+    rep_map = {}
 
     # drop repetive field from mapping
     for k, v in kwargs.items():

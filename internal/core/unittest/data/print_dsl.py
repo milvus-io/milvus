@@ -8,7 +8,7 @@ def show_dsl(query_entities):
         raise ParamError("Invalid query format. 'query_entities' must be a dict")
 
     duplicated_entities = copy.deepcopy(query_entities)
-    vector_placeholders = dict()
+    vector_placeholders = {}
 
     def extract_vectors_param(param, placeholders):
         if not isinstance(param, (dict, list)):

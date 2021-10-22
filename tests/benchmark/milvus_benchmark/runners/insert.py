@@ -54,8 +54,8 @@ class InsertRunner(BaseRunner):
         case_metric = copy.deepcopy(self.metric)
         # set metric type as case
         case_metric.set_case_metric_type()
-        case_metrics = list()
-        case_params = list()
+        case_metrics = []
+        case_params = []
         case_metrics.append(case_metric)
         case_param = {
             "collection_name": collection_name,
@@ -180,8 +180,8 @@ class BPInsertRunner(BaseRunner):
         flush = True
         if "flush" in collection and collection["flush"] == "no":
             flush = False
-        case_metrics = list()
-        case_params = list()
+        case_metrics = []
+        case_params = []
 
         for ni_per in ni_pers:
             collection_info = {

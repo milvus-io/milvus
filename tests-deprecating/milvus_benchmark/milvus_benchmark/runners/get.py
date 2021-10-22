@@ -51,12 +51,12 @@ class GetRunner(BaseRunner):
         if "flush" in collection and collection["flush"] == "no":
             flush = False
         self.init_metric(self.name, collection_info, index_info, search_info=None)
-        case_metrics = list()
+        case_metrics = []
         for ids_length in ids_length_list:
             ids = get_ids(ids_length, collection_size)
             case_metric = copy.deepcopy(self.metric)
             case_metric.set_case_metric_type()
-            case_params = list()
+            case_params = []
             case_metric.run_params = {"ids_length": ids_length}
             case_metrics.append(case_metric)
             case_param = {

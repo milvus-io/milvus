@@ -42,8 +42,8 @@ class AccuracyRunner(BaseRunner):
         nqs = collection["nqs"]
         search_params = collection["search_params"]
         search_params = utils.generate_combinations(search_params)
-        cases = list()
-        case_metrics = list()
+        cases = []
+        case_metrics = []
         self.init_metric(self.name, collection_info, index_info, search_info=None)
         for search_param in search_params:
             if not filters:
@@ -150,8 +150,8 @@ class AccAccuracyRunner(AccuracyRunner):
         # Convert list data into a set of dictionary data
         search_params = utils.generate_combinations(search_params)
         index_params = utils.generate_combinations(index_params)
-        cases = list()
-        case_metrics = list()
+        cases = []
+        case_metrics = []
         self.init_metric(self.name, collection_info, {}, search_info=None)
 
         # true_ids: The data set used to verify the results returned by query

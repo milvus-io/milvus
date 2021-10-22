@@ -46,8 +46,8 @@ class SearchRunner(BaseRunner):
         base_query_vectors = utils.get_vectors_from_binary(
             utils.MAX_NQ, dimension, data_type
         )
-        cases = list()
-        case_metrics = list()
+        cases = []
+        case_metrics = []
         self.init_metric(self.name, collection_info, index_info, None)
         for search_param in search_params:
             logger.info("Search param: %s" % json.dumps(search_param))
@@ -176,8 +176,8 @@ class InsertSearchRunner(BaseRunner):
         base_query_vectors = utils.get_vectors_from_binary(
             utils.MAX_NQ, dimension, data_type
         )
-        cases = list()
-        case_metrics = list()
+        cases = []
+        case_metrics = []
         self.init_metric(self.name, collection_info, index_info, None)
 
         for search_param in search_params:

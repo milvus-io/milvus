@@ -44,8 +44,8 @@ class BuildRunner(BaseRunner):
         self.init_metric(self.name, collection_info, index_info, search_info=None)
         case_metric = copy.deepcopy(self.metric)
         case_metric.set_case_metric_type()
-        case_metrics = list()
-        case_params = list()
+        case_metrics = []
+        case_params = []
         case_metrics.append(case_metric)
         case_param = {
             "collection_name": collection_name,
