@@ -1172,7 +1172,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate field name
 	for _, field := range cct.schema.Fields {
-		if err := ValidateFieldName(field.Name); err != nil {
+		if err := validateFieldName(field.Name); err != nil {
 			return err
 		}
 		if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
@@ -3547,7 +3547,7 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidateFieldName(fieldName); err != nil {
+	if err := validateFieldName(fieldName); err != nil {
 		return err
 	}
 
@@ -3738,7 +3738,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidateFieldName(fieldName); err != nil {
+	if err := validateFieldName(fieldName); err != nil {
 		return err
 	}
 

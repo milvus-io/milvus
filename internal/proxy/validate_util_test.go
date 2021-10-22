@@ -73,8 +73,8 @@ func TestValidatePartitionTag(t *testing.T) {
 }
 
 func TestValidateFieldName(t *testing.T) {
-	assert.Nil(t, ValidateFieldName("abc"))
-	assert.Nil(t, ValidateFieldName("_123abc"))
+	assert.Nil(t, validateFieldName("abc"))
+	assert.Nil(t, validateFieldName("_123abc"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -91,7 +91,7 @@ func TestValidateFieldName(t *testing.T) {
 	}
 
 	for _, name := range invalidNames {
-		assert.NotNil(t, ValidateFieldName(name))
+		assert.NotNil(t, validateFieldName(name))
 	}
 }
 
