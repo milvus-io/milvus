@@ -67,7 +67,8 @@ class TestRestartBase:
         logging.getLogger().info("Start restart server")
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        new_connect = get_milvus(
+            args["ip"], args["port"], handler=args["handler"])
         res_count = new_connect.count_entities(collection)
         logging.getLogger().info(res_count)
         assert res_count == 2 * default_nb
@@ -88,7 +89,8 @@ class TestRestartBase:
             # restart server
             assert restart_server(args["service_name"])
             # assert row count again
-            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+            new_connect = get_milvus(
+                args["ip"], args["port"], handler=args["handler"])
             res_count_2 = new_connect.count_entities(collection)
             logging.getLogger().info(res_count_2)
             timeout = 300
@@ -113,7 +115,7 @@ class TestRestartBase:
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         delete_length = 1000
-        delete_ids = ids[big_nb // 4 : big_nb // 4 + delete_length]
+        delete_ids = ids[big_nb // 4: big_nb // 4 + delete_length]
         delete_res = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
@@ -121,7 +123,8 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        new_connect = get_milvus(
+            args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
         timeout = 100
@@ -156,7 +159,8 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        new_connect = get_milvus(
+            args["ip"], args["port"], handler=args["handler"])
         assert new_connect.count_entities(collection) == big_nb
         stats = connect.get_collection_stats(collection)
         for file in stats["partitions"][0]["segments"][0]["files"]:
@@ -179,7 +183,8 @@ class TestRestartBase:
         for i in range(loop):
             ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, default_index, _async=True)
+        connect.create_index(collection, field_name,
+                             default_index, _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
         stats = connect.get_collection_stats(collection)
@@ -187,7 +192,8 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        new_connect = get_milvus(
+            args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
         assert res_count_2 == loop * big_nb
@@ -228,7 +234,7 @@ class TestRestartBase:
         delete_length = 1000
         loop = 10
         for i in range(loop):
-            delete_ids = ids[i * delete_length : (i + 1) * delete_length]
+            delete_ids = ids[i * delete_length: (i + 1) * delete_length]
             delete_res = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         connect.compact(collection, _async=True)
@@ -241,7 +247,8 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        new_connect = get_milvus(
+            args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
         assert res_count_2 == big_nb - delete_length * loop
@@ -275,7 +282,8 @@ class TestRestartBase:
             # restart server
             assert restart_server(args["service_name"])
             # assert row count again
-            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+            new_connect = get_milvus(
+                args["ip"], args["port"], handler=args["handler"])
             res_count_2 = new_connect.count_entities(collection_list[-1])
             logging.getLogger().info(res_count_2)
             timeout = 300
@@ -310,7 +318,8 @@ class TestRestartBase:
             tag_tmp = gen_unique_str()
             partitions.append(tag_tmp)
             connect.create_partition(collection, tag_tmp)
-            ids = connect.bulk_insert(collection, big_entities, partition_name=tag_tmp)
+            ids = connect.bulk_insert(
+                collection, big_entities, partition_name=tag_tmp)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -318,7 +327,8 @@ class TestRestartBase:
             # restart server
             assert restart_server(args["service_name"])
             # assert row count again
-            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
+            new_connect = get_milvus(
+                args["ip"], args["port"], handler=args["handler"])
             res_count_2 = new_connect.count_entities(collection)
             logging.getLogger().info(res_count_2)
             timeout = 300
