@@ -97,7 +97,7 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
-		return nil, fmt.Errorf("no primary in schema")
+		return nil, fmt.Errorf("Failed to get primary key field: no primary in schema")
 	}
 	return helper.schema.Fields[helper.primaryKeyOffset], nil
 }
@@ -106,7 +106,7 @@ func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) 
 func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.nameOffset[fieldName]
 	if !ok {
-		return nil, fmt.Errorf("fieldName(%s) not found", fieldName)
+		return nil, fmt.Errorf("Failed to get field schema by name: fieldName(%s) not found", fieldName)
 	}
 	return helper.schema.Fields[offset], nil
 }

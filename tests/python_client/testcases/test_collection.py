@@ -2854,11 +2854,15 @@ class TestLoadCollection:
         """
         target: test load collection without flush
         method: insert entities without flush, then load collection
-        expected: load collection failed
+        expected: No exception and data can be queried
         """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
+        result = connect.insert(collection, gen_entities(100))
+        assert len(result.primary_keys) == 100
         connect.load_collection(collection)
+        int_field_name = "int64"
+        term_expr = f'{int_field_name} in {result.primary_keys[:1]}'
+        res = connect.query(collection, term_expr)
+        assert res == [{int_field_name: result.primary_keys[0]}]
 
     # TODO
     @pytest.mark.tags(CaseLabel.L2)

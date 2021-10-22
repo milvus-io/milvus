@@ -188,6 +188,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
+// GetComponentStates gets the component states of QueryNode.
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -203,6 +204,7 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	return ret.(*internalpb.ComponentStates), err
 }
 
+// GetTimeTickChannel gets the time tick channel of QueryNode.
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -218,6 +220,7 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// GetStatisticsChannel gets the statistics channel of QueryNode.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
