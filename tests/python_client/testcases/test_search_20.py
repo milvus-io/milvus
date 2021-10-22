@@ -727,14 +727,24 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: test search normal case
         method: create connection, collection, insert and search
-        expected: search successfully with limit(topK)
+        expected: 1. search returned with 0 before travel timestamp
+                  2. search successfully with limit(topK) after travel timestamp
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0:5]
-        # 2. search
+        # 2. search before insert time_stamp
         log.info("test_search_normal: searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            travel_timestamp=time_stamp-1,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": [],
+                                         "limit": 0})
+        # 3. search after insert time_stamp
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp,
