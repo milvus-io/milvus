@@ -16,7 +16,7 @@ import "github.com/milvus-io/milvus/internal/proto/commonpb"
 // CompareIndexParams compares indexParam1 with indexParam2. When all keys of indexParam1 exist in indexParam2,
 // and the corresponding value are the same as in indexParam2, return true
 // Otherwise return false
-func CompareIndexParams(indexParam1 []*commonpb.KeyValuePair, indexParam2 []*commonpb.KeyValuePair) bool {
+func CompareIndexParams(indexParam1, indexParam2 []*commonpb.KeyValuePair) bool {
 	if indexParam1 == nil && indexParam2 == nil {
 		return true
 	}

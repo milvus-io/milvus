@@ -92,7 +92,7 @@ func CalcFFBatch(dim int64, left []float32, lIndex int64, right []float32, metri
 	}
 }
 
-func CalcFloatDistance(dim int64, left []float32, right []float32, metric string) ([]float32, error) {
+func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float32, error) {
 	if dim <= 0 {
 		err := errors.New("Invalid dimension")
 		return nil, err
@@ -205,7 +205,7 @@ func CalcHammingBatch(dim int64, left []byte, lIndex int64, right []byte, result
 	}
 }
 
-func CalcHammingDistance(dim int64, left []byte, right []byte) ([]int32, error) {
+func CalcHammingDistance(dim int64, left, right []byte) ([]int32, error) {
 	if dim <= 0 {
 		err := errors.New("Invalid dimension")
 		return nil, err
