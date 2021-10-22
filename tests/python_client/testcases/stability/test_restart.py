@@ -192,7 +192,7 @@ class TestRestartBase:
         logging.getLogger().info(res_count_2)
         assert res_count_2 == loop * big_nb
         status = new_connect._cmd("status")
-        assert json.loads(status)["indexing"] == True
+        assert json.loads(status)["indexing"] is True
         # timeout = 100
         # start_time = time.time()
         # while time.time() - start_time < timeout:
@@ -290,7 +290,7 @@ class TestRestartBase:
                     if tmp_count != big_nb:
                         break_flag = False
                         break
-                if break_flag == True:
+                if break_flag is True:
                     break
                 time.sleep(10)
             for name in collection_list:
