@@ -248,4 +248,4 @@ def equal_entities_list(exp, actual, with_vec=False):
                     exp.remove(a)
                 except Exception as ex:
                     log.error(ex)
-    return True if len(exp) == 0 else False
+    return len(exp) == 0

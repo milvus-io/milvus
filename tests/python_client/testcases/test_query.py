@@ -274,10 +274,7 @@ class TestQueryParams(TestcaseBase):
         """
         self._connect()
         df = cf.gen_default_dataframe_data()
-        bool_values = pd.Series(
-            data=[True if i % 2 == 0 else False for i in range(ct.default_nb)],
-            dtype="bool",
-        )
+        bool_values = pd.Series(data=[i % 2 == 0 for i in range(ct.default_nb)], dtype="bool")
         df.insert(2, ct.default_bool_field_name, bool_values)
         self.collection_wrap.construct_from_dataframe(
             cf.gen_unique_str(prefix), df, primary_field=ct.default_int64_field_name
