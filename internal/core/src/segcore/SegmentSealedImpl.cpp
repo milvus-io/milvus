@@ -557,9 +557,10 @@ SegmentSealedImpl::Delete(int64_t row_count, const int64_t* uids_raw, const Time
         src_timestamps[i] = t;
         src_uids[i] = uid;
     }
-    deleted_record_.timestamps_.set_data(0, src_timestamps.data(), row_count);
-    deleted_record_.uids_.set_data(0, src_uids.data(), row_count);
-    deleted_record_.ack_responder_.AddSegment(0, row_count);
+    auto current_size = deleted_record_.record_size_;
+    deleted_record_.timestamps_.set_data(current_size, src_timestamps.data(), row_count);
+    deleted_record_.uids_.set_data(current_size, src_uids.data(), row_count);
+    deleted_record_.ack_responder_.AddSegment(current_size, row_count);
     return;
 }
 
