@@ -14,7 +14,7 @@ BROKER_PULSAR_MEM = '"-Xms512m -Xmx1024m -XX:MaxDirectMemorySize=1024m -Dio.nett
 
 
 def get_host_cpus(hostname):
-    from kubernetes import client, config
+    from kubernetes import client, 
 
     config.load_kube_config()
     client.rest.logger.setLevel(logging.WARNING)
@@ -451,7 +451,7 @@ def restart_server(helm_release_name, namespace):
 
 
 def get_pod_status(helm_release_name, namespace):
-    from kubernetes import client, config
+    from kubernetes import client, 
 
     config.load_kube_config()
     v1 = client.CoreV1Api()

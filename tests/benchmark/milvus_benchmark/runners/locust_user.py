@@ -8,7 +8,7 @@ import locust.stats
 
 # import gevent.monkey
 # gevent.monkey.patch_all()
-from locust import LoadTestShape, User, between, events, stats
+from locust import LoadTestShape, User, between, events, 
 from locust.env import Environment
 from locust.log import greenlet_exception_logger, setup_logging
 from locust.stats import print_stats, stats_printer
