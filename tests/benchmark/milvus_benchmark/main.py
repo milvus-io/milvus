@@ -80,7 +80,8 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
                 metric.hardware = Hardware("")
             else:
                 metric.hardware = (
-                    Hardware(server_name) if server_name else Hardware(server_tag)
+                    Hardware(server_name) if server_name else Hardware(
+                        server_tag)
                 )
             start_status = env.start_up(helm_path, helm_params)
         if start_status:
@@ -144,7 +145,8 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     # helm mode with scheduler
-    arg_parser.add_argument("--image-version", default="", help="image version")
+    arg_parser.add_argument(
+        "--image-version", default="", help="image version")
     arg_parser.add_argument(
         "--schedule-conf",
         metavar="FILE",
@@ -181,7 +183,8 @@ def main():
 
     if args.schedule_conf:
         if args.local:
-            raise Exception("Helm mode with scheduler and other mode are incompatible")
+            raise Exception(
+                "Helm mode with scheduler and other mode are incompatible")
         if not args.image_version:
             raise Exception("Image version not given")
         env_mode = "helm"
@@ -189,7 +192,8 @@ def main():
         with open(args.schedule_conf) as f:
             schedule_config = full_load(f)
             f.close()
-        helm_path = os.path.join(os.getcwd(), "..//milvus-helm-charts/charts/milvus-ha")
+        helm_path = os.path.join(
+            os.getcwd(), "..//milvus-helm-charts/charts/milvus-ha")
         for item in schedule_config:
             server_host = item["server"] if "server" in item else ""
             server_tag = item["server_tag"] if "server_tag" in item else ""
