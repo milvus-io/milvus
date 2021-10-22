@@ -746,7 +746,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	exist := false
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, -1)
 	if err != nil {
-		log.Debug("get flushed segment from data coord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
+		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
 		exist = true
 	} else {
 		for _, id := range segIDs {
@@ -806,7 +806,7 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	}
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, t.Req.PartitionID)
 	if err != nil {
-		log.Debug("get flushed segments from data coord failed", zap.String("collection name", coll.Schema.Name), zap.Int64("partition id", t.Req.PartitionID), zap.Error(err))
+		log.Debug("Get flushed segments from data coord failed", zap.String("collection name", coll.Schema.Name), zap.Int64("partition id", t.Req.PartitionID), zap.Error(err))
 		return err
 	}
 
@@ -851,7 +851,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		flushedSegs = append(flushedSegs, k)
 	}
 	if err != nil {
-		log.Debug("get flushed segments from data coord failed", zap.String("collection_name", collMeta.Schema.Name), zap.Error(err))
+		log.Debug("Get flushed segments from data coord failed", zap.String("collection_name", collMeta.Schema.Name), zap.Error(err))
 		return err
 	}
 
@@ -912,7 +912,7 @@ func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 	for _, i := range idx {
 		f, err := GetFieldSchemaByIndexID(&coll, typeutil.UniqueID(i.IndexID))
 		if err != nil {
-			log.Warn("get field schema by index id failed", zap.String("collection name", t.Req.CollectionName), zap.String("index name", t.Req.IndexName), zap.Error(err))
+			log.Warn("Get field schema by index id failed", zap.String("collection name", t.Req.CollectionName), zap.String("index name", t.Req.IndexName), zap.Error(err))
 			continue
 		}
 		desc := &milvuspb.IndexDescription{
