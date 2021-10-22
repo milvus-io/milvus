@@ -489,6 +489,6 @@ if __name__ == "__main__":
 
     while not ff():
         print("retry")
-    else:
-        print("gogog")
+        
+    print("gogog")
     print("hhhh")
