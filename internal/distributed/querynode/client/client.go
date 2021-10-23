@@ -241,6 +241,7 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// AddQueryChannel adds query channel for QueryNode component.
 func (c *Client) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -256,6 +257,7 @@ func (c *Client) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChann
 	return ret.(*commonpb.Status), err
 }
 
+// RemoveQueryChannel removes the query channel for QueryNode component.
 func (c *Client) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -271,6 +273,7 @@ func (c *Client) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQuer
 	return ret.(*commonpb.Status), err
 }
 
+// WatchDmChannels watches the channels about data manipulation.
 func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()

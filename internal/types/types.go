@@ -183,6 +183,14 @@ type DataCoord interface {
 	// response struct `GetSegmentInfoResponse` contains the list of segment info
 	// error is returned only when some communication issue occurs
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
+
+	// GetRecoveryInfo request segment recovery info of collection/partition
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection/partition id to query
+	//
+	// response struct `GetRecoveryInfoResponse` contains the list of segments info and corresponding vchannel info
+	// error is returned only when some communication issue occurs
 	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)

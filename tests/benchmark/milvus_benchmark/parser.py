@@ -63,6 +63,7 @@ def parse_ann_collection_name(collection_name):
 
 
 def search_params_parser(param):
+    """ parser params of search interface and return top_ks, nqs, nprobes"""
     # parse top-k, set default value if top-k not in param
     if "top_ks" not in param:
         top_ks = [10]

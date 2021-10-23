@@ -9,32 +9,29 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package querynode
+package metricsinfo
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
-func TestGetSystemInfoMetrics(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	node, err := genSimpleQueryNode(ctx)
+func TestInContainer(t *testing.T) {
+	_, err := InContainer()
 	assert.NoError(t, err)
+}
 
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-
-	req := &milvuspb.GetMetricsRequest{
-		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
-	}
-	resp, err := getSystemInfoMetrics(ctx, req, node)
+func TestGetContainerMemLimit(t *testing.T) {
+	limit, err := GetContainerMemLimit()
 	assert.NoError(t, err)
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	assert.True(t, limit > 0)
+	t.Log("limit memory:", limit)
+}
+
+func TestGetContainerMemUsed(t *testing.T) {
+	used, err := GetContainerMemUsed()
+	assert.NoError(t, err)
+	assert.True(t, used > 0)
+	t.Log("used memory:", used)
 }

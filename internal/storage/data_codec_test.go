@@ -316,7 +316,7 @@ func TestDeleteCodec(t *testing.T) {
 	}
 	deleteCodec := NewDeleteCodec(schema)
 	deleteData := &DeleteData{
-		Data: map[string]int64{"1": 43757345, "2": 23578294723},
+		Data: map[int64]int64{1: 43757345, 2: 23578294723},
 	}
 	blob, err := deleteCodec.Serialize(1, 1, deleteData)
 	assert.Nil(t, err)

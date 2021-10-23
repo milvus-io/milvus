@@ -116,7 +116,7 @@ func TestGrpcRequest(t *testing.T) {
 	assert.Nil(t, err)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
-	meta, err := newMeta(kv)
+	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
 	cluster := &queryNodeCluster{
 		ctx:         baseCtx,
@@ -147,8 +147,8 @@ func TestGrpcRequest(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		loadSegmentReq := &querypb.LoadSegmentsRequest{
-			NodeID: nodeID,
-			Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
+			DstNodeID: nodeID,
+			Infos:     []*querypb.SegmentLoadInfo{segmentLoadInfo},
 		}
 		err := cluster.loadSegments(baseCtx, nodeID, loadSegmentReq)
 		assert.Nil(t, err)
@@ -166,26 +166,26 @@ func TestGrpcRequest(t *testing.T) {
 	})
 
 	t.Run("Test AddQueryChannel", func(t *testing.T) {
-		reqChannel, resChannel, err := cluster.clusterMeta.getQueryChannel(defaultCollectionID)
+		info, err := cluster.clusterMeta.getQueryChannelInfoByID(defaultCollectionID)
 		assert.Nil(t, err)
 		addQueryChannelReq := &querypb.AddQueryChannelRequest{
 			NodeID:           nodeID,
 			CollectionID:     defaultCollectionID,
-			RequestChannelID: reqChannel,
-			ResultChannelID:  resChannel,
+			RequestChannelID: info.QueryChannelID,
+			ResultChannelID:  info.QueryResultChannelID,
 		}
 		err = cluster.addQueryChannel(baseCtx, nodeID, addQueryChannelReq)
 		assert.Nil(t, err)
 	})
 
 	t.Run("Test RemoveQueryChannel", func(t *testing.T) {
-		reqChannel, resChannel, err := cluster.clusterMeta.getQueryChannel(defaultCollectionID)
+		info, err := cluster.clusterMeta.getQueryChannelInfoByID(defaultCollectionID)
 		assert.Nil(t, err)
 		removeQueryChannelReq := &querypb.RemoveQueryChannelRequest{
 			NodeID:           nodeID,
 			CollectionID:     defaultCollectionID,
-			RequestChannelID: reqChannel,
-			ResultChannelID:  resChannel,
+			RequestChannelID: info.QueryChannelID,
+			ResultChannelID:  info.QueryResultChannelID,
 		}
 		err = cluster.removeQueryChannel(baseCtx, nodeID, removeQueryChannelReq)
 		assert.Nil(t, err)

@@ -70,6 +70,15 @@ Run multiple test scenario in a category manually(take network partition chaos f
 
    pytest test_chaos.py --host ${Milvus_IP} -v
    ```
+### Automation Scripts
+Run test scenario automatically:
+1. update chaos type and pod in `chaos_test.sh`
+2. run the commands below:
+   ```bash
+   cd /milvus/tests/python_client/chaos
+   # in this step, script will install milvus and run testcase
+   bash chaos_test.sh
+   ```
 ### Github Action
 * [Pod Kill Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/pod-kill-chaos-test.yaml)
 * [Network Partition Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/network-partition-chaos-test.yaml)
@@ -78,10 +87,10 @@ Run multiple test scenario in a category manually(take network partition chaos f
 still in planning 
 
 ### Todo
-- [ ] pod_failure
+- [x] pod_failure
 - [ ] container_kill
 - [x] network attack
-- [ ] memory stress
+- [x] memory stress
 
 ## How to contribute
 * Get familiar with chaos engineering and [Chaos Mesh](https://chaos-mesh.org)

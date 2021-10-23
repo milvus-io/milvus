@@ -129,6 +129,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::vector<SegOffset>
     search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const = 0;
 
+    virtual std::vector<SegOffset>
+    search_ids(const BitsetView& view, Timestamp timestamp) const = 0;
+
  protected:
     // internal API: return chunk_data in span
     virtual SpanBase

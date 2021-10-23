@@ -644,6 +644,34 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	deleteCollection(collection)
 }
 
+func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
+	fieldParam := constFieldParam{
+		id:       100,
+		dataType: schemapb.DataType_Int64,
+	}
+	field := genPKField(fieldParam)
+	schema := &schemapb.CollectionSchema{
+		Name:   defaultCollectionName,
+		AutoID: false,
+		Fields: []*schemapb.FieldSchema{
+			field,
+		},
+	}
+
+	seg := newSegment(newCollection(defaultCollectionID, schema),
+		defaultSegmentID,
+		defaultPartitionID,
+		defaultCollectionID,
+		defaultVChannel,
+		segmentTypeSealed,
+		true)
+	pks := []IntPrimaryKey{1, 2, 3}
+	timestamps := []Timestamp{10, 10, 10}
+	var rowCount int64 = 3
+	error := seg.segmentLoadDeletedRecord(pks, timestamps, rowCount)
+	assert.NoError(t, error)
+}
+
 func TestSegment_segmentLoadFieldData(t *testing.T) {
 	genSchemas := func(dataType schemapb.DataType) (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
 		constField := constFieldParam{

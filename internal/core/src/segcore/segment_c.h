@@ -85,6 +85,9 @@ CStatus
 LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
 
 CStatus
+LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info);
+
+CStatus
 UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
 
 CStatus

@@ -39,14 +39,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
-/*
- * collectionReplica contains a in-memory local copy of persistent collections.
- * In common cases, the system has multiple query nodes. Data of a collection will be
- * distributed across all the available query nodes, and each query node's collectionReplica
- * will maintain its own share (only part of the collection).
- * Every replica tracks a value called tSafe which is the maximum timestamp that the replica
- * is up-to-date.
- */
+// ReplicaInterface specifies all the methods that the Collection object needs to implement in QueryNode.
+// In common cases, the system has multiple query nodes. The full data of a collection will be distributed
+// across multiple query nodes, and each query node's collectionReplica will maintain its own part.
 type ReplicaInterface interface {
 	// collection
 	getCollectionIDs() []UniqueID
@@ -539,6 +534,7 @@ func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.Segmen
 	return statisticData
 }
 
+//  removeExcludedSegments will remove excludedSegments from collectionReplica
 func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueID) {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -546,6 +542,7 @@ func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueI
 	delete(colReplica.excludedSegments, collectionID)
 }
 
+// addExcludedSegments will add excludedSegments to collectionReplica
 func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -557,6 +554,7 @@ func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, 
 	colReplica.excludedSegments[collectionID] = append(colReplica.excludedSegments[collectionID], segmentInfos...)
 }
 
+// getExcludedSegments returns excludedSegments of collectionReplica
 func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()

@@ -285,8 +285,6 @@ func (q *queryCollection) consumeQuery() {
 					if err != nil {
 						log.Warn(err.Error())
 					}
-				case *msgstream.LoadBalanceSegmentsMsg:
-					q.loadBalance(sm)
 				case *msgstream.RetrieveMsg:
 					err := q.receiveQueryMsg(sm)
 					if err != nil {
@@ -304,10 +302,6 @@ func (q *queryCollection) consumeQuery() {
 			}
 		}
 	}
-}
-
-func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
-	//TODO:: get loadBalance info from etcd
 }
 
 func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChangeInfoMsg) error {

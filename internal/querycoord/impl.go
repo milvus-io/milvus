@@ -449,7 +449,7 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 	}
 
 	collectionID := req.CollectionID
-	queryChannel, queryResultChannel, err := qc.meta.getQueryChannel(collectionID)
+	info, err := qc.meta.getQueryChannelInfoByID(collectionID)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -461,8 +461,8 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 
 	return &querypb.CreateQueryChannelResponse{
 		Status:         status,
-		RequestChannel: queryChannel,
-		ResultChannel:  queryResultChannel,
+		RequestChannel: info.QueryChannelID,
+		ResultChannel:  info.QueryResultChannelID,
 	}, nil
 }
 

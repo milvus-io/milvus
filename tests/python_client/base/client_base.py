@@ -169,6 +169,8 @@ class TestcaseBase(Base):
                 cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim)
             assert collection_w.is_empty is False
             assert collection_w.num_entities == nb
+            log.info("insert_data: inserted data into collection %s (num_entities: %s)"
+                     % (collection_w.name, nb))
             # This condition will be removed after auto index feature
             if not is_index:
                 collection_w.load()

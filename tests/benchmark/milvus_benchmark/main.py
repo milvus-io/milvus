@@ -277,5 +277,5 @@ if __name__ == "__main__":
         # back_scheduler.shutdown(wait=False)
         sys.exit(-2)
     # block_scheduler.shutdown(wait=False)
-    logger.info("All tests run finshed")
+    logger.info("All tests run finished")
     sys.exit(0)

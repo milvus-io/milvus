@@ -600,7 +600,7 @@ func (insertCodec *InsertCodec) Close() error {
 // DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
 // timestamp represents the time when this instance was deleted
 type DeleteData struct {
-	Data map[string]int64 // primary key to timestamp
+	Data map[int64]int64 // primary key to timestamp
 }
 
 // DeleteCodec serializes and deserializes the delete data
@@ -631,11 +631,11 @@ func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if value > int64(endTs) {
 			endTs = int(value)
 		}
-		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%s,%d", key, value))
+		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", key, value))
 		if err != nil {
 			return nil, err
 		}
-		sizeTotal += len(key)
+		sizeTotal += binary.Size(key)
 		sizeTotal += binary.Size(value)
 	}
 	eventWriter.SetEventTimestamp(uint64(startTs), uint64(endTs))
@@ -672,7 +672,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	}
 
 	var pid, sid UniqueID
-	result := &DeleteData{Data: make(map[string]int64)}
+	result := &DeleteData{Data: make(map[int64]int64)}
 	for _, blob := range blobs {
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
@@ -701,12 +701,17 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect")
 			}
 
+			pk, err := strconv.ParseInt(splits[0], 10, 64)
+			if err != nil {
+				return InvalidUniqueID, InvalidUniqueID, nil, err
+			}
+
 			ts, err := strconv.ParseInt(splits[1], 10, 64)
 			if err != nil {
 				return InvalidUniqueID, InvalidUniqueID, nil, err
 			}
 
-			result.Data[splits[0]] = ts
+			result.Data[pk] = ts
 		}
 
 		deleteCodec.readerCloseFunc = append(deleteCodec.readerCloseFunc, readerClose(binlogReader))

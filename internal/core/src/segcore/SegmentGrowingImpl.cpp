@@ -248,12 +248,10 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     std::vector<idx_t> uids(size);
     std::vector<Timestamp> timestamps(size);
     // #pragma omp parallel for
-    std::cout << "zzzz: " << size << std::endl;
     for (int index = 0; index < size; ++index) {
         auto [t, uid] = ordering[index];
         timestamps[index] = t;
         uids[index] = uid;
-        std::cout << "In Segcore Delete: " << uid << std::endl;
     }
     deleted_record_.timestamps_.set_data(reserved_begin, timestamps.data(), size);
     deleted_record_.uids_.set_data(reserved_begin, uids.data(), size);
@@ -470,6 +468,27 @@ SegmentGrowingImpl::search_ids(const boost::dynamic_bitset<>& bitset, Timestamp 
 
     for (int i = 0; i < bitset.size(); i++) {
         if (bitset[i]) {
+            SegOffset the_offset(-1);
+            auto offset = SegOffset(i);
+            if (record_.timestamps_[offset.get()] < timestamp) {
+                the_offset = std::max(the_offset, offset);
+            }
+
+            if (the_offset == SegOffset(-1)) {
+                continue;
+            }
+            res_offsets.push_back(the_offset);
+        }
+    }
+    return res_offsets;
+}
+
+std::vector<SegOffset>
+SegmentGrowingImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) const {
+    std::vector<SegOffset> res_offsets;
+
+    for (int i = 0; i < bitset.size(); ++i) {
+        if (!bitset.test(i)) {
             SegOffset the_offset(-1);
             auto offset = SegOffset(i);
             if (record_.timestamps_[offset.get()] < timestamp) {

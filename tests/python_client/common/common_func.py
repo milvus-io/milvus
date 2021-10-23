@@ -517,8 +517,6 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
         insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)
         start = start + nb // num
-    log.info("insert_data: inserted data into collection %s (num_entities: %s)"
-             % (collection_w.name, nb))
     return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
 

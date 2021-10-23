@@ -18,4 +18,22 @@ Collections:
           cluster_n_nodes:
             search: succ
             query: succ
+  -
+    testcase:
+      name: test_indexnode_pod_failure
+      chaos: chaos_indexnode_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            index: fail
+          cluster_n_nodes:
+            index: succ
 
+  -
+    testcase:
+      name: test_datanode_pod_failure
+      chaos: chaos_datanode_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            insert: fail
+          cluster_n_nodes:
+            insert: succ
