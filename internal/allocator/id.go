@@ -40,7 +40,7 @@ type idAllocatorInterface interface {
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 }
 
-// IDAllocator allocate Unique and monotonically increasing IDs from Root Coord.
+// IDAllocator allocates Unique and monotonically increasing IDs from Root Coord.
 // It could also batch allocate for less root coord server access
 type IDAllocator struct {
 	Allocator
