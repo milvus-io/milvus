@@ -41,6 +41,7 @@ class TestSimdCompatibility:
                        'spec.components.queryNode.replicas': 2
                        }
         milvus_op = MilvusOperator()
+        log.info(f"install milvus with configs: {cus_configs}")
         milvus_op.install(cus_configs)
         healthy = milvus_op.wait_for_healthy(release_name, namespace)
         log.info(f"milvus healthy: {healthy}")
