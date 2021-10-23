@@ -12,20 +12,21 @@ elif [[ "$unamestr" == 'Darwin' ]]; then
 fi
 echo "platform: $platform"
 
-
+# define chaos testing object
 pod="pulsar"
 chaos_type="pod_kill"
 release="milvus-chaos"
 ns="chaos-testing"
 
+# install milvus cluster for chaos testing
 pushd ./scripts
 echo "uninstall milvus if exist"
 bash uninstall_milvus.sh || true
-
 echo "install milvus"
 bash install_milvus.sh
 popd
 
+# replace chaos object as defined
 if [ "$platform" == "Mac" ];
 then
     sed -i "" "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${chaos_type}\/'/g" constants.py
@@ -35,7 +36,7 @@ else
     sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_podkill.yaml\'/g" constants.py
 fi
 
-
+# run chaos testing
 echo "start running testcase ${pod}"
 host=$(kubectl get svc/milvus-chaos -o jsonpath="{.spec.clusterIP}")
 python scripts/hello_milvus.py --host "$host"
