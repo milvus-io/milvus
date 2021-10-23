@@ -123,7 +123,7 @@ class TestChaos(TestChaosBase):
         # parse chaos object
         chaos_config = cc.gen_experiment_config(chaos_yaml)
         self._chaos_config = chaos_config  # cache the chaos config for tear down
-        log.info(chaos_config)
+        log.info(f"chaos_config: {chaos_config}")
 
         # parse the test expectations in testcases.yaml
         if self.parser_testcase_config(chaos_yaml) is False:
