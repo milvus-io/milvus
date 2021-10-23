@@ -85,7 +85,7 @@ class TestCollectionParams(TestcaseBase):
     def test_collection_empty_name(self):
         """
         target: test collection with empty name
-        method: create collection with a empty name
+        method: create collection with an empty name
         expected: raise exception
         """
         self._connect()
@@ -2485,7 +2485,7 @@ class TestHasCollection:
         """
         target: test if collection not created
         method: random a collection name, create this collection then drop it,
-            assert the value returned by has_collection method
+                assert the value returned by has_collection method
         expected: False
         """
         collection_name = gen_unique_str(uid_has)
