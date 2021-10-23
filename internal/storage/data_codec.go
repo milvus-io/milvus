@@ -605,19 +605,18 @@ type DeleteData struct {
 
 // DeleteCodec serializes and deserializes the delete data
 type DeleteCodec struct {
-	Schema          *etcdpb.CollectionMeta
 	readerCloseFunc []func() error
 }
 
 // NewDeleteCodec returns a DeleteCodec
-func NewDeleteCodec(schema *etcdpb.CollectionMeta) *DeleteCodec {
-	return &DeleteCodec{Schema: schema}
+func NewDeleteCodec() *DeleteCodec {
+	return &DeleteCodec{}
 }
 
 // Serialize transfer delete data to blob. .
 // For each delete message, it will save "pk,ts" string to binlog.
-func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *DeleteData) (*Blob, error) {
-	binlogWriter := NewDeleteBinlogWriter(schemapb.DataType_String, deleteCodec.Schema.ID, partitionID, segmentID)
+func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, data *DeleteData) (*Blob, error) {
+	binlogWriter := NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
 	eventWriter, err := binlogWriter.NextDeleteEventWriter()
 	if err != nil {
 		return nil, err

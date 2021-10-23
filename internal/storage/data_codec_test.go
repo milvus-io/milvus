@@ -311,14 +311,11 @@ func TestInsertCodec(t *testing.T) {
 }
 
 func TestDeleteCodec(t *testing.T) {
-	schema := &etcdpb.CollectionMeta{
-		ID: CollectionID,
-	}
-	deleteCodec := NewDeleteCodec(schema)
+	deleteCodec := NewDeleteCodec()
 	deleteData := &DeleteData{
 		Data: map[int64]int64{1: 43757345, 2: 23578294723},
 	}
-	blob, err := deleteCodec.Serialize(1, 1, deleteData)
+	blob, err := deleteCodec.Serialize(CollectionID, 1, 1, deleteData)
 	assert.Nil(t, err)
 
 	pid, sid, data, err := deleteCodec.Deserialize([]*Blob{blob})

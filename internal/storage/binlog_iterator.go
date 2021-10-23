@@ -121,7 +121,7 @@ type DeltalogIterator struct {
 }
 
 func NewDeltalogIterator(blob *Blob) (*DeltalogIterator, error) {
-	deltaCodec := NewDeleteCodec(nil)
+	deltaCodec := NewDeleteCodec()
 	_, _, serData, err := deltaCodec.Deserialize(blob)
 	if err != nil {
 		return nil, err
