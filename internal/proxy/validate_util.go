@@ -140,7 +140,7 @@ func validateFieldName(fieldName string) error {
 	return nil
 }
 
-func ValidateDimension(dim int64, isBinary bool) error {
+func validateDimension(dim int64, isBinary bool) error {
 	if dim <= 0 || dim > Params.MaxDimension {
 		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.MaxDimension)
 	}

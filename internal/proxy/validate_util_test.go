@@ -96,15 +96,15 @@ func TestValidateFieldName(t *testing.T) {
 }
 
 func TestValidateDimension(t *testing.T) {
-	assert.Nil(t, ValidateDimension(1, false))
-	assert.Nil(t, ValidateDimension(Params.MaxDimension, false))
-	assert.Nil(t, ValidateDimension(8, true))
-	assert.Nil(t, ValidateDimension(Params.MaxDimension, true))
+	assert.Nil(t, validateDimension(1, false))
+	assert.Nil(t, validateDimension(Params.MaxDimension, false))
+	assert.Nil(t, validateDimension(8, true))
+	assert.Nil(t, validateDimension(Params.MaxDimension, true))
 
 	// invalid dim
-	assert.NotNil(t, ValidateDimension(-1, false))
-	assert.NotNil(t, ValidateDimension(Params.MaxDimension+1, false))
-	assert.NotNil(t, ValidateDimension(9, true))
+	assert.NotNil(t, validateDimension(-1, false))
+	assert.NotNil(t, validateDimension(Params.MaxDimension+1, false))
+	assert.NotNil(t, validateDimension(9, true))
 }
 
 func TestValidateVectorFieldMetricType(t *testing.T) {
