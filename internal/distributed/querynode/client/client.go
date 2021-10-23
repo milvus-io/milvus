@@ -289,6 +289,7 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChanne
 	return ret.(*commonpb.Status), err
 }
 
+// LoadSegments loads the segments to search.
 func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
