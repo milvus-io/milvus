@@ -978,7 +978,7 @@ func TestCreateCollectionTask(t *testing.T) {
 
 		task.CreateCollectionRequest = reqBackup
 
-		// ValidateCollectionName
+		// validateCollectionName
 
 		schema.Name = " " // empty
 		emptyNameSchema, err := proto.Marshal(schema)
@@ -2422,7 +2422,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	collectionID, _ := globalMetaCache.GetCollectionID(ctx, collectionName)
 
-	// ValidateCollectionName
+	// validateCollectionName
 	task.query.CollectionName = "$"
 	assert.Error(t, task.PreExecute(ctx))
 	task.query.CollectionName = collectionName

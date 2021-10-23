@@ -748,7 +748,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	collectionName := it.BaseInsertTask.CollectionName
-	if err := ValidateCollectionName(collectionName); err != nil {
+	if err := validateCollectionName(collectionName); err != nil {
 		return err
 	}
 
@@ -1154,7 +1154,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	// validate collection name
-	if err := ValidateCollectionName(cct.schema.Name); err != nil {
+	if err := validateCollectionName(cct.schema.Name); err != nil {
 		return err
 	}
 
@@ -1268,7 +1268,7 @@ func (dct *dropCollectionTask) PreExecute(ctx context.Context) error {
 	dct.Base.MsgType = commonpb.MsgType_DropCollection
 	dct.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(dct.CollectionName); err != nil {
+	if err := validateCollectionName(dct.CollectionName); err != nil {
 		return err
 	}
 	return nil
@@ -1453,7 +1453,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidateCollectionName(st.query.CollectionName); err != nil {
+	if err := validateCollectionName(st.query.CollectionName); err != nil {
 		return err
 	}
 
@@ -2231,7 +2231,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 
 	collectionName := qt.query.CollectionName
 
-	if err := ValidateCollectionName(qt.query.CollectionName); err != nil {
+	if err := validateCollectionName(qt.query.CollectionName); err != nil {
 		log.Debug("Invalid collection name.", zap.Any("collectionName", collectionName),
 			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 		return err
@@ -2628,7 +2628,7 @@ func (hct *hasCollectionTask) PreExecute(ctx context.Context) error {
 	hct.Base.MsgType = commonpb.MsgType_HasCollection
 	hct.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(hct.CollectionName); err != nil {
+	if err := validateCollectionName(hct.CollectionName); err != nil {
 		return err
 	}
 	return nil
@@ -2703,7 +2703,7 @@ func (dct *describeCollectionTask) PreExecute(ctx context.Context) error {
 		return nil
 	}
 
-	return ValidateCollectionName(dct.CollectionName)
+	return validateCollectionName(dct.CollectionName)
 }
 
 func (dct *describeCollectionTask) Execute(ctx context.Context) error {
@@ -2993,7 +2993,7 @@ func (sct *showCollectionsTask) PreExecute(ctx context.Context) error {
 	sct.Base.SourceID = Params.ProxyID
 	if sct.GetType() == milvuspb.ShowType_InMemory {
 		for _, collectionName := range sct.CollectionNames {
-			if err := ValidateCollectionName(collectionName); err != nil {
+			if err := validateCollectionName(collectionName); err != nil {
 				return err
 			}
 		}
@@ -3148,7 +3148,7 @@ func (cpt *createPartitionTask) PreExecute(ctx context.Context) error {
 
 	collName, partitionTag := cpt.CollectionName, cpt.PartitionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -3225,7 +3225,7 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 
 	collName, partitionTag := dpt.CollectionName, dpt.PartitionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -3302,7 +3302,7 @@ func (hpt *hasPartitionTask) PreExecute(ctx context.Context) error {
 
 	collName, partitionTag := hpt.CollectionName, hpt.PartitionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -3377,7 +3377,7 @@ func (spt *showPartitionsTask) PreExecute(ctx context.Context) error {
 	spt.Base.MsgType = commonpb.MsgType_ShowPartitions
 	spt.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(spt.CollectionName); err != nil {
+	if err := validateCollectionName(spt.CollectionName); err != nil {
 		return err
 	}
 
@@ -3543,7 +3543,7 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 
 	collName, fieldName := cit.CollectionName, cit.FieldName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -3655,7 +3655,7 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
 	dit.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(dit.CollectionName); err != nil {
+	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
 
@@ -3734,7 +3734,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -3816,7 +3816,7 @@ func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
 	gibpt.Base.MsgType = commonpb.MsgType_GetIndexBuildProgress
 	gibpt.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(gibpt.CollectionName); err != nil {
+	if err := validateCollectionName(gibpt.CollectionName); err != nil {
 		return err
 	}
 
@@ -4037,7 +4037,7 @@ func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 	gist.Base.MsgType = commonpb.MsgType_GetIndexState
 	gist.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(gist.CollectionName); err != nil {
+	if err := validateCollectionName(gist.CollectionName); err != nil {
 		return err
 	}
 
@@ -4338,7 +4338,7 @@ func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 
 	collName := lct.CollectionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -4433,7 +4433,7 @@ func (rct *releaseCollectionTask) PreExecute(ctx context.Context) error {
 
 	collName := rct.CollectionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -4518,7 +4518,7 @@ func (lpt *loadPartitionsTask) PreExecute(ctx context.Context) error {
 
 	collName := lpt.CollectionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -4613,7 +4613,7 @@ func (rpt *releasePartitionsTask) PreExecute(ctx context.Context) error {
 
 	collName := rpt.CollectionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -4740,7 +4740,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 
 	collName := dt.req.CollectionName
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		log.Error("Invalid collection name", zap.String("collectionName", collName))
 		return err
 	}
@@ -4916,7 +4916,7 @@ func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	}
 
 	collName := c.CollectionName
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 	return nil
@@ -5053,7 +5053,7 @@ func (a *AlterAliasTask) PreExecute(ctx context.Context) error {
 	}
 
 	collName := a.CollectionName
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
