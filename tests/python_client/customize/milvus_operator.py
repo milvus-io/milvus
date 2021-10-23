@@ -98,6 +98,10 @@ class MilvusOperator(object):
         return False
 
     def endpoint(self, release_name, namespace='default'):
+        """
+        Method: get Milvus endpoint by name and namespace
+        Return: a string type endpoint. e.g: host:port
+        """
         endpoint = None
         cus_res = CusResource(kind=self.plural, group=self.group,
                               version=self.version, namespace=namespace)
