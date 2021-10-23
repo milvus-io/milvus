@@ -210,14 +210,21 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 
 	modSegments[segmentID] = clonedSegment
 
+	var getClonedSegment = func(segmentID UniqueID) *SegmentInfo {
+		if s, ok := modSegments[segmentID]; ok {
+			return s
+		}
+		if s := m.segments.GetSegment(segmentID); s != nil {
+			return s.Clone()
+		}
+		return nil
+	}
+
 	for _, pos := range startPositions {
 		if len(pos.GetStartPosition().GetMsgID()) == 0 {
 			continue
 		}
-		s := modSegments[pos.GetSegmentID()]
-		if s == nil {
-			s = m.segments.GetSegment(pos.GetSegmentID())
-		}
+		s := getClonedSegment(pos.GetSegmentID())
 		if s == nil {
 			continue
 		}
@@ -227,10 +234,7 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 	}
 
 	for _, cp := range checkpoints {
-		s := modSegments[cp.GetSegmentID()]
-		if s == nil {
-			s = m.segments.GetSegment(cp.GetSegmentID())
-		}
+		s := getClonedSegment(cp.GetSegmentID())
 		if s == nil {
 			continue
 		}
