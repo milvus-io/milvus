@@ -109,7 +109,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	return nil
 }
 
-func ValidateFieldName(fieldName string) error {
+func validateFieldName(fieldName string) error {
 	fieldName = strings.TrimSpace(fieldName)
 
 	if fieldName == "" {
