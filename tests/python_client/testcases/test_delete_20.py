@@ -203,7 +203,7 @@ class TestDeleteParams(TestcaseBase):
         """
         target: test delete from partition
         method: delete with partition names
-        expected: verify partition entities is deleted
+        expected: verify partition entities are deleted
         """
         import time
         # init collection and partition
@@ -231,7 +231,7 @@ class TestDeleteParams(TestcaseBase):
     def test_delete_default_partition(self):
         """
         target: test delete from default partition
-        method: delete with partition names is _default
+        method: delete with partition name "_default"
         expected: assert delete successfully
         """
         # create, insert with flush, load collection
@@ -269,7 +269,7 @@ class TestDeleteOperation(TestcaseBase):
     def test_delete_from_empty_collection(self):
         """
         target: test delete entities from an empty collection
-        method: create an collection and delete entities
+        method: create a collection and delete entities
         expected: No exception
         """
         c_name = cf.gen_unique_str(prefix)
@@ -283,7 +283,7 @@ class TestDeleteOperation(TestcaseBase):
         """
         target: test delete entities twice
         method: delete with same expr twice
-        expected: No exception of second deletion
+        expected: No exception for second deletion
         """
         # init collection with nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
