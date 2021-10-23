@@ -753,7 +753,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	partitionTag := it.BaseInsertTask.PartitionName
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 
@@ -1458,7 +1458,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	for _, tag := range st.query.PartitionNames {
-		if err := ValidatePartitionTag(tag, false); err != nil {
+		if err := validatePartitionTag(tag, false); err != nil {
 			return err
 		}
 	}
@@ -2249,7 +2249,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
 	for _, tag := range qt.query.PartitionNames {
-		if err := ValidatePartitionTag(tag, false); err != nil {
+		if err := validatePartitionTag(tag, false); err != nil {
 			log.Debug("Invalid partition name.", zap.Any("partitionName", tag),
 				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 			return err
@@ -3152,7 +3152,7 @@ func (cpt *createPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 
@@ -3229,7 +3229,7 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 
@@ -3306,7 +3306,7 @@ func (hpt *hasPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 	return nil
@@ -3383,7 +3383,7 @@ func (spt *showPartitionsTask) PreExecute(ctx context.Context) error {
 
 	if spt.GetType() == milvuspb.ShowType_InMemory {
 		for _, partitionName := range spt.PartitionNames {
-			if err := ValidatePartitionTag(partitionName, true); err != nil {
+			if err := validatePartitionTag(partitionName, true); err != nil {
 				return err
 			}
 		}
@@ -4754,7 +4754,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	// If partitionName is not empty, partitionID will be set.
 	if len(dt.req.PartitionName) > 0 {
 		partName := dt.req.PartitionName
-		if err := ValidatePartitionTag(partName, true); err != nil {
+		if err := validatePartitionTag(partName, true); err != nil {
 			log.Error("Invalid partition name", zap.String("partitionName", partName))
 			return err
 		}

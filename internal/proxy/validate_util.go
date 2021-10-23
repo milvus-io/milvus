@@ -74,7 +74,7 @@ func validateCollectionName(collName string) error {
 	return validateCollectionNameOrAlias(collName, "name")
 }
 
-func ValidatePartitionTag(partitionTag string, strictCheck bool) error {
+func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	partitionTag = strings.TrimSpace(partitionTag)
 
 	invalidMsg := "Invalid partition name: " + partitionTag + ". "
