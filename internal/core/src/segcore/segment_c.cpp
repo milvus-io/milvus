@@ -151,7 +151,7 @@ Delete(CSegmentInterface c_segment,
        int64_t size,
        const int64_t* row_ids,
        const uint64_t* timestamps) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
 
     try {
         auto res = segment->Delete(reserved_offset, size, row_ids, timestamps);
@@ -163,7 +163,7 @@ Delete(CSegmentInterface c_segment,
 
 int64_t
 PreDelete(CSegmentInterface c_segment, int64_t size) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
 
     return segment->PreDelete(size);
 }

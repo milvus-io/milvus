@@ -36,8 +36,6 @@ class SegmentSealed : public SegmentInternalInterface {
     HasIndex(FieldId field_id) const = 0;
     virtual bool
     HasFieldData(FieldId field_id) const = 0;
-    virtual void
-    Delete(int64_t row_count, const int64_t* uids_raw, const Timestamp* timestamps_raw) = 0;
 };
 
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;
