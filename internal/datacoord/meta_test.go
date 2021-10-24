@@ -12,6 +12,8 @@ package datacoord
 
 import (
 	"context"
+	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -283,4 +285,27 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		assert.Nil(t, segmentInfo.Binlogs)
 		assert.Nil(t, segmentInfo.StartPosition)
 	})
+}
+
+func TestSaveHandoffMeta(t *testing.T) {
+	meta, err := newMeta(memkv.NewMemoryKV())
+	assert.Nil(t, err)
+
+	info := &datapb.SegmentInfo{
+		ID:    100,
+		State: commonpb.SegmentState_Flushed,
+	}
+	segmentInfo := &SegmentInfo{
+		SegmentInfo: info,
+	}
+
+	err = meta.saveSegmentInfo(segmentInfo)
+	assert.Nil(t, err)
+
+	keys, _, err := meta.client.LoadWithPrefix(handoffSegmentPrefix)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(keys))
+	segmentID, err := strconv.ParseInt(filepath.Base(keys[0]), 10, 64)
+	assert.Nil(t, err)
+	assert.Equal(t, 100, int(segmentID))
 }

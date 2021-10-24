@@ -387,6 +387,20 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			meta:               scheduler.meta,
 		}
 		newTask = loadBalanceTask
+	case commonpb.MsgType_HandoffSegments:
+		handoffReq := querypb.HandoffSegmentsRequest{}
+		err = proto.Unmarshal([]byte(t), &handoffReq)
+		if err != nil {
+			return nil, err
+		}
+		handoffTask := &handoffTask{
+			baseTask:               baseTask,
+			HandoffSegmentsRequest: &handoffReq,
+			dataCoord:              scheduler.dataCoord,
+			cluster:                scheduler.cluster,
+			meta:                   scheduler.meta,
+		}
+		newTask = handoffTask
 	default:
 		err = errors.New("inValid msg type when unMarshal task")
 		log.Error(err.Error())

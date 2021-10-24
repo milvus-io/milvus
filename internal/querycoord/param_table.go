@@ -64,6 +64,9 @@ type ParamTable struct {
 
 	// --- Pulsar ---
 	PulsarAddress string
+
+	//---- Handoff ---
+	AutoHandoff bool
 }
 
 // Params are variables of the ParamTable type
@@ -114,6 +117,9 @@ func (p *ParamTable) Init() {
 
 	//--- Pulsar ----
 	p.initPulsarAddress()
+
+	//---- Handoff ---
+	p.initAutoHandoff()
 }
 
 func (p *ParamTable) initQueryCoordAddress() {
@@ -255,4 +261,15 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = addr
+}
+
+func (p *ParamTable) initAutoHandoff() {
+	handoff, err := p.Load("queryCoord.autoHandoff")
+	if err != nil {
+		panic(err)
+	}
+	p.AutoHandoff, err = strconv.ParseBool(handoff)
+	if err != nil {
+		panic(err)
+	}
 }
