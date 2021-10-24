@@ -64,6 +64,7 @@ type Replica interface {
 	removeSegment(segID UniqueID)
 
 	updateStatistics(segID UniqueID, numRows int64)
+	refreshFlushedSegStatistics(segID UniqueID, numRows int64)
 	getSegmentStatisticsUpdates(segID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
 	segmentFlushed(segID UniqueID)
 }
@@ -540,6 +541,18 @@ func (replica *SegmentReplica) hasSegment(segID UniqueID, countFlushed bool) boo
 	}
 
 	return inNew || inNormal || inFlush
+}
+func (replica *SegmentReplica) refreshFlushedSegStatistics(segID UniqueID, numRows int64) {
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
+
+	if seg, ok := replica.flushedSegments[segID]; ok {
+		seg.memorySize = 0
+		seg.numRows = numRows
+		return
+	}
+
+	log.Warn("refesh numRow on not exists segment", zap.Int64("segID", segID))
 }
 
 // updateStatistics updates the number of rows of a segment in replica.

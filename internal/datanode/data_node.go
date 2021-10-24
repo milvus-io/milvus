@@ -40,6 +40,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -101,14 +102,16 @@ type DataNode struct {
 	vchan2SyncService map[string]*dataSyncService // vchannel name
 	vchan2FlushChs    map[string]chan flushMsg    // vchannel name to flush channels
 
-	clearSignal  chan UniqueID // collection ID
-	segmentCache *Cache
+	clearSignal        chan UniqueID // collection ID
+	segmentCache       *Cache
+	compactionExecutor *compactionExecutor
 
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
 	session *sessionutil.Session
 	watchKv kv.MetaKv
+	blobKv  kv.BaseKV
 
 	closer io.Closer
 
@@ -124,10 +127,11 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		cancel: cancel2,
 		Role:   typeutil.DataNodeRole,
 
-		rootCoord:    nil,
-		dataCoord:    nil,
-		msFactory:    factory,
-		segmentCache: newCache(),
+		rootCoord:          nil,
+		dataCoord:          nil,
+		msFactory:          factory,
+		segmentCache:       newCache(),
+		compactionExecutor: newCompactionExecutor(),
 
 		vchan2SyncService: make(map[string]*dataSyncService),
 		vchan2FlushChs:    make(map[string]chan flushMsg),
@@ -406,6 +410,22 @@ func (node *DataNode) Start() error {
 		return errors.New("DataNode fail to connect etcd")
 	}
 
+	option := &miniokv.Option{
+		Address:           Params.MinioAddress,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSL,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
+	}
+
+	kv, err := miniokv.NewMinIOKV(node.ctx, option)
+	if err != nil {
+		return err
+	}
+
+	node.blobKv = kv
+
 	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
 		return errors.New("DataNode fail to start")
 	}
@@ -413,6 +433,8 @@ func (node *DataNode) Start() error {
 	FilterThreshold = rep.GetTimestamp()
 
 	go node.BackGroundGC(node.clearSignal)
+
+	go node.compactionExecutor.start(node.ctx)
 
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()
@@ -704,5 +726,30 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 }
 
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
-	panic("not implemented") // TODO: Implement
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+
+	ds, ok := node.vchan2SyncService[req.GetChannel()]
+	if !ok {
+		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channel name", req.GetChannel()))
+		status.Reason = errIllegalCompactionPlan.Error()
+		return status, nil
+	}
+
+	binlogIO := &binlogIO{node.blobKv, ds.idAllocator}
+	task := newCompactionTask(
+		binlogIO, binlogIO,
+		ds.replica,
+		ds.flushManager,
+		ds.idAllocator,
+		node.dataCoord,
+		req,
+	)
+
+	node.compactionExecutor.execute(task)
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
