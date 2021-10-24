@@ -60,11 +60,11 @@ class SegmentGrowing : public SegmentInternalInterface {
            const Timestamp* timestamps,
            const ColumnBasedRawData& values) = 0;
 
-    virtual int64_t
-    PreDelete(int64_t size) = 0;
+    // virtual int64_t
+    // PreDelete(int64_t size) = 0;
 
-    virtual Status
-    Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
+    // virtual Status
+    // Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 
  public:
     virtual ssize_t
