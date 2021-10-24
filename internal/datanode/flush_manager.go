@@ -220,17 +220,14 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 		return nil
 	}
 
-	collID, partID, meta, err := m.getSegmentMeta(segmentID, pos)
+	collID, partID, err := m.getCollectionAndPartitionID(segmentID)
 	if err != nil {
 		return err
 	}
 
-	delCodec := storage.NewDeleteCodec(&etcdpb.CollectionMeta{
-		ID:     collID,
-		Schema: meta.GetSchema(),
-	})
+	delCodec := storage.NewDeleteCodec()
 
-	blob, err := delCodec.Serialize(partID, segmentID, data.delData)
+	blob, err := delCodec.Serialize(collID, partID, segmentID, data.delData)
 	if err != nil {
 		return err
 	}
