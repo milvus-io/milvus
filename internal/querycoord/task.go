@@ -1356,7 +1356,7 @@ func (wqt *watchQueryChannelTask) execute(ctx context.Context) error {
 
 	err := wqt.cluster.addQueryChannel(wqt.ctx, wqt.NodeID, wqt.AddQueryChannelRequest)
 	if err != nil {
-		log.Warn("watchQueryChannelTask: watchQueryChannel occur error", zap.Int64("taskID", wqt.getTaskID()))
+		log.Warn("watchQueryChannelTask: watchQueryChannel occur error", zap.Int64("taskID", wqt.getTaskID()), zap.Error(err))
 		wqt.setResultInfo(err)
 		return err
 	}
