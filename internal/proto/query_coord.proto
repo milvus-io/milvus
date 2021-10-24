@@ -292,11 +292,6 @@ message CollectionInfo {
   int64 inMemory_percentage = 8;
 }
 
-message HandoffSegments {
-  common.MsgBase base = 1;
-  repeated SegmentLoadInfo infos = 2;
-}
-
 message LoadBalanceSegmentInfo {
   int64 segmentID = 1;
   int64 partitionID = 2;
@@ -306,6 +301,11 @@ message LoadBalanceSegmentInfo {
   bool source_done = 6;
   bool dst_done = 7;
   bool valid_info = 8;
+}
+
+message HandoffSegmentsRequest {
+  common.MsgBase base = 1;
+  repeated SegmentInfo segmentInfos = 2;
 }
 
 message LoadBalanceRequest {

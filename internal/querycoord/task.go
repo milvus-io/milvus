@@ -1378,7 +1378,152 @@ func (wqt *watchQueryChannelTask) postExecute(context.Context) error {
 	return nil
 }
 
+//****************************handoff task********************************//
 type handoffTask struct {
+	*baseTask
+	*querypb.HandoffSegmentsRequest
+	dataCoord types.DataCoord
+	cluster   Cluster
+	meta      Meta
+}
+
+func (ht *handoffTask) msgBase() *commonpb.MsgBase {
+	return ht.Base
+}
+
+func (ht *handoffTask) marshal() ([]byte, error) {
+	return proto.Marshal(ht.HandoffSegmentsRequest)
+}
+
+func (ht *handoffTask) msgType() commonpb.MsgType {
+	return ht.Base.MsgType
+}
+
+func (ht *handoffTask) timestamp() Timestamp {
+	return ht.Base.Timestamp
+}
+
+func (ht *handoffTask) preExecute(context.Context) error {
+	ht.setResultInfo(nil)
+	segmentIDs := make([]UniqueID, 0)
+	segmentInfos := ht.HandoffSegmentsRequest.SegmentInfos
+	for _, info := range segmentInfos {
+		segmentIDs = append(segmentIDs, info.SegmentID)
+	}
+	log.Debug("start do handoff segments task",
+		zap.Int64s("segmentIDs", segmentIDs))
+	return nil
+}
+
+func (ht *handoffTask) execute(ctx context.Context) error {
+	segmentInfos := ht.HandoffSegmentsRequest.SegmentInfos
+	for _, segmentInfo := range segmentInfos {
+		collectionID := segmentInfo.CollectionID
+		partitionID := segmentInfo.PartitionID
+		segmentID := segmentInfo.SegmentID
+
+		collectionInfo, err := ht.meta.getCollectionInfoByID(collectionID)
+		if err != nil {
+			log.Debug("handoffTask: collection has not been loaded into memory", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID))
+			continue
+		}
+
+		partitionLoaded := false
+		for _, id := range collectionInfo.PartitionIDs {
+			if id == partitionID {
+				partitionLoaded = true
+			}
+		}
+
+		if collectionInfo.LoadType != querypb.LoadType_loadCollection && !partitionLoaded {
+			log.Debug("handoffTask: partition has not been loaded into memory", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Int64("segmentID", segmentID))
+			continue
+		}
+
+		_, err = ht.meta.getSegmentInfoByID(segmentID)
+		if err != nil {
+			getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
+				Base:         ht.Base,
+				CollectionID: collectionID,
+				PartitionID:  partitionID,
+			}
+			recoveryInfo, err := ht.dataCoord.GetRecoveryInfo(ctx, getRecoveryInfoRequest)
+			if err != nil {
+				ht.setResultInfo(err)
+				return err
+			}
+
+			findBinlog := false
+			var loadSegmentReq *querypb.LoadSegmentsRequest
+			for _, segmentBinlogs := range recoveryInfo.Binlogs {
+				if segmentBinlogs.SegmentID == segmentID {
+					findBinlog = true
+					segmentLoadInfo := &querypb.SegmentLoadInfo{
+						SegmentID:    segmentID,
+						PartitionID:  partitionID,
+						CollectionID: collectionID,
+						BinlogPaths:  segmentBinlogs.FieldBinlogs,
+						NumOfRows:    segmentBinlogs.NumOfRows,
+					}
+
+					msgBase := proto.Clone(ht.Base).(*commonpb.MsgBase)
+					msgBase.MsgType = commonpb.MsgType_LoadSegments
+					loadSegmentReq = &querypb.LoadSegmentsRequest{
+						Base:          msgBase,
+						Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
+						Schema:        collectionInfo.Schema,
+						LoadCondition: querypb.TriggerCondition_handoff,
+					}
+				}
+			}
+
+			if !findBinlog {
+				err = fmt.Errorf("segmnet has not been flushed, segmentID is %d", segmentID)
+				ht.setResultInfo(err)
+				return err
+			}
+			err = assignInternalTask(ctx, collectionID, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{loadSegmentReq}, nil, true)
+			if err != nil {
+				log.Error("handoffTask: assign child task failed", zap.Any("segmentInfo", segmentInfo))
+				ht.setResultInfo(err)
+				return err
+			}
+		} else {
+			err = fmt.Errorf("sealed segment has been exist on query node, segmentID is %d", segmentID)
+			log.Error("handoffTask: sealed segment has been exist on query node", zap.Int64("segmentID", segmentID))
+			ht.setResultInfo(err)
+			return err
+		}
+	}
+
+	log.Debug("handoffTask: assign child task done", zap.Any("segmentInfos", segmentInfos))
+
+	log.Debug("handoffTask Execute done",
+		zap.Int64("taskID", ht.getTaskID()))
+	return nil
+}
+
+func (ht *handoffTask) postExecute(context.Context) error {
+	if ht.result.ErrorCode != commonpb.ErrorCode_Success {
+		ht.childTasks = []task{}
+	}
+
+	log.Debug("handoffTask postExecute done",
+		zap.Int64("taskID", ht.getTaskID()))
+
+	return nil
+}
+
+func (ht *handoffTask) rollBack(ctx context.Context) []task {
+	resultTasks := make([]task, 0)
+	childTasks := ht.getChildTask()
+	for _, childTask := range childTasks {
+		if childTask.msgType() == commonpb.MsgType_LoadSegments {
+			// TODO:: add release segment to rollBack, no release does not affect correctness of query
+		}
+	}
+
+	return resultTasks
 }
 
 type loadBalanceTask struct {

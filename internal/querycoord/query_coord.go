@@ -15,12 +15,15 @@ import (
 	"context"
 	"errors"
 
+	"fmt"
 	"math/rand"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -36,6 +39,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+)
+
+const (
+	handoffSegmentPrefix = "querycoord-handoff"
 )
 
 // Timestamp is an alias for the Int64 type
@@ -171,6 +178,9 @@ func (qc *QueryCoord) Start() error {
 
 	qc.loopWg.Add(1)
 	go qc.watchNodeLoop()
+
+	qc.loopWg.Add(1)
+	go qc.watchHandoffSegmentLoop()
 
 	go qc.session.LivenessCheck(qc.loopCtx, func() {
 		qc.Stop()
@@ -330,4 +340,87 @@ func (qc *QueryCoord) watchNodeLoop() {
 			}
 		}
 	}
+}
+
+func (qc *QueryCoord) watchHandoffSegmentLoop() {
+	ctx, cancel := context.WithCancel(qc.loopCtx)
+
+	defer cancel()
+	defer qc.loopWg.Done()
+	log.Debug("query coordinator start watch segment loop")
+
+	// TODO:: recover handoff task when coord down
+	watchChan := qc.kvClient.WatchWithPrefix(handoffSegmentPrefix)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case resp := <-watchChan:
+			for _, event := range resp.Events {
+				segmentInfo := &querypb.SegmentInfo{}
+				err := proto.Unmarshal(event.Kv.Value, segmentInfo)
+				if err != nil {
+					log.Error("watchHandoffSegmentLoop: unmarshal failed", zap.Any("error", err.Error()))
+					continue
+				}
+				switch event.Type {
+				case mvccpb.PUT:
+					collectionID := segmentInfo.CollectionID
+					partitionID := segmentInfo.PartitionID
+					segmentID := segmentInfo.SegmentID
+					if Params.AutoHandoff {
+						log.Debug("watchHandoffSegmentLoop: handoff segment received",
+							zap.Any("collectionID", collectionID),
+							zap.Any("partitionID", partitionID),
+							zap.Any("segmentID", segmentID),
+							zap.Any("channel", segmentInfo.ChannelID),
+						)
+						baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_handoff)
+						handoffReq := &querypb.HandoffSegmentsRequest{
+							Base: &commonpb.MsgBase{
+								MsgType: commonpb.MsgType_HandoffSegments,
+							},
+							SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
+						}
+						handoffTask := &handoffTask{
+							baseTask:               baseTask,
+							HandoffSegmentsRequest: handoffReq,
+							dataCoord:              qc.dataCoordClient,
+							cluster:                qc.cluster,
+							meta:                   qc.meta,
+						}
+						err = qc.scheduler.Enqueue(handoffTask)
+						if err != nil {
+							log.Error("watchHandoffSegmentLoop: handoffTask enqueue failed", zap.Error(err))
+							break
+						}
+
+						go func() {
+							err := handoffTask.waitToFinish()
+							if err != nil {
+								log.Error("watchHandoffSegmentLoop: handoffTask failed", zap.Error(err))
+							}
+						}()
+
+						log.Debug("watchHandoffSegmentLoop: handoffTask completed",
+							zap.Any("collectionID", collectionID),
+							zap.Any("partitionID", partitionID),
+							zap.Any("segmentID", segmentID),
+							zap.Any("channel", segmentInfo.ChannelID),
+						)
+					}
+
+					buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, collectionID, partitionID, segmentID)
+					err = qc.kvClient.Remove(buildQuerySegmentPath)
+					if err != nil {
+						log.Error("watchHandoffSegmentLoop: remove handoff segment from etcd failed", zap.Error(err))
+					}
+				default:
+					// do nothing
+				}
+			}
+		}
+	}
+
 }

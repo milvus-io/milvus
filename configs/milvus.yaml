@@ -72,6 +72,7 @@ proxy:
 queryCoord:
   address: localhost
   port: 19531
+  autoHandoff: true
 
   grpc:
     serverMaxRecvSize: 2147483647 # math.MaxInt32
