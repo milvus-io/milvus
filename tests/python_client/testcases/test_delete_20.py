@@ -314,6 +314,40 @@ class TestDeleteOperation(TestcaseBase):
         assert collection_w.num_entities == tmp_nb - 1
         assert collection_w.has_index()
 
+    @pytest.mark.xfail(reason="Issue: #10459")
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_query_ids_both_sealed_and_channel(self):
+        """
+        target: test query that delete ids from both channle and sealed
+        method: 1.create and insert
+                2.delete id 0 and flush
+                3.load and query id 0
+                4.insert new id and delete the id
+                5.query id 0 and new id
+        expected: Empty querybresult
+        """
+        # init collection and insert data without flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete id 0 and flush
+        del_res, _ = collection_w.delete(tmp_expr)
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
+        # load and query id 0
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+
+        # insert id tmp_nb and delete id 0 and tmp_nb
+        df_new = cf.gen_default_dataframe_data(nb=1, start=tmp_nb)
+        collection_w.insert(df_new)
+        collection_w.delete(expr=f'{ct.default_int64_field_name} in {[tmp_nb]}')
+
+        # query with id 0 and tmp_nb
+        collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, tmp_nb]}',
+                           check_task=CheckTasks.check_query_empty)
+
     @pytest.mark.xfail(reason="Waiting for debug")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_search(self):
@@ -664,6 +698,66 @@ class TestDeleteOperation(TestcaseBase):
         # query with first and last id
         expr = f'{ct.default_int64_field_name} in {ids}'
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.skip(reason="Issue: #10459")
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_merge_same_id_channel_and_sealed(self):
+        """
+        target: test merge same delete ids from channel and sealed
+        method: 1.create, insert
+                2.delete id and flush (data and deleted become sealed)
+                3.load and query (verify delete successfully)
+                4.insert entity with deleted id
+                5.delete id
+                6.query with id
+        expected: Empty query result
+        """
+        # init collection and insert data without flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete id 0 and flush
+        del_res, _ = collection_w.delete(tmp_expr)
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
+        # load and query id 0
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+
+        # re-insert id 0 and re-delete id 0
+        collection_w.insert(df[:1])
+        collection_w.delete(tmp_expr)
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.skip(reason="Issue: #10459")
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_merge_ids_channel_and_sealed(self):
+        """
+        target: test merge deleted ids come from both channel and sealed
+        method: 1.create, insert ids [0, tmp_nb) with shard_num=1
+                2.delete id 0 and flush
+                3.load and query with id 0
+                4.delete id 1 (merge same segment deleted ids 0 and 1)
+                5.query with id 0 and 1
+        expected: Empty query result
+        """
+        # init collection and insert data without flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete id 0 and flush
+        del_res, _ = collection_w.delete(tmp_expr)
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
+        # load and query id 0
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+
+        # delete id 1 and query id 0 and 1
+        collection_w.delete(expr=f'{ct.default_int64_field_name} in {[1]}')
+        collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, 1]}', check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="TODO")

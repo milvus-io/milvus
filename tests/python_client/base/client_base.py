@@ -103,13 +103,13 @@ class TestcaseBase(Base):
                                                     port=param_info.param_port)
         return res
 
-    def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None, **kwargs):
+    def init_collection_wrap(self, name=None, schema=None, shards_num=2, check_task=None, check_items=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
         if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=name, schema=schema, check_task=check_task, check_items=check_items, **kwargs)
+        collection_w.init_collection(name=name, schema=schema, shards_num=shards_num, check_task=check_task, check_items=check_items, **kwargs)
         self.collection_object_list.append(collection_w)
         return collection_w
 
