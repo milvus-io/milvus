@@ -149,7 +149,10 @@ type IndexNode interface {
 	Component
 	TimeTickProvider
 
+	// CreateIndex receives request from IndexCoordinator to build an index.
+	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error)
+	// GetMetrics gets the metrics about IndexNode.
 	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 }
 ```
