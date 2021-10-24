@@ -94,7 +94,6 @@ func (queue *baseTaskQueue) FrontUnissuedTask() task {
 	defer queue.utLock.RUnlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Warn("sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -106,7 +105,6 @@ func (queue *baseTaskQueue) PopUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Warn("sorry, but the unissued task list is empty!")
 		return nil
 	}
 
