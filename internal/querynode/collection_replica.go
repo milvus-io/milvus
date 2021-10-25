@@ -579,6 +579,7 @@ func (colReplica *collectionReplica) freeAll() {
 	colReplica.segments = make(map[UniqueID]*Segment)
 }
 
+// newCollectionReplica returns a new ReplicaInterface
 func newCollectionReplica(etcdKv *etcdkv.EtcdKV) ReplicaInterface {
 	collections := make(map[UniqueID]*Collection)
 	partitions := make(map[UniqueID]*Partition)
