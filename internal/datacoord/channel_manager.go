@@ -63,10 +63,9 @@ func defaultFactory(hash *consistent.Consistent) ChannelPolicyFactory {
 
 // NewChannelManager return a new ChannelManager
 func NewChannelManager(kv kv.TxnKV, posProvider positionProvider, options ...ChannelManagerOpt) (*ChannelManager, error) {
-	hashring := consistent.New()
 	c := &ChannelManager{
 		posProvider: posProvider,
-		factory:     defaultFactory(hashring),
+		factory:     NewChannelPolicyFactoryV1(kv),
 		store:       NewChannelStore(kv),
 	}
 

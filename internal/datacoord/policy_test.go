@@ -428,3 +428,121 @@ func TestBgCheckWithMaxWatchDuration(t *testing.T) {
 		})
 	}
 }
+
+func TestAvgAssignRegisterPolicy(t *testing.T) {
+	type args struct {
+		store  ROChannelStore
+		nodeID int64
+	}
+	tests := []struct {
+		name string
+		args args
+		want ChannelOpSet
+	}{
+		{
+			"test empty",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{},
+				},
+				1,
+			},
+			nil,
+		},
+		{
+			"test with buffer channel",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						bufferID: {bufferID, []*channel{{"ch1", 1}}},
+					},
+				},
+				1,
+			},
+			[]*ChannelOp{
+				{
+					Type:     Delete,
+					NodeID:   bufferID,
+					Channels: []*channel{{"ch1", 1}},
+				},
+				{
+					Type:     Add,
+					NodeID:   1,
+					Channels: []*channel{{"ch1", 1}},
+				},
+			},
+		},
+		{
+			"test with avg assign",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"ch1", 1}, {"ch2", 1}}},
+						2: {2, []*channel{{"ch3", 1}, {"ch4", 1}}},
+					},
+				},
+				3,
+			},
+			[]*ChannelOp{
+				{
+					Type:     Delete,
+					NodeID:   1,
+					Channels: []*channel{{"ch1", 1}},
+				},
+				{
+					Type:     Add,
+					NodeID:   3,
+					Channels: []*channel{{"ch1", 1}},
+				},
+			},
+		},
+		{
+			"test with avg equals to zero",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"ch1", 1}}},
+						2: {2, []*channel{{"ch3", 1}}},
+					},
+				},
+				3,
+			},
+			nil,
+		},
+		{
+			"test node with empty channel",
+			args{
+				&ChannelStore{
+					memkv.NewMemoryKV(),
+					map[int64]*NodeChannelInfo{
+						1: {1, []*channel{{"ch1", 1}, {"ch2", 1}, {"ch3", 1}}},
+						2: {2, []*channel{}},
+					},
+				},
+				3,
+			},
+			[]*ChannelOp{
+				{
+					Type:     Delete,
+					NodeID:   1,
+					Channels: []*channel{{"ch1", 1}},
+				},
+				{
+					Type:     Add,
+					NodeID:   3,
+					Channels: []*channel{{"ch1", 1}},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AvgAssignRegisterPolicy(tt.args.store, tt.args.nodeID)
+			assert.EqualValues(t, tt.want, got)
+		})
+	}
+}
