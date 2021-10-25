@@ -242,6 +242,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 	blobPath := path.Join(Params.DeleteBinlogRootPath, blobKey)
 	kvs := map[string]string{blobPath: string(blob.Value[:])}
 	data.fileSize = int64(len(blob.Value))
+	data.filePath = blobPath
 	log.Debug("delete blob path", zap.String("path", blobPath))
 
 	m.getFlushQueue(segmentID).enqueueDelFlush(&flushBufferDeleteTask{

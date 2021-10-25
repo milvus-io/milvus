@@ -4840,7 +4840,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 
-	err = stream.Produce(&msgPack)
+	err = stream.Broadcast(&msgPack)
 	if err != nil {
 		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		dt.result.Status.Reason = err.Error()

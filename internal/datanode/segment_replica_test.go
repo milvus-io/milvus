@@ -661,7 +661,7 @@ func TestInnerFunctionSegment(t *testing.T) {
 	err = replica.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()})
 	assert.Nil(t, err)
 
-	totalSegments := replica.filterSegments("insert-01", 0)
+	totalSegments := replica.filterSegments("insert-01", common.InvalidPartitionID)
 	assert.Equal(t, len(totalSegments), 3)
 }
 
