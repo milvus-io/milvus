@@ -252,7 +252,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	return fmt.Errorf("data_type %s mismatch with metric_type %s", dataType.String(), metricTypeStrRaw)
 }
 
-func ValidateSchema(coll *schemapb.CollectionSchema) error {
+func validateSchema(coll *schemapb.CollectionSchema) error {
 	autoID := coll.AutoID
 	primaryIdx := -1
 	idMap := make(map[int64]int)    // fieldId -> idx
