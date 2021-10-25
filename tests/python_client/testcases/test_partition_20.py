@@ -512,7 +512,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_drop_indexed_partition(self, data, index_param):
         """
         target: verify drop an indexed partition
-        method: 1.create a partition
+        method: 1. create a partition
                 2. insert same data
                 3. create an index
                 4. flush or not flush (remove flush step for issue # 5837)
@@ -546,7 +546,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_release_empty_partition(self):
         """
         target: verify release an empty partition
-        method: 1.create a partition
+        method: 1. create a partition
                 2. release the partition
         expected: release successfully
         """
@@ -562,7 +562,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_release_dropped_partition(self):
         """
         target: verify release a dropped partition
-        method: 1.create a partition
+        method: 1. create a partition
                 2. drop the partition
                 3. release the partition
         expected: raise exception
@@ -581,7 +581,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_release_dropped_collection(self):
         """
         target: verify release a dropped collection
-        method: 1.create a collection and partition
+        method: 1. create a collection and partition
                 2. drop the collection
                 3. release the partition
         expected: raise exception
@@ -605,7 +605,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_release_after_collection_released(self):
         """
         target: verify release a partition after the collection released
-        method: 1.create a collection and partition
+        method: 1. create a collection and partition
                 2. insert some data
                 3. release the collection
                 4. release the partition
@@ -653,7 +653,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_insert_default_partition(self):
         """
         target: verify insert data into _default partition
-        method: 1.create a collection
+        method: 1. create a collection
                 2. insert some data into _default partition
         expected: insert successfully
         """
@@ -675,7 +675,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_insert_dropped_partition(self):
         """
         target: verify insert data into a dropped partition
-        method: 1.create a collection
+        method: 1. create a collection
                 2. insert some data into a dropped partition
         expected: raise exception
         """
@@ -695,7 +695,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_insert_dropped_collection(self):
         """
         target: verify insert data into a dropped collection
-        method: 1.create a collection
+        method: 1. create a collection
                 2. insert some data into a dropped collection
         expected: raise exception
         """
@@ -719,7 +719,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_insert_maximum_size_data(self):
         """
         target: verify insert maximum size data(256M?) a time
-        method: 1.create a partition
+        method: 1. create a partition
                 2. insert maximum size data
         expected: insert successfully
         """
@@ -741,7 +741,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_insert_mismatched_dimensions(self, dim):
         """
         target: verify insert maximum size data(256M?) a time
-        method: 1.create a collection with default dim
+        method: 1. create a collection with default dim
                 2. insert dismatch dim data
         expected: raise exception
         """
@@ -758,7 +758,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_insert_sync(self, sync):
         """
         target: verify insert sync
-        method: 1.create a partition
+        method: 1. create a partition
                 2. insert data in sync
         expected: insert successfully
         """
