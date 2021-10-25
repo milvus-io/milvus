@@ -494,7 +494,7 @@ func (node *DataNode) getChannelNamebySegmentID(segID UniqueID) string {
 	node.chanMut.RLock()
 	defer node.chanMut.RUnlock()
 	for name, dataSync := range node.vchan2SyncService {
-		if dataSync.replica.hasSegment(segID, false) {
+		if dataSync.replica.hasSegment(segID, true) {
 			return name
 		}
 	}
