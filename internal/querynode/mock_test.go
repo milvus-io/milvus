@@ -923,7 +923,11 @@ func genSimpleStreaming(ctx context.Context) (*streaming, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := newStreaming(ctx, fac, kv)
+	historicalReplica, err := genSimpleReplica()
+	if err != nil {
+		return nil, err
+	}
+	s := newStreaming(ctx, fac, kv, historicalReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err

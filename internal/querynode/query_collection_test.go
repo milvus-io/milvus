@@ -97,6 +97,7 @@ func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) {
 }
 
 func TestQueryCollection_withoutVChannel(t *testing.T) {
+	ctx := context.Background()
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.PulsarAddress,
 		"ReceiveBufSize": 1024,
@@ -134,7 +135,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	//create a streaming
-	streaming := newStreaming(context.Background(), factory, etcdKV)
+	streaming := newStreaming(ctx, factory, etcdKV, historical.replica)
 	err = streaming.replica.addCollection(0, schema)
 	assert.Nil(t, err)
 	err = streaming.replica.addPartition(0, 1)
