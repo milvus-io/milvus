@@ -625,7 +625,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.load()
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.xfail(reason="Issue: #10546")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_insert_same_entity(self):
         """
