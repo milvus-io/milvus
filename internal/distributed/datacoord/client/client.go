@@ -402,6 +402,8 @@ func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	return ret.(*datapb.GetPartitionStatisticsResponse), err
 }
 
+// GetSegmentInfoChannel DEPRECATED
+// legacy api to get SegmentInfo Channel name
 func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
