@@ -174,7 +174,7 @@ func ValidateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 	return nil
 }
 
-//ValidateFieldAutoID call after ValidatePrimaryKey
+//ValidateFieldAutoID call after validatePrimaryKey
 func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 	var idx = -1
 	for i, field := range coll.Fields {
@@ -191,7 +191,7 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
+func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	idx := -1
 	for i, field := range coll.Fields {
 		if field.IsPrimaryKey {
