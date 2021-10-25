@@ -120,7 +120,7 @@ Note: go1.15 is required to build Milvus.
 
 #### Docker & Docker Compose
 
-Milvus depends on etcd, Pulsar and MinIO. Using Docker Compose to manage these is an easy way in a local development. To install Docker and Docker Compose in your development environment, follow the instructions from the Docker website below:
+Milvus depends on etcd, Pulsar and MinIO. Using Docker Compose to manage these is an easy way in local development. To install Docker and Docker Compose in your development environment, follow the instructions from the Docker website below:
 
 -   Docker: https://docs.docker.com/get-docker/
 -   Docker Compose: https://docs.docker.com/compose/install/
@@ -135,7 +135,7 @@ $ make all
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
 
-If you want to update proto file before make, we can use the following command:
+If you want to update proto file before `make`, we can use the following command:
 ```shell
 $ make generated-proto-go
 ```
@@ -219,7 +219,7 @@ $ make codecov-cpp
 
 ### E2E Tests
 
-Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
+Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before running E2E tests, you need a running Milvus:
 
 ```shell
 # Running Milvus cluster
@@ -235,7 +235,7 @@ $ cd ../../../
 $ ./scripts/start_standalone.sh
 ```
 
-To run E2E tests, use these command:
+To run E2E tests, use these commands:
 
 ```shell
 $ cd tests/python_client
