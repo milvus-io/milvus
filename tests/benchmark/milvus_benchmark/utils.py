@@ -3,6 +3,7 @@ import time
 import logging
 import string
 import random
+import json
 from yaml.representer import SafeRepresenter
 # from yaml import full_load, dump
 import yaml
@@ -201,3 +202,9 @@ def search_param_analysis(vector_query, filter_query):
     }
     # logger.debug("[search_param_analysis] search_param_analysis: %s" % str(result))
     return result
+
+
+def read_json_file(file_name):
+    with open(file_name) as f:
+        file_dict = json.load(f)
+    return file_dict
