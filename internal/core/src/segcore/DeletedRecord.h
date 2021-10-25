@@ -73,7 +73,7 @@ DeletedRecord::TmpBitmap::clone(int64_t capacity) -> std::shared_ptr<TmpBitmap> 
     res->del_barrier = this->del_barrier;
     res->bitmap_ptr = std::make_shared<faiss::ConcurrentBitset>(capacity);
     auto u8size = this->bitmap_ptr->size();
-    memcpy(res->bitmap_ptr->mutable_data(), res->bitmap_ptr->data(), u8size);
+    memcpy(res->bitmap_ptr->mutable_data(), this->bitmap_ptr->data(), u8size);
     return res;
 }
 
