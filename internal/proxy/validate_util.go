@@ -150,7 +150,7 @@ func validateDimension(dim int64, isBinary bool) error {
 	return nil
 }
 
-func ValidateVectorFieldMetricType(field *schemapb.FieldSchema) error {
+func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 	if (field.DataType != schemapb.DataType_FloatVector) && (field.DataType != schemapb.DataType_BinaryVector) {
 		return nil
 	}

@@ -116,21 +116,21 @@ func TestValidateVectorFieldMetricType(t *testing.T) {
 		TypeParams:   nil,
 		IndexParams:  nil,
 	}
-	assert.Nil(t, ValidateVectorFieldMetricType(field1))
+	assert.Nil(t, validateVectorFieldMetricType(field1))
 	field1.DataType = schemapb.DataType_FloatVector
-	assert.NotNil(t, ValidateVectorFieldMetricType(field1))
+	assert.NotNil(t, validateVectorFieldMetricType(field1))
 	field1.IndexParams = []*commonpb.KeyValuePair{
 		{
 			Key:   "abcdefg",
 			Value: "",
 		},
 	}
-	assert.NotNil(t, ValidateVectorFieldMetricType(field1))
+	assert.NotNil(t, validateVectorFieldMetricType(field1))
 	field1.IndexParams = append(field1.IndexParams, &commonpb.KeyValuePair{
 		Key:   "metric_type",
 		Value: "",
 	})
-	assert.Nil(t, ValidateVectorFieldMetricType(field1))
+	assert.Nil(t, validateVectorFieldMetricType(field1))
 }
 
 func TestValidateDuplicatedFieldName(t *testing.T) {
