@@ -23,7 +23,7 @@ import (
 )
 
 func TestFlushTaskRunner(t *testing.T) {
-	task := newFlushTaskRunner(1)
+	task := newFlushTaskRunner(1, nil)
 	signal := make(chan struct{})
 
 	saveFlag := false
@@ -33,7 +33,7 @@ func TestFlushTaskRunner(t *testing.T) {
 	task.init(func(*segmentFlushPack) error {
 		saveFlag = true
 		return nil
-	}, func() {}, signal)
+	}, func(pack *segmentFlushPack, i postInjectionFunc) {}, signal)
 
 	go func() {
 		<-task.finishSignal
@@ -55,4 +55,63 @@ func TestFlushTaskRunner(t *testing.T) {
 
 	assert.True(t, saveFlag)
 	assert.True(t, nextFlag)
+}
+
+func TestFlushTaskRunner_Injection(t *testing.T) {
+	injectCh := make(chan taskInjection, 1)
+	task := newFlushTaskRunner(1, injectCh)
+	signal := make(chan struct{})
+
+	saveFlag := false
+	nextFlag := false
+	processed := make(chan struct{})
+
+	injected := make(chan struct{})
+	injectOver := make(chan bool)
+
+	injectCh <- taskInjection{
+		injected:   injected,
+		injectOver: injectOver,
+		postInjection: func(pack *segmentFlushPack) {
+			t.Log("task injection executed")
+			pack.segmentID = 2
+		},
+	}
+
+	go func() {
+		<-injected
+		injectOver <- true
+	}()
+
+	task.init(func(pack *segmentFlushPack) error {
+		assert.EqualValues(t, 2, pack.segmentID)
+		saveFlag = true
+		return nil
+	}, func(pack *segmentFlushPack, i postInjectionFunc) {
+		if i != nil {
+			i(pack)
+		}
+	}, signal)
+
+	go func() {
+		<-task.finishSignal
+		nextFlag = true
+		processed <- struct{}{}
+	}()
+
+	assert.False(t, saveFlag)
+	assert.False(t, nextFlag)
+
+	task.runFlushInsert(&emptyFlushTask{}, nil, nil, false, nil)
+	task.runFlushDel(&emptyFlushTask{}, &DelDataBuf{})
+
+	assert.False(t, saveFlag)
+	assert.False(t, nextFlag)
+
+	close(signal)
+	<-processed
+
+	assert.True(t, saveFlag)
+	assert.True(t, nextFlag)
+
 }
