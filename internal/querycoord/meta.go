@@ -484,8 +484,9 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 	m.segmentMu.Unlock()
 
 	m.channelMu.Lock()
-	for collectionID, channelInfo := range queryChannelInfosMap {
-		m.queryChannelInfos[collectionID] = channelInfo
+	collectionIDTmp := UniqueID(0)
+	for _, channelInfo := range queryChannelInfosMap {
+		m.queryChannelInfos[collectionIDTmp] = channelInfo
 	}
 	m.channelMu.Unlock()
 
@@ -582,7 +583,8 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 	m.segmentMu.Unlock()
 
 	m.channelMu.Lock()
-	m.queryChannelInfos[collectionID] = queryChannelInfo
+	collectionIDTmp := UniqueID(0)
+	m.queryChannelInfos[collectionIDTmp] = queryChannelInfo
 	m.channelMu.Unlock()
 
 	return col2SealedSegmentChangeInfos{collectionID: segmentChangeInfos}, nil
