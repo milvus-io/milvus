@@ -1949,7 +1949,6 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, avail
 		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
 
-	// TODO(yukun): Use parallel function
 	var realTopK int64 = -1
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, availableQueryNodeNum)
