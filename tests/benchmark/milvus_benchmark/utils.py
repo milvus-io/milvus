@@ -111,8 +111,8 @@ def get_unique_name(prefix=None):
 
 
 def get_current_time():
-    """ return current time"""
-    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+    """return current time"""
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
 
 def print_table(headers, columns, data):
