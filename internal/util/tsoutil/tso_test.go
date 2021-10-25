@@ -22,9 +22,9 @@ import (
 func TestParseHybridTs(t *testing.T) {
 	var ts uint64 = 426152581543231492
 	physical, logical := ParseHybridTs(ts)
-	physicalTime := time.Unix(int64(physical/1000), int64(physical)%1000*time.Millisecond.Nanoseconds())
+	physicalTime := time.Unix(physical/1000, physical%1000*time.Millisecond.Nanoseconds())
 	log.Debug("TestParseHybridTs",
-		zap.Uint64("physical", physical),
-		zap.Uint64("logical", logical),
+		zap.Int64("physical", physical),
+		zap.Int64("logical", logical),
 		zap.Any("physical time", physicalTime))
 }
