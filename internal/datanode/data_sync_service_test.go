@@ -176,7 +176,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	pulsarURL := Params.PulsarAddress
 
 	Factory := &MetaFactory{}
-	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 	mockRootCoord := &RootCoordFactory{}
 	collectionID := UniqueID(1)
 
