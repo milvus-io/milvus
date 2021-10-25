@@ -171,8 +171,8 @@ func TestRegister(t *testing.T) {
 		channelManager, err := NewChannelManager(kv, dummyPosProvider{})
 		assert.Nil(t, err)
 		err = channelManager.Watch(&channel{
-			name:         "ch1",
-			collectionID: 0,
+			Name:         "ch1",
+			CollectionID: 0,
 		})
 		assert.Nil(t, err)
 		cluster := NewCluster(sessionManager, channelManager)
@@ -191,7 +191,7 @@ func TestRegister(t *testing.T) {
 		nodeChannels := channelManager.GetChannels()
 		assert.EqualValues(t, 1, len(nodeChannels))
 		assert.EqualValues(t, 1, nodeChannels[0].NodeID)
-		assert.EqualValues(t, "ch1", nodeChannels[0].Channels[0].name)
+		assert.EqualValues(t, "ch1", nodeChannels[0].Channels[0].Name)
 	})
 
 	t.Run("register and restart with no channel", func(t *testing.T) {
@@ -271,7 +271,7 @@ func TestUnregister(t *testing.T) {
 		assert.EqualValues(t, 1, len(channels))
 		assert.EqualValues(t, 2, channels[0].NodeID)
 		assert.EqualValues(t, 1, len(channels[0].Channels))
-		assert.EqualValues(t, "ch1", channels[0].Channels[0].name)
+		assert.EqualValues(t, "ch1", channels[0].Channels[0].Name)
 	})
 
 	t.Run("remove all channels after unregsiter", func(t *testing.T) {
@@ -300,7 +300,7 @@ func TestUnregister(t *testing.T) {
 		channel := channelManager.GetBuffer()
 		assert.NotNil(t, channel)
 		assert.EqualValues(t, 1, len(channel.Channels))
-		assert.EqualValues(t, "ch_1", channel.Channels[0].name)
+		assert.EqualValues(t, "ch_1", channel.Channels[0].Name)
 	})
 }
 
@@ -328,7 +328,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		assert.Nil(t, err)
 		channels := channelManager.GetChannels()
 		assert.EqualValues(t, 1, len(channels))
-		assert.EqualValues(t, "ch1", channels[0].Channels[0].name)
+		assert.EqualValues(t, "ch1", channels[0].Channels[0].Name)
 	})
 
 	t.Run("watch channel to empty cluster", func(t *testing.T) {
@@ -346,7 +346,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		assert.Empty(t, channels)
 		channel := channelManager.GetBuffer()
 		assert.NotNil(t, channel)
-		assert.EqualValues(t, "ch1", channel.Channels[0].name)
+		assert.EqualValues(t, "ch1", channel.Channels[0].Name)
 	})
 }
 
