@@ -1377,13 +1377,17 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		req:       deleteReq,
-		DeleteRequest: &internalpb.DeleteRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_Delete,
-				SourceID: Params.ProxyID,
+		BaseDeleteTask: BaseDeleteTask{
+			BaseMsg: msgstream.BaseMsg{},
+			DeleteRequest: internalpb.DeleteRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Delete,
+					MsgID:   0,
+				},
+				CollectionName: request.CollectionName,
+				PartitionName:  request.PartitionName,
+				// RowData: transfer column based request to this
 			},
-			CollectionName: request.CollectionName,
-			PartitionName:  request.PartitionName,
 		},
 		chMgr:    node.chMgr,
 		chTicker: node.chTicker,
