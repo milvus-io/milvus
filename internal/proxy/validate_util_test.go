@@ -138,11 +138,11 @@ func TestValidateDuplicatedFieldName(t *testing.T) {
 		{Name: "abc"},
 		{Name: "def"},
 	}
-	assert.Nil(t, ValidateDuplicatedFieldName(fields))
+	assert.Nil(t, validateDuplicatedFieldName(fields))
 	fields = append(fields, &schemapb.FieldSchema{
 		Name: "abc",
 	})
-	assert.NotNil(t, ValidateDuplicatedFieldName(fields))
+	assert.NotNil(t, validateDuplicatedFieldName(fields))
 }
 
 func TestValidatePrimaryKey(t *testing.T) {

@@ -1004,7 +1004,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		// ValidateDuplicatedFieldName
+		// validateDuplicatedFieldName
 		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
 		schema.Fields = append(schema.Fields, schema.Fields[0])
 		duplicatedFieldsSchema, err := proto.Marshal(schema)

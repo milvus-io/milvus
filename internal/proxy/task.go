@@ -1141,7 +1141,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidateDuplicatedFieldName(cct.schema.Fields); err != nil {
+	if err := validateDuplicatedFieldName(cct.schema.Fields); err != nil {
 		return err
 	}
 
