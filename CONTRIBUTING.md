@@ -49,13 +49,13 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 - (**Recommended**) Provide answers for issue labeled `question`.
 - Provide help for issues labeled `bug`, `improvement`, and `enhancement` by
-  - (**Recommended**) Ask questions, reproduce the issue, or providie solutions.
+  - (**Recommended**) Ask questions, reproduce the issue, or provide solutions.
   - Pull a request to fix the issue.
 
 **If you require new feature or major enhancement, you can**
 
 - (**Recommended**) File an issue about the feature/enhancement with reasons.
-- Provide a MEP for the feature/enhancement.
+- Provide an MEP for the feature/enhancement.
 - Pull a request to implement the MEP.
 
 **If you are a reviewer/approver of Milvus, you can**
@@ -68,7 +68,7 @@ If you want to become a contributor of Milvus, send us your pull requests! For t
 All submissions will be reviewed as quickly as possible.
 There will be a reviewer to review the codes, and an approver to review everything aside the codes, see [code review](CODE_REVIEW.md) for details.
 If everything is perfect, the reviewer will label `/lgtm`, and the approver will label `/approve`.
-Once the 2 labels are on your PR, and all actions pass, your PR will be merged into base branch automaticaly by our @sre-ci-robot
+Once the 2 labels are on your PR, and all actions pass, your PR will be merged into base branch automatically by our @sre-ci-robot
 
 ### GitHub workflow
 
