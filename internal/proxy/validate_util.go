@@ -237,7 +237,7 @@ func isVector(dataType schemapb.DataType) (bool, error) {
 	return false, fmt.Errorf("invalid data type: %d", dataType)
 }
 
-func ValidateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) error {
+func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) error {
 	metricTypeStr := strings.ToUpper(metricTypeStrRaw)
 	switch metricTypeStr {
 	case "L2", "IP":
@@ -313,7 +313,7 @@ func ValidateSchema(coll *schemapb.CollectionSchema) error {
 
 			metricTypeStr, ok := indexKv["metric_type"]
 			if ok {
-				err4 := ValidateMetricType(field.DataType, metricTypeStr)
+				err4 := validateMetricType(field.DataType, metricTypeStr)
 				if err4 != nil {
 					return err4
 				}
