@@ -532,6 +532,7 @@ message DeleteRequest {
   string collection_name = 3;
   string partition_name = 4;
   string expr = 5;
+  repeated uint32 hash_keys = 6;
 }
 
 enum PlaceholderType {
