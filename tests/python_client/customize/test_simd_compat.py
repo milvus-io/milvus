@@ -46,10 +46,10 @@ class TestSimdCompatibility:
         healthy = milvus_op.wait_for_healthy(release_name, namespace)
         log.info(f"milvus healthy: {healthy}")
         assert healthy
-        endpoint = milvus_op.endpoint(release_name, namespace)
+        endpoint = milvus_op.endpoint(release_name, namespace).split(':')
         log.info(f"milvus endpoint: {endpoint}")
-        host = endpoint.split(':')[0]
-        port = endpoint.split(':')[1]
+        host = endpoint[0]
+        port = endpoint[1]
         conn = connections.connect(simd, host=host, port=port)
         assert conn is not None
         mil = MilvusSys(alias=simd)
