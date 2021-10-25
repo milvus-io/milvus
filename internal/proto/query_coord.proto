@@ -162,6 +162,8 @@ message SegmentInfo {
   int64 indexID = 8;
   string channelID = 9;
   SegmentState segment_state = 10;
+  repeated int64 compactionFrom = 11;
+  bool createdByCompaction = 12;
 }
 
 message GetSegmentInfoResponse {
