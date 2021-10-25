@@ -161,7 +161,7 @@ func TestValidatePrimaryKey(t *testing.T) {
 		TypeParams:   nil,
 		IndexParams:  nil,
 	})
-	assert.Nil(t, ValidateSchema(&coll))
+	assert.Nil(t, validateSchema(&coll))
 	pf := &schemapb.FieldSchema{
 		Name:         "f2",
 		FieldID:      101,
@@ -172,13 +172,13 @@ func TestValidatePrimaryKey(t *testing.T) {
 		IndexParams:  nil,
 	}
 	coll.Fields = append(coll.Fields, pf)
-	assert.NotNil(t, ValidateSchema(&coll))
+	assert.NotNil(t, validateSchema(&coll))
 	coll.AutoID = false
-	assert.NotNil(t, ValidateSchema(&coll))
+	assert.NotNil(t, validateSchema(&coll))
 	pf.DataType = schemapb.DataType_Bool
-	assert.NotNil(t, ValidateSchema(&coll))
+	assert.NotNil(t, validateSchema(&coll))
 	pf.DataType = schemapb.DataType_Int64
-	assert.Nil(t, ValidateSchema(&coll))
+	assert.Nil(t, validateSchema(&coll))
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:         "",
 		FieldID:      102,
@@ -188,7 +188,7 @@ func TestValidatePrimaryKey(t *testing.T) {
 		TypeParams:   nil,
 		IndexParams:  nil,
 	})
-	assert.NotNil(t, ValidateSchema(&coll))
+	assert.NotNil(t, validateSchema(&coll))
 }
 
 func TestValidateSchema(t *testing.T) {
@@ -198,7 +198,7 @@ func TestValidateSchema(t *testing.T) {
 		AutoID:      false,
 		Fields:      nil,
 	}
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf1 := &schemapb.FieldSchema{
 		Name:         "f1",
@@ -210,16 +210,16 @@ func TestValidateSchema(t *testing.T) {
 		IndexParams:  nil,
 	}
 	coll.Fields = append(coll.Fields, pf1)
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf1.IsPrimaryKey = true
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 
 	pf1.DataType = schemapb.DataType_Int32
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf1.DataType = schemapb.DataType_Int64
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 
 	pf2 := &schemapb.FieldSchema{
 		Name:         "f2",
@@ -231,30 +231,30 @@ func TestValidateSchema(t *testing.T) {
 		IndexParams:  nil,
 	}
 	coll.Fields = append(coll.Fields, pf2)
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf2.IsPrimaryKey = false
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 
 	pf2.Name = "f1"
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 	pf2.Name = "f2"
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 
 	pf2.FieldID = 100
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf2.FieldID = 101
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 
 	pf2.DataType = -1
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf2.DataType = schemapb.DataType_FloatVector
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf2.DataType = schemapb.DataType_Int64
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 
 	tp3Good := []*commonpb.KeyValuePair{
 		{
@@ -338,32 +338,32 @@ func TestValidateSchema(t *testing.T) {
 	}
 
 	coll.Fields = append(coll.Fields, pf3)
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 
 	pf3.TypeParams = tp3Bad1
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf3.TypeParams = tp3Bad2
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf3.TypeParams = tp3Bad3
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf3.TypeParams = tp3Bad4
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf3.TypeParams = tp3Good
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 
 	pf3.IndexParams = ip3Bad1
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf3.IndexParams = ip3Bad2
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf3.IndexParams = ip3Bad3
-	assert.NotNil(t, ValidateSchema(coll))
+	assert.NotNil(t, validateSchema(coll))
 
 	pf3.IndexParams = ip3Good
-	assert.Nil(t, ValidateSchema(coll))
+	assert.Nil(t, validateSchema(coll))
 }
