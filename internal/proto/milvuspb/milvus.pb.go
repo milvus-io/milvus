@@ -2178,14 +2178,20 @@ func (m *DescribeIndexRequest) GetIndexName() string {
 	return ""
 }
 
+//
+// Index informations
 type IndexDescription struct {
-	IndexName            string                   `protobuf:"bytes,1,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
-	IndexID              int64                    `protobuf:"varint,2,opt,name=indexID,proto3" json:"indexID,omitempty"`
-	Params               []*commonpb.KeyValuePair `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty"`
-	FieldName            string                   `protobuf:"bytes,4,opt,name=field_name,json=fieldName,proto3" json:"field_name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
-	XXX_unrecognized     []byte                   `json:"-"`
-	XXX_sizecache        int32                    `json:"-"`
+	// Index name
+	IndexName string `protobuf:"bytes,1,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	// Index id
+	IndexID int64 `protobuf:"varint,2,opt,name=indexID,proto3" json:"indexID,omitempty"`
+	// Will return index_type, metric_type, params(like nlist).
+	Params []*commonpb.KeyValuePair `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty"`
+	// The vector field name
+	FieldName            string   `protobuf:"bytes,4,opt,name=field_name,json=fieldName,proto3" json:"field_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *IndexDescription) Reset()         { *m = IndexDescription{} }
@@ -2241,8 +2247,12 @@ func (m *IndexDescription) GetFieldName() string {
 	return ""
 }
 
+//
+// Describe index response
 type DescribeIndexResponse struct {
-	Status               *commonpb.Status    `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// Response status
+	Status *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// All index informations, for now only return tha latest index you created for the collection.
 	IndexDescriptions    []*IndexDescription `protobuf:"bytes,2,rep,name=index_descriptions,json=indexDescriptions,proto3" json:"index_descriptions,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
 	XXX_unrecognized     []byte              `json:"-"`
