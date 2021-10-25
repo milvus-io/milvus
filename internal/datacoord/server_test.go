@@ -1254,6 +1254,23 @@ func TestGetRecoveryInfo(t *testing.T) {
 					},
 				},
 			},
+			Field2StatslogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []string{
+						"/stats_log/file1",
+						"/stats_log/file2",
+					},
+				},
+			},
+			Deltalogs: []*datapb.DeltaLogInfo{
+				{
+					TimestampFrom: 0,
+					TimestampTo:   1,
+					DeltaLogPath:  "/stats_log/file1",
+					DeltaLogSize:  1,
+				},
+			},
 		}
 		segment := createSegment(0, 0, 0, 100, 10, "ch1", commonpb.SegmentState_Flushed)
 		err := svr.meta.AddSegment(NewSegmentInfo(segment))
