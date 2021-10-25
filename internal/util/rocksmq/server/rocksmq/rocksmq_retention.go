@@ -312,15 +312,6 @@ func (ri *retentionInfo) retention() error {
 				}
 			}
 			ri.mutex.RUnlock()
-			// ri.lastRetentionTime.Range(func(k, v interface{}) bool {
-			// 	if v.(int64)+checkTime < timeNow {
-			// 		err := ri.newExpiredCleanUp(k.(string))
-			// 		if err != nil {
-			// 			log.Warn("Retention expired clean failed", zap.Any("error", err))
-			// 		}
-			// 	}
-			// 	return true
-			// })
 		}
 	}
 }
