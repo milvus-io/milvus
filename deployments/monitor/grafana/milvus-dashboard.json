@@ -2497,7 +2497,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(rate(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+          "expr": "sum(increase(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2) ",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
