@@ -384,5 +384,8 @@ TEST(Sealed, Delete) {
     int64_t new_count = 3;
     std::vector<idx_t> new_pks{6, 7, 8};
     std::vector<idx_t> new_timestamps{10, 10, 10};
-    segment->Delete(new_count, reinterpret_cast<const int64_t*>(new_pks.data()), reinterpret_cast<const Timestamp*>(new_timestamps.data()));
+    auto reserved_offset = segment->PreDelete(new_count);
+    ASSERT_EQ(reserved_offset, row_count);
+    segment->Delete(reserved_offset, new_count, reinterpret_cast<const int64_t*>(new_pks.data()),
+                    reinterpret_cast<const Timestamp*>(new_timestamps.data()));
 }

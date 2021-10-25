@@ -398,6 +398,28 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadBalanceSegments)
 	})
 
+	t.Run("Test handoffTask", func(t *testing.T) {
+		handoffTask := &handoffTask{
+			HandoffSegmentsRequest: &querypb.HandoffSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_HandoffSegments,
+				},
+			},
+		}
+
+		blobs, err := handoffTask.marshal()
+		assert.Nil(t, err)
+		err = kv.Save("testMarshalHandoffTask", string(blobs))
+		assert.Nil(t, err)
+		defer kv.RemoveWithPrefix("testMarshalHandoffTask")
+		value, err := kv.Load("testMarshalHandoffTask")
+		assert.Nil(t, err)
+
+		task, err := taskScheduler.unmarshalTask(1008, value)
+		assert.Nil(t, err)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_HandoffSegments)
+	})
+
 	taskScheduler.Close()
 }
 

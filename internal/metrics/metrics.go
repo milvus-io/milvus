@@ -160,7 +160,7 @@ var (
 	////////////////////////////////////////////////////////////////////////////
 	// for time tick
 
-	// RootCoordInsertChannelTimeTick used to count the time tick num of insert channel in 24H
+	// RootCoordInsertChannelTimeTick counts the time tick num of insert channel in 24H
 	RootCoordInsertChannelTimeTick = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -169,7 +169,7 @@ var (
 			Help:      "Time tick of insert Channel in 24H",
 		}, []string{"vchannel"})
 
-	// RootCoordDDChannelTimeTick used to count the time tick num of dd channel in 24H
+	// RootCoordDDChannelTimeTick counts the time tick num of dd channel in 24H
 	RootCoordDDChannelTimeTick = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -179,7 +179,7 @@ var (
 		})
 )
 
-//RegisterRootCoord register RootCoord metrics
+//RegisterRootCoord registers RootCoord metrics
 func RegisterRootCoord() {
 	prometheus.MustRegister(RootCoordProxyLister)
 

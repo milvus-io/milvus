@@ -20,9 +20,9 @@ import (
 )
 
 func TestValidateCollectionName(t *testing.T) {
-	assert.Nil(t, ValidateCollectionName("abc"))
-	assert.Nil(t, ValidateCollectionName("_123abc"))
-	assert.Nil(t, ValidateCollectionName("abc123_$"))
+	assert.Nil(t, validateCollectionName("abc"))
+	assert.Nil(t, validateCollectionName("_123abc"))
+	assert.Nil(t, validateCollectionName("abc123_$"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -39,17 +39,17 @@ func TestValidateCollectionName(t *testing.T) {
 	}
 
 	for _, name := range invalidNames {
-		assert.NotNil(t, ValidateCollectionName(name))
+		assert.NotNil(t, validateCollectionName(name))
 		assert.NotNil(t, validateCollectionNameOrAlias(name, "name"))
 		assert.NotNil(t, validateCollectionNameOrAlias(name, "alias"))
 	}
 }
 
 func TestValidatePartitionTag(t *testing.T) {
-	assert.Nil(t, ValidatePartitionTag("abc", true))
-	assert.Nil(t, ValidatePartitionTag("123abc", true))
-	assert.Nil(t, ValidatePartitionTag("_123abc", true))
-	assert.Nil(t, ValidatePartitionTag("abc123_$", true))
+	assert.Nil(t, validatePartitionTag("abc", true))
+	assert.Nil(t, validatePartitionTag("123abc", true))
+	assert.Nil(t, validatePartitionTag("_123abc", true))
+	assert.Nil(t, validatePartitionTag("abc123_$", true))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -65,16 +65,16 @@ func TestValidatePartitionTag(t *testing.T) {
 	}
 
 	for _, name := range invalidNames {
-		assert.NotNil(t, ValidatePartitionTag(name, true))
+		assert.NotNil(t, validatePartitionTag(name, true))
 	}
 
-	assert.Nil(t, ValidatePartitionTag("ab cd", false))
-	assert.Nil(t, ValidatePartitionTag("ab*", false))
+	assert.Nil(t, validatePartitionTag("ab cd", false))
+	assert.Nil(t, validatePartitionTag("ab*", false))
 }
 
 func TestValidateFieldName(t *testing.T) {
-	assert.Nil(t, ValidateFieldName("abc"))
-	assert.Nil(t, ValidateFieldName("_123abc"))
+	assert.Nil(t, validateFieldName("abc"))
+	assert.Nil(t, validateFieldName("_123abc"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -91,20 +91,20 @@ func TestValidateFieldName(t *testing.T) {
 	}
 
 	for _, name := range invalidNames {
-		assert.NotNil(t, ValidateFieldName(name))
+		assert.NotNil(t, validateFieldName(name))
 	}
 }
 
 func TestValidateDimension(t *testing.T) {
-	assert.Nil(t, ValidateDimension(1, false))
-	assert.Nil(t, ValidateDimension(Params.MaxDimension, false))
-	assert.Nil(t, ValidateDimension(8, true))
-	assert.Nil(t, ValidateDimension(Params.MaxDimension, true))
+	assert.Nil(t, validateDimension(1, false))
+	assert.Nil(t, validateDimension(Params.MaxDimension, false))
+	assert.Nil(t, validateDimension(8, true))
+	assert.Nil(t, validateDimension(Params.MaxDimension, true))
 
 	// invalid dim
-	assert.NotNil(t, ValidateDimension(-1, false))
-	assert.NotNil(t, ValidateDimension(Params.MaxDimension+1, false))
-	assert.NotNil(t, ValidateDimension(9, true))
+	assert.NotNil(t, validateDimension(-1, false))
+	assert.NotNil(t, validateDimension(Params.MaxDimension+1, false))
+	assert.NotNil(t, validateDimension(9, true))
 }
 
 func TestValidateVectorFieldMetricType(t *testing.T) {

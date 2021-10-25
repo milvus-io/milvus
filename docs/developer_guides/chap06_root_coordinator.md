@@ -20,6 +20,14 @@ type RootCoord interface {
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
 	CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+	// DropCollection notifies RootCoord to drop a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used) and collection name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
 	DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 	HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
 	DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
@@ -61,9 +69,7 @@ type RootCoord interface {
 }
 ```
 
-
-
-* *MsgBase*
+- _MsgBase_
 
 ```go
 type MsgBase struct {
@@ -74,7 +80,7 @@ type MsgBase struct {
 }
 ```
 
-* *CreateCollection*
+- _CreateCollection_
 
 <img src="./figs/root_coord_create_collection.png">
 
@@ -88,7 +94,7 @@ type CreateCollectionRequest struct {
 }
 ```
 
-* *DropCollection*
+- _DropCollection_
 
 ```go
 type DropCollectionRequest struct {
@@ -98,7 +104,7 @@ type DropCollectionRequest struct {
 }
 ```
 
-* *HasCollection*
+- _HasCollection_
 
 ```go
 type HasCollectionRequest struct {
@@ -109,7 +115,7 @@ type HasCollectionRequest struct {
 }
 ```
 
-* *DescribeCollection*
+- _DescribeCollection_
 
 ```go
 type DescribeCollectionRequest struct {
@@ -134,7 +140,7 @@ type DescribeCollectionResponse struct {
 }
 ```
 
-* *ShowCollections*
+- _ShowCollections_
 
 ```go
 type ShowCollectionsRequest struct {
@@ -151,7 +157,7 @@ type ShowCollectionResponse struct {
 }
 ```
 
-* *CreatePartition*
+- _CreatePartition_
 
 ```go
 type CreatePartitionRequest struct {
@@ -162,7 +168,7 @@ type CreatePartitionRequest struct {
 }
 ```
 
-* *DropPartition*
+- _DropPartition_
 
 ```go
 type DropPartitionRequest struct {
@@ -173,7 +179,7 @@ type DropPartitionRequest struct {
 }
 ```
 
-* *HasPartition*
+- _HasPartition_
 
 ```go
 type HasPartitionRequest struct {
@@ -184,7 +190,7 @@ type HasPartitionRequest struct {
 }
 ```
 
-* *ShowPartitions*
+- _ShowPartitions_
 
 ```go
 type ShowPartitionRequest struct {
@@ -201,7 +207,7 @@ type ShowPartitionResponse struct {
 }
 ```
 
-* *DescribeSegment*
+- _DescribeSegment_
 
 ```go
 type DescribeSegmentRequest struct {
@@ -218,7 +224,7 @@ type DescribeSegmentResponse struct {
 }
 ```
 
-* *ShowSegments*
+- _ShowSegments_
 
 ```go
 type ShowSegmentsRequest struct {
@@ -233,7 +239,8 @@ type ShowSegmentsResponse struct {
 }
 ```
 
-* *ReleaseDQLMessageStream*	
+- _ReleaseDQLMessageStream_
+
 ```go
 type ReleaseDQLMessageStreamRequest struct {
 	Base         *commonpb.MsgBase
@@ -243,8 +250,8 @@ type ReleaseDQLMessageStreamRequest struct {
 
 ```
 
-* *CreateIndex*
-<img src="./figs/root_coord_create_index.png">
+- _CreateIndex_
+  <img src="./figs/root_coord_create_index.png">
 
 ```go
 type CreateIndexRequest struct {
@@ -256,7 +263,7 @@ type CreateIndexRequest struct {
 }
 ```
 
-* *DescribeIndex*
+- _DescribeIndex_
 
 ```go
 type DescribeIndexRequest struct {
@@ -269,7 +276,7 @@ type DescribeIndexRequest struct {
 
 type IndexDescription struct {
 	IndexName string
-	IndexID   UniqueID 
+	IndexID   UniqueID
 	Params    []*commonpb.KeyValuePair
 	FieldName string
 }
@@ -280,7 +287,7 @@ type DescribeIndexResponse struct {
 }
 ```
 
-* *DropIndex*
+- _DropIndex_
 
 ```go
 type DropIndexRequest struct {
@@ -292,7 +299,7 @@ type DropIndexRequest struct {
 }
 ```
 
-* *AllocTimestamp*
+- _AllocTimestamp_
 
 ```go
 type AllocTimestampRequest struct {
@@ -302,12 +309,12 @@ type AllocTimestampRequest struct {
 
 type AllocTimestampResponse struct {
 	Status    *commonpb.Status
-	Timestamp UniqueID 
+	Timestamp UniqueID
 	Count     uint32
 }
 ```
 
-* *AllocID*
+- _AllocID_
 
 ```go
 type AllocIDRequest struct {
@@ -322,14 +329,14 @@ type AllocIDResponse struct {
 }
 ```
 
-* *UpdateChannelTimeTick*
+- _UpdateChannelTimeTick_
 
 ```go
 type ChannelTimeTickMsg struct {
 	Base             *commonpb.MsgBase
 	ChannelNames     []string
 	Timestamps       []Timestamp
-	DefaultTimestamp Timestamp 
+	DefaultTimestamp Timestamp
 }
 ```
 
@@ -337,7 +344,7 @@ type ChannelTimeTickMsg struct {
 
 `RC` would put `Dd Message` into the `DML MsgSteams`
 
-* *BaseMsg*
+- _BaseMsg_
 
 ```go
 type BaseMsg struct {
@@ -349,7 +356,7 @@ type BaseMsg struct {
 }
 ```
 
-* *CreateCollectionMsg*
+- _CreateCollectionMsg_
 
 ```go
 type CreateCollectionRequest struct {
@@ -357,7 +364,7 @@ type CreateCollectionRequest struct {
 	DbName               string
 	CollectionName       string
 	DbID                 UniqueID
-	CollectionID         UniqueID 
+	CollectionID         UniqueID
 	Schema               []byte
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
@@ -369,15 +376,15 @@ type CreateCollectionMsg struct {
 }
 ```
 
-* *DropCollectionMsg*
+- _DropCollectionMsg_
 
 ```go
 type DropCollectionRequest struct {
 	Base           *commonpb.MsgBase
 	DbName         string
 	CollectionName string
-	DbID           UniqueID 
-	CollectionID   UniqueID 
+	DbID           UniqueID
+	CollectionID   UniqueID
 }
 
 type DropCollectionMsg struct {
@@ -386,7 +393,7 @@ type DropCollectionMsg struct {
 }
 ```
 
-* *CreatePartitionMsg*
+- _CreatePartitionMsg_
 
 ```go
 type CreatePartitionRequest struct {
@@ -405,7 +412,7 @@ type CreatePartitionMsg struct {
 }
 ```
 
-* *DropPartitionMsg*
+- _DropPartitionMsg_
 
 ```go
 type DropPartitionRequest struct {
@@ -425,6 +432,7 @@ type DropPartitionMsg struct {
 ```
 
 #### 6.3 Create Index automatically
+
 `RC` would notify `IC(Index Coord)` to build index automatically when the segment has been flushed.
 <img src="./figs/root_coord_create_index_automatically.png">
 
@@ -514,7 +522,6 @@ type Core struct {
 }
 ```
 
-
 #### 6.5 Data definition Request Scheduler
 
 ###### 6.5.1 Task
@@ -533,7 +540,7 @@ type reqTask interface {
 
 A task example is as follows. In this example, we wrap a CreateCollectionRequest (a proto) as a createCollectionTask. The wrapper need to implement task interfaces.
 
-``` go
+```go
 type CreateCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreateCollectionRequest
@@ -549,15 +556,14 @@ func (t *CreateCollectionReqTask) Notify(err error)
 
 In most cases, a data definition task need to
 
-* update system's meta data (via $metaTable$),
-* send `DD Message` into related `DML MsgStream`, so that the `Data Node` and `Query Node` would take it 
-
+- update system's meta data (via $metaTable$),
+- send `DD Message` into related `DML MsgStream`, so that the `Data Node` and `Query Node` would take it
 
 #### 6.6 Meta Table
 
 ###### 6.6.1 Meta
 
-* Tenant Meta
+- Tenant Meta
 
 ```protobuf
 message TenantMeta {
@@ -568,9 +574,9 @@ message TenantMeta {
 }
 ```
 
-* Proxy Meta
+- Proxy Meta
 
-``` protobuf
+```protobuf
 message ProxyMeta {
   uint64 id = 1;
   common.Address address = 2;
@@ -578,7 +584,7 @@ message ProxyMeta {
 }
 ```
 
-* Collection Meta
+- Collection Meta
 
 ```protobuf
 message PartitionInfo {
@@ -609,7 +615,7 @@ message CollectionInfo {
 }
 ```
 
-* Segment Meta
+- Segment Meta
 
 ```protobuf
 message SegmentIndexInfo {
@@ -632,10 +638,9 @@ message SegmentIndexInfo {
 "segment-index/$collectionId/$indexId/$partitionId/$segmentId" -> segmentIndexInfoBlog string
 ```
 
-Note that *tenantId*, *proxyId*, *collectionId*, *partitionId*, *indexId*, *segmentId* are unique strings converted from int64.
+Note that _tenantId_, _proxyId_, _collectionId_, _partitionId_, _indexId_, _segmentId_ are unique strings converted from int64.
 
-*tenantMetaBlob*, *proxyMetaBlob*, *collectionInfoBlob*, *partitionInfoBlob*, *IndexInfoBlob*, *segmentIndexInfoBlog* are serialized protos.
-
+_tenantMetaBlob_, _proxyMetaBlob_, _collectionInfoBlob_, _partitionInfoBlob_, _IndexInfoBlob_, _segmentIndexInfoBlog_ are serialized protos.
 
 ###### 6.6.3 Meta Table
 
@@ -690,11 +695,9 @@ func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, err
 func (mt *metaTable) AddFlushedSegment(segID typeutil.UniqueID) error
 ```
 
-* *metaTable* maintains meta both in memory and *etcdKV*. It keeps meta's consistency in both sides. All its member functions may be called concurrently.
- 
-* for *HasCollection*, *GetCollectionByID*, *GetCollectionByName*, *ListCollections*, if the argument of `ts` is none-zero, then *metaTable* would return the meta on the timestamp of `ts`; if `ts` is zero, *metaTable* would return the lastest meta
+- _metaTable_ maintains meta both in memory and _etcdKV_. It keeps meta's consistency in both sides. All its member functions may be called concurrently.
 
-
+- for _HasCollection_, _GetCollectionByID_, _GetCollectionByName_, _ListCollections_, if the argument of `ts` is none-zero, then _metaTable_ would return the meta on the timestamp of `ts`; if `ts` is zero, _metaTable_ would return the lastest meta
 
 #### 6.7 System Time Synchronization
 
@@ -717,5 +720,5 @@ func (t *timetickSync) GetProxy(sess []*sessionutil.Session)
 func (t *timetickSync) StartWatch()
 func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestamp) error
 func (t *timetickSync) GetProxyNum()
-func (t *timetickSync) GetChanNum() int 
+func (t *timetickSync) GetChanNum() int
 ```

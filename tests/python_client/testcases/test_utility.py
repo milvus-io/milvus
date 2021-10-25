@@ -1260,6 +1260,7 @@ class TestUtilityBase(TestcaseBase):
         method: set right vectors as random vectors, left vectors are entities
         expected: distance calculated successfully
         """
+        log.info("Create connection")
         self._connect()
         nb = 10
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
@@ -1272,10 +1273,12 @@ class TestUtilityBase(TestcaseBase):
         end = middle
         for i in range(len(partitions)):
             vectors_l = vectors[i].loc[:, default_field_name]
+            log.info("Extract entities from partition %d as left vector" % i)
             op_l = {"ids": insert_ids[start:end], "collection": collection_w.name,
                     "partition": partitions[i].name, "field": default_field_name}
             start += middle
             end += middle
+            log.info("Calculate distance between vector and entities from partition %d" % i)
             self.utility_wrap.calc_distance(op_l, op_r, params,
                                             check_task=CheckTasks.check_distance,
                                             check_items={"vectors_l": vectors_l,

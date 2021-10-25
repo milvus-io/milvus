@@ -17,19 +17,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
-
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 const (
-	metaPrefix    = "datacoord-meta"
-	segmentPrefix = metaPrefix + "/s"
+	metaPrefix           = "datacoord-meta"
+	segmentPrefix        = metaPrefix + "/s"
+	handoffSegmentPrefix = "querycoord-handoff"
 )
 
 type meta struct {
@@ -210,14 +211,21 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 
 	modSegments[segmentID] = clonedSegment
 
+	var getClonedSegment = func(segmentID UniqueID) *SegmentInfo {
+		if s, ok := modSegments[segmentID]; ok {
+			return s
+		}
+		if s := m.segments.GetSegment(segmentID); s != nil {
+			return s.Clone()
+		}
+		return nil
+	}
+
 	for _, pos := range startPositions {
 		if len(pos.GetStartPosition().GetMsgID()) == 0 {
 			continue
 		}
-		s := modSegments[pos.GetSegmentID()]
-		if s == nil {
-			s = m.segments.GetSegment(pos.GetSegmentID())
-		}
+		s := getClonedSegment(pos.GetSegmentID())
 		if s == nil {
 			continue
 		}
@@ -227,10 +235,7 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 	}
 
 	for _, cp := range checkpoints {
-		s := modSegments[cp.GetSegmentID()]
-		if s == nil {
-			s = m.segments.GetSegment(cp.GetSegmentID())
-		}
+		s := getClonedSegment(cp.GetSegmentID())
 		if s == nil {
 			continue
 		}
@@ -448,8 +453,27 @@ func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {
 		log.Error("DataCoord saveSegmentInfo marshal failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 		return fmt.Errorf("DataCoord saveSegmentInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
 	}
-	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	return m.client.Save(key, string(segBytes))
+	kvs := make(map[string]string)
+	dataKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	kvs[dataKey] = string(segBytes)
+	if segment.State == commonpb.SegmentState_Flushed {
+		handoffSegmentInfo := &querypb.SegmentInfo{
+			SegmentID:    segment.ID,
+			CollectionID: segment.CollectionID,
+			PartitionID:  segment.PartitionID,
+			ChannelID:    segment.InsertChannel,
+			SegmentState: querypb.SegmentState_sealed,
+		}
+		handoffSegBytes, err := proto.Marshal(handoffSegmentInfo)
+		if err != nil {
+			log.Error("DataCoord saveSegmentInfo marshal handoffSegInfo failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+			return fmt.Errorf("DataCoord saveSegmentInfo segmentID:%d, marshal handoffSegInfo failed:%w", segment.GetID(), err)
+		}
+		queryKey := buildQuerySegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+		kvs[queryKey] = string(handoffSegBytes)
+	}
+
+	return m.client.MultiSave(kvs)
 }
 
 // removeSegmentInfo utility function removing segment info from kv store
@@ -467,6 +491,11 @@ func (m *meta) saveKvTxn(kv map[string]string) error {
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store
 func buildSegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, collectionID, partitionID, segmentID)
+}
+
+// buildQuerySegmentPath common logic mapping segment info to corresponding key of queryCoord in kv store
+func buildQuerySegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, collectionID, partitionID, segmentID)
 }
 
 // buildSegment utility function for compose datapb.SegmentInfo struct with provided info

@@ -182,7 +182,7 @@ func (colReplica *collectionReplica) getCollectionByID(collectionID UniqueID) (*
 func (colReplica *collectionReplica) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
 	collection, ok := colReplica.collections[collectionID]
 	if !ok {
-		return nil, errors.New("collection hasn't been loaded or has been released, collection id = %d" + strconv.FormatInt(collectionID, 10))
+		return nil, errors.New("collection hasn't been loaded or has been released, collection id =" + strconv.FormatInt(collectionID, 10))
 	}
 
 	return collection, nil

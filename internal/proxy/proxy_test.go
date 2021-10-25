@@ -91,14 +91,14 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 	wg.Add(1)
 	go func() {
 		rootcoord.Params.Init()
-
 		if !localMsg {
 			logutil.SetupLogger(&rootcoord.Params.Log)
 			defer log.Sync()
 		}
 
 		factory := newMsgFactory(localMsg)
-		rc, err := grpcrootcoord.NewServer(ctx, factory)
+		var err error
+		rc, err = grpcrootcoord.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -470,11 +470,12 @@ func TestProxy(t *testing.T) {
 	})
 
 	prefix := "test_proxy_"
+	partitionPrefix := "test_proxy_partition_"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	otherCollectionName := collectionName + funcutil.GenRandomStr()
-	partitionName := prefix + funcutil.GenRandomStr()
-	otherPartitionName := partitionName + funcutil.GenRandomStr()
+	otherCollectionName := collectionName + "_other_" + funcutil.GenRandomStr()
+	partitionName := partitionPrefix + funcutil.GenRandomStr()
+	otherPartitionName := partitionPrefix + "_other_" + funcutil.GenRandomStr()
 	shardsNum := int32(2)
 	int64Field := "int64"
 	floatVecField := "fVec"

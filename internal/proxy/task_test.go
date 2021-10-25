@@ -978,7 +978,7 @@ func TestCreateCollectionTask(t *testing.T) {
 
 		task.CreateCollectionRequest = reqBackup
 
-		// ValidateCollectionName
+		// validateCollectionName
 
 		schema.Name = " " // empty
 		emptyNameSchema, err := proto.Marshal(schema)
@@ -1024,7 +1024,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		// ValidateFieldName
+		// validateFieldName
 		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
 		for idx := range schema.Fields {
 			schema.Fields[idx].Name = "$"
@@ -2422,7 +2422,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	collectionID, _ := globalMetaCache.GetCollectionID(ctx, collectionName)
 
-	// ValidateCollectionName
+	// validateCollectionName
 	task.query.CollectionName = "$"
 	assert.Error(t, task.PreExecute(ctx))
 	task.query.CollectionName = collectionName

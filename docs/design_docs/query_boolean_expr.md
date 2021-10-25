@@ -1,44 +1,44 @@
 ```haskell
-Expr := 
+Expr :=
     LogicalExpr | NIL
 
-LogicalExpr := 
-    LogicalExpr BinaryLogicalOp LogicalExpr 
+LogicalExpr :=
+    LogicalExpr BinaryLogicalOp LogicalExpr
   | UnaryLogicalOp LogicalExpr
   | "(" LogicalExpr ")"
   | SingleExpr
 
-BinaryLogicalOp := 
-    "&&" | "and" 
+BinaryLogicalOp :=
+    "&&" | "and"
   | "||" | "or"
 
 UnaryLogicalOp :=
     "not"
 
-SingleExpr := 
+SingleExpr :=
     TermExpr
   | CompareExpr
 
-TermExpr := 
+TermExpr :=
     IDENTIFIER "in" ConstantArray
 
-ConstantArray := 
+ConstantArray :=
     "[" ConstantExpr { "," ConstantExpr } "]"
-    
-ConstantExpr := 
+
+ConstantExpr :=
     Constant
   | ConstantExpr BinaryArithOp ConstantExpr
   | UnaryArithOp ConstantExpr
 
-Constant := 
+Constant :=
     INTERGER
   | FLOAT_NUMBER
-  
-UnaryArithOp := 
+
+UnaryArithOp :=
     "+"
   | "-"
 
-BinaryArithOp := 
+BinaryArithOp :=
     "+"
   | "-"
   | "*"
@@ -46,17 +46,17 @@ BinaryArithOp :=
   | "%"
   | "**"
 
-CompareExpr := 
+CompareExpr :=
     IDENTIFIER CmpOp IDENTIFIER
   | IDENTIFIER CmpOp ConstantExpr
   | ConstantExpr CmpOp IDENTIFIER
   | ConstantExpr CmpOpRestricted IDENTIFIER CmpOpRestricted ConstantExpr
-  
-CmpOpRestricted := 
+
+CmpOpRestricted :=
     "<"
   | "<="
 
-CmpOp := 
+CmpOp :=
     ">"
   | ">="
   | "<"

@@ -76,7 +76,7 @@ class CustomResourceOperations(object):
         return data
 
     def get(self, metadata_name):
-        """list all the customer resources in k8s"""
+        """get a customer resources by name in k8s"""
         try:
             config.load_kube_config()
             api_instance = client.CustomObjectsApi()
@@ -85,7 +85,7 @@ class CustomResourceOperations(object):
                                                                      name=metadata_name)
             log.debug(f"get custom resource response: {api_response}")
         except ApiException as e:
-            log.error("Exception when calling CustomObjectsApi->list_namespaced_custom_object: %s\n" % e)
+            log.error("Exception when calling CustomObjectsApi->get_namespaced_custom_object: %s\n" % e)
             raise Exception(str(e))
         return api_response
 

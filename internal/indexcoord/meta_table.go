@@ -355,7 +355,7 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	var metas []Meta
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.State == commonpb.IndexState_Finished && (meta.indexMeta.MarkDeleted || !meta.indexMeta.Recycled) {
-			metas = append(metas, meta)
+			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
 		}
 		if len(metas) >= limit {
 			return metas
@@ -373,7 +373,7 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.State == commonpb.IndexState_Unissued {
-			metas = append(metas, meta)
+			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
 			continue
 		}
 		if meta.indexMeta.State == commonpb.IndexState_Finished || meta.indexMeta.State == commonpb.IndexState_Failed {
@@ -387,7 +387,7 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 			}
 		}
 		if !alive {
-			metas = append(metas, meta)
+			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
 		}
 	}
 
@@ -513,5 +513,5 @@ func (mt *metaTable) GetIndexMetaByIndexBuildID(indexBuildID UniqueID) *indexpb.
 		log.Error("IndexCoord MetaTable GetIndexMeta not exist", zap.Int64("IndexBuildID", indexBuildID))
 		return nil
 	}
-	return meta.indexMeta
+	return proto.Clone(meta.indexMeta).(*indexpb.IndexMeta)
 }

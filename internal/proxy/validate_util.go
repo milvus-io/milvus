@@ -70,11 +70,11 @@ func ValidateCollectionAlias(collAlias string) error {
 	return validateCollectionNameOrAlias(collAlias, "alias")
 }
 
-func ValidateCollectionName(collName string) error {
+func validateCollectionName(collName string) error {
 	return validateCollectionNameOrAlias(collName, "name")
 }
 
-func ValidatePartitionTag(partitionTag string, strictCheck bool) error {
+func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	partitionTag = strings.TrimSpace(partitionTag)
 
 	invalidMsg := "Invalid partition name: " + partitionTag + ". "
@@ -109,7 +109,7 @@ func ValidatePartitionTag(partitionTag string, strictCheck bool) error {
 	return nil
 }
 
-func ValidateFieldName(fieldName string) error {
+func validateFieldName(fieldName string) error {
 	fieldName = strings.TrimSpace(fieldName)
 
 	if fieldName == "" {
@@ -140,7 +140,7 @@ func ValidateFieldName(fieldName string) error {
 	return nil
 }
 
-func ValidateDimension(dim int64, isBinary bool) error {
+func validateDimension(dim int64, isBinary bool) error {
 	if dim <= 0 || dim > Params.MaxDimension {
 		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.MaxDimension)
 	}

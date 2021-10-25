@@ -26,6 +26,12 @@ get_bit(const boost::dynamic_bitset<>& bitset, FieldOffset field_offset) {
     return bitset[field_offset.get()];
 }
 
+int64_t
+SegmentSealedImpl::PreDelete(int64_t size) {
+    auto reserved_begin = deleted_record_.reserved.fetch_add(size);
+    return reserved_begin;
+}
+
 void
 SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
@@ -170,6 +176,7 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     deleted_record_.uids_.set_data(0, primary_keys, size);
     deleted_record_.timestamps_.set_data(0, timestamps, size);
     deleted_record_.ack_responder_.AddSegment(0, size);
+    deleted_record_.reserved.fetch_add(size);
     deleted_record_.record_size_ = size;
 }
 
@@ -246,7 +253,7 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
     // Sealed segment only has one chunk with chunk_id 0
     auto span = deleted_record_.uids_.get_span_base(0);
     auto uids_ptr = reinterpret_cast<const idx_t*>(span.data());
-    auto del_size = deleted_record_.record_size_;
+    auto del_size = deleted_record_.reserved.load();
     std::vector<idx_t> ids(del_size);
     std::copy_n(uids_ptr, del_size, ids.data());
 
@@ -542,8 +549,11 @@ SegmentSealedImpl::search_ids(const IdArray& id_array, Timestamp timestamp) cons
     return primary_key_index_->do_search_ids(id_array);
 }
 
-void
-SegmentSealedImpl::Delete(int64_t row_count, const int64_t* uids_raw, const Timestamp* timestamps_raw) {
+Status
+SegmentSealedImpl::Delete(int64_t reserved_offset,
+                          int64_t row_count,
+                          const int64_t* uids_raw,
+                          const Timestamp* timestamps_raw) {
     std::vector<std::tuple<Timestamp, idx_t>> ordering(row_count);
     for (int i = 0; i < row_count; i++) {
         ordering[i] = std::make_tuple(timestamps_raw[i], uids_raw[i]);
@@ -558,10 +568,10 @@ SegmentSealedImpl::Delete(int64_t row_count, const int64_t* uids_raw, const Time
         src_uids[i] = uid;
     }
     auto current_size = deleted_record_.record_size_;
-    deleted_record_.timestamps_.set_data(current_size, src_timestamps.data(), row_count);
-    deleted_record_.uids_.set_data(current_size, src_uids.data(), row_count);
-    deleted_record_.ack_responder_.AddSegment(current_size, row_count);
-    return;
+    deleted_record_.timestamps_.set_data(reserved_offset, src_timestamps.data(), row_count);
+    deleted_record_.uids_.set_data(reserved_offset, src_uids.data(), row_count);
+    deleted_record_.ack_responder_.AddSegment(reserved_offset, row_count);
+    return Status::OK();
 }
 
 std::vector<SegOffset>

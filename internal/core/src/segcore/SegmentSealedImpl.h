@@ -78,6 +78,12 @@ class SegmentSealedImpl : public SegmentSealed {
     std::string
     debug() const override;
 
+    int64_t
+    PreDelete(int64_t size) override;
+
+    Status
+    Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
+
  protected:
     // blob and row_count
     SpanBase
@@ -153,9 +159,6 @@ class SegmentSealedImpl : public SegmentSealed {
 
     std::vector<SegOffset>
     search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
-
-    void
-    Delete(int64_t row_count, const int64_t* uids_raw, const Timestamp* timestamps_raw) override;
 
     //    virtual void
     //    build_index_if_primary_key(FieldId field_id);
