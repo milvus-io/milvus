@@ -456,6 +456,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		}
 		return res, err
 	}
+	log.Debug("query node start to GetSegmentInfo")
 	infos := make([]*queryPb.SegmentInfo, 0)
 	// TODO: remove segmentType and use queryPb.SegmentState instead
 	getSegmentStateBySegmentType := func(segType segmentType) queryPb.SegmentState {
@@ -494,18 +495,9 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 	}
 	// get info from historical
 	node.historical.replica.printReplica()
-	partitionIDs, err := node.historical.replica.getPartitionIDs(in.CollectionID)
-	if err != nil {
-		res := &queryPb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}
-		return res, err
-	}
-	for _, partitionID := range partitionIDs {
-		segmentIDs, err := node.historical.replica.getSegmentIDs(partitionID)
+	collectionIDs := node.historical.replica.getCollectionIDs()
+	for _, collectionID := range collectionIDs {
+		partitionIDs, err := node.historical.replica.getPartitionIDs(collectionID)
 		if err != nil {
 			res := &queryPb.GetSegmentInfoResponse{
 				Status: &commonpb.Status{
@@ -515,8 +507,8 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 			}
 			return res, err
 		}
-		for _, id := range segmentIDs {
-			segment, err := node.historical.replica.getSegmentByID(id)
+		for _, partitionID := range partitionIDs {
+			segmentIDs, err := node.historical.replica.getSegmentIDs(partitionID)
 			if err != nil {
 				res := &queryPb.GetSegmentInfoResponse{
 					Status: &commonpb.Status{
@@ -526,27 +518,30 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 				}
 				return res, err
 			}
-			info := getSegmentInfo(segment)
-			log.Debug("QueryNode::Impl::GetSegmentInfo for historical", zap.Any("SegmentID", id), zap.Any("info", info))
+			for _, id := range segmentIDs {
+				segment, err := node.historical.replica.getSegmentByID(id)
+				if err != nil {
+					res := &queryPb.GetSegmentInfoResponse{
+						Status: &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_UnexpectedError,
+							Reason:    err.Error(),
+						},
+					}
+					return res, err
+				}
+				info := getSegmentInfo(segment)
+				log.Debug("QueryNode::Impl::GetSegmentInfo for historical", zap.Any("SegmentID", id), zap.Any("info", info))
 
-			infos = append(infos, info)
+				infos = append(infos, info)
+			}
 		}
 	}
 
 	// get info from streaming
 	node.streaming.replica.printReplica()
-	partitionIDs, err = node.streaming.replica.getPartitionIDs(in.CollectionID)
-	if err != nil {
-		res := &queryPb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}
-		return res, err
-	}
-	for _, partitionID := range partitionIDs {
-		segmentIDs, err := node.streaming.replica.getSegmentIDs(partitionID)
+	collectionIDs = node.streaming.replica.getCollectionIDs()
+	for _, collectionID := range collectionIDs {
+		partitionIDs, err := node.streaming.replica.getPartitionIDs(collectionID)
 		if err != nil {
 			res := &queryPb.GetSegmentInfoResponse{
 				Status: &commonpb.Status{
@@ -556,8 +551,8 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 			}
 			return res, err
 		}
-		for _, id := range segmentIDs {
-			segment, err := node.streaming.replica.getSegmentByID(id)
+		for _, partitionID := range partitionIDs {
+			segmentIDs, err := node.streaming.replica.getSegmentIDs(partitionID)
 			if err != nil {
 				res := &queryPb.GetSegmentInfoResponse{
 					Status: &commonpb.Status{
@@ -567,11 +562,27 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 				}
 				return res, err
 			}
-			info := getSegmentInfo(segment)
-			log.Debug("QueryNode::Impl::GetSegmentInfo for streaming", zap.Any("SegmentID", id), zap.Any("info", info))
-			infos = append(infos, info)
+			for _, id := range segmentIDs {
+				segment, err := node.streaming.replica.getSegmentByID(id)
+				if err != nil {
+					res := &queryPb.GetSegmentInfoResponse{
+						Status: &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_UnexpectedError,
+							Reason:    err.Error(),
+						},
+					}
+					return res, err
+				}
+				info := getSegmentInfo(segment)
+				log.Debug("QueryNode::Impl::GetSegmentInfo for streaming", zap.Any("SegmentID", id), zap.Any("info", info))
+				infos = append(infos, info)
+			}
 		}
 	}
+
+	log.Debug("query node GetSegmentInfo done",
+		zap.Any("segmentInfos", infos),
+	)
 	return &queryPb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

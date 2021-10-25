@@ -2142,7 +2142,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	log.Debug("GetQuerySegmentInfo",
 		zap.String("role", Params.RoleName),
 		zap.String("db", req.DbName),
-		zap.Any("collection", req.CollectionName))
+	)
 
 	resp := &milvuspb.GetQuerySegmentInfoResponse{
 		Status: &commonpb.Status{
@@ -2153,11 +2153,6 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		resp.Status = unhealthyStatus()
 		return resp, nil
 	}
-	segments, err := node.getSegmentsOfCollection(ctx, req.DbName, req.CollectionName)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
 	infoResp, err := node.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
@@ -2165,11 +2160,9 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 			Timestamp: 0,
 			SourceID:  Params.ProxyID,
 		},
-		SegmentIDs: segments,
 	})
 	if err != nil {
-		log.Error("Failed to get segment info from QueryCoord",
-			zap.Int64s("segmentIDs", segments), zap.Error(err))
+		log.Error("Failed to get segment info from QueryCoord", zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
