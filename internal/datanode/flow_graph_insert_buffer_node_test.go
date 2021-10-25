@@ -64,7 +64,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	Params.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
-	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 	mockRootCoord := &RootCoordFactory{}
 
 	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
@@ -161,7 +161,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	Params.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
-	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 	mockRootCoord := &RootCoordFactory{}
 
 	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
@@ -357,7 +357,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	Params.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
-	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 	dataFactory := NewDataFactory()
 
 	mockRootCoord := &RootCoordFactory{}
@@ -629,7 +629,7 @@ func TestInsertBufferNode_getCollMetaBySegID(t *testing.T) {
 	Params.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
-	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 
 	rcf := &RootCoordFactory{}
 	mockRootCoord := &CompactedRootCoord{
@@ -690,7 +690,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	Params.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
-	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 
 	rcf := &RootCoordFactory{}
 	mockRootCoord := &CompactedRootCoord{
