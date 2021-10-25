@@ -46,6 +46,16 @@ class TestQueryParams(TestcaseBase):
         res = vectors[0].iloc[0:pos, :1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
+	@pytest.mark.tags(CaseLabel.L1)
+	def test_query_with_dup_primary_key(self):
+		"""
+        target: test query with duplicate primary key
+        method: 1.insert same data twice
+                2.query
+        expected: query results are de-duplicated
+		"""
+		pass
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_empty_collection(self):
         """
