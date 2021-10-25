@@ -2456,7 +2456,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of drop_index as measured over the last 5 minutes",
+      "description": "per-minute rate of drop index",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
