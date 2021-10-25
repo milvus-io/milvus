@@ -1145,7 +1145,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidatePrimaryKey(cct.schema); err != nil {
+	if err := validatePrimaryKey(cct.schema); err != nil {
 		return err
 	}
 

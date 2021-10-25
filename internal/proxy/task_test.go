@@ -1013,7 +1013,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		// ValidatePrimaryKey
+		// validatePrimaryKey
 		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
 		for idx := range schema.Fields {
 			schema.Fields[idx].IsPrimaryKey = false
