@@ -2049,8 +2049,8 @@ class TestCreateCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_multithread(self, connect):
         """
-        target: test create collection with multithread
-        method: create collection using multithread,
+        target: test create collection with multi-thread
+        method: create collection using multi-thread,
         expected: collections are created
         """
         threads_num = 8
@@ -2263,8 +2263,8 @@ class TestDescribeCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_multithread(self, connect):
         """
-        target: test create collection with multithread
-        method: create collection using multithread,
+        target: test create collection with multi-thread
+        method: create collection using multi-thread,
         expected: collections are created
         """
         threads_num = 4
@@ -2387,7 +2387,7 @@ class TestDropCollection:
         """
         target: test if collection not created
         method: random a collection name, which not existed in db,
-            assert the exception raised returned by drp_collection method
+                assert the exception raised returned by drp_collection method
         expected: False
         """
         collection_name = gen_unique_str(uid_drop)
@@ -2402,8 +2402,8 @@ class TestDropCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_collection_multithread(self, connect):
         """
-        target: test create and drop collection with multithread
-        method: create and drop collection using multithread,
+        target: test create and drop collection with multi-thread
+        method: create and drop collection using multi-thread,
         expected: collections are created, and dropped
         """
         threads_num = 8
@@ -2497,8 +2497,8 @@ class TestHasCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_multithread(self, connect):
         """
-        target: test create collection with multithread
-        method: create collection using multithread,
+        target: test create collection with multi-thread
+        method: create collection using multi-thread,
         expected: collections are created
         """
         threads_num = 4
