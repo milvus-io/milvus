@@ -18,11 +18,8 @@
 #include <boost/iterator/counting_iterator.hpp>
 
 #include "common/Consts.h"
-#include "faiss/utils/distances.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "query/PlanNode.h"
-#include "query/PlanImpl.h"
 #include "query/SearchOnSealed.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/Reduce.h"
