@@ -410,6 +410,13 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		if !ok || len(messageIDs) == 0 {
 			return col2SegmentChangeInfos, errors.New("updateGlobalSealedSegmentInfos: send sealed segment change info failed")
 		}
+
+		if queryChannelInfo.SeekPosition == nil {
+			queryChannelInfo.SeekPosition = &internalpb.MsgPosition{
+				ChannelName: queryChannelInfo.QueryChannelID,
+			}
+		}
+
 		queryChannelInfo.SeekPosition.MsgID = messageIDs[0].Serialize()
 
 		// update segmentInfo, queryChannelInfo meta to cache and etcd
@@ -521,6 +528,12 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 	messageIDs, ok := messageIDInfos[queryChannelInfo.QueryChannelID]
 	if !ok || len(messageIDs) == 0 {
 		return col2SealedSegmentChangeInfos{collectionID: segmentChangeInfos}, errors.New("updateGlobalSealedSegmentInfos: send sealed segment change info failed")
+	}
+
+	if queryChannelInfo.SeekPosition == nil {
+		queryChannelInfo.SeekPosition = &internalpb.MsgPosition{
+			ChannelName: queryChannelInfo.QueryChannelID,
+		}
 	}
 	queryChannelInfo.SeekPosition.MsgID = messageIDs[0].Serialize()
 
