@@ -45,6 +45,7 @@ func (p *producer) Topic() string {
 	return p.topic
 }
 
+// Send produce message in rocksmq
 func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
 	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{
 		{
