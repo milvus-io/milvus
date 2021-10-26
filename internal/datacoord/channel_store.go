@@ -151,8 +151,8 @@ func (c *ChannelStore) Reload() error {
 
 		c.Add(nodeID)
 		channel := &channel{
-			name:         temp.GetVchan().GetChannelName(),
-			collectionID: temp.GetVchan().GetCollectionID(),
+			Name:         temp.GetVchan().GetChannelName(),
+			CollectionID: temp.GetVchan().GetCollectionID(),
 		}
 		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
 	}
@@ -228,12 +228,12 @@ func (c *ChannelStore) update(opSet ChannelOpSet) error {
 		case Delete:
 			filter := make(map[string]struct{})
 			for _, ch := range v.Channels {
-				filter[ch.name] = struct{}{}
+				filter[ch.Name] = struct{}{}
 			}
 			origin := c.channelsInfo[v.NodeID].Channels
 			res := make([]*channel, 0, len(origin))
 			for _, ch := range origin {
-				if _, ok := filter[ch.name]; !ok {
+				if _, ok := filter[ch.Name]; !ok {
 					res = append(res, ch)
 				}
 			}
@@ -322,7 +322,7 @@ func (c *ChannelStore) txn(opSet ChannelOpSet) error {
 	removals := make([]string, 0)
 	for _, update := range opSet {
 		for i, c := range update.Channels {
-			k := buildChannelKey(update.NodeID, c.name)
+			k := buildChannelKey(update.NodeID, c.Name)
 			switch update.Type {
 			case Add:
 				val, err := proto.Marshal(update.ChannelWatchInfos[i])
@@ -366,7 +366,7 @@ func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	cstr := "["
 	if len(cu.Channels) > 0 {
 		for _, s := range cu.Channels {
-			cstr += s.name
+			cstr += s.Name
 			cstr += ", "
 		}
 		cstr = cstr[:len(cstr)-2]

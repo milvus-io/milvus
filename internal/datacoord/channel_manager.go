@@ -47,8 +47,8 @@ type ChannelManager struct {
 }
 
 type channel struct {
-	name         string
-	collectionID UniqueID
+	Name         string
+	CollectionID UniqueID
 }
 
 // ChannelManagerOpt is to set optional parameters in channel manager
@@ -250,7 +250,7 @@ func (c *ChannelManager) Watch(ch *channel) error {
 
 func (c *ChannelManager) fillChannelPosition(update *ChannelOp) {
 	for _, ch := range update.Channels {
-		vchan := c.posProvider.GetVChanPositions(ch.name, ch.collectionID, true)
+		vchan := c.posProvider.GetVChanPositions(ch.Name, ch.CollectionID, true)
 		info := &datapb.ChannelWatchInfo{
 			Vchan:   vchan,
 			StartTs: time.Now().Unix(),
@@ -287,7 +287,7 @@ func (c *ChannelManager) Match(nodeID int64, channel string) bool {
 	}
 
 	for _, ch := range info.Channels {
-		if ch.name == channel {
+		if ch.Name == channel {
 			return true
 		}
 	}

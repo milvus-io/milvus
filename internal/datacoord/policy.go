@@ -128,10 +128,10 @@ func ConsistentHashRegisterPolicy(hashring *consistent.Consistent) RegisterPolic
 		channelsInfo := store.GetNodesChannels()
 		for _, c := range channelsInfo {
 			for _, ch := range c.Channels {
-				idstr, err := hashring.Get(ch.name)
+				idstr, err := hashring.Get(ch.Name)
 				if err != nil {
 					log.Warn("receive error when getting from hashring",
-						zap.String("channel", ch.name), zap.Error(err))
+						zap.String("channel", ch.Name), zap.Error(err))
 					return nil
 				}
 				did, err := deformatNodeID(idstr)
@@ -218,10 +218,10 @@ func ConsistentHashChannelAssignPolicy(hashring *consistent.Consistent) ChannelA
 
 		adds := make(map[int64][]*channel)
 		for _, c := range filteredChannels {
-			idstr, err := hashring.Get(c.name)
+			idstr, err := hashring.Get(c.Name)
 			if err != nil {
 				log.Warn("receive error when getting from hashring",
-					zap.String("channel", c.name), zap.Error(err))
+					zap.String("channel", c.Name), zap.Error(err))
 				return nil
 			}
 			did, err := deformatNodeID(idstr)
@@ -247,13 +247,13 @@ func ConsistentHashChannelAssignPolicy(hashring *consistent.Consistent) ChannelA
 func filterChannels(store ROChannelStore, channels []*channel) []*channel {
 	channelsMap := make(map[string]*channel)
 	for _, c := range channels {
-		channelsMap[c.name] = c
+		channelsMap[c.Name] = c
 	}
 
 	allChannelsInfo := store.GetChannels()
 	for _, info := range allChannelsInfo {
 		for _, c := range info.Channels {
-			delete(channelsMap, c.name)
+			delete(channelsMap, c.Name)
 		}
 	}
 
@@ -343,9 +343,9 @@ func ConsistentHashDeregisterPolicy(hashring *consistent.Consistent) DeregisterP
 		// reassign channels of deleted node
 		updates := make(map[int64][]*channel)
 		for _, c := range deletedInfo.Channels {
-			idstr, err := hashring.Get(c.name)
+			idstr, err := hashring.Get(c.Name)
 			if err != nil {
-				log.Warn("failed to get channel in hash ring", zap.String("channel", c.name))
+				log.Warn("failed to get channel in hash ring", zap.String("channel", c.Name))
 				return nil
 			}
 
@@ -437,7 +437,7 @@ func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 				Channels: make([]*channel, 0),
 			}
 			for _, c := range ch.Channels {
-				k := buildChannelKey(ch.NodeID, c.name)
+				k := buildChannelKey(ch.NodeID, c.Name)
 				v, err := kv.Load(k)
 				if err != nil {
 					return nil, err
