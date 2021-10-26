@@ -114,7 +114,7 @@ func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return objectsKeys, objectsValues, nil
 }
 
-// LoadWithPrefix load an object with @key.
+// Load loads an object with @key.
 func (kv *MinIOKV) Load(key string) (string, error) {
 	object, err := kv.minioClient.GetObject(kv.ctx, kv.bucketName, key, minio.GetObjectOptions{})
 	if object != nil {
