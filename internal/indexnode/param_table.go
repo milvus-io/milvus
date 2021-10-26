@@ -105,7 +105,7 @@ func (pt *ParamTable) initMinIOAddress() {
 }
 
 func (pt *ParamTable) initMinIOAccessKeyID() {
-	ret, err := pt.Load("minio.accessKeyID")
+	ret, err := pt.Load("_MinioAccessKeyID")
 	if err != nil {
 		panic(err)
 	}
@@ -113,7 +113,7 @@ func (pt *ParamTable) initMinIOAccessKeyID() {
 }
 
 func (pt *ParamTable) initMinIOSecretAccessKey() {
-	ret, err := pt.Load("minio.secretAccessKey")
+	ret, err := pt.Load("_MinioSecretAccessKey")
 	if err != nil {
 		panic(err)
 	}
@@ -121,7 +121,7 @@ func (pt *ParamTable) initMinIOSecretAccessKey() {
 }
 
 func (pt *ParamTable) initMinIOUseSSL() {
-	ret, err := pt.Load("minio.useSSL")
+	ret, err := pt.Load("_MinioUseSSL")
 	if err != nil {
 		panic(err)
 	}
@@ -160,7 +160,7 @@ func (pt *ParamTable) initIndexRootPath() {
 }
 
 func (pt *ParamTable) initMinioBucketName() {
-	bucketName, err := pt.Load("minio.bucketName")
+	bucketName, err := pt.Load("_MinioBucketName")
 	if err != nil {
 		panic(err)
 	}
