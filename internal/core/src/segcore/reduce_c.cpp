@@ -12,6 +12,7 @@
 #include <vector>
 #include <unordered_set>
 
+#include "common/Consts.h"
 #include "common/Types.h"
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
@@ -92,7 +93,7 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
         int64_t curr_pk = result_pair.search_result_->primary_keys_[result_pair.offset_];
         float curr_dis = result_pair.search_result_->result_distances_[result_pair.offset_];
         // remove duplicates
-        if (curr_pk == -1 || std::abs(curr_dis - prev_dis) > 0.00001) {
+        if (curr_pk == INVALID_ID || std::abs(curr_dis - prev_dis) > 0.00001) {
             result_pair.search_result_->result_offsets_.push_back(loc_offset++);
             search_records[index].push_back(result_pair.offset_);
             prev_dis = curr_dis;

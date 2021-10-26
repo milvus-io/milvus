@@ -9,25 +9,25 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <random>
-
 #include <algorithm>
-#include <numeric>
-#include <thread>
-#include <queue>
-
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <faiss/utils/distances.h>
-#include <query/SearchOnSealed.h>
 #include <iostream>
-#include "query/generated/ExecPlanNodeVisitor.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include <numeric>
+#include <queue>
+#include <random>
+#include <thread>
+#include <boost/iterator/counting_iterator.hpp>
+
+#include "common/Consts.h"
+#include "faiss/utils/distances.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "query/PlanNode.h"
 #include "query/PlanImpl.h"
+#include "query/SearchOnSealed.h"
+#include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/Reduce.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "utils/tools.h"
-#include <boost/iterator/counting_iterator.hpp>
 
 namespace milvus::segcore {
 
@@ -376,7 +376,7 @@ SegmentGrowingImpl::bulk_subscript_impl(int64_t element_sizeof,
     for (int i = 0; i < count; ++i) {
         auto dst = output_base + i * element_sizeof;
         auto offset = seg_offsets[i];
-        const uint8_t* src = offset == -1 ? empty.data() : (const uint8_t*)vec.get_element(offset);
+        const uint8_t* src = (offset == INVALID_SEG_OFFSET ? empty.data() : (const uint8_t*)vec.get_element(offset));
         memcpy(dst, src, element_sizeof);
     }
 }
@@ -392,7 +392,7 @@ SegmentGrowingImpl::bulk_subscript_impl(
     auto output = reinterpret_cast<T*>(output_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        output[i] = offset == -1 ? default_value : vec[offset];
+        output[i] = (offset == INVALID_SEG_OFFSET ? default_value : vec[offset]);
     }
 }
 
@@ -405,7 +405,7 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
         case SystemFieldType::Timestamp:
             PanicInfo("timestamp unsupported");
         case SystemFieldType::RowId:
-            bulk_subscript_impl<int64_t>(this->record_.uids_, seg_offsets, count, -1, output);
+            bulk_subscript_impl<int64_t>(this->record_.uids_, seg_offsets, count, INVALID_ID, output);
             break;
         default:
             PanicInfo("unknown subscript fields");
