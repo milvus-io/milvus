@@ -37,7 +37,7 @@ Whether save successfully:
 
 ### B. Recovery from a set of checkpoints
 
-1. We need all positions of all segments in this vchannel `p1, p2, ... pn`
+1. We need all positions of all segments in this vchannel `p1, p2, ... pn`.
 
 A design of WatchDmChannelReq
 
