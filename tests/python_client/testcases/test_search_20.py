@@ -780,6 +780,42 @@ class TestCollectionSearch(TestcaseBase):
             assert hits.distances[0] == 0.0
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_dup_primary_key(self, dim, auto_id, _async):
+        """
+        target: test search with duplicate primary key
+        method: 1.insert same data twice
+                2.search
+        expected: search results are de-duplicated
+        """
+        # initialize with data
+        nb = ct.default_nb
+        nq = ct.default_nq
+        collection_w, insert_data, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                                auto_id=auto_id,
+                                                                                dim=dim)[0:4]
+        # insert data again
+        insert_res, _ = collection_w.insert(insert_data[0])
+        insert_ids.extend(insert_res.primary_keys)
+        # search
+        vectors = [[random.random() for _ in range(dim)]
+                   for _ in range(default_nq)]
+        search_res, _ = collection_w.search(vectors[:nq], default_search_field,
+                                            default_search_params, default_limit,
+                                            default_search_exp, _async=_async,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": nq,
+                                                         "ids": insert_ids,
+                                                         "limit": default_limit,
+                                                         "_async": _async})
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+        # assert that search results are de-duplicated
+        for hits in search_res:
+            ids = hits.ids
+            assert sorted(list(set(ids))) == sorted(ids)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self, dim, auto_id, _async):
         """
         target: test search with empty query vector
