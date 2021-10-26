@@ -77,6 +77,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 	}, nil
 }
 
+// Run initializes and starts QueryCoord's grpc service.
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
