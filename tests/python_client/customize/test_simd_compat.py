@@ -14,6 +14,7 @@ supported_simd_types = ["sse4_2", "avx", "avx2", "avx512"]
 
 
 # TODO: implement simd config after supported
+# TODO: not support running concurrently with different simd_types. need improvement
 @pytest.mark.skip(reason='simd config is not supported yet')
 class TestSimdCompatibility:
     """
