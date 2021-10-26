@@ -10,9 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+
 #include <cstdint>
 #include "exceptions/EasyAssert.h"
+
 namespace milvus {
+
 inline int64_t
 upper_align(int64_t value, int64_t align) {
     Assert(align > 0);
