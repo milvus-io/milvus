@@ -179,7 +179,7 @@ message CreateIndexRequest {
 
 14. There is a background service, `indexBuildLoop`, in the `IndexNode`. `indexBuildLoop` would call `scheduleIndexBuildTask` to get a `IndexBuildTask` from `IndexBuildQueue`, and then start another `goroutine` to build index and update meta.
 
-_Node_: `InexNode` will not notify the `QueryCoord` to load the index file, if an user wants to speed up seach by these index files, he should call `ReleaseCollection` firstly, then call `LoadCollection` to load these index files.
+_Note_: `IndexNode` will not notify the `QueryCoord` to load the index files, if an user wants to speed up seach by these index files, he should call `ReleaseCollection` firstly, then call `LoadCollection` to load these index files.
 
 15. As mentioned earlier, `RootCoord` would only search on these flushed segments on `CreateIndex` request, the following figure show how to deal with the newly add segments.
 
