@@ -61,6 +61,7 @@ type Server struct {
 	closer io.Closer
 }
 
+// NewServer create a new QueryCoord grpc server.
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	svr, err := qc.NewQueryCoord(ctx1, factory)
