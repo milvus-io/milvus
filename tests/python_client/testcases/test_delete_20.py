@@ -552,7 +552,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.load()
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_data_from_growing_segment(self):
         """
         target: test delete entities from growing segment
@@ -577,7 +577,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.xfail(reason="Issue: #10431")
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_after_load_sealed_segment(self):
         """
         target: test delete sealed data and get deleteMsg from insertChannel
@@ -601,7 +601,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.xfail(reason="Issue: #10431")
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_sealed_segment_with_flush(self):
         """
         target: test delete data from sealed segment and flush delta log
@@ -621,6 +621,30 @@ class TestDeleteOperation(TestcaseBase):
         del_res = collection_w.delete(tmp_expr)[0]
         assert del_res.delete_count == 1
         collection_w.num_entities
+        # load and query id 0
+        collection_w.load()
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_sealed_only(self):
+        """
+        target: test delete with sealed only data and delete request
+        method: 1.create, insert
+                2.delete and flush
+                3.load and query
+        expected: Empty query result
+        """
+        # create collection
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        # insert without flush
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete id 0 and flush
+        del_res = collection_w.delete(tmp_expr)[0]
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
         # load and query id 0
         collection_w.load()
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
