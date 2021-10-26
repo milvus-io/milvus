@@ -50,7 +50,7 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
                                        bool force) const {
     auto old = deleted_record_.get_lru_entry();
 
-    if (!force || old->bitmap_ptr->count() == insert_barrier) {
+    if (old->bitmap_ptr->count() == insert_barrier) {
         if (old->del_barrier == del_barrier) {
             return old;
         }

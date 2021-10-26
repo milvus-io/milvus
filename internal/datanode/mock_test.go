@@ -33,6 +33,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -164,7 +165,7 @@ func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.Sav
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
+func (mf *MetaFactory) GetCollectionMeta(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
 	sch := schemapb.CollectionSchema{
 		Name:        collectionName,
 		Description: "test collection by meta factory",
@@ -532,6 +533,10 @@ func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
 }
 
 func (alloc *AllocatorFactory) allocIDBatch(count uint32) (UniqueID, uint32, error) {
+	if count == 0 {
+		return 0, 0, errors.New("count should be greater than zero")
+	}
+
 	start, err := alloc.allocID()
 	return start, count, err
 }
@@ -609,7 +614,7 @@ func (m *RootCoordFactory) ShowCollections(ctx context.Context, in *milvuspb.Sho
 
 func (m *RootCoordFactory) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	f := MetaFactory{}
-	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
+	meta := f.GetCollectionMeta(m.collectionID, m.collectionName)
 	resp := &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -653,4 +658,56 @@ func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.
 
 func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return nil, errors.New("mocked failure")
+}
+
+func genInsertData() *InsertData {
+	return &InsertData{
+		Data: map[int64]s.FieldData{
+			0: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{1, 2},
+			},
+			1: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{3, 4},
+			},
+			100: &s.FloatVectorFieldData{
+				NumRows: []int64{2},
+				Data:    []float32{1.0, 6.0, 7.0, 8.0},
+				Dim:     2,
+			},
+			101: &s.BinaryVectorFieldData{
+				NumRows: []int64{2},
+				Data:    []byte{0, 255, 255, 255, 128, 128, 128, 0},
+				Dim:     32,
+			},
+			102: &s.BoolFieldData{
+				NumRows: []int64{2},
+				Data:    []bool{true, false},
+			},
+			103: &s.Int8FieldData{
+				NumRows: []int64{2},
+				Data:    []int8{5, 6},
+			},
+			104: &s.Int16FieldData{
+				NumRows: []int64{2},
+				Data:    []int16{7, 8},
+			},
+			105: &s.Int32FieldData{
+				NumRows: []int64{2},
+				Data:    []int32{9, 10},
+			},
+			106: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{11, 12},
+			},
+			107: &s.FloatFieldData{
+				NumRows: []int64{2},
+				Data:    []float32{2.333, 2.334},
+			},
+			108: &s.DoubleFieldData{
+				NumRows: []int64{2},
+				Data:    []float64{3.333, 3.334},
+			},
+		}}
 }

@@ -159,7 +159,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, minIOKV, dsService.replica, func(pack *segmentFlushPack) error {
 		fieldInsert := []*datapb.FieldBinlog{}
 		fieldStats := []*datapb.FieldBinlog{}
-		deltaInfos := make([]*datapb.DeltaLogInfo, len(pack.deltaLogs))
+		deltaInfos := []*datapb.DeltaLogInfo{}
 		checkPoints := []*datapb.CheckPoint{}
 		for k, v := range pack.insertLogs {
 			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
@@ -168,7 +168,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
 		}
 		for _, delData := range pack.deltaLogs {
-			deltaInfos = append(deltaInfos, &datapb.DeltaLogInfo{RecordEntries: uint64(delData.size), TimestampFrom: delData.tsFrom, TimestampTo: delData.tsTo, DeltaLogSize: delData.fileSize})
+			deltaInfos = append(deltaInfos, &datapb.DeltaLogInfo{RecordEntries: uint64(delData.size), TimestampFrom: delData.tsFrom, TimestampTo: delData.tsTo, DeltaLogPath: delData.filePath, DeltaLogSize: delData.fileSize})
 		}
 
 		// only current segment checkpoint info,
@@ -183,6 +183,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("SegmentID", pack.segmentID),
 			zap.Int64("CollectionID", dsService.collectionID),
 			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
+			zap.Int("Length of Field2Stats", len(fieldStats)),
+			zap.Int("Length of Field2Deltalogs", len(deltaInfos)),
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{

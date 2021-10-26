@@ -61,7 +61,7 @@ class TestChaosData:
         collection_w = construct_from_data(c_name)
         log.debug(collection_w.schema)
 
-        # reboot a pod
+        # apply memory stress
         apply_memory_stress(chaos_yaml)
 
         # wait memory stress
@@ -91,11 +91,50 @@ class TestChaosData:
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
-    def test_chaos_memory_stress_datanode(self, connection, chaos_yaml):
-        pass
+    def test_chaos_memory_stress_datanode(self, chaos_yaml):
+        """
+        target: test inject memory stress into dataNode
+        method: 1.Deploy milvus and limit datanode memory resource
+                2.Create collection and insert some data
+                3.Inject memory stress chaos
+                4.Continue to insert data
+        expected:
+        """
+        # init collection and insert 250 nb
+        nb = 25000
+        dim = 512
+        c_name = cf.gen_unique_str('chaos_memory')
+        collection_w = ApiCollectionWrapper()
+        collection_w.init_collection(name=c_name,
+                                     schema=cf.gen_default_collection_schema(dim=dim))
+        for i in range(10):
+            t0 = datetime.datetime.now()
+            df = cf.gen_default_dataframe_data(nb=nb, dim=dim)
+            res = collection_w.insert(df)[0]
+            assert res.insert_count == nb
+            log.info(f'After {i+1} insert, num_entities: {collection_w.num_entities}')
+            tt = datetime.datetime.now() - t0
+            log.info(f"{i} insert and flush data cost: {tt}")
+
+        # inject memory stress
+        chaos_config = gen_experiment_config(chaos_yaml)
+        log.debug(chaos_config)
+        chaos_res = CusResource(kind=chaos_config['kind'],
+                                group=constants.CHAOS_GROUP,
+                                version=constants.CHAOS_VERSION,
+                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res.create(chaos_config)
+        log.debug("chaos injected")
+
+        # Continue to insert data
+        collection_w.insert(df)
+        log.info(f'Total num entities: {collection_w.num_entities}')
+
+        # delete chaos
+        meta_name = chaos_config.get('metadata', None).get('name', None)
+        chaos_res.delete(metadata_name=meta_name)
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
     def test_chaos_memory_stress_indexnode(self, connection, chaos_yaml):
         pass
-

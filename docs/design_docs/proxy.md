@@ -25,10 +25,10 @@ operation of Proxy includes two part, one part is static check and another is dy
 parameters check, constraints check and etc. Dynamic check will check some related dependency of the request, take
 search requests for example, Proxy should check if the related collection exists in Milvus.
 
-Also, Proxy will do some preprocessing for every request. Proxy will do little thing for some requests in the
+Also, Proxy will do some preprocessing for every request. Proxy will do little things for some requests in the
 preprocessing stage and a lot more for other requests. Every object in Milvus will be assigned with a `ID`, such as
-`CollectionID`, `PartitionID`, `IndexID`, `SegmentID` and etc. Components in Milvus communicate with each other by the
-ID of object, however, users only knows the object name. So as the user access layser of Milvus, Proxy should translate
+`CollectionID`, `PartitionID`, `IndexID`, `SegmentID`, etc. Components in Milvus communicate with each other by the
+object IDs, however, users only knows the object name. So as a user access layer of Milvus, Proxy should translate
 the object name into object ID. Also taking search request as example, Proxy should translate the `CollectionName` into
 `CollectionID` and then the Query Node will recognize the request. Proxy holds a cache that translate object name into
 object id and dynamically updates the cache.

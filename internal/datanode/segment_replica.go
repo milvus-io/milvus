@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
@@ -263,7 +264,7 @@ func (replica *SegmentReplica) filterSegments(channelName string, partitionID Un
 	results := make([]*Segment, 0)
 
 	isMatched := func(segment *Segment, chanName string, partID UniqueID) bool {
-		return segment.channelName == chanName && (partID == 0 || segment.partitionID == partID)
+		return segment.channelName == chanName && (partID == common.InvalidFieldID || segment.partitionID == partID)
 	}
 	for _, seg := range replica.newSegments {
 		if isMatched(seg, channelName, partitionID) {
@@ -434,8 +435,8 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*dat
 // listNewSegmentsStartPositions gets all *New Segments* start positions and
 //   transfer segments states from *New* to *Normal*.
 func (replica *SegmentReplica) listNewSegmentsStartPositions() []*datapb.SegmentStartPosition {
-	replica.segMu.RLock()
-	defer replica.segMu.RUnlock()
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
 
 	result := make([]*datapb.SegmentStartPosition, 0, len(replica.newSegments))
 	for id, seg := range replica.newSegments {
@@ -500,6 +501,12 @@ func (replica *SegmentReplica) updateSegmentPKRange(segID UniqueID, pks []int64)
 	}
 
 	seg, ok = replica.normalSegments[segID]
+	if ok {
+		seg.updatePKRange(pks)
+		return
+	}
+
+	seg, ok = replica.flushedSegments[segID]
 	if ok {
 		seg.updatePKRange(pks)
 		return

@@ -13,6 +13,7 @@ fi
 echo "platform: $platform"
 
 # define chaos testing object
+release=${1:-"milvus-chaos"}
 pod="pulsar"
 chaos_type="pod_kill"
 release="milvus-chaos"
@@ -21,9 +22,9 @@ ns="chaos-testing"
 # install milvus cluster for chaos testing
 pushd ./scripts
 echo "uninstall milvus if exist"
-bash uninstall_milvus.sh || true
+bash uninstall_milvus.sh ${release}|| true
 echo "install milvus"
-bash install_milvus.sh
+bash install_milvus.sh ${release}
 popd
 
 # replace chaos object as defined

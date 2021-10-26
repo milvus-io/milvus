@@ -7400,12 +7400,24 @@ class DeleteRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kHashKeysFieldNumber = 6,
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kPartitionNameFieldNumber = 4,
     kExprFieldNumber = 5,
     kBaseFieldNumber = 1,
   };
+  // repeated uint32 hash_keys = 6;
+  int hash_keys_size() const;
+  void clear_hash_keys();
+  ::PROTOBUF_NAMESPACE_ID::uint32 hash_keys(int index) const;
+  void set_hash_keys(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value);
+  void add_hash_keys(::PROTOBUF_NAMESPACE_ID::uint32 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+      hash_keys() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+      mutable_hash_keys();
+
   // string db_name = 2;
   void clear_db_name();
   const std::string& db_name() const;
@@ -7463,6 +7475,8 @@ class DeleteRequest :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 > hash_keys_;
+  mutable std::atomic<int> _hash_keys_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_name_;
@@ -18844,6 +18858,36 @@ inline void DeleteRequest::set_allocated_expr(std::string* expr) {
   }
   expr_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), expr);
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.DeleteRequest.expr)
+}
+
+// repeated uint32 hash_keys = 6;
+inline int DeleteRequest::hash_keys_size() const {
+  return hash_keys_.size();
+}
+inline void DeleteRequest::clear_hash_keys() {
+  hash_keys_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint32 DeleteRequest::hash_keys(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DeleteRequest.hash_keys)
+  return hash_keys_.Get(index);
+}
+inline void DeleteRequest::set_hash_keys(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  hash_keys_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DeleteRequest.hash_keys)
+}
+inline void DeleteRequest::add_hash_keys(::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  hash_keys_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.DeleteRequest.hash_keys)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+DeleteRequest::hash_keys() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.DeleteRequest.hash_keys)
+  return hash_keys_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+DeleteRequest::mutable_hash_keys() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.DeleteRequest.hash_keys)
+  return &hash_keys_;
 }
 
 // -------------------------------------------------------------------

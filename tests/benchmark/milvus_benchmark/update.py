@@ -30,11 +30,12 @@ def parse_server_tag(server_tag):
     return {"cpus": cpus, "mems": mems, "gpus": gpus}
 
 
-"""
-description: update values.yaml
-return: no return
-"""
 def update_values(src_values_file, deploy_params_file):
+    """
+    description: update values.yaml
+    return: no return
+    """
+
     # deploy_mode, hostname, server_tag, milvus_config, server_config=None
     try:
         with open(src_values_file) as f:

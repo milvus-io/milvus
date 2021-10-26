@@ -58,7 +58,7 @@ class TestAliasOperation(TestcaseBase):
         target: test collection creating alias
         method: 
                 1.create a collection and create 10 partitions for it
-                2.collection create a alias, then init a collection with this alias name but not create partitions 
+                2.collection create an alias, then init a collection with this alias name but not create partitions
         expected: collection is equal to alias
         """
         self._connect()
@@ -150,7 +150,7 @@ class TestAliasOperation(TestcaseBase):
         target: test collection dropping alias
         method: 
                 1.create a collection with 10 partitions
-                2.collection create a alias
+                2.collection create an alias
                 3.collection drop the alias
         expected: 
                 after step 2, collection is equal to alias
@@ -416,7 +416,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         target: test collection altering to alias which is not exist
         method: 
                 1.create a collection with alias
-                2.collection alters to a alias name which is not exist
+                2.collection alters to an alias name which is not exist
         expected: 
                 in step 2, alter alias with a not exist name is not allowed
         """

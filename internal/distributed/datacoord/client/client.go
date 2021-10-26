@@ -402,6 +402,8 @@ func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	return ret.(*datapb.GetPartitionStatisticsResponse), err
 }
 
+// GetSegmentInfoChannel DEPRECATED
+// legacy api to get SegmentInfo Channel name
 func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -452,6 +454,13 @@ func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return client.SaveBinlogPaths(ctx, req)
 }
 
+// GetRecoveryInfo request segment recovery info of collection/partition
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the collection/partition id to query
+//
+// response struct `GetRecoveryInfoResponse` contains the list of segments info and corresponding vchannel info
+// error is returned only when some communication issue occurs
 func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()

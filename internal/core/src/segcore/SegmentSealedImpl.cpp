@@ -262,7 +262,7 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
     if (del_barrier < old->del_barrier) {
         for (auto del_index = del_barrier; del_index < old->del_barrier; ++del_index) {
             int64_t the_offset = seg_offsets[del_index].get();
-            AssertInfo(the_offset > 0, "Seg offset is invalid");
+            AssertInfo(the_offset >= 0, "Seg offset is invalid");
             if (deleted_record_.timestamps_[del_index] < query_timestamp) {
                 bitmap->clear(the_offset);
             }
@@ -271,7 +271,7 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
     } else {
         for (auto del_index = old->del_barrier; del_index < del_barrier; ++del_index) {
             int64_t the_offset = seg_offsets[del_index].get();
-            AssertInfo(the_offset > 0, "Seg offset is invalid");
+            AssertInfo(the_offset >= 0, "Seg offset is invalid");
             if (deleted_record_.timestamps_[del_index] < query_timestamp) {
                 bitmap->set(the_offset);
             }

@@ -24,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -54,6 +55,7 @@ type DelDataBuf struct {
 	tsFrom   Timestamp
 	tsTo     Timestamp
 	fileSize int64
+	filePath string
 }
 
 func (ddb *DelDataBuf) updateSize(size int64) {
@@ -114,9 +116,14 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 			log.Error("primary keys and timestamp's element num mis-match")
 		}
 
-		newBuf := newDelDataBuf()
-		delDataBuf, _ := dn.delBuf.LoadOrStore(segID, newBuf)
-		delData := delDataBuf.(*DelDataBuf).delData
+		var delDataBuf *DelDataBuf
+		value, ok := dn.delBuf.Load(segID)
+		if ok {
+			delDataBuf = value.(*DelDataBuf)
+		} else {
+			delDataBuf = newDelDataBuf()
+		}
+		delData := delDataBuf.delData
 
 		for i := 0; i < rows; i++ {
 			delData.Data[pks[i]] = tss[i]
@@ -124,8 +131,8 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		}
 
 		// store
-		delDataBuf.(*DelDataBuf).updateSize(int64(rows))
-		delDataBuf.(*DelDataBuf).updateTimeRange(tr)
+		delDataBuf.updateSize(int64(rows))
+		delDataBuf.updateTimeRange(tr)
 		dn.delBuf.Store(segID, delDataBuf)
 	}
 
@@ -133,7 +140,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 }
 
 func (dn *deleteNode) showDelBuf() {
-	segments := dn.replica.filterSegments(dn.channelName, 0)
+	segments := dn.replica.filterSegments(dn.channelName, common.InvalidPartitionID)
 	for _, seg := range segments {
 		segID := seg.segmentID
 		if v, ok := dn.delBuf.Load(segID); ok {

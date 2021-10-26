@@ -337,6 +337,7 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	return ret.(*commonpb.Status), err
 }
 
+// ReleaseSegments releases the data of the specified segments in QueryNode.
 func (c *Client) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -352,6 +353,7 @@ func (c *Client) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmen
 	return ret.(*commonpb.Status), err
 }
 
+// GetSegmentInfo gets the information of the specified segments in QueryNode.
 func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -367,6 +369,7 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	return ret.(*querypb.GetSegmentInfoResponse), err
 }
 
+// GetMetrics gets the metrics information of QueryNode.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()

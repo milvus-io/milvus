@@ -928,7 +928,7 @@ rpc DropIndex(DropIndexRequest) returns (common.Status){}
 
 **Description:**
 
-Drop a index for a collection.
+Drop an index for a collection.
 
 **Parameters:**
 

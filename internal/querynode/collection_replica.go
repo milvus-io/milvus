@@ -44,6 +44,7 @@ import (
 // across multiple query nodes, and each query node's collectionReplica will maintain its own part.
 type ReplicaInterface interface {
 	// collection
+	// getCollectionIDs returns all collection ids in the collectionReplica
 	getCollectionIDs() []UniqueID
 	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
 	removeCollection(collectionID UniqueID) error
@@ -566,6 +567,7 @@ func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) 
 	return colReplica.excludedSegments[collectionID], nil
 }
 
+// freeAll will free all meta info from collectionReplica
 func (colReplica *collectionReplica) freeAll() {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -579,6 +581,7 @@ func (colReplica *collectionReplica) freeAll() {
 	colReplica.segments = make(map[UniqueID]*Segment)
 }
 
+// newCollectionReplica returns a new ReplicaInterface
 func newCollectionReplica(etcdKv *etcdkv.EtcdKV) ReplicaInterface {
 	collections := make(map[UniqueID]*Collection)
 	partitions := make(map[UniqueID]*Partition)
