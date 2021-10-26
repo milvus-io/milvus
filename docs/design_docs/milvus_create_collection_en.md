@@ -1,6 +1,6 @@
-# Create Collections
+# Create Collection
 
-`Milvus 2.0` uses `Collection` to represent a set of data, like `Table` in a traditional database. Users can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `CreateCollection`, at the end of this article, you should know which components are involved in `CreateCollection`.
+`Milvus 2.0` uses `Collection` to represent a set of data, like `Table` in a traditional database. User can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `CreateCollection`, at the end of this article, you should know which components are involved in `CreateCollection`.
 
 The execution flow of `CreateCollection` is shown in the following figure:
 
@@ -58,7 +58,7 @@ type task interface {
 	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
-Notify(err error)
+}
 
 type createCollectionTask struct {
 	Condition
@@ -70,7 +70,7 @@ type createCollectionTask struct {
 }
 ```
 
-3. There is a background service in `Proxy`, this service would get the `CreateCollectionTask` from `DdTaskQueue`, and execute it in three phases.
+2. There is a background service in `Proxy`, this service would get the `CreateCollectionTask` from `DdTaskQueue`, and execute it in three phases.
 
    - `PreExecute`, do some static checking at this phase, such as check if `Collection Name` and `Field Name` are legal, if there are duplicate columns, etc.
    - `Execute`, at this phase, `Proxy` would send `CreateCollection` request to `RootCoord` via `Grpc`, and wait for response, the `proto` is defined as follows:
@@ -87,7 +87,7 @@ type createCollectionTask struct {
 
    - `PostExecute`, `CreateCollectonTask` does nothing at this phase, and return directly.
 
-4. `RootCoord` would wrap the `CreateCollection` request into `CreateCollectionReqTask`, and then call function `executeTask`. `executeTask` would return until the `context` is done or `CreateCollectionReqTask.Execute` is returned.
+3. `RootCoord` would wrap the `CreateCollection` request into `CreateCollectionReqTask`, and then call function `executeTask`. `executeTask` would return until the `context` is done or `CreateCollectionReqTask.Execute` is returned.
 
 ```go
 type reqTask interface {
@@ -95,7 +95,7 @@ type reqTask interface {
 	Type() commonpb.MsgType
 	Execute(ctx context.Context) error
 	Core() *Core
-Core() *Core }
+}
 
 type CreateCollectionReqTask struct {
 	baseReqTask
@@ -103,13 +103,13 @@ type CreateCollectionReqTask struct {
 }
 ```
 
-5. `CreateCollectionReqTask.Execute` would alloc `CollecitonID` and default `PartitionID`, and set `Virtual Channel` and `Physical Channel`, which are used by `MsgStream`, then write the `Collection`'s meta into `metaTable`
+4. `CreateCollectionReqTask.Execute` would alloc `CollecitonID` and default `PartitionID`, and set `Virtual Channel` and `Physical Channel`, which are used by `MsgStream`, then write the `Collection`'s meta into `metaTable`
 
-6. After `Collection`'s meta writing into `metaTable`, `Milvus` would consider this collection has been created successfully.
+5. After `Collection`'s meta writing into `metaTable`, `Milvus` would consider this collection has been created successfully.
 
-7. `RootCoord` would alloc a timestamp from `TSO` before writing `Collection`'s meta into `metaTable`, and this timestamp is considered as the point when the collection was created
+6. `RootCoord` would alloc a timestamp from `TSO` before writing `Collection`'s meta into `metaTable`, and this timestamp is considered as the point when the collection was created
 
-8. At last `RootCoord` will send a message of `CreateCollectionRequest` into `MsgStream`, and other components, who have subscribed to the `MsgStream`, would be notified. The `Proto` of `CreateCollectionRequest` is defined as follow:
+7. At last `RootCoord` will send a message of `CreateCollectionRequest` into `MsgStream`, and other components, who have subscribed to the `MsgStream`, would be notified. The `Proto` of `CreateCollectionRequest` is defined as follow:
 
 ```proto
 message CreateCollectionRequest {
@@ -128,7 +128,7 @@ message CreateCollectionRequest {
 
 ```
 
-9. After all these operations, `RootCoord` would update the internal timestamp and return, so the `Proxy` would get the response.
+8. After all these operations, `RootCoord` would update the internal timestamp and return, so the `Proxy` would get the response.
 
 _Notes:_
 
