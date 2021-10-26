@@ -50,6 +50,63 @@ func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet 
 	return opSet
 }
 
+func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
+	opSet := BufferChannelAssignPolicy(store, nodeID)
+	if len(opSet) != 0 {
+		return opSet
+	}
+
+	infos := store.GetNodesChannels()
+	infos = filterNode(infos, nodeID)
+
+	channelNum := 0
+	for _, info := range infos {
+		channelNum += len(info.Channels)
+	}
+	avg := channelNum / (len(store.GetNodes()) + 1)
+	if avg == 0 {
+		return nil
+	}
+
+	// sort in descending order and reallocate
+	sort.Slice(infos, func(i, j int) bool {
+		return len(infos[i].Channels) > len(infos[j].Channels)
+	})
+
+	deletes := make(map[int64][]*channel)
+	adds := make(map[int64][]*channel)
+	for i := 0; i < avg; {
+		t := infos[i%len(infos)]
+		idx := i / len(infos)
+		if idx >= len(t.Channels) {
+			continue
+		}
+		deletes[t.NodeID] = append(deletes[t.NodeID], t.Channels[idx])
+		adds[nodeID] = append(adds[nodeID], t.Channels[idx])
+		i++
+	}
+
+	opSet = ChannelOpSet{}
+	for k, v := range deletes {
+		opSet.Delete(k, v)
+	}
+	for k, v := range adds {
+		opSet.Add(k, v)
+	}
+	return opSet
+}
+
+func filterNode(infos []*NodeChannelInfo, nodeID int64) []*NodeChannelInfo {
+	filtered := make([]*NodeChannelInfo, 0)
+	for _, info := range infos {
+		if info.NodeID == nodeID {
+			continue
+		}
+		filtered = append(filtered, info)
+	}
+	return filtered
+}
+
 // ConsistentHashRegisterPolicy use a consistent hash to matain the mapping
 func ConsistentHashRegisterPolicy(hashring *consistent.Consistent) RegisterPolicy {
 	return func(store ROChannelStore, nodeID int64) ChannelOpSet {
