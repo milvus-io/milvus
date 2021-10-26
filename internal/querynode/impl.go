@@ -126,14 +126,13 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 		return status, err
 	}
 	consumeChannels := []string{in.RequestChannelID}
+	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
+	sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
 	if in.SeekPosition == nil || len(in.SeekPosition.MsgID) == 0 {
 		// as consumer
-		consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
-		sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
 		log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 	} else {
 		// seek query channel
-		sc.queryMsgStream.AsConsumer(consumeChannels, in.SeekPosition.MsgGroup)
 		err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{in.SeekPosition})
 		if err != nil {
 			status := &commonpb.Status{
