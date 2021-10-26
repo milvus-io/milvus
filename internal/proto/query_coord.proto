@@ -317,10 +317,14 @@ message LoadBalanceRequest {
 }
 
 //---------------- common query proto -----------------
+message SegmentChangeInfo {
+  int64 online_nodeID = 1;
+  repeated SegmentInfo online_segments = 2;
+  int64 offline_nodeID = 3;
+  repeated SegmentInfo offline_segments = 4;
+}
+
 message SealedSegmentsChangeInfo {
   common.MsgBase base = 1;
-  int64 online_nodeID = 2;
-  repeated SegmentInfo online_segments = 3;
-  int64 offline_nodeID = 4;
-  repeated SegmentInfo offline_segments = 5;
+  repeated SegmentChangeInfo infos = 2;
 }

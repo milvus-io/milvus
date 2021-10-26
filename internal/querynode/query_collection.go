@@ -305,35 +305,37 @@ func (q *queryCollection) consumeQuery() {
 }
 
 func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChangeInfoMsg) error {
-	// for OnlineSegments:
-	for _, segment := range msg.OnlineSegments {
-		// 1. update global sealed segments
-		err := q.globalSegmentManager.addGlobalSegmentInfo(segment)
-		if err != nil {
-			return err
-		}
-		// 2. update excluded segment, cluster have been loaded sealed segments,
-		// so we need to avoid getting growing segment from flow graph.
-		q.streaming.replica.addExcludedSegments(segment.CollectionID, []*datapb.SegmentInfo{
-			{
-				ID:            segment.SegmentID,
-				CollectionID:  segment.CollectionID,
-				PartitionID:   segment.PartitionID,
-				InsertChannel: segment.ChannelID,
-				NumOfRows:     segment.NumRows,
-				// TODO: add status, remove query pb segment status, use common pb segment status?
-				DmlPosition: &internalpb.MsgPosition{
-					// use max timestamp to filter out dm messages
-					Timestamp: math.MaxInt64,
+	for _, info := range msg.Infos {
+		// for OnlineSegments:
+		for _, segment := range info.OnlineSegments {
+			// 1. update global sealed segments
+			err := q.globalSegmentManager.addGlobalSegmentInfo(segment)
+			if err != nil {
+				return err
+			}
+			// 2. update excluded segment, cluster have been loaded sealed segments,
+			// so we need to avoid getting growing segment from flow graph.
+			q.streaming.replica.addExcludedSegments(segment.CollectionID, []*datapb.SegmentInfo{
+				{
+					ID:            segment.SegmentID,
+					CollectionID:  segment.CollectionID,
+					PartitionID:   segment.PartitionID,
+					InsertChannel: segment.ChannelID,
+					NumOfRows:     segment.NumRows,
+					// TODO: add status, remove query pb segment status, use common pb segment status?
+					DmlPosition: &internalpb.MsgPosition{
+						// use max timestamp to filter out dm messages
+						Timestamp: typeutil.MaxTimestamp,
+					},
 				},
-			},
-		})
-	}
+			})
+		}
 
-	// for OfflineSegments:
-	for _, segment := range msg.OfflineSegments {
-		// update global sealed segments
-		q.globalSegmentManager.removeGlobalSegmentInfo(segment.SegmentID)
+		// for OfflineSegments:
+		for _, segment := range info.OfflineSegments {
+			// 1. update global sealed segments
+			q.globalSegmentManager.removeGlobalSegmentInfo(segment.SegmentID)
+		}
 	}
 	return nil
 }
