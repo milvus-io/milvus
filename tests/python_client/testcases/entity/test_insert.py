@@ -36,7 +36,6 @@ class TestInsertBase:
         params=ut.gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")) == "CPU":
         if request.param["index_type"] in ut.index_cpu_not_support():
             pytest.skip("CPU not support index_type: ivf_sq8h")
         logging.getLogger().info(request.param)
