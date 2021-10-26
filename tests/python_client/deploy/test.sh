@@ -51,7 +51,7 @@ function error_exit {
     then
         mkdir logs
     fi
-    docker-compose logs > ./logs/${Deploy_Dir}-${Task}-${current}.log
+    docker-compose logs > ./logs/${Deploy_Dir}-${Task}-${current}.log 2>&1
     echo "log saved to $(pwd)/logs/${Deploy_Dir}-${Task}-${current}.log"
     popd
     exit 1
