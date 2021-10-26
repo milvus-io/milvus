@@ -30,8 +30,9 @@ import (
 )
 
 const (
-	bufferID  = math.MinInt64
-	delimeter = "/"
+	bufferID            = math.MinInt64
+	delimeter           = "/"
+	maxOperationsPerTxn = 128
 )
 
 var errUnknownOpType error = errors.New("unknown operation type")
@@ -172,6 +173,50 @@ func (c *ChannelStore) Add(nodeID int64) {
 
 // Update applies the operations in opSet
 func (c *ChannelStore) Update(opSet ChannelOpSet) error {
+	totalChannelNum := 0
+	for _, op := range opSet {
+		totalChannelNum += len(op.Channels)
+	}
+	if totalChannelNum <= maxOperationsPerTxn {
+		return c.update(opSet)
+	}
+	// split opset to many txn; same channel's operations should be executed in one txn.
+	channelsOpSet := make(map[string]ChannelOpSet)
+	for _, op := range opSet {
+		for i, ch := range op.Channels {
+			chOp := &ChannelOp{
+				Type:     op.Type,
+				NodeID:   op.NodeID,
+				Channels: []*channel{ch},
+			}
+			if op.Type == Add {
+				chOp.ChannelWatchInfos = []*datapb.ChannelWatchInfo{op.ChannelWatchInfos[i]}
+			}
+			channelsOpSet[ch.name] = append(channelsOpSet[ch.name], chOp)
+		}
+	}
+
+	// execute a txn per 128 operations
+	count := 0
+	operations := make([]*ChannelOp, 0, maxOperationsPerTxn)
+	for _, opset := range channelsOpSet {
+		if count+len(opset) > maxOperationsPerTxn {
+			if err := c.update(operations); err != nil {
+				return err
+			}
+			count = 0
+			operations = make([]*ChannelOp, 0, maxOperationsPerTxn)
+		}
+		count += len(opset)
+		operations = append(operations, opset...)
+	}
+	if count == 0 {
+		return nil
+	}
+	return c.update(operations)
+}
+
+func (c *ChannelStore) update(opSet ChannelOpSet) error {
 	if err := c.txn(opSet); err != nil {
 		return err
 	}
