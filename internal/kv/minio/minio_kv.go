@@ -275,6 +275,7 @@ func (kv *MinIOKV) LoadPartial(key string, start, end int64) ([]byte, error) {
 	return ioutil.ReadAll(object)
 }
 
+// GetSize obtains the data size of the object with @key.
 func (kv *MinIOKV) GetSize(key string) (int64, error) {
 	objectInfo, err := kv.minioClient.StatObject(kv.ctx, kv.bucketName, key, minio.StatObjectOptions{})
 	if err != nil {
