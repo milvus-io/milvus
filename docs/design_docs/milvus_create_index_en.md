@@ -72,7 +72,7 @@ type createIndexTask struct {
 
    - `PostExecute`, `CreateIndexTask` does nothing at this phase, and return directly.
 
-4. `RootCoord` would wraps the `CreateIndex` request into `CreateIndexReqTask`, and then call function `executeTask`. `executeTask` would return until the `context` is done or `CreateIndexReqTask.Execute` returned.
+4. `RootCoord` would wrap the `CreateIndex` request into `CreateIndexReqTask`, and then call function `executeTask`. `executeTask` would return until the `context` is done or `CreateIndexReqTask.Execute` returned.
 
 ```go
 type reqTask interface {
