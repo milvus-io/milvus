@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/viper"
 )
 
+// UniqueID is type alias of typeutil.UniqueID
 type UniqueID = typeutil.UniqueID
 
 type Base interface {
