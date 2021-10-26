@@ -24,7 +24,6 @@ class TestDeleteParams(TestcaseBase):
     Only the `in` operator is supported in the expr
     """
 
-    @pytest.mark.xfail(reason="Issues #10431")
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize('is_binary', [False, True])
     def test_delete_entities(self, is_binary):
