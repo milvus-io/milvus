@@ -162,7 +162,7 @@ func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 	return errors.New("vector float without metric_type")
 }
 
-func ValidateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
+func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 	names := make(map[string]bool)
 	for _, field := range fields {
 		_, ok := names[field.Name]
