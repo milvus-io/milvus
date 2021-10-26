@@ -27,6 +27,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// MinIOKV implements DataKV interface and relies on underling MinIO service.
+// MinIOKV object contains a client which can be used to access the MinIO service.
 type MinIOKV struct {
 	ctx         context.Context
 	minioClient *minio.Client
