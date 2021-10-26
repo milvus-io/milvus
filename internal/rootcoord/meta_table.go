@@ -12,6 +12,7 @@
 package rootcoord
 
 import (
+	"bytes"
 	"fmt"
 	"path"
 	"strconv"
@@ -137,6 +138,10 @@ func (mt *MetaTable) reloadFromKV() error {
 	}
 
 	for _, value := range values {
+		if bytes.Equal([]byte(value), suffixSnapshotTombstone) {
+			// backward compatibility, IndexMeta used to be in SnapshotKV
+			continue
+		}
 		proxyMeta := pb.ProxyMeta{}
 		err = proto.Unmarshal([]byte(value), &proxyMeta)
 		if err != nil {
@@ -165,6 +170,10 @@ func (mt *MetaTable) reloadFromKV() error {
 		return err
 	}
 	for _, value := range values {
+		if bytes.Equal([]byte(value), suffixSnapshotTombstone) {
+			// backward compatibility, IndexMeta used to be in SnapshotKV
+			continue
+		}
 		segmentIndexInfo := pb.SegmentIndexInfo{}
 		err = proto.Unmarshal([]byte(value), &segmentIndexInfo)
 		if err != nil {
@@ -197,6 +206,10 @@ func (mt *MetaTable) reloadFromKV() error {
 		return err
 	}
 	for _, value := range values {
+		if bytes.Equal([]byte(value), suffixSnapshotTombstone) {
+			// backward compatibility, IndexMeta used to be in SnapshotKV
+			continue
+		}
 		meta := pb.IndexInfo{}
 		err = proto.Unmarshal([]byte(value), &meta)
 		if err != nil {
