@@ -334,3 +334,31 @@ func TestMinIOKV_FGetObjects(t *testing.T) {
 	defer file1.Close()
 	defer os.Remove(path + name2)
 }
+
+func TestMinIOKV_GetSize(t *testing.T) {
+	Params.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bucketName := "fantastic-tech-test"
+	minIOKV, err := newMinIOKVClient(ctx, bucketName)
+	assert.Nil(t, err)
+	defer minIOKV.RemoveWithPrefix("")
+
+	key := "TestMinIOKV_GetSize_key"
+	value := "TestMinIOKV_GetSize_value"
+
+	err = minIOKV.Save(key, value)
+	assert.NoError(t, err)
+
+	size, err := minIOKV.GetSize(key)
+	assert.NoError(t, err)
+	assert.Equal(t, size, int64(len(value)))
+
+	key2 := "TestMemoryKV_GetSize_key2"
+
+	size, err = minIOKV.GetSize(key2)
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), size)
+}

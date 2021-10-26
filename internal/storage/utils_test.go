@@ -45,6 +45,10 @@ func (kv *mockLessHeaderDataKV) LoadPartial(key string, start, end int64) ([]byt
 	return ret, nil
 }
 
+func (kv *mockLessHeaderDataKV) GetSize(key string) (int64, error) {
+	return 0, errors.New("less header")
+}
+
 func newMockLessHeaderDataKV() *mockLessHeaderDataKV {
 	return &mockLessHeaderDataKV{}
 }
@@ -63,6 +67,10 @@ func (kv *mockWrongHeaderDataKV) LoadPartial(key string, start, end int64) ([]by
 	_ = binary.Write(&buffer, binary.LittleEndian, header)
 
 	return buffer.Bytes(), nil
+}
+
+func (kv *mockWrongHeaderDataKV) GetSize(key string) (int64, error) {
+	return 0, errors.New("wrong header")
 }
 
 func newMockWrongHeaderDataKV() kv.DataKV {
@@ -121,7 +129,7 @@ func TestGetBinlogSize(t *testing.T) {
 
 		size, err = GetBinlogSize(memoryKV, blob.Key)
 		assert.Nil(t, err)
-		assert.Equal(t, size+int64(binary.Size(MagicNumber)), int64(len(blob.Value)))
+		assert.Equal(t, size, int64(len(blob.Value)))
 	}
 }
 
@@ -243,6 +251,10 @@ func (kv *mockFailedToGetDescDataKV) LoadPartial(key string, start, end int64) (
 	return buf.Bytes(), nil
 }
 
+func (kv *mockFailedToGetDescDataKV) GetSize(key string) (int64, error) {
+	return 0, nil
+}
+
 func newMockFailedToGetDescDataKV() *mockFailedToGetDescDataKV {
 	return &mockFailedToGetDescDataKV{}
 }
@@ -282,6 +294,10 @@ func (kv *mockLessDescDataKV) LoadPartial(key string, start, end int64) ([]byte,
 	*/
 }
 
+func (kv *mockLessDescDataKV) GetSize(key string) (int64, error) {
+	return 0, nil
+}
+
 func newMockLessDescDataKV() *mockLessDescDataKV {
 	return &mockLessDescDataKV{}
 }
@@ -305,6 +321,10 @@ func (kv *mockOriginalSizeDataKV) LoadPartial(key string, start, end int64) ([]b
 		return kv.impl(key, start, end)
 	}
 	return nil, nil
+}
+
+func (kv *mockOriginalSizeDataKV) GetSize(key string) (int64, error) {
+	return 0, nil
 }
 
 func newMockOriginalSizeDataKV() *mockOriginalSizeDataKV {
