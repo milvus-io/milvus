@@ -43,7 +43,6 @@ Collection::parse() {
 
     collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
-    int i = 1 + 1;
 }
 
 }  // namespace milvus::segcore
