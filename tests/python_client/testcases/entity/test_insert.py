@@ -398,7 +398,7 @@ class TestInsertBase:
     def test_insert_partition_repeatedly(self, connect, collection):
         """
         target: test insert entities in collection created before
-        method: create collection and insert entities in it repeatly, with the partition_name param
+        method: create collection and insert entities in it repeatedly, with the partition_name param
         expected: the collection row count equals to nq
         """
         connect.create_partition(collection, default_tag)
