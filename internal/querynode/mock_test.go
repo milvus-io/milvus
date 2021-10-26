@@ -1254,8 +1254,7 @@ func consumeSimpleRetrieveResult(stream msgstream.MsgStream) (*msgstream.Retriev
 }
 
 func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
-	return &querypb.SealedSegmentsChangeInfo{
-		Base:         genCommonMsgBase(commonpb.MsgType_LoadBalanceSegments),
+	changeInfo := &querypb.SegmentChangeInfo{
 		OnlineNodeID: Params.QueryNodeID,
 		OnlineSegments: []*querypb.SegmentInfo{
 			genSimpleSegmentInfo(),
@@ -1264,6 +1263,11 @@ func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 		OfflineSegments: []*querypb.SegmentInfo{
 			genSimpleSegmentInfo(),
 		},
+	}
+
+	return &querypb.SealedSegmentsChangeInfo{
+		Base:  genCommonMsgBase(commonpb.MsgType_LoadBalanceSegments),
+		Infos: []*querypb.SegmentChangeInfo{changeInfo},
 	}
 }
 
