@@ -192,7 +192,7 @@ func (c *ChannelStore) Update(opSet ChannelOpSet) error {
 			if op.Type == Add {
 				chOp.ChannelWatchInfos = []*datapb.ChannelWatchInfo{op.ChannelWatchInfos[i]}
 			}
-			channelsOpSet[ch.name] = append(channelsOpSet[ch.name], chOp)
+			channelsOpSet[ch.Name] = append(channelsOpSet[ch.Name], chOp)
 		}
 	}
 
