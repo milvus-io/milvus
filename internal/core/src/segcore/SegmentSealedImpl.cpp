@@ -9,10 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "segcore/SegmentSealedImpl.h"
+#include "common/Consts.h"
+#include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/ScalarIndex.h"
-#include "query/SearchBruteForce.h"
+#include "segcore/SegmentSealedImpl.h"
 
 namespace milvus::segcore {
 
@@ -444,7 +445,7 @@ SegmentSealedImpl::bulk_subscript_impl(const void* src_raw, const int64_t* seg_o
     auto dst = reinterpret_cast<T*>(dst_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        dst[i] = offset == -1 ? -1 : src[offset];
+        dst[i] = (offset == INVALID_SEG_OFFSET ? INVALID_ID : src[offset]);
     }
 }
 
@@ -458,12 +459,7 @@ SegmentSealedImpl::bulk_subscript_impl(
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         auto dst = dst_vec + i * element_sizeof;
-        const char* src;
-        if (offset != -1) {
-            src = src_vec + element_sizeof * offset;
-        } else {
-            src = none.data();
-        }
+        const char* src = (offset == INVALID_SEG_OFFSET ? none.data() : (src_vec + element_sizeof * offset));
         memcpy(dst, src, element_sizeof);
     }
 }
