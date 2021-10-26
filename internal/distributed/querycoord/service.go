@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+// Server is the grpc server of QueryCoord.
 type Server struct {
 	wg         sync.WaitGroup
 	loopCtx    context.Context
