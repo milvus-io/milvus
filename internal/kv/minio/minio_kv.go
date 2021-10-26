@@ -249,6 +249,7 @@ func (kv *MinIOKV) MultiRemove(keys []string) error {
 	return resultErr
 }
 
+// LoadPartial loads partial data ranged in [start, end) with @key.
 func (kv *MinIOKV) LoadPartial(key string, start, end int64) ([]byte, error) {
 	switch {
 	case start < 0 || end < 0:
