@@ -328,31 +328,12 @@ func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChange
 				},
 			},
 		})
-		// 3. delete growing segment because these segments are loaded
-		hasGrowingSegment := q.streaming.replica.hasSegment(segment.SegmentID)
-		if hasGrowingSegment {
-			err = q.streaming.replica.removeSegment(segment.SegmentID)
-			if err != nil {
-				return err
-			}
-			log.Debug("remove growing segment in adjustByChangeInfo",
-				zap.Any("collectionID", q.collectionID),
-				zap.Any("segmentID", segment.SegmentID),
-			)
-		}
 	}
 
 	// for OfflineSegments:
 	for _, segment := range msg.OfflineSegments {
-		// 1. update global sealed segments
+		// update global sealed segments
 		q.globalSegmentManager.removeGlobalSegmentInfo(segment.SegmentID)
-		// 2. load balance, remove old sealed segments
-		if msg.OfflineNodeID == Params.QueryNodeID {
-			err := q.historical.replica.removeSegment(segment.SegmentID)
-			if err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }

@@ -375,6 +375,38 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		waitTaskFinalState(handoffTask, taskFailed)
 	})
 
+	releasePartitionTask := genReleasePartitionTask(baseCtx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(releasePartitionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(releasePartitionTask, taskExpired)
+
+	t.Run("Test handoffReleasedPartition", func(t *testing.T) {
+		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_handoff)
+		segmentInfo := &querypb.SegmentInfo{
+			SegmentID:    defaultSegmentID,
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+			SegmentState: querypb.SegmentState_sealed,
+		}
+		handoffReq := &querypb.HandoffSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_HandoffSegments,
+			},
+			SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
+		}
+		handoffTask := &handoffTask{
+			baseTask:               baseTask,
+			HandoffSegmentsRequest: handoffReq,
+			dataCoord:              queryCoord.dataCoordClient,
+			cluster:                queryCoord.cluster,
+			meta:                   queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(handoffTask)
+		assert.Nil(t, err)
+
+		waitTaskFinalState(handoffTask, taskExpired)
+	})
+
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)

@@ -666,6 +666,6 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 		info.OfflineSegments = append(info.OfflineSegments, genSimpleSegmentInfo())
 
 		err = qc.adjustByChangeInfo(info)
-		assert.Error(t, err)
+		assert.Nil(t, err)
 	})
 }

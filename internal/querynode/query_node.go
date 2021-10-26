@@ -43,7 +43,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -356,23 +355,7 @@ func (node *QueryNode) adjustByChangeInfo(info *querypb.SealedSegmentsChangeInfo
 
 	// For online segments:
 	for _, segmentInfo := range info.OnlineSegments {
-		// 1. update excluded segment, cluster have been loaded sealed segments,
-		// so we need to avoid getting growing segment from flow graph.
-		node.streaming.replica.addExcludedSegments(segmentInfo.CollectionID, []*datapb.SegmentInfo{
-			{
-				ID:            segmentInfo.SegmentID,
-				CollectionID:  segmentInfo.CollectionID,
-				PartitionID:   segmentInfo.PartitionID,
-				InsertChannel: segmentInfo.ChannelID,
-				NumOfRows:     segmentInfo.NumRows,
-				// TODO: add status, remove query pb segment status, use common pb segment status?
-				DmlPosition: &internalpb.MsgPosition{
-					// use max timestamp to filter out dm messages
-					Timestamp: typeutil.MaxTimestamp,
-				},
-			},
-		})
-		// 2. delete growing segment because these segments are loaded in historical.
+		// delete growing segment because these segments are loaded in historical.
 		hasGrowingSegment := node.streaming.replica.hasSegment(segmentInfo.SegmentID)
 		if hasGrowingSegment {
 			err := node.streaming.replica.removeSegment(segmentInfo.SegmentID)
@@ -389,7 +372,7 @@ func (node *QueryNode) adjustByChangeInfo(info *querypb.SealedSegmentsChangeInfo
 
 	// For offline segments:
 	for _, segment := range info.OfflineSegments {
-		// 1. load balance or compaction, remove old sealed segments.
+		// load balance or compaction, remove old sealed segments.
 		if info.OfflineNodeID == Params.QueryNodeID {
 			err := node.historical.replica.removeSegment(segment.SegmentID)
 			if err != nil {
