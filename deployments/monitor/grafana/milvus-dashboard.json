@@ -2753,7 +2753,7 @@
       "pluginVersion": "7.5.4",
       "targets": [
         {
-          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
