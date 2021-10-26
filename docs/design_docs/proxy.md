@@ -1,6 +1,6 @@
 ## 6. Proxy
 
-As the user access layer of Milvus, Proxy mainly plays a role that does some check and preprocessing for requests from
+As the user access layer of Milvus, Proxy mainly plays a role that does some checks and preprocessing for requests from
 clients and then forward these requests to other components, such as Root Coordinator, Data Coordinator, Query
 Coordinator, Index Coordinator. The below figure shows that how Proxy interacts with other components.
 
