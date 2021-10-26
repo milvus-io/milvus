@@ -83,12 +83,12 @@ To support this watermark mechanism, Proxy should report the timestamp statistic
 Coordinator periodically. When Proxy knows all operations of a specific were done before a `ts`, then Proxy will report
 the `ts` and inform Root Coordinator that udpates the timestmap statistics.
 
-Proxy holds a cache about meta information of collections. These meta information includes `CollectionID`, `Schema`,
-`PartitionID` and etc. Components in Milvus communicate with each other using `CollectionID` and `PartitionID`, so the
+Proxy holds a cache about meta information of collections. The meta information includes `CollectionID`, `Schema`,
+`PartitionID`, etc. Components in Milvus communicate with each other using `CollectionID` and `PartitionID`, so the
 object name in request will be translated to object ID in Proxy. When the meta is not hit in cache, Proxy will update
 the cache from Root Coordinator. At the same time, in order to keep the consistency of cache, when there are any changes
-of meta information in Root Coordinator, it will inform all Proxies to clear the related meta cache and the later
-requests that need these meta will get the newest meta information.
+of meta information in Root Coordinator, it will inform all Proxies to clear the related meta cache, and any newer
+requests will get the latest meta information.
 
 For inserts to a collection which is auto_id configured in the collection schema, Proxy assigns a primary key for
 every row of insert request. For now the only supported data type of auto-generated primary field is `int64`. Proxy 
