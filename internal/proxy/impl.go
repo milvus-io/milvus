@@ -1379,7 +1379,9 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		Condition: NewTaskCondition(ctx),
 		req:       deleteReq,
 		BaseDeleteTask: BaseDeleteTask{
-			BaseMsg: msgstream.BaseMsg{},
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: request.HashKeys,
+			},
 			DeleteRequest: internalpb.DeleteRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Delete,
