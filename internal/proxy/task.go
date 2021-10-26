@@ -1517,10 +1517,14 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		}
 		roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, st.query.SearchParams)
 		if err != nil {
-			return errors.New(RoundDecimalKey + "not found in search_params")
+			roundDecimalStr = "-1"
 		}
-		roundDeciaml, err := strconv.Atoi(roundDecimalStr)
+		roundDecimal, err := strconv.Atoi(roundDecimalStr)
 		if err != nil {
+			return errors.New(RoundDecimalKey + " " + roundDecimalStr + " is not invalid")
+		}
+
+		if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
 			return errors.New(RoundDecimalKey + " " + roundDecimalStr + " is not invalid")
 		}
 
@@ -1528,7 +1532,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			Topk:         int64(topK),
 			MetricType:   metricType,
 			SearchParams: searchParams,
-			RoundDecimal: int64(roundDeciaml),
+			RoundDecimal: int64(roundDecimal),
 		}
 
 		log.Debug("create query plan",
