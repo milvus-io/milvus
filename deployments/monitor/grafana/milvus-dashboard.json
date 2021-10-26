@@ -2984,7 +2984,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of show_segments as measured over the last 5 minutes",
+      "description": "per-minute rate of show_segments",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
