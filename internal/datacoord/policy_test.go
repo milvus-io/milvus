@@ -481,7 +481,6 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"ch1", 1}, {"ch2", 1}}},
-						2: {2, []*channel{{"ch3", 1}, {"ch4", 1}}},
 					},
 				},
 				3,
