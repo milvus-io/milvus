@@ -48,6 +48,7 @@ type ReplicaInterface interface {
 	getCollectionIDs() []UniqueID
 	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
 	removeCollection(collectionID UniqueID) error
+	// getCollectionByID gets the collection which id is collectionID
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	hasCollection(collectionID UniqueID) bool
 	getCollectionNum() int
