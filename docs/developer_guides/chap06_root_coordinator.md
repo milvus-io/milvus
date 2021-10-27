@@ -11,30 +11,22 @@ type RootCoord interface {
 
 	// DDL request
   // CreateCollection notifies RootCoord to create a collection
-	//
-	// ctx is the context to control request deadline and cancellation
-	// req contains the request params, including database name(not used), collection name, collection schema and
-	//     physical channel num for inserting data
-	//
-	// The `ErrorCode` of `Status` is `Success` if create collection successfully;
-	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
-	// error is always nil
 	CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
 	// DropCollection notifies RootCoord to drop a collection
-	//
-	// ctx is the context to control request deadline and cancellation
-	// req contains the request params, including database name(not used) and collection name
-	//
-	// The `ErrorCode` of `Status` is `Success` if drop collection successfully;
-	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
-	// error is always nil
 	DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+  // HasCollection notifies RootCoord to check a collection's existence at specified timestamp
 	HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+  // DescribeCollection notifies RootCoord to get all information about this collection at specified timestamp
 	DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+  // ShowCollections notifies RootCoord to list all collection names and other info in database at specified timestamp
 	ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)
-	CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+	// CreatePartition notifies RootCoord to create a partition
+  CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+  // DropPartition notifies RootCoord to drop a partition
 	DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+  // HasPartition notifies RootCoord to check if a partition with specified name exists in the collection
 	HasPartition(ctx context.Context, req *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+  // ShowPartitions notifies RootCoord to list all partition names and other info in the collection
 	ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 
 	//index builder service
