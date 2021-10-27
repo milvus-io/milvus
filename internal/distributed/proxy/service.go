@@ -122,12 +122,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("proxy node init done ...")
+	log.Debug("Proxy node init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("proxy node start done ...")
+	log.Debug("Proxy node start done ...")
 	return nil
 }
 
