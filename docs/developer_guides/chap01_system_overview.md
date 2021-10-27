@@ -20,9 +20,9 @@ A batch insert/delete is guaranteed to become visible atomically.
 
 <img src="./figs/data_organization.png" width=550>
 
-In Milvus, 'collection' refers to the concept of table. A collection can be optionally divided into several 'partitions'. Both collection and partition are the basic execution scopes of queries. When using partition, users should know how a collection should be partitioned. In most cases, partition leads to more flexible data management and more efficient querying. For a partitioned collection, queries can be executed both on the collection or a set of specified partitions.
+In Milvus, 'collection' refers to the concept of a table. A collection can be optionally divided into several 'partitions'. Both collection and partition are the basic execution scopes of queries. When using the partition, users should know how a collection should be partitioned. In most cases, partition leads to more flexible data management and more efficient querying. For a partitioned collection, queries can be executed both on the collection or a set of specified partitions.
 
-Each collection or partition contains a set of 'segment groups'. Segment group is the basic unit of data-to-node mapping. It's also the basic unit of a replica. For instance, if a query node failed, its segment groups will be redistributed across other nodes. If a query node is overloaded, part of its segment groups will be migrated to underloaded ones. If a hot collection/partition is detected, its segment groups will be replicated to smooth the system load skewness.
+Each collection or partition contains a set of 'segment groups'. The Segment group is the basic unit of data-to-node mapping. It's also the basic unit of a replica. For instance, if a query node failed, its segment groups will be redistributed across other nodes. If a query node is overloaded, part of its segment groups will be migrated to underloaded ones. If a hot collection/partition is detected, its segment groups will be replicated to smooth the system load skewness.
 
 'Segment' is the finest unit of data organization. It is where the data and indexes are actually kept. Each segment contains a set of rows. In order to reduce the memory footprint during query execution and to fully utilize SIMD, the physical data layout within segments is organized in a column-based manner.
 
@@ -34,7 +34,7 @@ The main components, proxy, WAL, query node, and write node can scale to multipl
 
 The WAL forms a hash ring. Requests (i.e. inserts and deletes) from clients will be repacked by proxy. Operations shared the identical hash value (the hash value of primary key) will be routed to the same hash bucket. In addition, some preprocessing work will be done by proxy, such as static validity checking, primary key assignment (if not given by the user), timestamp assignment.
 
-The query/write nodes are linked to the hash ring, with each node covers some portion of the buckets. Once the hash function and bucket coverage are settled, the chain 'proxy -> WAL -> query/write node' will act as a producer-consumer pipeline. Logs in each bucket is a determined operation stream. Via performing the operation stream in order, the query nodes keep themselves up to date.
+The query/write nodes are linked to the hash ring, with each node covering some portion of the buckets. Once the hash function and bucket coverage are settled, the chain 'proxy -> WAL -> query/write node' will act as a producer-consumer pipeline. Logs in each bucket are a determined operation stream. Via performing the operation stream in order, the query nodes keep themselves up to date.
 
 The query nodes hold all the indexes in memory. Since building an index is time-consuming, the query nodes will dump their index to disk (store engine) for fast failure recovery and cross node index copy.
 
