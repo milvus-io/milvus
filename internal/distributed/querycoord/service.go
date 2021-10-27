@@ -94,6 +94,7 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// init initializes QueryCoord's grpc service.
 func (s *Server) init() error {
 	Params.Init()
 
