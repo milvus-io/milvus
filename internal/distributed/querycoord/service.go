@@ -220,6 +220,7 @@ func (s *Server) start() error {
 	return s.queryCoord.Start()
 }
 
+// Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() error {
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
