@@ -16,6 +16,7 @@ query_res_tmp_expr = [{f'{ct.default_int64_field_name}': 0}]
 exp_res = "exp_res"
 
 
+@pytest.mark.skip(reason="Delete API disabled")
 class TestDeleteParams(TestcaseBase):
     """
     Test case of delete interface
@@ -226,7 +227,6 @@ class TestDeleteParams(TestcaseBase):
         collection_w.query(f'{ct.default_int64_field_name} in [1]',
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.xfail(reason="Issues #10431")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_default_partition(self):
         """
@@ -238,9 +238,9 @@ class TestDeleteParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
         del_res, _ = collection_w.delete(tmp_expr, partition_name=ct.default_partition_name)
         assert del_res.delete_count == 1
+        collection_w.num_entities
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.xfail(reason="Issue: #10466")
     @pytest.mark.parametrize("partition_name", [1, [], {}, ()])
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_non_string_partition_name(self, partition_name):
@@ -252,11 +252,11 @@ class TestDeleteParams(TestcaseBase):
         # create, insert with flush, load collection
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
-        error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
-        collection_w.delete(tmp_expr, partitio_name=partition_name)
+        error = {ct.err_code: 0, ct.err_msg: f"partition_name value {partition_name} is illegal"}
+        collection_w.delete(tmp_expr, partition_name=partition_name, check_task=CheckTasks.err_res, check_items=error)
 
 
-# @pytest.mark.xfail(reason="Waiting for debug")
+@pytest.mark.skip(reason="Delete API disabled")
 class TestDeleteOperation(TestcaseBase):
     """
     ******************************************************************
@@ -323,7 +323,7 @@ class TestDeleteOperation(TestcaseBase):
                 3.load and query id 0
                 4.insert new id and delete the id
                 5.query id 0 and new id
-        expected: Empty querybresult
+        expected: Empty query result
         """
         # init collection and insert data without flush
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
@@ -527,7 +527,6 @@ class TestDeleteOperation(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: f"collection {collection_w.name} was not loaded into memory"}
         collection_w.query(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.xfail(reason="Issues #10382")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_without_flush(self):
         """
@@ -549,6 +548,7 @@ class TestDeleteOperation(TestcaseBase):
 
         # load and query with id
         collection_w.load()
+        time.sleep(1)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
