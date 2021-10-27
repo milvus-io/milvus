@@ -90,6 +90,7 @@ func (s *Server) Run() error {
 	if err := s.start(); err != nil {
 		return err
 	}
+	log.Debug("QueryCoord start done ...")
 	return nil
 }
 
