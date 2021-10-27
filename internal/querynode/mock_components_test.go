@@ -177,10 +177,22 @@ func (m *mockRootCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetrics
 type mockIndexCoord struct {
 	types.Component
 	types.TimeTickProvider
+
+	idxFileInfo *indexpb.IndexFilePathInfo
 }
 
 func newMockIndexCoord() *mockIndexCoord {
-	return &mockIndexCoord{}
+	paths, _ := generateIndex(defaultSegmentID)
+	return &mockIndexCoord{
+		idxFileInfo: &indexpb.IndexFilePathInfo{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			IndexBuildID:   buildID,
+			IndexFilePaths: paths,
+		},
+	}
+
 }
 
 func (m *mockIndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
@@ -196,27 +208,11 @@ func (m *mockIndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetInd
 }
 
 func (m *mockIndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	paths, err := generateIndex(defaultSegmentID)
-	if err != nil {
-		return &indexpb.GetIndexFilePathsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, nil
-	}
 	return &indexpb.GetIndexFilePathsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		FilePaths: []*indexpb.IndexFilePathInfo{
-			{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				IndexBuildID:   buildID,
-				IndexFilePaths: paths,
-			},
-		},
+		FilePaths: []*indexpb.IndexFilePathInfo{m.idxFileInfo},
 	}, nil
 }
 
