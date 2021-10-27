@@ -363,11 +363,16 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 
 		for _, segmentBingLog := range recoveryInfo.Binlogs {
 			segmentID := segmentBingLog.SegmentID
+			err = lct.meta.saveSegmentBinlog(collectionID, partitionID, segmentBingLog)
+			if err != nil {
+				log.Error("loadCollectionTask: save segment binlog info failed", zap.Int64("collectionID", collectionID))
+				lct.setResultInfo(err)
+				return err
+			}
 			segmentLoadInfo := &querypb.SegmentLoadInfo{
 				SegmentID:    segmentID,
 				PartitionID:  partitionID,
 				CollectionID: collectionID,
-				BinlogPaths:  segmentBingLog.FieldBinlogs,
 				NumOfRows:    segmentBingLog.NumOfRows,
 				Statslogs:    segmentBingLog.Statslogs,
 				Deltalogs:    segmentBingLog.Deltalogs,
@@ -688,14 +693,18 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			lpt.setResultInfo(err)
 			return err
 		}
-
 		for _, segmentBingLog := range recoveryInfo.Binlogs {
 			segmentID := segmentBingLog.SegmentID
+			err = lpt.meta.saveSegmentBinlog(collectionID, partitionID, segmentBingLog)
+			if err != nil {
+				log.Error("loadPartitionTask: save segment binlog info failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
+				lpt.setResultInfo(err)
+				return err
+			}
 			segmentLoadInfo := &querypb.SegmentLoadInfo{
 				SegmentID:    segmentID,
 				PartitionID:  partitionID,
 				CollectionID: collectionID,
-				BinlogPaths:  segmentBingLog.FieldBinlogs,
 				NumOfRows:    segmentBingLog.NumOfRows,
 				Statslogs:    segmentBingLog.Statslogs,
 				Deltalogs:    segmentBingLog.Deltalogs,
@@ -1612,11 +1621,16 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 
 					for _, segmentBingLog := range recoveryInfo.Binlogs {
 						segmentID := segmentBingLog.SegmentID
+						err = lbt.meta.saveSegmentBinlog(collectionID, partitionID, segmentBingLog)
+						if err != nil {
+							log.Error("loadBalanceTask: save segment binlog info failed", zap.Any("task", lbt))
+							lbt.setResultInfo(err)
+							return err
+						}
 						segmentLoadInfo := &querypb.SegmentLoadInfo{
 							SegmentID:    segmentID,
 							PartitionID:  partitionID,
 							CollectionID: collectionID,
-							BinlogPaths:  segmentBingLog.FieldBinlogs,
 							NumOfRows:    segmentBingLog.NumOfRows,
 							Statslogs:    segmentBingLog.Statslogs,
 							Deltalogs:    segmentBingLog.Deltalogs,

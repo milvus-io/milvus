@@ -24,8 +24,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -37,6 +39,7 @@ const (
 	segmentMetaPrefix             = "queryCoord-segmentMeta"
 	queryChannelMetaPrefix        = "queryCoord-queryChannel"
 	sealedSegmentChangeInfoPrefix = "queryCoord-sealedSegmentChangeInfo"
+	segmentBinlogPrefix           = "queryCoord-segmentBinlog"
 )
 
 type col2SegmentInfos = map[UniqueID][]*querypb.SegmentInfo
@@ -77,6 +80,10 @@ type Meta interface {
 	getLoadType(collectionID UniqueID) (querypb.LoadType, error)
 	setLoadPercentage(collectionID UniqueID, partitionID UniqueID, percentage int64, loadType querypb.LoadType) error
 	//printMeta()
+
+	saveSegmentBinlog(collectionID UniqueID, partitionID UniqueID, binlogs *datapb.SegmentBinlogs) error
+	loadSegmentBinlog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) (*datapb.SegmentBinlogs, error)
+
 	saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2SealedSegmentChangeInfos, error)
 	removeGlobalSealedSegInfos(collectionID UniqueID, partitionIDs []UniqueID) (col2SealedSegmentChangeInfos, error)
 	sendSealedSegmentChangeInfos(collectionID UniqueID, changeInfos *querypb.SealedSegmentsChangeInfo) (*querypb.QueryChannelInfo, map[string][]mqclient.MessageID, error)
@@ -705,7 +712,13 @@ func (m *MetaReplica) getPartitionStatesByID(collectionID UniqueID, partitionID 
 func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 	err := removeGlobalCollectionInfo(collectionID, m.client)
 	if err != nil {
-		log.Warn("remove collectionInfo from etcd failed", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		log.Error("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		return err
+	}
+	binlogsPrefix := fmt.Sprintf("%s/%d", segmentBinlogPrefix, collectionID)
+	err = m.client.RemoveWithPrefix(binlogsPrefix)
+	if err != nil {
+		log.Error("remove segment binlog info error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 		return err
 	}
 
@@ -749,6 +762,12 @@ func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID Unique
 		err = saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("releasePartition: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
+			return err
+		}
+		binlogsPrefix := fmt.Sprintf("%s/%d/%d", segmentBinlogPrefix, collectionID, partitionID)
+		err = m.client.RemoveWithPrefix(binlogsPrefix)
+		if err != nil {
+			log.Error("remove segment binlog info error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
 		}
 
@@ -998,6 +1017,31 @@ func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID Uniqu
 	m.collectionMu.Unlock()
 
 	return nil
+}
+
+func (m *MetaReplica) saveSegmentBinlog(collectionID UniqueID, partitionID UniqueID, binlogs *datapb.SegmentBinlogs) error {
+	binlogsBytes, err := proto.Marshal(binlogs)
+	if err != nil {
+		return err
+	}
+
+	key := fmt.Sprintf("%s/%d/%d/%d", segmentBinlogPrefix, collectionID, partitionID, binlogs.SegmentID)
+	return m.client.Save(key, string(binlogsBytes))
+}
+
+func (m *MetaReplica) loadSegmentBinlog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) (*datapb.SegmentBinlogs, error) {
+	key := fmt.Sprintf("%s/%d/%d/%d", segmentBinlogPrefix, collectionID, partitionID, segmentID)
+	binlogsBytes, err := m.client.Load(key)
+	if err != nil {
+		return nil, err
+	}
+	binlogs := &datapb.SegmentBinlogs{}
+	err = proto.Unmarshal([]byte(binlogsBytes), binlogs)
+	if err != nil {
+		return nil, err
+	}
+
+	return binlogs, nil
 }
 
 //func (m *MetaReplica) printMeta() {

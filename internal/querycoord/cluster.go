@@ -212,7 +212,14 @@ func (c *queryNodeCluster) getComponentInfos(ctx context.Context) ([]*internalpb
 func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *querypb.LoadSegmentsRequest) error {
 	c.Lock()
 	defer c.Unlock()
-
+	for _, info := range in.Infos {
+		segmentID := info.SegmentID
+		segBinlogs, err := c.clusterMeta.loadSegmentBinlog(info.CollectionID, info.PartitionID, segmentID)
+		if err != nil {
+			return err
+		}
+		info.BinlogPaths = segBinlogs.FieldBinlogs
+	}
 	if node, ok := c.nodes[nodeID]; ok {
 		err := node.loadSegments(ctx, in)
 		if err != nil {

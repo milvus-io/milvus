@@ -12,6 +12,7 @@ package querycoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -336,6 +337,71 @@ func Test_RepeatLoadCollection(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func Test_BinlogPathNotNilInLoadSegmentReq(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
+	assert.Nil(t, err)
+
+	waitTaskFinalState(loadCollectionTask, taskExpired)
+	loadSegReqs := make([]*loadSegmentTask, 0)
+	for _, childTask := range loadCollectionTask.getChildTask() {
+		if childTask.msgType() == commonpb.MsgType_LoadSegments {
+			loadSegReqs = append(loadSegReqs, childTask.(*loadSegmentTask))
+		}
+	}
+	assert.NotEqual(t, 0, len(loadSegReqs))
+	assert.NotNil(t, loadSegReqs[0].LoadSegmentsRequest.Infos[0].BinlogPaths)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_ClearBinlogsAfterRelease(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadCollectionTask, taskExpired)
+
+	prefix := fmt.Sprintf("%s/%d", segmentBinlogPrefix, defaultCollectionID)
+	keys, _, err := queryCoord.kvClient.LoadWithPrefix(prefix)
+	assert.Nil(t, err)
+	assert.NotEqual(t, 0, len(keys))
+
+	releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(releaseCollectionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(releaseCollectionTask, taskExpired)
+
+	keys, _, err = queryCoord.kvClient.LoadWithPrefix(prefix)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(keys))
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
 func Test_LoadCollectionAssignTaskFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
@@ -595,6 +661,8 @@ func Test_RescheduleSegmentWithWatchQueryChannel(t *testing.T) {
 	node1.loadSegment = returnFailedResult
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
 	loadCollectionTask := loadSegmentTask.parentTask
+	key := fmt.Sprintf("%s/%d/%d/%d", segmentBinlogPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+	queryCoord.kvClient.Save(key, "")
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 
 	waitTaskFinalState(loadCollectionTask, taskExpired)

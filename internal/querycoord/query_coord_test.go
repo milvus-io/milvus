@@ -294,12 +294,13 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
 		assert.NotEqual(t, 0, len(infos))
 		segmentID := defaultSegmentID + 4
+		partitiononID := defaultPartitionID + 2
 		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_handoff)
 
 		segmentInfo := &querypb.SegmentInfo{
 			SegmentID:    segmentID,
 			CollectionID: defaultCollectionID,
-			PartitionID:  defaultPartitionID + 2,
+			PartitionID:  partitiononID,
 			SegmentState: querypb.SegmentState_sealed,
 		}
 		handoffReq := &querypb.HandoffSegmentsRequest{
@@ -315,6 +316,9 @@ func TestHandoffSegmentLoop(t *testing.T) {
 			cluster:                queryCoord.cluster,
 			meta:                   queryCoord.meta,
 		}
+		key := fmt.Sprintf("%s/%d/%d/%d", segmentBinlogPrefix, defaultCollectionID, partitiononID, segmentID)
+		queryCoord.kvClient.Save(key, "")
+
 		err = queryCoord.scheduler.Enqueue(handoffTask)
 		assert.Nil(t, err)
 

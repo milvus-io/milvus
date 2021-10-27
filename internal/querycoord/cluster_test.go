@@ -150,6 +150,8 @@ func TestGrpcRequest(t *testing.T) {
 			DstNodeID: nodeID,
 			Infos:     []*querypb.SegmentLoadInfo{segmentLoadInfo},
 		}
+		key := fmt.Sprintf("%s/%d/%d/%d", segmentBinlogPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+		kv.Save(key, "")
 		err := cluster.loadSegments(baseCtx, nodeID, loadSegmentReq)
 		assert.Nil(t, err)
 	})
