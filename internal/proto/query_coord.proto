@@ -161,9 +161,10 @@ message SegmentInfo {
   string index_name = 7;
   int64 indexID = 8;
   string channelID = 9;
-  SegmentState segment_state = 10;
+  SegmentState segment_state = 10; // will deprecated
   repeated int64 compactionFrom = 11;
   bool createdByCompaction = 12;
+  common.SegmentState state = 13;
 }
 
 message GetSegmentInfoResponse {
