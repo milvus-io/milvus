@@ -212,8 +212,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
 			return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
 		}
+		dsService.flushingSegCache.Remove(req.GetSegmentID())
 		return nil
-
 	})
 
 	c := &nodeConfig{
