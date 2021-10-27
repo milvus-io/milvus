@@ -103,13 +103,13 @@ class TestcaseBase(Base):
                                                     port=param_info.param_port)
         return res
 
-    def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None, **kwargs):
+    def init_collection_wrap(self, name=None, schema=None, shards_num=2, check_task=None, check_items=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
         if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=name, schema=schema, check_task=check_task, check_items=check_items, **kwargs)
+        collection_w.init_collection(name=name, schema=schema, shards_num=shards_num, check_task=check_task, check_items=check_items, **kwargs)
         self.collection_object_list.append(collection_w)
         return collection_w
 
@@ -150,6 +150,7 @@ class TestcaseBase(Base):
         vectors = []
         binary_raw_vectors = []
         insert_ids = []
+        time_stamp = 0
         # 1 create collection
         default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim)
         if is_binary:
@@ -164,16 +165,17 @@ class TestcaseBase(Base):
             cf.gen_partitions(collection_w, partition_num)
         # 3 insert data if specified
         if insert_data:
-            collection_w, vectors, binary_raw_vectors, insert_ids = \
-                cf.insert_data(collection_w, nb, is_binary, is_all_data_type,
-                               auto_id=auto_id, dim=dim)
+            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
+                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim)
             assert collection_w.is_empty is False
             assert collection_w.num_entities == nb
+            log.info("insert_data: inserted data into collection %s (num_entities: %s)"
+                     % (collection_w.name, nb))
             # This condition will be removed after auto index feature
             if not is_index:
                 collection_w.load()
 
-        return collection_w, vectors, binary_raw_vectors, insert_ids
+        return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
     def insert_entities_into_two_partitions_in_half(self, half, prefix='query'):
         """

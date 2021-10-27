@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
@@ -375,7 +391,11 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	}
 	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	segment2StatsBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	segment2DeltaBinlogs := make(map[UniqueID][]*datapb.DeltaLogInfo)
 	segmentsNumOfRows := make(map[UniqueID]int64)
+
+	flushedIDs := make(map[int64]struct{})
 	for _, id := range segmentIDs {
 		segment := s.meta.GetSegment(id)
 		if segment == nil {
@@ -386,6 +406,10 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}
 		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing {
 			continue
+		}
+		_, ok := flushedIDs[id]
+		if !ok {
+			flushedIDs[id] = struct{}{}
 		}
 
 		binlogs := segment.GetBinlogs()
@@ -403,14 +427,32 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}
 
 		segmentsNumOfRows[id] = segment.NumOfRows
+
+		statsBinlogs := segment.GetStatslogs()
+		field2StatsBinlog := make(map[UniqueID][]string)
+		for _, field := range statsBinlogs {
+			field2StatsBinlog[field.GetFieldID()] = append(field2StatsBinlog[field.GetFieldID()], field.GetBinlogs()...)
+		}
+
+		for f, paths := range field2StatsBinlog {
+			fieldBinlogs := &datapb.FieldBinlog{
+				FieldID: f,
+				Binlogs: paths,
+			}
+			segment2StatsBinlogs[id] = append(segment2StatsBinlogs[id], fieldBinlogs)
+		}
+
+		segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], segment.GetDeltalogs()...)
 	}
 
 	binlogs := make([]*datapb.SegmentBinlogs, 0, len(segment2Binlogs))
-	for segmentID, fieldBinlogs := range segment2Binlogs {
+	for segmentID := range flushedIDs {
 		sbl := &datapb.SegmentBinlogs{
 			SegmentID:    segmentID,
 			NumOfRows:    segmentsNumOfRows[segmentID],
-			FieldBinlogs: fieldBinlogs,
+			FieldBinlogs: segment2Binlogs[segmentID],
+			Statslogs:    segment2StatsBinlogs[segmentID],
+			Deltalogs:    segment2DeltaBinlogs[segmentID],
 		}
 		binlogs = append(binlogs, sbl)
 	}

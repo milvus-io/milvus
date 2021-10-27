@@ -49,8 +49,13 @@ const (
 const maxLengthPerRowOfIndexFile = 4 * 1024 * 1024
 
 type (
-	UniqueID  = typeutil.UniqueID
-	FieldID   = typeutil.UniqueID
+	// UniqueID is type alias of typeutil.UniqueID
+	UniqueID = typeutil.UniqueID
+
+	// FieldID represent the identity number of filed in collection and its type is UniqueID
+	FieldID = typeutil.UniqueID
+
+	// Timestamp is type alias of typeutil.Timestamp
 	Timestamp = typeutil.Timestamp
 )
 
@@ -88,6 +93,8 @@ func (b Blob) GetValue() []byte {
 }
 
 type FieldData interface {
+	Length() int
+	Get(i int) interface{}
 }
 
 type BoolFieldData struct {
@@ -132,6 +139,28 @@ type FloatVectorFieldData struct {
 	Data    []float32
 	Dim     int
 }
+
+func (data *BoolFieldData) Length() int         { return len(data.Data) }
+func (data *Int8FieldData) Length() int         { return len(data.Data) }
+func (data *Int16FieldData) Length() int        { return len(data.Data) }
+func (data *Int32FieldData) Length() int        { return len(data.Data) }
+func (data *Int64FieldData) Length() int        { return len(data.Data) }
+func (data *FloatFieldData) Length() int        { return len(data.Data) }
+func (data *DoubleFieldData) Length() int       { return len(data.Data) }
+func (data *StringFieldData) Length() int       { return len(data.Data) }
+func (data *BinaryVectorFieldData) Length() int { return len(data.Data) }
+func (data *FloatVectorFieldData) Length() int  { return len(data.Data) }
+
+func (data *BoolFieldData) Get(i int) interface{}         { return data.Data[i] }
+func (data *Int8FieldData) Get(i int) interface{}         { return data.Data[i] }
+func (data *Int16FieldData) Get(i int) interface{}        { return data.Data[i] }
+func (data *Int32FieldData) Get(i int) interface{}        { return data.Data[i] }
+func (data *Int64FieldData) Get(i int) interface{}        { return data.Data[i] }
+func (data *FloatFieldData) Get(i int) interface{}        { return data.Data[i] }
+func (data *DoubleFieldData) Get(i int) interface{}       { return data.Data[i] }
+func (data *StringFieldData) Get(i int) interface{}       { return data.Data[i] }
+func (data *BinaryVectorFieldData) Get(i int) interface{} { return data.Data[i] }
+func (data *FloatVectorFieldData) Get(i int) interface{}  { return data.Data[i] }
 
 // why not binary.Size(data) directly? binary.Size(data) return -1
 // binary.Size returns how many bytes Write would generate to encode the value v, which
@@ -215,8 +244,8 @@ func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 // For each field, it will create a binlog writer, and write a event to the binlog.
 // It returns binlog buffer in the end.
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, []*Blob, error) {
-	var blobs []*Blob
-	var statsBlobs []*Blob
+	blobs := make([]*Blob, 0)
+	statsBlobs := make([]*Blob, 0)
 	var writer *InsertBinlogWriter
 	timeFieldData, ok := data.Data[rootcoord.TimeStampField]
 	if !ok {
@@ -303,19 +332,19 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		})
 
 		// stats fields
-		statsWriter := &StatsWriter{}
 		switch field.DataType {
 		case schemapb.DataType_Int64:
+			statsWriter := &StatsWriter{}
 			err = statsWriter.StatsInt64(field.FieldID, field.IsPrimaryKey, singleData.(*Int64FieldData).Data)
+			if err != nil {
+				return nil, nil, err
+			}
+			statsBuffer := statsWriter.GetBuffer()
+			statsBlobs = append(statsBlobs, &Blob{
+				Key:   blobKey,
+				Value: statsBuffer,
+			})
 		}
-		if err != nil {
-			return nil, nil, err
-		}
-		statsBuffer := statsWriter.GetBuffer()
-		statsBlobs = append(statsBlobs, &Blob{
-			Key:   blobKey,
-			Value: statsBuffer,
-		})
 	}
 
 	return blobs, statsBlobs, nil
@@ -576,24 +605,23 @@ func (insertCodec *InsertCodec) Close() error {
 // DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
 // timestamp represents the time when this instance was deleted
 type DeleteData struct {
-	Data map[string]int64 // primary key to timestamp
+	Data map[int64]int64 // primary key to timestamp
 }
 
 // DeleteCodec serializes and deserializes the delete data
 type DeleteCodec struct {
-	Schema          *etcdpb.CollectionMeta
 	readerCloseFunc []func() error
 }
 
 // NewDeleteCodec returns a DeleteCodec
-func NewDeleteCodec(schema *etcdpb.CollectionMeta) *DeleteCodec {
-	return &DeleteCodec{Schema: schema}
+func NewDeleteCodec() *DeleteCodec {
+	return &DeleteCodec{}
 }
 
 // Serialize transfer delete data to blob. .
 // For each delete message, it will save "pk,ts" string to binlog.
-func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *DeleteData) (*Blob, error) {
-	binlogWriter := NewDeleteBinlogWriter(schemapb.DataType_String, deleteCodec.Schema.ID, partitionID, segmentID)
+func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, data *DeleteData) (*Blob, error) {
+	binlogWriter := NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
 	eventWriter, err := binlogWriter.NextDeleteEventWriter()
 	if err != nil {
 		return nil, err
@@ -607,11 +635,11 @@ func (deleteCodec *DeleteCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if value > int64(endTs) {
 			endTs = int(value)
 		}
-		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%s,%d", key, value))
+		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", key, value))
 		if err != nil {
 			return nil, err
 		}
-		sizeTotal += len(key)
+		sizeTotal += binary.Size(key)
 		sizeTotal += binary.Size(value)
 	}
 	eventWriter.SetEventTimestamp(uint64(startTs), uint64(endTs))
@@ -648,7 +676,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	}
 
 	var pid, sid UniqueID
-	result := &DeleteData{Data: make(map[string]int64)}
+	result := &DeleteData{Data: make(map[int64]int64)}
 	for _, blob := range blobs {
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
@@ -677,12 +705,17 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect")
 			}
 
+			pk, err := strconv.ParseInt(splits[0], 10, 64)
+			if err != nil {
+				return InvalidUniqueID, InvalidUniqueID, nil, err
+			}
+
 			ts, err := strconv.ParseInt(splits[1], 10, 64)
 			if err != nil {
 				return InvalidUniqueID, InvalidUniqueID, nil, err
 			}
 
-			result.Data[splits[0]] = ts
+			result.Data[pk] = ts
 		}
 
 		deleteCodec.readerCloseFunc = append(deleteCodec.readerCloseFunc, readerClose(binlogReader))

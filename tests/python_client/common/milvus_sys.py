@@ -9,7 +9,7 @@ sys_logs_req = ujson.dumps({"metric_type": "system_logs"})
 
 
 class MilvusSys:
-    def __init__(self, alias):
+    def __init__(self, alias='default'):
         self.alias = alias
         self.client = connections.get_connection(alias=self.alias)
         if self.client is None:
@@ -73,6 +73,15 @@ class MilvusSys:
         return index_nodes
 
     @property
+    def proxy_nodes(self):
+        """get all proxy nodes in Milvus deployment"""
+        proxy_nodes = []
+        for node in self.nodes:
+            if 'Proxy' == node.get('infos').get('type'):
+                proxy_nodes.append(node)
+        return proxy_nodes
+
+    @property
     def nodes(self):
         """get all the nodes in Milvus deployment"""
         return json.loads(self.sys_info.response).get('nodes_info')
@@ -85,4 +94,3 @@ class MilvusSys:
                 if str(node_type).lower() == str(node.get('infos').get('type')).lower():
                     target_nodes.append(node)
         return target_nodes
-

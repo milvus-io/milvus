@@ -61,7 +61,7 @@ type IDRequest struct {
 	count uint32
 }
 
-// SyncRequest embed BaseRequest and is used to force synchronize from RootCoordinator.
+// SyncRequest embeds BaseRequest and is used to force synchronize from RootCoordinator.
 type SyncRequest struct {
 	BaseRequest
 }
@@ -79,21 +79,21 @@ type EmptyTicker struct {
 	tChan <-chan time.Time
 }
 
-// Chan return a read-only channel from which you can only receive time.Time type data.
+// Chan returns a read-only channel from which you can only receive time.Time type data.
 // As for EmptyTicker, you will never read data from Chan.
 func (t *EmptyTicker) Chan() <-chan time.Time {
 	return t.tChan
 }
 
-// Init do nothing.
+// Init does nothing.
 func (t *EmptyTicker) Init() {
 }
 
-// Reset do nothing.
+// Reset does nothing.
 func (t *EmptyTicker) Reset() {
 }
 
-// Close do nothing.
+// Close does nothing.
 func (t *EmptyTicker) Close() {
 }
 
@@ -108,7 +108,7 @@ func (t *Ticker) Init() {
 	t.ticker = time.NewTicker(t.UpdateInterval)
 }
 
-// Reset rests the inner member `ticker`.
+// Reset resets the inner member `ticker`.
 func (t *Ticker) Reset() {
 	t.ticker.Reset(t.UpdateInterval)
 }

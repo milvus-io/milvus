@@ -202,7 +202,7 @@ func (rmq *rocksmq) Close() {
 
 func (rmq *rocksmq) stopRetention() {
 	if rmq.retentionInfo != nil {
-		rmq.retentionInfo.cancel()
+		rmq.retentionInfo.Stop()
 	}
 }
 

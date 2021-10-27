@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -828,7 +829,7 @@ func genSealedSegment(schemaForCreate *schemapb.CollectionSchema,
 		case *storage.DoubleFieldData:
 			numRows = fieldData.NumRows
 			data = fieldData.Data
-		case storage.StringFieldData:
+		case *storage.StringFieldData:
 			numRows = fieldData.NumRows
 			data = fieldData.Data
 		case *storage.FloatVectorFieldData:
@@ -922,7 +923,11 @@ func genSimpleStreaming(ctx context.Context) (*streaming, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := newStreaming(ctx, fac, kv)
+	historicalReplica, err := genSimpleReplica()
+	if err != nil {
+		return nil, err
+	}
+	s := newStreaming(ctx, fac, kv, historicalReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -1249,6 +1254,37 @@ func consumeSimpleRetrieveResult(stream msgstream.MsgStream) (*msgstream.Retriev
 	return res.Msgs[0].(*msgstream.RetrieveResultMsg), nil
 }
 
+func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
+	changeInfo := &querypb.SegmentChangeInfo{
+		OnlineNodeID: Params.QueryNodeID,
+		OnlineSegments: []*querypb.SegmentInfo{
+			genSimpleSegmentInfo(),
+		},
+		OfflineNodeID: Params.QueryNodeID + 1,
+		OfflineSegments: []*querypb.SegmentInfo{
+			genSimpleSegmentInfo(),
+		},
+	}
+
+	return &querypb.SealedSegmentsChangeInfo{
+		Base:  genCommonMsgBase(commonpb.MsgType_LoadBalanceSegments),
+		Infos: []*querypb.SegmentChangeInfo{changeInfo},
+	}
+}
+
+func saveChangeInfo(key string, value string) error {
+	log.Debug(".. [query node unittest] Saving change info")
+
+	kv, err := genEtcdKV()
+	if err != nil {
+		return err
+	}
+
+	key = changeInfoMetaPrefix + "/" + key
+
+	return kv.Save(key, value)
+}
+
 // node
 func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 	fac, err := genFactory()
@@ -1256,6 +1292,13 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 		return nil, err
 	}
 	node := NewQueryNode(ctx, fac)
+
+	etcdKV, err := genEtcdKV()
+	if err != nil {
+		return nil, err
+	}
+
+	node.etcdKV = etcdKV
 
 	streaming, err := genSimpleStreaming(ctx)
 	if err != nil {

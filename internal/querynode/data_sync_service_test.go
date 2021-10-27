@@ -135,10 +135,13 @@ func TestDataSyncService_collectionFlowGraphs(t *testing.T) {
 	streaming, err := genSimpleStreaming(ctx)
 	assert.NoError(t, err)
 
+	historicalReplica, err := genSimpleReplica()
+	assert.NoError(t, err)
+
 	fac, err := genFactory()
 	assert.NoError(t, err)
 
-	dataSyncService := newDataSyncService(ctx, streaming.replica, streaming.tSafeReplica, fac)
+	dataSyncService := newDataSyncService(ctx, streaming.replica, historicalReplica, streaming.tSafeReplica, fac)
 	assert.NotNil(t, dataSyncService)
 
 	dataSyncService.addCollectionFlowGraph(defaultCollectionID, []Channel{defaultVChannel})
@@ -178,10 +181,13 @@ func TestDataSyncService_partitionFlowGraphs(t *testing.T) {
 	streaming, err := genSimpleStreaming(ctx)
 	assert.NoError(t, err)
 
+	historicalReplica, err := genSimpleReplica()
+	assert.NoError(t, err)
+
 	fac, err := genFactory()
 	assert.NoError(t, err)
 
-	dataSyncService := newDataSyncService(ctx, streaming.replica, streaming.tSafeReplica, fac)
+	dataSyncService := newDataSyncService(ctx, streaming.replica, historicalReplica, streaming.tSafeReplica, fac)
 	assert.NotNil(t, dataSyncService)
 
 	dataSyncService.addPartitionFlowGraph(defaultPartitionID, defaultPartitionID, []Channel{defaultVChannel})
@@ -222,10 +228,13 @@ func TestDataSyncService_removePartitionFlowGraphs(t *testing.T) {
 		streaming, err := genSimpleStreaming(ctx)
 		assert.NoError(t, err)
 
+		historicalReplica, err := genSimpleReplica()
+		assert.NoError(t, err)
+
 		fac, err := genFactory()
 		assert.NoError(t, err)
 
-		dataSyncService := newDataSyncService(ctx, streaming.replica, streaming.tSafeReplica, fac)
+		dataSyncService := newDataSyncService(ctx, streaming.replica, historicalReplica, streaming.tSafeReplica, fac)
 		assert.NotNil(t, dataSyncService)
 
 		dataSyncService.addPartitionFlowGraph(defaultPartitionID, defaultPartitionID, []Channel{defaultVChannel})

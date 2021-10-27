@@ -16,6 +16,7 @@ from milvus_benchmark import config, utils
 from milvus_benchmark import parser
 # from scheduler import back_scheduler
 from logs import log
+from logs.log import global_params
 
 log.setup_logging()
 logger = logging.getLogger("milvus_benchmark.main")
@@ -277,5 +278,5 @@ if __name__ == "__main__":
         # back_scheduler.shutdown(wait=False)
         sys.exit(-2)
     # block_scheduler.shutdown(wait=False)
-    logger.info("All tests run finshed")
+    logger.info("All tests run finished")
     sys.exit(0)

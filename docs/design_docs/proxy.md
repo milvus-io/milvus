@@ -1,6 +1,6 @@
 ## 6. Proxy
 
-As the user access layer of Milvus, Proxy mainly plays a role that do some check and preprocessing for requests from
+As the user access layer of Milvus, Proxy mainly plays a role that does some checks and preprocessing for requests from
 clients and then forward these requests to other components, such as Root Coordinator, Data Coordinator, Query
 Coordinator, Index Coordinator. The below figure shows that how Proxy interacts with other components.
 
@@ -25,10 +25,10 @@ operation of Proxy includes two part, one part is static check and another is dy
 parameters check, constraints check and etc. Dynamic check will check some related dependency of the request, take
 search requests for example, Proxy should check if the related collection exists in Milvus.
 
-Also, Proxy will do some preprocessing for every request. Proxy will do little thing for some requests in the
+Also, Proxy will do some preprocessing for every request. Proxy will do little things for some requests in the
 preprocessing stage and a lot more for other requests. Every object in Milvus will be assigned with a `ID`, such as
-`CollectionID`, `PartitionID`, `IndexID`, `SegmentID` and etc. Components in Milvus communicate with each other by the
-ID of object, however, users only knows the object name. So as the user access layser of Milvus, Proxy should translate
+`CollectionID`, `PartitionID`, `IndexID`, `SegmentID`, etc. Components in Milvus communicate with each other by the
+object IDs, however, users only knows the object name. So as a user access layer of Milvus, Proxy should translate
 the object name into object ID. Also taking search request as example, Proxy should translate the `CollectionName` into
 `CollectionID` and then the Query Node will recognize the request. Proxy holds a cache that translate object name into
 object id and dynamically updates the cache.
@@ -83,12 +83,12 @@ To support this watermark mechanism, Proxy should report the timestamp statistic
 Coordinator periodically. When Proxy knows all operations of a specific were done before a `ts`, then Proxy will report
 the `ts` and inform Root Coordinator that udpates the timestmap statistics.
 
-Proxy holds a cache about meta information of collections. These meta information includes `CollectionID`, `Schema`,
-`PartitionID` and etc. Components in Milvus communicate with each other using `CollectionID` and `PartitionID`, so the
+Proxy holds a cache about meta information of collections. The meta information includes `CollectionID`, `Schema`,
+`PartitionID`, etc. Components in Milvus communicate with each other using `CollectionID` and `PartitionID`, so the
 object name in request will be translated to object ID in Proxy. When the meta is not hit in cache, Proxy will update
 the cache from Root Coordinator. At the same time, in order to keep the consistency of cache, when there are any changes
-of meta information in Root Coordinator, it will inform all Proxies to clear the related meta cache and the later
-requests that need these meta will get the newest meta information.
+of meta information in Root Coordinator, it will inform all Proxies to clear the related meta cache, and any newer
+requests will get the latest meta information.
 
 For inserts to a collection which is auto_id configured in the collection schema, Proxy assigns a primary key for
 every row of insert request. For now the only supported data type of auto-generated primary field is `int64`. Proxy 

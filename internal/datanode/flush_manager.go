@@ -52,7 +52,10 @@ type segmentFlushPack struct {
 type notifyMetaFunc func(*segmentFlushPack) error
 
 // taskPostFunc clean up function after single flush task done
-type taskPostFunc func()
+type taskPostFunc func(pack *segmentFlushPack, postInjection postInjectionFunc)
+
+// postInjectionFunc post injection pack process logic
+type postInjectionFunc func(pack *segmentFlushPack)
 
 // make sure implementation
 var _ flushManager = (*rendezvousFlushManager)(nil)
@@ -60,20 +63,30 @@ var _ flushManager = (*rendezvousFlushManager)(nil)
 type orderFlushQueue struct {
 	sync.Once
 	segmentID UniqueID
+	injectCh  chan taskInjection
+
 	// MsgID => flushTask
 	working    sync.Map
 	notifyFunc notifyMetaFunc
 
 	tailMut sync.Mutex
 	tailCh  chan struct{}
+
+	injectMut     sync.Mutex
+	runningTasks  int32
+	injectHandler *injectHandler
+	postInjection postInjectionFunc
 }
 
 // newOrderFlushQueue creates a orderFlushQueue
 func newOrderFlushQueue(segID UniqueID, f notifyMetaFunc) *orderFlushQueue {
-	return &orderFlushQueue{
+	q := &orderFlushQueue{
 		segmentID:  segID,
 		notifyFunc: f,
+		injectCh:   make(chan taskInjection, 100),
 	}
+	q.injectHandler = newInjectHandler(q)
+	return q
 }
 
 // init orderFlushQueue use once protect init, init tailCh
@@ -86,17 +99,41 @@ func (q *orderFlushQueue) init() {
 }
 
 func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flushTaskRunner {
-	actual, loaded := q.working.LoadOrStore(string(pos.MsgID), newFlushTaskRunner(q.segmentID))
+	actual, loaded := q.working.LoadOrStore(string(pos.MsgID), newFlushTaskRunner(q.segmentID, q.injectCh))
 	t := actual.(*flushTaskRunner)
 	if !loaded {
+
+		q.injectMut.Lock()
+		q.runningTasks++
+		if q.injectHandler != nil {
+			q.injectHandler.close()
+			q.injectHandler = nil
+		}
+		q.injectMut.Unlock()
+
 		q.tailMut.Lock()
-		t.init(q.notifyFunc, func() {
-			q.working.Delete(string(pos.MsgID))
-		}, q.tailCh)
+		t.init(q.notifyFunc, q.postTask, q.tailCh)
 		q.tailCh = t.finishSignal
 		q.tailMut.Unlock()
 	}
 	return t
+}
+
+func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInjectionFunc) {
+	q.working.Delete(string(pack.pos.MsgID))
+	q.injectMut.Lock()
+	q.runningTasks--
+	if q.runningTasks == 0 {
+		q.injectHandler = newInjectHandler(q)
+	}
+	if postInjection != nil {
+		q.postInjection = postInjection
+	}
+
+	if q.postInjection != nil {
+		q.postInjection(pack)
+	}
+	q.injectMut.Unlock()
 }
 
 // enqueueInsertBuffer put insert buffer data into queue
@@ -107,6 +144,53 @@ func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs, stat
 // enqueueDelBuffer put delete buffer data into queue
 func (q *orderFlushQueue) enqueueDelFlush(task flushDeleteTask, deltaLogs *DelDataBuf, pos *internalpb.MsgPosition) {
 	q.getFlushTaskRunner(pos).runFlushDel(task, deltaLogs)
+}
+
+// inject performs injection for current task queue
+// send into injectCh in there is running task
+// or perform injection logic here if there is no injection
+func (q *orderFlushQueue) inject(inject taskInjection) {
+	q.injectCh <- inject
+}
+
+type injectHandler struct {
+	once sync.Once
+	wg   sync.WaitGroup
+	done chan struct{}
+}
+
+func newInjectHandler(q *orderFlushQueue) *injectHandler {
+	h := &injectHandler{
+		done: make(chan struct{}),
+	}
+	h.wg.Add(1)
+	go h.handleInjection(q)
+	return h
+}
+
+func (h *injectHandler) handleInjection(q *orderFlushQueue) {
+	defer h.wg.Done()
+	for {
+		select {
+		case inject := <-q.injectCh:
+			q.tailMut.Lock() //Maybe double check
+			injectDone := make(chan struct{})
+			q.tailCh = injectDone
+			q.tailMut.Unlock()
+			inject.injected <- struct{}{}
+			<-inject.injectOver
+			close(injectDone)
+		case <-h.done:
+			return
+		}
+	}
+}
+
+func (h *injectHandler) close() {
+	h.once.Do(func() {
+		close(h.done)
+		h.wg.Wait()
+	})
 }
 
 // rendezvousFlushManager makes sure insert & del buf all flushed
@@ -220,17 +304,14 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 		return nil
 	}
 
-	collID, partID, meta, err := m.getSegmentMeta(segmentID, pos)
+	collID, partID, err := m.getCollectionAndPartitionID(segmentID)
 	if err != nil {
 		return err
 	}
 
-	delCodec := storage.NewDeleteCodec(&etcdpb.CollectionMeta{
-		ID:     collID,
-		Schema: meta.GetSchema(),
-	})
+	delCodec := storage.NewDeleteCodec()
 
-	blob, err := delCodec.Serialize(partID, segmentID, data.delData)
+	blob, err := delCodec.Serialize(collID, partID, segmentID, data.delData)
 	if err != nil {
 		return err
 	}
@@ -245,6 +326,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 	blobPath := path.Join(Params.DeleteBinlogRootPath, blobKey)
 	kvs := map[string]string{blobPath: string(blob.Value[:])}
 	data.fileSize = int64(len(blob.Value))
+	data.filePath = blobPath
 	log.Debug("delete blob path", zap.String("path", blobPath))
 
 	m.getFlushQueue(segmentID).enqueueDelFlush(&flushBufferDeleteTask{
@@ -252,6 +334,13 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 		data:   kvs,
 	}, data, pos)
 	return nil
+}
+
+// injectFlush inject process before task finishes
+func (m *rendezvousFlushManager) injectFlush(injection taskInjection, segments ...UniqueID) {
+	for _, segmentID := range segments {
+		m.getFlushQueue(segmentID).inject(injection)
+	}
 }
 
 // fetch meta info for segment

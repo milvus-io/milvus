@@ -13,14 +13,13 @@ package querynode
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -37,41 +36,6 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	fieldBinlog, err := saveSimpleBinLog(ctx)
 	assert.NoError(t, err)
 
-	t.Run("test no segment meta", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
-		assert.NoError(t, err)
-
-		err = historical.replica.removeSegment(defaultSegmentID)
-		assert.NoError(t, err)
-		loader := newSegmentLoader(ctx, nil, nil, historical.replica, kv)
-		assert.NotNil(t, loader)
-
-		req := &querypb.LoadSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_WatchQueryChannels,
-				MsgID:   rand.Int63(),
-			},
-			NodeID:        0,
-			Schema:        schema,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
-			Infos: []*querypb.SegmentLoadInfo{
-				{
-					SegmentID:    defaultSegmentID,
-					PartitionID:  defaultPartitionID,
-					CollectionID: defaultCollectionID,
-					BinlogPaths:  fieldBinlog,
-				},
-			},
-		}
-
-		key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, defaultSegmentID)
-		err = kv.Remove(key)
-		assert.NoError(t, err)
-
-		err = loader.loadSegment(req, true)
-		assert.Error(t, err)
-	})
-
 	t.Run("test load segment", func(t *testing.T) {
 		historical, err := genSimpleHistorical(ctx)
 		assert.NoError(t, err)
@@ -86,7 +50,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			NodeID:        0,
+			DstNodeID:     0,
 			Schema:        schema,
 			LoadCondition: querypb.TriggerCondition_grpcRequest,
 			Infos: []*querypb.SegmentLoadInfo{
@@ -99,14 +63,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 			},
 		}
 
-		key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, defaultSegmentID)
-		segmentInfo := &querypb.SegmentInfo{}
-		value, err := proto.Marshal(segmentInfo)
-		assert.Nil(t, err)
-		err = kv.Save(key, string(value))
-		assert.NoError(t, err)
-
-		err = loader.loadSegment(req, true)
+		err = loader.loadSegment(req)
 		assert.NoError(t, err)
 	})
 
@@ -124,7 +81,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			NodeID:        0,
+			DstNodeID:     0,
 			Schema:        schema,
 			LoadCondition: querypb.TriggerCondition_grpcRequest,
 			Infos: []*querypb.SegmentLoadInfo{
@@ -137,58 +94,9 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 			},
 		}
 
-		key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, defaultSegmentID)
-		segmentInfo := &querypb.SegmentInfo{}
-		value, err := proto.Marshal(segmentInfo)
-		assert.Nil(t, err)
-		err = kv.Save(key, string(value))
-		assert.NoError(t, err)
-
-		err = loader.loadSegment(req, true)
+		err = loader.loadSegment(req)
 		assert.Error(t, err)
 	})
-}
-
-func TestSegmentLoader_notOnService(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	historical, err := genSimpleHistorical(ctx)
-	assert.NoError(t, err)
-
-	err = historical.replica.removeSegment(defaultSegmentID)
-	assert.NoError(t, err)
-
-	kv, err := genEtcdKV()
-	assert.NoError(t, err)
-
-	loader := newSegmentLoader(ctx, nil, nil, historical.replica, kv)
-	assert.NotNil(t, loader)
-
-	schema := genSimpleInsertDataSchema()
-
-	fieldBinlog, err := saveSimpleBinLog(ctx)
-	assert.NoError(t, err)
-
-	req := &querypb.LoadSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchQueryChannels,
-			MsgID:   rand.Int63(),
-		},
-		NodeID:        0,
-		Schema:        schema,
-		LoadCondition: querypb.TriggerCondition_grpcRequest,
-		Infos: []*querypb.SegmentLoadInfo{
-			{
-				SegmentID:    defaultSegmentID,
-				PartitionID:  defaultPartitionID,
-				CollectionID: defaultCollectionID,
-				BinlogPaths:  fieldBinlog,
-			},
-		},
-	}
-	err = loader.loadSegment(req, false)
-	assert.NoError(t, err)
 }
 
 func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
@@ -276,14 +184,6 @@ func TestSegmentLoader_invalid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	t.Run("test loadSegmentOfConditionHandOff", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
-		assert.NoError(t, err)
-
-		err = historical.loader.loadSegmentOfConditionHandOff(nil)
-		assert.Error(t, err)
-	})
-
 	t.Run("test no collection", func(t *testing.T) {
 		historical, err := genSimpleHistorical(ctx)
 		assert.NoError(t, err)
@@ -296,7 +196,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			NodeID:        0,
+			DstNodeID:     0,
 			LoadCondition: querypb.TriggerCondition_grpcRequest,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -307,44 +207,44 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			},
 		}
 
-		err = historical.loader.loadSegment(req, true)
+		err = historical.loader.loadSegment(req)
 		assert.Error(t, err)
 	})
 
-	t.Run("test no collection 2", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
-		assert.NoError(t, err)
-
-		err = historical.replica.removeCollection(defaultCollectionID)
-		assert.NoError(t, err)
-
-		err = historical.loader.loadSegmentInternal(defaultCollectionID, nil, nil)
-		assert.Error(t, err)
-	})
-
-	t.Run("test no vec field", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
-		assert.NoError(t, err)
-
-		err = historical.replica.removeCollection(defaultCollectionID)
-		assert.NoError(t, err)
-
-		schema := &schemapb.CollectionSchema{
-			Name:   defaultCollectionName,
-			AutoID: true,
-			Fields: []*schemapb.FieldSchema{
-				genConstantField(constFieldParam{
-					id:       FieldID(100),
-					dataType: schemapb.DataType_Int8,
-				}),
-			},
-		}
-		err = historical.loader.historicalReplica.addCollection(defaultCollectionID, schema)
-		assert.NoError(t, err)
-
-		err = historical.loader.loadSegmentInternal(defaultCollectionID, nil, nil)
-		assert.Error(t, err)
-	})
+	//t.Run("test no collection 2", func(t *testing.T) {
+	//	historical, err := genSimpleHistorical(ctx)
+	//	assert.NoError(t, err)
+	//
+	//	err = historical.replica.removeCollection(defaultCollectionID)
+	//	assert.NoError(t, err)
+	//
+	//	err = historical.loader.loadSegmentInternal(defaultCollectionID, nil, nil)
+	//	assert.Error(t, err)
+	//})
+	//
+	//t.Run("test no vec field", func(t *testing.T) {
+	//	historical, err := genSimpleHistorical(ctx)
+	//	assert.NoError(t, err)
+	//
+	//	err = historical.replica.removeCollection(defaultCollectionID)
+	//	assert.NoError(t, err)
+	//
+	//	schema := &schemapb.CollectionSchema{
+	//		Name:   defaultCollectionName,
+	//		AutoID: true,
+	//		Fields: []*schemapb.FieldSchema{
+	//			genConstantField(constFieldParam{
+	//				id:       FieldID(100),
+	//				dataType: schemapb.DataType_Int8,
+	//			}),
+	//		},
+	//	}
+	//	err = historical.loader.historicalReplica.addCollection(defaultCollectionID, schema)
+	//	assert.NoError(t, err)
+	//
+	//	err = historical.loader.loadSegmentInternal(defaultCollectionID, nil, nil)
+	//	assert.Error(t, err)
+	//})
 
 	t.Run("test no vec field 2", func(t *testing.T) {
 		historical, err := genSimpleHistorical(ctx)
@@ -371,7 +271,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			NodeID:        0,
+			DstNodeID:     0,
 			Schema:        schema,
 			LoadCondition: querypb.TriggerCondition_grpcRequest,
 			Infos: []*querypb.SegmentLoadInfo{
@@ -382,7 +282,68 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				},
 			},
 		}
-		err = historical.loader.loadSegment(req, false)
+		err = historical.loader.loadSegment(req)
 		assert.Error(t, err)
 	})
+}
+
+func TestSegmentLoader_checkSegmentSize(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	historical, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
+
+	err = historical.loader.checkSegmentSize(defaultSegmentID, map[UniqueID]int64{defaultSegmentID: 1024})
+	assert.NoError(t, err)
+
+	//totalMem, err := getTotalMemory()
+	//assert.NoError(t, err)
+	//err = historical.loader.checkSegmentSize(defaultSegmentID, map[UniqueID]int64{defaultSegmentID: int64(totalMem * 2)})
+	//assert.Error(t, err)
+}
+
+func TestSegmentLoader_estimateSegmentSize(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	historical, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
+
+	seg, err := historical.replica.getSegmentByID(defaultSegmentID)
+	assert.NoError(t, err)
+
+	binlog := []*datapb.FieldBinlog{
+		{
+			FieldID: simpleConstField.id,
+			Binlogs: []string{"^&^%*&%&&(*^*&"},
+		},
+	}
+
+	_, err = historical.loader.estimateSegmentSize(seg, binlog, nil)
+	assert.Error(t, err)
+
+	binlog, err = saveSimpleBinLog(ctx)
+	assert.NoError(t, err)
+
+	_, err = historical.loader.estimateSegmentSize(seg, binlog, nil)
+	assert.NoError(t, err)
+
+	indexPath, err := generateIndex(defaultSegmentID)
+	assert.NoError(t, err)
+
+	err = seg.setIndexInfo(simpleVecField.id, &indexInfo{})
+	assert.NoError(t, err)
+
+	err = seg.setIndexPaths(simpleVecField.id, indexPath)
+	assert.NoError(t, err)
+
+	_, err = historical.loader.estimateSegmentSize(seg, binlog, []FieldID{simpleVecField.id})
+	assert.NoError(t, err)
+
+	err = seg.setIndexPaths(simpleVecField.id, []string{"&*^*(^*(&*%^&*^(&"})
+	assert.NoError(t, err)
+
+	_, err = historical.loader.estimateSegmentSize(seg, binlog, []FieldID{simpleVecField.id})
+	assert.Error(t, err)
 }

@@ -35,6 +35,8 @@ func TestGrpcTask(t *testing.T) {
 	node, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+
 	t.Run("Test ShowParsOnNotLoadedCol", func(t *testing.T) {
 		res, err := queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
@@ -455,7 +457,7 @@ func TestLoadBalanceTask(t *testing.T) {
 	loadBalanceTask := &loadBalanceTask{
 		baseTask: &baseTask{
 			ctx:              baseCtx,
-			Condition:        NewTaskCondition(baseCtx),
+			condition:        newTaskCondition(baseCtx),
 			triggerCondition: querypb.TriggerCondition_nodeDown,
 		},
 		LoadBalanceRequest: loadBalanceSegment,
@@ -641,7 +643,7 @@ func Test_GrpcGetQueryChannelFail(t *testing.T) {
 	kv := &testKv{
 		returnFn: failedResult,
 	}
-	meta, err := newMeta(kv)
+	meta, err := newMeta(context.Background(), kv, nil, nil)
 	assert.Nil(t, err)
 
 	queryCoord := &QueryCoord{

@@ -28,7 +28,7 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
    
    2. Prepare data: 
    
-      if we need to use the sift/deep dataset as the raw data input, we need to mount NAS and update `RAW_DATA_DIR` in `config.py`, the example mount command:
+      if we need to use the sift/deep dataset as the raw data input, then mount NAS and update `RAW_DATA_DIR` in `config.py`, the example mount command:
    
    ```bash
       $ sudo mount -t cifs -o username=test,vers=1.0 //172.16.70.249/test /test
@@ -169,7 +169,7 @@ Also, you should provide the field value of the source data file path `source_fi
 
 - `main.py`
   
-   The entry file: parse the input params and initialize the other component: `metric`, `env`, `runner`
+   The entry file: parse the input params and initialize the other components: `metric`, `env`, `runner`
 
 - `metric`
 

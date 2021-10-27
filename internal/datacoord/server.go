@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package datacoord
 
@@ -47,10 +52,11 @@ const connEtcdMaxRetryTime = 100000
 
 var (
 	// TODO: sunby put to config
-	enableTtChecker  = true
-	ttCheckerName    = "dataTtChecker"
-	ttMaxInterval    = 3 * time.Minute
-	ttCheckerWarnMsg = fmt.Sprintf("we haven't received tt for %f minutes", ttMaxInterval.Minutes())
+	enableTtChecker           = true
+	ttCheckerName             = "dataTtChecker"
+	ttMaxInterval             = 3 * time.Minute
+	ttCheckerWarnMsg          = fmt.Sprintf("we haven't received tt for %f minutes", ttMaxInterval.Minutes())
+	segmentTimedFlushDuration = 10.0
 )
 
 type (
@@ -262,7 +268,7 @@ func (s *Server) initCluster() error {
 func (s *Server) initServiceDiscovery() error {
 	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
 	if err != nil {
-		log.Debug("dataCoord initMeta failed", zap.Error(err))
+		log.Debug("dataCoord initServiceDiscovery failed", zap.Error(err))
 		return err
 	}
 	log.Debug("registered sessions", zap.Any("sessions", sessions))
@@ -415,10 +421,14 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				continue
 			}
 
-			if len(segments) == 0 {
+			staleSegments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
+				return !info.lastFlushTime.IsZero() && time.Since(info.lastFlushTime).Minutes() >= segmentTimedFlushDuration
+			})
+
+			if len(segments)+len(staleSegments) == 0 {
 				continue
 			}
-			log.Debug("flush segments", zap.Int64s("segmentIDs", segments))
+			log.Debug("flush segments", zap.Int64s("segmentIDs", segments), zap.Int("markSegments count", len(staleSegments)))
 			segmentInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 			for _, id := range segments {
 				sInfo := s.meta.GetSegment(id)
@@ -430,8 +440,19 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				segmentInfos = append(segmentInfos, sInfo.SegmentInfo)
 				s.meta.SetLastFlushTime(id, time.Now())
 			}
-			if len(segmentInfos) > 0 {
-				s.cluster.Flush(s.ctx, segmentInfos)
+			markSegments := make([]*datapb.SegmentInfo, 0, len(staleSegments))
+			for _, segment := range staleSegments {
+				for _, fSeg := range segmentInfos {
+					// check segment needs flush first
+					if segment.GetID() == fSeg.GetID() {
+						continue
+					}
+				}
+				markSegments = append(markSegments, segment.SegmentInfo)
+				s.meta.SetLastFlushTime(segment.GetID(), time.Now())
+			}
+			if len(segmentInfos)+len(markSegments) > 0 {
+				s.cluster.Flush(s.ctx, segmentInfos, markSegments)
 			}
 		}
 		s.helper.eventAfterHandleDataNodeTt()
@@ -667,7 +688,7 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 	var useUnflushedPosition bool
 	for _, s := range segments {
 		if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
-			flushed = append(flushed, s.SegmentInfo)
+			flushed = append(flushed, trimSegmentInfo(s.SegmentInfo))
 			if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
 				seekPosition = s.DmlPosition
 			}
@@ -678,7 +699,7 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 			continue
 		}
 
-		unflushed = append(unflushed, s.SegmentInfo)
+		unflushed = append(unflushed, trimSegmentInfo(s.SegmentInfo))
 
 		if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
 			useUnflushedPosition = true
@@ -710,5 +731,21 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 		SeekPosition:      seekPosition,
 		FlushedSegments:   flushed,
 		UnflushedSegments: unflushed,
+	}
+}
+
+// trimSegmentInfo returns a shallow copy of datapb.SegmentInfo and sets ALL binlog info to nil
+func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
+	return &datapb.SegmentInfo{
+		ID:             info.ID,
+		CollectionID:   info.CollectionID,
+		PartitionID:    info.PartitionID,
+		InsertChannel:  info.InsertChannel,
+		NumOfRows:      info.NumOfRows,
+		State:          info.State,
+		MaxRowNum:      info.MaxRowNum,
+		LastExpireTime: info.LastExpireTime,
+		StartPosition:  info.StartPosition,
+		DmlPosition:    info.DmlPosition,
 	}
 }

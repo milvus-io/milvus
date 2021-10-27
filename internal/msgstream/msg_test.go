@@ -838,6 +838,20 @@ func TestSealedSegmentsChangeInfoMsg(t *testing.T) {
 		}
 	}
 
+	changeInfo := &querypb.SegmentChangeInfo{
+		OnlineNodeID: int64(1),
+		OnlineSegments: []*querypb.SegmentInfo{
+			genSimpleSegmentInfo(1),
+			genSimpleSegmentInfo(2),
+			genSimpleSegmentInfo(3),
+		},
+		OfflineNodeID: int64(2),
+		OfflineSegments: []*querypb.SegmentInfo{
+			genSimpleSegmentInfo(4),
+			genSimpleSegmentInfo(5),
+			genSimpleSegmentInfo(6),
+		},
+	}
 	changeInfoMsg := &SealedSegmentsChangeInfoMsg{
 		BaseMsg: generateBaseMsg(),
 		SealedSegmentsChangeInfo: querypb.SealedSegmentsChangeInfo{
@@ -847,18 +861,7 @@ func TestSealedSegmentsChangeInfoMsg(t *testing.T) {
 				Timestamp: 2,
 				SourceID:  3,
 			},
-			OnlineNodeID: int64(1),
-			OnlineSegments: []*querypb.SegmentInfo{
-				genSimpleSegmentInfo(1),
-				genSimpleSegmentInfo(2),
-				genSimpleSegmentInfo(3),
-			},
-			OfflineNodeID: int64(2),
-			OfflineSegments: []*querypb.SegmentInfo{
-				genSimpleSegmentInfo(4),
-				genSimpleSegmentInfo(5),
-				genSimpleSegmentInfo(6),
-			},
+			Infos: []*querypb.SegmentChangeInfo{changeInfo},
 		},
 	}
 

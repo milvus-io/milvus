@@ -88,8 +88,8 @@ func (sr *StatsReader) GetInt64Stats() (*Int64Stats, error) {
 }
 
 func DeserializeStats(blobs []*Blob) ([]*Int64Stats, error) {
-	results := make([]*Int64Stats, len(blobs))
-	for i, blob := range blobs {
+	results := make([]*Int64Stats, 0, len(blobs))
+	for _, blob := range blobs {
 		if blob.Value == nil {
 			continue
 		}
@@ -99,8 +99,7 @@ func DeserializeStats(blobs []*Blob) ([]*Int64Stats, error) {
 		if err != nil {
 			return nil, err
 		}
-		results[i] = stats
+		results = append(results, stats)
 	}
 	return results, nil
-
 }

@@ -444,15 +444,27 @@ message DescribeIndexRequest {
   string index_name = 5; 
 }
 
+/*
+* Index informations
+*/
 message IndexDescription {
+  // Index name
   string index_name = 1;
+  // Index id
   int64 indexID = 2;
+  // Will return index_type, metric_type, params(like nlist).
   repeated common.KeyValuePair params = 3;
+  // The vector field name
   string field_name = 4;
 }
 
+/*
+* Describe index response
+*/
 message DescribeIndexResponse {
+  // Response status
   common.Status status = 1;
+  // All index informations, for now only return tha latest index you created for the collection.
   repeated IndexDescription index_descriptions = 2;
 }
 
@@ -520,6 +532,7 @@ message DeleteRequest {
   string collection_name = 3;
   string partition_name = 4;
   string expr = 5;
+  repeated uint32 hash_keys = 6;
 }
 
 enum PlaceholderType {

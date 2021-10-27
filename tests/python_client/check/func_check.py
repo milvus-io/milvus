@@ -57,6 +57,9 @@ class ResponseChecker:
             # Query interface of collection and partition that response check
             result = self.check_query_results(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_query_empty:
+            result = self.check_query_empty(self.response, self.func_name)
+
         elif self.check_task == CheckTasks.check_distance:
             # Calculate distance interface that response check
             result = self.check_distance(self.response, self.func_name, self.check_items)
@@ -246,6 +249,23 @@ class ResponseChecker:
             # assert len(exp_res) == len(query_res)
             # for i in range(len(exp_res)):
             #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])
+
+    @staticmethod
+    def check_query_empty(query_res, func_name):
+        """
+        Verify that the query result is empty
+
+        :param: query_res: A list that contains all results
+        :type: list
+
+        :param func_name: Query API name
+        :type func_name: str
+        """
+        if func_name != 'query':
+            log.warning("The function name is {} rather than {}".format(func_name, "query"))
+        if not isinstance(query_res, list):
+            raise Exception("The query result to check isn't list type object")
+        assert len(query_res) == 0, "Query result is not empty"
 
     @staticmethod
     def check_distance(distance_res, func_name, check_items):

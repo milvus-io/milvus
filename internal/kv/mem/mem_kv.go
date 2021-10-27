@@ -212,3 +212,12 @@ func (kv *MemoryKV) LoadPartial(key string, start, end int64) ([]byte, error) {
 			start, end)
 	}
 }
+
+func (kv *MemoryKV) GetSize(key string) (int64, error) {
+	value, err := kv.Load(key)
+	if err != nil {
+		return 0, err
+	}
+
+	return int64(len(value)), nil
+}

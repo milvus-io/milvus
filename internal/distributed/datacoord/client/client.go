@@ -281,6 +281,19 @@ func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	return ret.(*datapb.FlushResponse), err
 }
 
+// AssignSegmentID applies allocations for specified Coolection/Partition and related Channel Name(Virtial Channel)
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the requester's info(id and role) and the list of Assignment Request,
+// which coontains the specified collection, partitaion id, the related VChannel Name and row count it needs
+//
+// response struct `AssignSegmentIDResponse` contains the the assignment result for each request
+// error is returned only when some communication issue occurs
+// if some error occurs in the process of `AssignSegmentID`, it will be recorded and returned in `Status` field of response
+//
+// `AssignSegmentID` will applies current configured allocation policies for each request
+// if the VChannel is newly used, `WatchDmlChannels` will be invoked to notify a `DataNode`(selected by policy) to watch it
+// if there is anything make the allocation impossible, the response will not contain the corresponding result
 func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -296,6 +309,15 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	return ret.(*datapb.AssignSegmentIDResponse), err
 }
 
+// GetSegmentStates requests segment state information
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the list of segment id to query
+//
+// response struct `GetSegmentStatesResponse` contains the list of each state query result
+// 	when the segment is not found, the state entry will has the field `Status`  to identify failure
+// 	otherwise the Segment State and Start position information will be returned
+// error is returned only when some communication issue occurs
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -311,6 +333,14 @@ func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 	return ret.(*datapb.GetSegmentStatesResponse), err
 }
 
+// GetInsertBinlogPaths requests binlog paths for specified segment
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the segment id to query
+//
+// response struct `GetInsertBinlogPathsResponse` contains the fields list
+// 	and corresponding binlog path list
+// error is returned only when some communication issue occurs
 func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -326,6 +356,14 @@ func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	return ret.(*datapb.GetInsertBinlogPathsResponse), err
 }
 
+// GetCollectionStatistics requests collection statistics
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the collection id to query
+//
+// response struct `GetCollectionStatisticsResponse` contains the key-value list fields returning related data
+// 	only row count for now
+// error is returned only when some communication issue occurs
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -341,6 +379,14 @@ func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	return ret.(*datapb.GetCollectionStatisticsResponse), err
 }
 
+// GetPartitionStatistics requests partition statistics
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the collection and partition id to query
+//
+// response struct `GetPartitionStatisticsResponse` contains the key-value list fields returning related data
+// 	only row count for now
+// error is returned only when some communication issue occurs
 func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -356,6 +402,8 @@ func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	return ret.(*datapb.GetPartitionStatisticsResponse), err
 }
 
+// GetSegmentInfoChannel DEPRECATED
+// legacy api to get SegmentInfo Channel name
 func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -371,6 +419,13 @@ func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// GetSegmentInfo requests segment info
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the list of segment ids to query
+//
+// response struct `GetSegmentInfoResponse` contains the list of segment info
+// error is returned only when some communication issue occurs
 func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -399,6 +454,13 @@ func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return client.SaveBinlogPaths(ctx, req)
 }
 
+// GetRecoveryInfo request segment recovery info of collection/partition
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the collection/partition id to query
+//
+// response struct `GetRecoveryInfoResponse` contains the list of segments info and corresponding vchannel info
+// error is returned only when some communication issue occurs
 func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()

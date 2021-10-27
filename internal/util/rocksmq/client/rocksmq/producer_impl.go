@@ -45,6 +45,7 @@ func (p *producer) Topic() string {
 	return p.topic
 }
 
+// Send produce message in rocksmq
 func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
 	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{
 		{
@@ -57,6 +58,7 @@ func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
 	return ids[0], nil
 }
 
+// Close destroy the topic of this producer in rocksmq
 func (p *producer) Close() {
 	err := p.c.server.DestroyTopic(p.topic)
 	if err != nil {

@@ -11,6 +11,7 @@ type QueryCoord interface {
 	Component
 	TimeTickProvider
 
+  // ShowCollections notifies RootCoord to list all collection names and other info in database at specified timestamp
 	ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)
 	LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
@@ -233,6 +234,14 @@ type QueryNode interface {
 	Component
 	TimeTickProvider
 
+	// AddQueryChannel notifies QueryNode to subscribe a query channel and be a producer of a query result channel.
+	// `ctx` is the context to control request deadline and cancellation.
+	// `req` contains the request params, which are collection id, query channel and query result channel.
+	//
+	// Return UnexpectedError code in status:
+	//     If QueryNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY.
+	// Return Success code in status:
+	//     Subscribe a query channel and be a producer of a query result channel.
 	AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error)
 	RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error)
 	WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)

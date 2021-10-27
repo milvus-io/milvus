@@ -22,7 +22,7 @@
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
-#include "utils/tools.h"
+#include "utils/Utils.h"
 
 using namespace milvus;
 

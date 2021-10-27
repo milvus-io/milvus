@@ -789,6 +789,39 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 	return nil
 }
 
+func (s *Segment) segmentLoadDeletedRecord(primaryKeys []IntPrimaryKey, timestamps []Timestamp, rowCount int64) error {
+	s.segPtrMu.RLock()
+	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
+	if s.segmentPtr == nil {
+		return errors.New("null seg core pointer")
+	}
+	if s.segmentType != segmentTypeSealed {
+		errMsg := fmt.Sprintln("segmentLoadFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+		return errors.New(errMsg)
+	}
+	loadInfo := C.CLoadDeletedRecordInfo{
+		timestamps:   unsafe.Pointer(&timestamps[0]),
+		primary_keys: unsafe.Pointer(&primaryKeys[0]),
+		row_count:    C.int64_t(rowCount),
+	}
+	/*
+		CStatus
+		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
+	*/
+	var status = C.LoadDeletedRecord(s.segmentPtr, loadInfo)
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("LoadDeletedRecord failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
+	log.Debug("load deleted record done",
+		zap.Int64("row count", rowCount),
+		zap.Int64("segmentID", s.ID()))
+	return nil
+}
+
 func (s *Segment) dropFieldData(fieldID int64) error {
 	/*
 		CStatus

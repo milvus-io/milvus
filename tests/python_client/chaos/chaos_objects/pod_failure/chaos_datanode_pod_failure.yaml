@@ -4,16 +4,13 @@ metadata:
   name: test-datanode-pod-failure
   namespace: chaos-testing
 spec:
-  action: pod-failure
-  mode: one
-  value: ''
-  duration: '20s'
   selector:
     namespaces:
-      - chaos-testing         # target namespace of milvus deployment
+      - chaos-testing
     labelSelectors:
       app.kubernetes.io/instance: milvus-chaos
-      app.kubernetes.io/name: milvus
       component: datanode
-  scheduler:
-    cron: '@every 30s'
+  mode: one
+  action: pod-failure
+  duration: 2m
+  gracePeriod: 0

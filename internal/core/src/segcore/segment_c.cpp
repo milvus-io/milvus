@@ -151,7 +151,7 @@ Delete(CSegmentInterface c_segment,
        int64_t size,
        const int64_t* row_ids,
        const uint64_t* timestamps) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
 
     try {
         auto res = segment->Delete(reserved_offset, size, row_ids, timestamps);
@@ -163,7 +163,7 @@ Delete(CSegmentInterface c_segment,
 
 int64_t
 PreDelete(CSegmentInterface c_segment, int64_t size) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
 
     return segment->PreDelete(size);
 }
@@ -178,6 +178,21 @@ LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_in
         auto load_info =
             LoadFieldDataInfo{load_field_data_info.field_id, load_field_data_info.blob, load_field_data_info.row_count};
         segment->LoadFieldData(load_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info) {
+    try {
+        auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        auto load_info = LoadDeletedRecordInfo{deleted_record_info.timestamps, deleted_record_info.primary_keys,
+                                               deleted_record_info.row_count};
+        segment->LoadDeletedRecord(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());

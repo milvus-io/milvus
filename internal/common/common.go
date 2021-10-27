@@ -44,4 +44,7 @@ const (
 
 	// InvalidPartitionID indicates that the partition is not specified. It will be set when the partitionName is empty
 	InvalidPartitionID = int64(-1)
+
+	// InvalidField indicates that the field does not exist . It will be set when the field is not found.
+	InvalidFieldID = int64(-1)
 )

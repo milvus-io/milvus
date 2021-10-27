@@ -147,7 +147,8 @@ message GetPartitionStatesResponse {
 
 message GetSegmentInfoRequest {
   common.MsgBase base = 1;
-  repeated int64 segmentIDs = 2;
+  repeated int64 segmentIDs = 2; // deprecated
+  int64 collectionID = 3;
 }
 
 message SegmentInfo {
@@ -161,6 +162,8 @@ message SegmentInfo {
   int64 indexID = 8;
   string channelID = 9;
   SegmentState segment_state = 10;
+  repeated int64 compactionFrom = 11;
+  bool createdByCompaction = 12;
 }
 
 message GetSegmentInfoResponse {
@@ -229,14 +232,18 @@ message SegmentLoadInfo {
   int64 flush_time = 5;
   repeated data.FieldBinlog binlog_paths = 6;
   int64 num_of_rows = 7;
+  repeated data.FieldBinlog statslogs = 8;
+  repeated data.DeltaLogInfo deltalogs = 9;
 }
 
 message LoadSegmentsRequest {
   common.MsgBase base = 1;
-  int64 nodeID = 2;
+  int64 dst_nodeID = 2;
   repeated SegmentLoadInfo infos = 3;
   schema.CollectionSchema schema = 4;
-  TriggerCondition load_condition = 5;
+  TriggerCondition load_condition = 5; // deprecated
+  int64 source_nodeID = 6;
+  int64 collectionID = 7;
 }
 
 message ReleaseSegmentsRequest {
@@ -272,6 +279,8 @@ message QueryChannelInfo {
   int64 collectionID = 1;
   string query_channelID = 2;
   string query_result_channelID = 3;
+  repeated SegmentInfo global_sealed_segments = 4;
+  internal.MsgPosition seek_position = 5;
 }
 
 message CollectionInfo {
@@ -285,11 +294,6 @@ message CollectionInfo {
   int64 inMemory_percentage = 8;
 }
 
-message HandoffSegments {
-  common.MsgBase base = 1;
-  repeated SegmentLoadInfo infos = 2;
-}
-
 message LoadBalanceSegmentInfo {
   int64 segmentID = 1;
   int64 partitionID = 2;
@@ -301,6 +305,11 @@ message LoadBalanceSegmentInfo {
   bool valid_info = 8;
 }
 
+message HandoffSegmentsRequest {
+  common.MsgBase base = 1;
+  repeated SegmentInfo segmentInfos = 2;
+}
+
 message LoadBalanceRequest {
   common.MsgBase base = 1;
   repeated int64 source_nodeIDs = 2;
@@ -308,10 +317,14 @@ message LoadBalanceRequest {
 }
 
 //---------------- common query proto -----------------
+message SegmentChangeInfo {
+  int64 online_nodeID = 1;
+  repeated SegmentInfo online_segments = 2;
+  int64 offline_nodeID = 3;
+  repeated SegmentInfo offline_segments = 4;
+}
+
 message SealedSegmentsChangeInfo {
   common.MsgBase base = 1;
-  int64 online_nodeID = 2;
-  repeated SegmentInfo online_segments = 3;
-  int64 offline_nodeID = 4;
-  repeated SegmentInfo offline_segments = 5;
+  repeated SegmentChangeInfo infos = 2;
 }

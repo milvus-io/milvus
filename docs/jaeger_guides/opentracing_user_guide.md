@@ -16,19 +16,13 @@ See also:
 - Blog post [Evolving Distributed Tracing at Uber](https://eng.uber.com/distributed-tracing/).
 - Tutorial / walkthrough [Take OpenTracing for a HotROD ride](https://medium.com/@YuriShkuro/take-opentracing-for-a-hotrod-ride-f6e3141f7941).
 
-
-
 We mainly use jaeger as an implementation of opentracing.
 
 Two request: **Insert Request** and **Search Request** in milvus system is traced at this stage.
 
-
-
 ## Jaeger Home page
 
 ![](./figs/jaeger_home_page.png)
-
-
 
 ### Lookup by Trace ID
 
@@ -38,15 +32,15 @@ The use of the search box requires configuration of the log collection system. F
 
 ### Service
 
-Filter with service name
+Filter with service name.
 
 ### Operation
 
-Operation in Service, eg request name, function name
+Operation in Service, eg request name, function name.
 
 ### Tags
 
-Set tag to facilitate search. Tag is defined in code
+Set tag to facilitate search. Tag is defined in code.
 
 ### Lookback
 
@@ -54,11 +48,11 @@ Filter with time.
 
 ### Min Duraton Max Duration
 
-The minimum and maximum request duration, you can use this condition to find the time-consuming and short-term requests
+The minimum and maximum request duration, you can use this condition to find the time-consuming and short-term requests.
 
 ### Limit Result
 
-The max number of result
+The max number of result.
 
 ## Search result
 
@@ -73,8 +67,6 @@ The detailed information of search result.
 3. 10675 Span means that there are 10675 operations, see the number of operations for each service in the middle. And the trace time is shown in the right.
 4. The user can select multiple traces with the box in the upper left, and then compare with them to find something different. For example, different insert request may take a different time. At this time, you can select two for comparison, and the comparison can be very easy to know which trace went wrong
 
-
-
 ## Detailed trace information
 
 Click the search result. You can analyze the detail trace information.
@@ -84,11 +76,9 @@ Click the search result. You can analyze the detail trace information.
 1. Duration: Total time consume.
 2. Service: The number of service called.
 3. Depth: Call chain depth.
-4. Total Spans: This call consists of 10 spans
+4. Total Spans: This call consists of 10 spans.
 5. To enter the details, look at the left half first, showing the call chain of the entire request. The black represents the service name, and the gray kid represents the span name defined in the code.
 6. The duration of the right half of the code call. The length represents the time consumed by the Span in the entire call chain.
-
-
 
 ### Span Detail information
 
@@ -98,11 +88,6 @@ Click the Span to see the detailed span information such as the last span in the
 2. Process can locate which specific server processing this data.
 3. Logs are the logs printed by this span during the call.
 
-
-
-
-
 ## More
 
-More usage guides will be updated in the future
-
+More usage guides will be updated in the future.

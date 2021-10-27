@@ -26,6 +26,7 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
@@ -218,4 +219,195 @@ func TestWatchNodeLoop(t *testing.T) {
 		err = removeAllSession()
 		assert.Nil(t, err)
 	})
+}
+
+func TestHandoffSegmentLoop(t *testing.T) {
+	refreshParams()
+	baseCtx := context.Background()
+
+	queryCoord, err := startQueryCoord(baseCtx)
+	assert.Nil(t, err)
+
+	queryNode1, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode1.queryNodeID)
+
+	t.Run("Test watchHandoffLoop", func(t *testing.T) {
+		segmentInfo := &querypb.SegmentInfo{
+			SegmentID:    defaultSegmentID,
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+			SegmentState: querypb.SegmentState_sealed,
+		}
+
+		key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+		value, err := proto.Marshal(segmentInfo)
+		assert.Nil(t, err)
+		err = queryCoord.kvClient.Save(key, string(value))
+		assert.Nil(t, err)
+		for {
+			_, err := queryCoord.kvClient.Load(key)
+			if err != nil {
+				break
+			}
+		}
+	})
+
+	loadPartitionTask := genLoadPartitionTask(baseCtx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(loadPartitionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadPartitionTask, taskExpired)
+
+	t.Run("Test partitionNotLoaded", func(t *testing.T) {
+		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_handoff)
+		segmentInfo := &querypb.SegmentInfo{
+			SegmentID:    defaultSegmentID,
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID + 1,
+			SegmentState: querypb.SegmentState_sealed,
+		}
+		handoffReq := &querypb.HandoffSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_HandoffSegments,
+			},
+			SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
+		}
+		handoffTask := &handoffTask{
+			baseTask:               baseTask,
+			HandoffSegmentsRequest: handoffReq,
+			dataCoord:              queryCoord.dataCoordClient,
+			cluster:                queryCoord.cluster,
+			meta:                   queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(handoffTask)
+		assert.Nil(t, err)
+
+		waitTaskFinalState(handoffTask, taskExpired)
+	})
+
+	loadCollectionTask := genLoadCollectionTask(baseCtx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadCollectionTask, taskExpired)
+
+	t.Run("Test handoffGrowingSegment", func(t *testing.T) {
+		infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
+		assert.NotEqual(t, 0, len(infos))
+		segmentID := defaultSegmentID + 4
+		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_handoff)
+
+		segmentInfo := &querypb.SegmentInfo{
+			SegmentID:    segmentID,
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID + 2,
+			SegmentState: querypb.SegmentState_sealed,
+		}
+		handoffReq := &querypb.HandoffSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_HandoffSegments,
+			},
+			SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
+		}
+		handoffTask := &handoffTask{
+			baseTask:               baseTask,
+			HandoffSegmentsRequest: handoffReq,
+			dataCoord:              queryCoord.dataCoordClient,
+			cluster:                queryCoord.cluster,
+			meta:                   queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(handoffTask)
+		assert.Nil(t, err)
+
+		waitTaskFinalState(handoffTask, taskExpired)
+	})
+
+	t.Run("Test binlogNotExist", func(t *testing.T) {
+		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_handoff)
+		segmentInfo := &querypb.SegmentInfo{
+			SegmentID:    defaultSegmentID + 100,
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+			SegmentState: querypb.SegmentState_sealed,
+		}
+		handoffReq := &querypb.HandoffSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_HandoffSegments,
+			},
+			SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
+		}
+		handoffTask := &handoffTask{
+			baseTask:               baseTask,
+			HandoffSegmentsRequest: handoffReq,
+			dataCoord:              queryCoord.dataCoordClient,
+			cluster:                queryCoord.cluster,
+			meta:                   queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(handoffTask)
+		assert.Nil(t, err)
+
+		waitTaskFinalState(handoffTask, taskFailed)
+	})
+
+	t.Run("Test sealedSegmentExist", func(t *testing.T) {
+		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_handoff)
+		segmentInfo := &querypb.SegmentInfo{
+			SegmentID:    defaultSegmentID,
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+			SegmentState: querypb.SegmentState_sealed,
+		}
+		handoffReq := &querypb.HandoffSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_HandoffSegments,
+			},
+			SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
+		}
+		handoffTask := &handoffTask{
+			baseTask:               baseTask,
+			HandoffSegmentsRequest: handoffReq,
+			dataCoord:              queryCoord.dataCoordClient,
+			cluster:                queryCoord.cluster,
+			meta:                   queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(handoffTask)
+		assert.Nil(t, err)
+
+		waitTaskFinalState(handoffTask, taskFailed)
+	})
+
+	releasePartitionTask := genReleasePartitionTask(baseCtx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(releasePartitionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(releasePartitionTask, taskExpired)
+
+	t.Run("Test handoffReleasedPartition", func(t *testing.T) {
+		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_handoff)
+		segmentInfo := &querypb.SegmentInfo{
+			SegmentID:    defaultSegmentID,
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+			SegmentState: querypb.SegmentState_sealed,
+		}
+		handoffReq := &querypb.HandoffSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_HandoffSegments,
+			},
+			SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
+		}
+		handoffTask := &handoffTask{
+			baseTask:               baseTask,
+			HandoffSegmentsRequest: handoffReq,
+			dataCoord:              queryCoord.dataCoordClient,
+			cluster:                queryCoord.cluster,
+			meta:                   queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(handoffTask)
+		assert.Nil(t, err)
+
+		waitTaskFinalState(handoffTask, taskExpired)
+	})
+
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
 }

@@ -24,14 +24,13 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	oplog "github.com/opentracing/opentracing-go/log"
 )
 
@@ -96,7 +95,7 @@ func (queue *TaskQueue) addTaskToFront(t task) {
 }
 
 // PopTask pops a trigger task from task list
-func (queue *TaskQueue) PopTask() task {
+func (queue *TaskQueue) popTask() task {
 	queue.Lock()
 	defer queue.Unlock()
 
@@ -139,7 +138,13 @@ type TaskScheduler struct {
 }
 
 // NewTaskScheduler reloads tasks from kv and returns a new taskScheduler
-func NewTaskScheduler(ctx context.Context, meta Meta, cluster Cluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataCoord types.DataCoord) (*TaskScheduler, error) {
+func NewTaskScheduler(ctx context.Context,
+	meta Meta,
+	cluster Cluster,
+	kv *etcdkv.EtcdKV,
+	rootCoord types.RootCoord,
+	dataCoord types.DataCoord,
+	idAllocator func() (UniqueID, error)) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
 	stopTaskLoopChan := make(chan int, 1)
@@ -148,6 +153,7 @@ func NewTaskScheduler(ctx context.Context, meta Meta, cluster Cluster, kv *etcdk
 		cancel:                   cancel,
 		meta:                     meta,
 		cluster:                  cluster,
+		taskIDAllocator:          idAllocator,
 		activateTaskChan:         taskChan,
 		client:                   kv,
 		stopActivateTaskLoopChan: stopTaskLoopChan,
@@ -155,20 +161,8 @@ func NewTaskScheduler(ctx context.Context, meta Meta, cluster Cluster, kv *etcdk
 		dataCoord:                dataCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
-	//init id allocator
-	etcdKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryCoordTaskID")
-	if err != nil {
-		return nil, err
-	}
-	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)
-	if err := idAllocator.Initialize(); err != nil {
-		log.Debug("query coordinator idAllocator initialize failed", zap.Error(err))
-		return nil, err
-	}
-	s.taskIDAllocator = func() (UniqueID, error) {
-		return idAllocator.AllocOne()
-	}
-	err = s.reloadFromKV()
+
+	err := s.reloadFromKV()
 	if err != nil {
 		log.Error("reload task from kv failed", zap.Error(err))
 		return nil, err
@@ -393,6 +387,20 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			meta:               scheduler.meta,
 		}
 		newTask = loadBalanceTask
+	case commonpb.MsgType_HandoffSegments:
+		handoffReq := querypb.HandoffSegmentsRequest{}
+		err = proto.Unmarshal([]byte(t), &handoffReq)
+		if err != nil {
+			return nil, err
+		}
+		handoffTask := &handoffTask{
+			baseTask:               baseTask,
+			HandoffSegmentsRequest: &handoffReq,
+			dataCoord:              scheduler.dataCoord,
+			cluster:                scheduler.cluster,
+			meta:                   scheduler.meta,
+		}
+		newTask = handoffTask
 	default:
 		err = errors.New("inValid msg type when unMarshal task")
 		log.Error(err.Error())
@@ -438,9 +446,11 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	var taskInfoKey string
 	// assign taskID for childTask and update triggerTask's childTask to etcd
 	updateKVFn := func(parentTask task) error {
-		kvs := make(map[string]string)
-		kvs[taskInfoKey] = strconv.Itoa(int(taskDone))
+		// TODO:: if childTask.type == loadSegment, then only save segmentID to etcd instead of binlog paths
+		// The binlog paths of each segment will be written into etcd in advance
+		// The binlog paths will be filled in through etcd when load segment grpc is called
 		for _, childTask := range parentTask.getChildTask() {
+			kvs := make(map[string]string)
 			id, err := scheduler.taskIDAllocator()
 			if err != nil {
 				return err
@@ -454,11 +464,18 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 			kvs[childTaskKey] = string(blobs)
 			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, childTask.getTaskID())
 			kvs[stateKey] = strconv.Itoa(int(taskUndo))
+			err = scheduler.client.MultiSave(kvs)
+			if err != nil {
+				return err
+			}
 		}
-		err := scheduler.client.MultiSave(kvs)
+
+		parentInfoKey := fmt.Sprintf("%s/%d", taskInfoPrefix, parentTask.getTaskID())
+		err := scheduler.client.Save(parentInfoKey, strconv.Itoa(int(taskDone)))
 		if err != nil {
 			return err
 		}
+
 		return nil
 	}
 
@@ -599,7 +616,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			scheduler.stopActivateTaskLoopChan <- 1
 			return
 		case <-scheduler.triggerTaskQueue.Chan():
-			triggerTask = scheduler.triggerTaskQueue.PopTask()
+			triggerTask = scheduler.triggerTaskQueue.popTask()
 			log.Debug("scheduleLoop: pop a triggerTask from triggerTaskQueue", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
 			alreadyNotify := true
 			if triggerTask.getState() == taskUndo || triggerTask.getState() == taskDoing {
@@ -618,8 +635,18 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				activateTasks := make([]task, len(childTasks))
 				copy(activateTasks, childTasks)
 				processInternalTaskFn(activateTasks, triggerTask)
-				resultStatus := triggerTask.getResultInfo()
-				if resultStatus.ErrorCode != commonpb.ErrorCode_Success {
+				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+					err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
+					if err != nil {
+						triggerTask.setResultInfo(err)
+					}
+				}
+				resultInfo := triggerTask.getResultInfo()
+				if resultInfo.ErrorCode != commonpb.ErrorCode_Success {
+					if !alreadyNotify {
+						triggerTask.notify(errors.New(resultInfo.Reason))
+						alreadyNotify = true
+					}
 					rollBackTasks := triggerTask.rollBack(scheduler.ctx)
 					log.Debug("scheduleLoop: start rollBack after triggerTask failed",
 						zap.Int64("triggerTaskID", triggerTask.getTaskID()),
@@ -629,7 +656,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 						log.Error("scheduleLoop: rollBackInternalTask error",
 							zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 							zap.Error(err))
-						triggerTask.setResultInfo(err)
+
 					} else {
 						processInternalTaskFn(rollBackTasks, triggerTask)
 					}
@@ -807,11 +834,13 @@ func (scheduler *TaskScheduler) processActivateTaskLoop() {
 				continue
 			}
 
-			log.Debug("processActivateTaskLoop: pop a active task from activateChan", zap.Int64("taskID", t.getTaskID()))
-			go func() {
-				err := scheduler.processTask(t)
-				t.notify(err)
-			}()
+			if t.getState() != taskDone {
+				log.Debug("processActivateTaskLoop: pop a active task from activateChan", zap.Int64("taskID", t.getTaskID()))
+				go func() {
+					err := scheduler.processTask(t)
+					t.notify(err)
+				}()
+			}
 		}
 	}
 }
@@ -828,4 +857,100 @@ func (scheduler *TaskScheduler) Start() error {
 func (scheduler *TaskScheduler) Close() {
 	scheduler.cancel()
 	scheduler.wg.Wait()
+}
+
+func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta) error {
+	segmentInfosToSave := make(map[UniqueID][]*querypb.SegmentInfo)
+	segmentInfosToRemove := make(map[UniqueID][]*querypb.SegmentInfo)
+
+	var sealedSegmentChangeInfos col2SealedSegmentChangeInfos
+	var err error
+	switch triggerTask.msgType() {
+	case commonpb.MsgType_ReleaseCollection:
+		// release all segmentInfo of the collection when release collection
+		req := triggerTask.(*releaseCollectionTask).ReleaseCollectionRequest
+		collectionID := req.CollectionID
+		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, nil)
+	case commonpb.MsgType_ReleasePartitions:
+		// release all segmentInfo of the partitions when release partitions
+		req := triggerTask.(*releasePartitionTask).ReleasePartitionsRequest
+		collectionID := req.CollectionID
+		segmentInfos := meta.showSegmentInfos(collectionID, req.PartitionIDs)
+		for _, info := range segmentInfos {
+			if info.CollectionID == collectionID {
+				if _, ok := segmentInfosToRemove[collectionID]; !ok {
+					segmentInfosToRemove[collectionID] = make([]*querypb.SegmentInfo, 0)
+				}
+				segmentInfosToRemove[collectionID] = append(segmentInfosToRemove[collectionID], info)
+			}
+		}
+		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
+	default:
+		// save new segmentInfo when load segment
+		for _, childTask := range triggerTask.getChildTask() {
+			if childTask.msgType() == commonpb.MsgType_LoadSegments {
+				req := childTask.(*loadSegmentTask).LoadSegmentsRequest
+				dstNodeID := req.DstNodeID
+				for _, loadInfo := range req.Infos {
+					collectionID := loadInfo.CollectionID
+					segmentID := loadInfo.SegmentID
+					segmentInfo := &querypb.SegmentInfo{
+						SegmentID:    segmentID,
+						CollectionID: loadInfo.CollectionID,
+						PartitionID:  loadInfo.PartitionID,
+						NodeID:       dstNodeID,
+						SegmentState: querypb.SegmentState_sealed,
+					}
+					if _, ok := segmentInfosToSave[collectionID]; !ok {
+						segmentInfosToSave[collectionID] = make([]*querypb.SegmentInfo, 0)
+					}
+					segmentInfosToSave[collectionID] = append(segmentInfosToSave[collectionID], segmentInfo)
+				}
+			}
+		}
+		sealedSegmentChangeInfos, err = meta.saveGlobalSealedSegInfos(segmentInfosToSave)
+	}
+
+	if err != nil {
+		rollBackSegmentChangeInfoErr := retry.Do(ctx, func() error {
+			rollBackChangeInfos := reverseSealedSegmentChangeInfo(sealedSegmentChangeInfos)
+			for collectionID, infos := range rollBackChangeInfos {
+				_, _, sendErr := meta.sendSealedSegmentChangeInfos(collectionID, infos)
+				if sendErr != nil {
+					return sendErr
+				}
+			}
+			return nil
+		}, retry.Attempts(20))
+		if rollBackSegmentChangeInfoErr != nil {
+			log.Error("scheduleLoop: Restore the information of global sealed segments in query node failed", zap.Error(rollBackSegmentChangeInfoErr))
+		}
+		return err
+	}
+
+	return nil
+}
+
+func reverseSealedSegmentChangeInfo(changeInfosMap map[UniqueID]*querypb.SealedSegmentsChangeInfo) map[UniqueID]*querypb.SealedSegmentsChangeInfo {
+	result := make(map[UniqueID]*querypb.SealedSegmentsChangeInfo)
+	for collectionID, changeInfos := range changeInfosMap {
+		segmentChangeInfos := &querypb.SealedSegmentsChangeInfo{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SealedSegmentsChangeInfo,
+			},
+			Infos: []*querypb.SegmentChangeInfo{},
+		}
+		for _, info := range changeInfos.Infos {
+			changeInfo := &querypb.SegmentChangeInfo{
+				OnlineNodeID:    info.OfflineNodeID,
+				OnlineSegments:  info.OfflineSegments,
+				OfflineNodeID:   info.OnlineNodeID,
+				OfflineSegments: info.OnlineSegments,
+			}
+			segmentChangeInfos.Infos = append(segmentChangeInfos.Infos, changeInfo)
+		}
+		result[collectionID] = segmentChangeInfos
+	}
+
+	return result
 }

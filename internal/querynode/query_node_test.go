@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -192,7 +193,7 @@ func newQueryNodeMock() *QueryNode {
 	}
 	svr := NewQueryNode(ctx, msFactory)
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, svr.msFactory, etcdKV)
-	svr.streaming = newStreaming(ctx, msFactory, etcdKV)
+	svr.streaming = newStreaming(ctx, msFactory, etcdKV, svr.historical.replica)
 	svr.etcdKV = etcdKV
 
 	return svr
@@ -271,4 +272,139 @@ func TestQueryNode_init(t *testing.T) {
 
 	err = node.Init()
 	assert.NoError(t, err)
+}
+
+func genSimpleQueryNodeToTestWatchChangeInfo(ctx context.Context) (*QueryNode, error) {
+	node, err := genSimpleQueryNode(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	err = node.queryService.addQueryCollection(defaultCollectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	qc, err := node.queryService.getQueryCollection(defaultCollectionID)
+	if err != nil {
+		return nil, err
+	}
+	err = qc.globalSegmentManager.addGlobalSegmentInfo(genSimpleSegmentInfo())
+	if err != nil {
+		return nil, err
+	}
+
+	return node, nil
+}
+
+func TestQueryNode_waitChangeInfo(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+	assert.NoError(t, err)
+
+	err = node.waitChangeInfo(genSimpleChangeInfo())
+	assert.NoError(t, err)
+}
+
+func TestQueryNode_adjustByChangeInfo(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	t.Run("test adjustByChangeInfo", func(t *testing.T) {
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		assert.NoError(t, err)
+
+		err = node.adjustByChangeInfo(genSimpleChangeInfo())
+		assert.NoError(t, err)
+	})
+
+	t.Run("test adjustByChangeInfo no segment", func(t *testing.T) {
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		assert.NoError(t, err)
+
+		err = node.historical.replica.removeSegment(defaultSegmentID)
+		assert.NoError(t, err)
+
+		segmentChangeInfos := genSimpleChangeInfo()
+		segmentChangeInfos.Infos[0].OnlineSegments = nil
+		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeID
+
+		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		qc.globalSegmentManager.removeGlobalSegmentInfo(defaultSegmentID)
+
+		err = node.adjustByChangeInfo(segmentChangeInfos)
+		assert.Error(t, err)
+	})
+}
+
+func TestQueryNode_watchChangeInfo(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	t.Run("test watchChangeInfo", func(t *testing.T) {
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		assert.NoError(t, err)
+
+		go node.watchChangeInfo()
+
+		info := genSimpleSegmentInfo()
+		value, err := proto.Marshal(info)
+		assert.NoError(t, err)
+		err = saveChangeInfo("0", string(value))
+		assert.NoError(t, err)
+
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	t.Run("test watchChangeInfo key error", func(t *testing.T) {
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		assert.NoError(t, err)
+
+		go node.watchChangeInfo()
+
+		err = saveChangeInfo("*$&#%^^", "%EUY%&#^$%&@")
+		assert.NoError(t, err)
+
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	t.Run("test watchChangeInfo unmarshal error", func(t *testing.T) {
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		assert.NoError(t, err)
+
+		go node.watchChangeInfo()
+
+		err = saveChangeInfo("0", "$%^$*&%^#$&*")
+		assert.NoError(t, err)
+
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	t.Run("test watchChangeInfo adjustByChangeInfo error", func(t *testing.T) {
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		assert.NoError(t, err)
+
+		err = node.historical.replica.removeSegment(defaultSegmentID)
+		assert.NoError(t, err)
+
+		segmentChangeInfos := genSimpleChangeInfo()
+		segmentChangeInfos.Infos[0].OnlineSegments = nil
+		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeID
+
+		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		qc.globalSegmentManager.removeGlobalSegmentInfo(defaultSegmentID)
+
+		go node.watchChangeInfo()
+
+		value, err := proto.Marshal(segmentChangeInfos)
+		assert.NoError(t, err)
+		err = saveChangeInfo("0", string(value))
+		assert.NoError(t, err)
+
+		time.Sleep(100 * time.Millisecond)
+	})
 }

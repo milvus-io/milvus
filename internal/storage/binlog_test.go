@@ -66,12 +66,12 @@ func TestInsertBinlog(t *testing.T) {
 	buf, err := w.GetBuffer()
 	assert.Nil(t, err)
 
-	//magic number
+	// magic number
 	magicNum := UnsafeReadInt32(buf, 0)
 	assert.Equal(t, magicNum, MagicNumber)
 	pos := int(unsafe.Sizeof(MagicNumber))
 
-	//descriptor header, timestamp
+	// descriptor header, timestamp
 	ts := UnsafeReadInt64(buf, pos)
 	assert.Greater(t, ts, int64(0))
 	curts := time.Now().UnixNano() / int64(time.Millisecond)

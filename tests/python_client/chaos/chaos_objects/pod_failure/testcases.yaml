@@ -1,13 +1,11 @@
-# Testcases All-in-one
-#   pod kill
+# Pod Failure Testcases All-in-one
+#   pod failure
 #     standalone
-#       3 pods(standalone-ha-blabla, etcd, minio)
+#       todo
 #     cluster-1-node
-#       11 pods(proxy, rootcoord, querynode, querycoord, datanode, datacoord,
-#               indexnode, indexcoord, pulsar, etcd, minio)
+#       todo
 #     cluster-n-nodes
-#       11 pods* n: kill one and kill all
-
+#       4 pods(querynode, datanode, indexnode, proxy)
 Collections:
   -
     testcase:
@@ -18,6 +16,24 @@ Collections:
             search: fail
             query: fail
           cluster_n_nodes:
-            search: degrade
-            query: degrade
+            search: succ
+            query: succ
+  -
+    testcase:
+      name: test_indexnode_pod_failure
+      chaos: chaos_indexnode_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            index: fail
+          cluster_n_nodes:
+            index: succ
 
+  -
+    testcase:
+      name: test_datanode_pod_failure
+      chaos: chaos_datanode_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            insert: fail
+          cluster_n_nodes:
+            insert: succ

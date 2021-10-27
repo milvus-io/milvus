@@ -20,19 +20,16 @@ import (
 	"math"
 	"reflect"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 	"unsafe"
-
-	"github.com/milvus-io/milvus/internal/common"
 
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -46,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -585,7 +583,7 @@ func (it *insertTask) transferColumnBasedRequestToRowBasedData() error {
 	return nil
 }
 
-func (it *insertTask) checkFieldAutoID() error {
+func (it *insertTask) checkFieldAutoIDAndHashPK() error {
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if it.req.NumRows <= 0 {
 		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
@@ -696,30 +694,16 @@ func (it *insertTask) checkFieldAutoID() error {
 			},
 		}
 
-		// TODO(dragondriver): in this case, should we directly overwrite the hash?
-
-		if len(it.HashValues) != 0 && len(it.HashValues) != len(it.BaseInsertTask.RowIDs) {
-			return fmt.Errorf("invalid length of input hash values")
-		}
-		if it.HashValues == nil || len(it.HashValues) <= 0 {
-			it.HashValues = make([]uint32, 0, len(it.BaseInsertTask.RowIDs))
-			for _, rowID := range it.BaseInsertTask.RowIDs {
-				hash, _ := typeutil.Hash32Int64(rowID)
-				it.HashValues = append(it.HashValues, hash)
-			}
+		it.HashValues = make([]uint32, 0, len(it.BaseInsertTask.RowIDs))
+		for _, rowID := range it.BaseInsertTask.RowIDs {
+			hash, _ := typeutil.Hash32Int64(rowID)
+			it.HashValues = append(it.HashValues, hash)
 		}
 	} else {
-		// use primary keys as hash if hash is not provided
-		// in this case, primary field is required, we have already checked this
-		if uint32(len(it.HashValues)) != 0 && uint32(len(it.HashValues)) != rowNums {
-			return fmt.Errorf("invalid length of input hash values")
-		}
-		if it.HashValues == nil || len(it.HashValues) <= 0 {
-			it.HashValues = make([]uint32, 0, len(primaryData))
-			for _, pk := range primaryData {
-				hash, _ := typeutil.Hash32Int64(pk)
-				it.HashValues = append(it.HashValues, hash)
-			}
+		it.HashValues = make([]uint32, 0, len(primaryData))
+		for _, pk := range primaryData {
+			hash, _ := typeutil.Hash32Int64(pk)
+			it.HashValues = append(it.HashValues, hash)
 		}
 	}
 
@@ -749,12 +733,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	collectionName := it.BaseInsertTask.CollectionName
-	if err := ValidateCollectionName(collectionName); err != nil {
+	if err := validateCollectionName(collectionName); err != nil {
 		return err
 	}
 
 	partitionTag := it.BaseInsertTask.PartitionName
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 
@@ -770,7 +754,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	err = it.checkFieldAutoID()
+	err = it.checkFieldAutoIDAndHashPK()
 	if err != nil {
 		return err
 	}
@@ -826,7 +810,6 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		if keysLen != timestampLen || keysLen != rowIDLen || keysLen != rowDataLen {
 			return nil, fmt.Errorf("the length of hashValue, timestamps, rowIDs, RowData are not equal")
 		}
-
 		for idx, channelID := range keys {
 			channelCountMap[channelID]++
 			if _, ok := channelMaxTSMap[channelID]; !ok {
@@ -908,8 +891,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		return 0
 	}
 
-	factor := 10
-	threshold := Params.PulsarMaxMessageSize / factor
+	threshold := Params.PulsarMaxMessageSize
 	log.Debug("Proxy", zap.Int("threshold of message size: ", threshold))
 	// not accurate
 	/* #nosec G103 */
@@ -1155,15 +1137,15 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	// validate collection name
-	if err := ValidateCollectionName(cct.schema.Name); err != nil {
+	if err := validateCollectionName(cct.schema.Name); err != nil {
 		return err
 	}
 
-	if err := ValidateDuplicatedFieldName(cct.schema.Fields); err != nil {
+	if err := validateDuplicatedFieldName(cct.schema.Fields); err != nil {
 		return err
 	}
 
-	if err := ValidatePrimaryKey(cct.schema); err != nil {
+	if err := validatePrimaryKey(cct.schema); err != nil {
 		return err
 	}
 
@@ -1173,7 +1155,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate field name
 	for _, field := range cct.schema.Fields {
-		if err := ValidateFieldName(field.Name); err != nil {
+		if err := validateFieldName(field.Name); err != nil {
 			return err
 		}
 		if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
@@ -1194,11 +1176,11 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 				return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
 			}
 			if field.DataType == schemapb.DataType_FloatVector {
-				if err := ValidateDimension(dim, false); err != nil {
+				if err := validateDimension(dim, false); err != nil {
 					return err
 				}
 			} else {
-				if err := ValidateDimension(dim, true); err != nil {
+				if err := validateDimension(dim, true); err != nil {
 					return err
 				}
 			}
@@ -1269,7 +1251,7 @@ func (dct *dropCollectionTask) PreExecute(ctx context.Context) error {
 	dct.Base.MsgType = commonpb.MsgType_DropCollection
 	dct.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(dct.CollectionName); err != nil {
+	if err := validateCollectionName(dct.CollectionName); err != nil {
 		return err
 	}
 	return nil
@@ -1454,12 +1436,12 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := ValidateCollectionName(st.query.CollectionName); err != nil {
+	if err := validateCollectionName(st.query.CollectionName); err != nil {
 		return err
 	}
 
 	for _, tag := range st.query.PartitionNames {
-		if err := ValidatePartitionTag(tag, false); err != nil {
+		if err := validatePartitionTag(tag, false); err != nil {
 			return err
 		}
 	}
@@ -1535,10 +1517,14 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		}
 		roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, st.query.SearchParams)
 		if err != nil {
-			return errors.New(RoundDecimalKey + "not found in search_params")
+			roundDecimalStr = "-1"
 		}
-		roundDeciaml, err := strconv.Atoi(roundDecimalStr)
+		roundDecimal, err := strconv.Atoi(roundDecimalStr)
 		if err != nil {
+			return errors.New(RoundDecimalKey + " " + roundDecimalStr + " is not invalid")
+		}
+
+		if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
 			return errors.New(RoundDecimalKey + " " + roundDecimalStr + " is not invalid")
 		}
 
@@ -1546,7 +1532,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			Topk:         int64(topK),
 			MetricType:   metricType,
 			SearchParams: searchParams,
-			RoundDecimal: int64(roundDeciaml),
+			RoundDecimal: int64(roundDecimal),
 		}
 
 		log.Debug("create query plan",
@@ -1733,48 +1719,211 @@ func (st *searchTask) Execute(ctx context.Context) error {
 	return err
 }
 
-func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
-	log.Debug("reduceSearchResultDataParallel", zap.Any("lenOfSearchResults", len(searchResults)))
+func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
+	tr := timerecord.NewTimeRecorder("decodeSearchResults")
+	log.Debug("decodeSearchResults", zap.Any("lenOfSearchResults", len(searchResults)))
 
 	results := make([]*schemapb.SearchResultData, 0)
 	// necessary to parallel this?
 	for i, partialSearchResult := range searchResults {
-		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("len(SlicedBob)", len(partialSearchResult.SlicedBlob)))
+		log.Debug("decodeSearchResults", zap.Any("i", i), zap.Any("len(SlicedBob)", len(partialSearchResult.SlicedBlob)))
 		if partialSearchResult.SlicedBlob == nil {
 			continue
 		}
 
 		var partialResultData schemapb.SearchResultData
 		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
-		log.Debug("decodeSearchResultsSerial, Unmarshal partitalSearchResult.SliceBlob", zap.Error(err))
+		log.Debug("decodeSearchResults, Unmarshal partitalSearchResult.SliceBlob", zap.Error(err))
 		if err != nil {
 			return nil, err
 		}
 
 		results = append(results, &partialResultData)
 	}
-	log.Debug("reduceSearchResultDataParallel", zap.Any("lenOfResults", len(results)))
+	log.Debug("decodeSearchResults", zap.Any("lenOfResults", len(results)))
+	tr.Elapse("done")
 
 	return results, nil
 }
 
-func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
-	t := time.Now()
-	defer func() {
-		log.Debug("decodeSearchResults", zap.Any("time cost", time.Since(t)))
-	}()
-	return decodeSearchResultsSerial(searchResults)
-	// return decodeSearchResultsParallelByCPU(searchResults)
+func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64) error {
+	if data.NumQueries != nq {
+		return fmt.Errorf("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
+	}
+	if data.TopK != topk {
+		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
+	}
+	if len(data.Ids.GetIntId().Data) != (int)(nq*topk) {
+		return fmt.Errorf("search result's id length %d invalid", len(data.Ids.GetIntId().Data))
+	}
+	if len(data.Scores) != (int)(nq*topk) {
+		return fmt.Errorf("search result's score length %d invalid", len(data.Scores))
+	}
+	return nil
 }
 
-func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultData, availableQueryNodeNum int64,
-	nq int64, topk int64, metricType string, maxParallel int) (*milvuspb.SearchResults, error) {
+func selectSearchResultData(dataArray []*schemapb.SearchResultData, offsets []int64, topk int64, qi int64) int {
+	sel := -1
+	maxDistance := minFloat32
+	for i, offset := range offsets { // query num, the number of ways to merge
+		if offset >= topk {
+			continue
+		}
+		idx := qi*topk + offset
+		id := dataArray[i].Ids.GetIntId().Data[idx]
+		if id != -1 {
+			distance := dataArray[i].Scores[idx]
+			if distance > maxDistance {
+				sel = i
+				maxDistance = distance
+			}
+		}
+	}
+	return sel
+}
 
-	log.Debug("reduceSearchResultDataParallel",
-		zap.Int("len(searchResultData)", len(searchResultData)),
-		zap.Int64("availableQueryNodeNum", availableQueryNodeNum),
-		zap.Int64("nq", nq), zap.Int64("topk", topk), zap.String("metricType", metricType),
-		zap.Int("maxParallel", maxParallel))
+func copySearchResultData(dst *schemapb.SearchResultData, src *schemapb.SearchResultData, idx int64) error {
+	for i, fieldData := range src.FieldsData {
+		switch fieldType := fieldData.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			if dst.FieldsData[i] == nil || dst.FieldsData[i].GetScalars() == nil {
+				dst.FieldsData[i] = &schemapb.FieldData{
+					FieldName: fieldData.FieldName,
+					FieldId:   fieldData.FieldId,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{},
+					},
+				}
+			}
+			switch scalarType := fieldType.Scalars.Data.(type) {
+			case *schemapb.ScalarField_BoolData:
+				if dst.FieldsData[i].GetScalars().GetBoolData() == nil {
+					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BoolData{
+							BoolData: &schemapb.BoolArray{
+								Data: []bool{scalarType.BoolData.Data[idx]},
+							},
+						},
+					}
+				} else {
+					dst.FieldsData[i].GetScalars().GetBoolData().Data = append(dst.FieldsData[i].GetScalars().GetBoolData().Data, scalarType.BoolData.Data[idx])
+				}
+			case *schemapb.ScalarField_IntData:
+				if dst.FieldsData[i].GetScalars().GetIntData() == nil {
+					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: []int32{scalarType.IntData.Data[idx]},
+							},
+						},
+					}
+				} else {
+					dst.FieldsData[i].GetScalars().GetIntData().Data = append(dst.FieldsData[i].GetScalars().GetIntData().Data, scalarType.IntData.Data[idx])
+				}
+			case *schemapb.ScalarField_LongData:
+				if dst.FieldsData[i].GetScalars().GetLongData() == nil {
+					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{scalarType.LongData.Data[idx]},
+							},
+						},
+					}
+				} else {
+					dst.FieldsData[i].GetScalars().GetLongData().Data = append(dst.FieldsData[i].GetScalars().GetLongData().Data, scalarType.LongData.Data[idx])
+				}
+			case *schemapb.ScalarField_FloatData:
+				if dst.FieldsData[i].GetScalars().GetFloatData() == nil {
+					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: []float32{scalarType.FloatData.Data[idx]},
+							},
+						},
+					}
+				} else {
+					dst.FieldsData[i].GetScalars().GetFloatData().Data = append(dst.FieldsData[i].GetScalars().GetFloatData().Data, scalarType.FloatData.Data[idx])
+				}
+			case *schemapb.ScalarField_DoubleData:
+				if dst.FieldsData[i].GetScalars().GetDoubleData() == nil {
+					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DoubleData{
+							DoubleData: &schemapb.DoubleArray{
+								Data: []float64{scalarType.DoubleData.Data[idx]},
+							},
+						},
+					}
+				} else {
+					dst.FieldsData[i].GetScalars().GetDoubleData().Data = append(dst.FieldsData[i].GetScalars().GetDoubleData().Data, scalarType.DoubleData.Data[idx])
+				}
+			default:
+				log.Debug("Not supported field type", zap.String("field type", fieldData.Type.String()))
+				return fmt.Errorf("not supported field type: %s", fieldData.Type.String())
+			}
+		case *schemapb.FieldData_Vectors:
+			dim := fieldType.Vectors.Dim
+			if dst.FieldsData[i] == nil || dst.FieldsData[i].GetVectors() == nil {
+				dst.FieldsData[i] = &schemapb.FieldData{
+					FieldName: fieldData.FieldName,
+					FieldId:   fieldData.FieldId,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: dim,
+						},
+					},
+				}
+			}
+			switch vectorType := fieldType.Vectors.Data.(type) {
+			case *schemapb.VectorField_BinaryVector:
+				if dst.FieldsData[i].GetVectors().GetBinaryVector() == nil {
+					bvec := &schemapb.VectorField_BinaryVector{
+						BinaryVector: vectorType.BinaryVector[idx*(dim/8) : (idx+1)*(dim/8)],
+					}
+					dst.FieldsData[i].GetVectors().Data = bvec
+				} else {
+					dst.FieldsData[i].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(dst.FieldsData[i].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector, vectorType.BinaryVector[idx*(dim/8):(idx+1)*(dim/8)]...)
+				}
+			case *schemapb.VectorField_FloatVector:
+				if dst.FieldsData[i].GetVectors().GetFloatVector() == nil {
+					fvec := &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: vectorType.FloatVector.Data[idx*dim : (idx+1)*dim],
+						},
+					}
+					dst.FieldsData[i].GetVectors().Data = fvec
+				} else {
+					dst.FieldsData[i].GetVectors().GetFloatVector().Data = append(dst.FieldsData[i].GetVectors().GetFloatVector().Data, vectorType.FloatVector.Data[idx*dim:(idx+1)*dim]...)
+				}
+			default:
+				log.Debug("Not supported field type", zap.String("field type", fieldData.Type.String()))
+				return fmt.Errorf("not supported field type: %s", fieldData.Type.String())
+			}
+		}
+	}
+	return nil
+}
+
+//func printSearchResultData(data *schemapb.SearchResultData, header string) {
+//	size := len(data.Ids.GetIntId().Data)
+//	if size != len(data.Scores) {
+//		log.Error("SearchResultData length mis-match")
+//	}
+//	log.Debug("==== SearchResultData ====",
+//		zap.String("header", header), zap.Int64("nq", data.NumQueries), zap.Int64("topk", data.TopK))
+//	for i := 0; i < size; i++ {
+//		log.Debug("", zap.Int("i", i), zap.Int64("id", data.Ids.GetIntId().Data[i]), zap.Float32("score", data.Scores[i]))
+//	}
+//}
+
+func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq int64, topk int64, metricType string) (*milvuspb.SearchResults, error) {
+
+	tr := timerecord.NewTimeRecorder("reduceSearchResultData")
+	defer func() {
+		tr.Elapse("done")
+	}()
+
+	log.Debug("reduceSearchResultData", zap.Int("len(searchResultData)", len(searchResultData)),
+		zap.Int64("nq", nq), zap.Int64("topk", topk), zap.String("metricType", metricType))
 
 	ret := &milvuspb.SearchResults{
 		Status: &commonpb.Status{
@@ -1797,178 +1946,66 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 	}
 
 	for i, sData := range searchResultData {
-		log.Debug("reduceSearchResultDataParallel",
+		log.Debug("reduceSearchResultData",
 			zap.Int("i", i),
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK),
 			zap.Any("len(FieldsData)", len(sData.FieldsData)))
-		if sData.NumQueries != nq {
-			return ret, fmt.Errorf("search result's nq(%d) mis-match with %d", sData.NumQueries, nq)
+		if err := checkSearchResultData(sData, nq, topk); err != nil {
+			return ret, err
 		}
-		if sData.TopK != topk {
-			return ret, fmt.Errorf("search result's topk(%d) mis-match with %d", sData.TopK, topk)
-		}
-		if len(sData.Ids.GetIntId().Data) != (int)(nq*topk) {
-			return ret, fmt.Errorf("search result's id length %d invalid", len(sData.Ids.GetIntId().Data))
-		}
-		if len(sData.Scores) != (int)(nq*topk) {
-			return ret, fmt.Errorf("search result's score length %d invalid", len(sData.Scores))
-		}
+		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
 
-	// TODO(yukun): Use parallel function
 	var realTopK int64 = -1
-	var idx int64
-	var j int64
-	for idx = 0; idx < nq; idx++ {
-		locs := make([]int64, availableQueryNodeNum)
+	for i := int64(0); i < nq; i++ {
+		offsets := make([]int64, len(searchResultData))
 
-		j = 0
-		for ; j < topk; j++ {
-			choice, maxDistance := -1, minFloat32
-			for q, loc := range locs { // query num, the number of ways to merge
-				if loc >= topk {
-					continue
-				}
-				curIdx := idx*topk + loc
-				id := searchResultData[q].Ids.GetIntId().Data[curIdx]
-				if id != -1 {
-					distance := searchResultData[q].Scores[curIdx]
-					if distance > maxDistance {
-						choice = q
-						maxDistance = distance
-					}
-				}
-			}
-			if choice == -1 {
+		var prevIDSet = make(map[int64]struct{})
+		var prevScore float32 = math.MaxFloat32
+		var j int64
+		for j = 0; j < topk; {
+			sel := selectSearchResultData(searchResultData, offsets, topk, i)
+			if sel == -1 {
 				break
 			}
-			choiceOffset := locs[choice]
-			curIdx := idx*topk + choiceOffset
+			idx := i*topk + offsets[sel]
 
+			id := searchResultData[sel].Ids.GetIntId().Data[idx]
+			score := searchResultData[sel].Scores[idx]
 			// ignore invalid search result
-			id := searchResultData[choice].Ids.GetIntId().Data[curIdx]
 			if id == -1 {
 				continue
 			}
-			ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
-			// TODO(yukun): Process searchResultData.FieldsData
-			for k, fieldData := range searchResultData[choice].FieldsData {
-				switch fieldType := fieldData.Field.(type) {
-				case *schemapb.FieldData_Scalars:
-					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetScalars() == nil {
-						ret.Results.FieldsData[k] = &schemapb.FieldData{
-							FieldName: fieldData.FieldName,
-							FieldId:   fieldData.FieldId,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{},
-							},
-						}
-					}
-					switch scalarType := fieldType.Scalars.Data.(type) {
-					case *schemapb.ScalarField_BoolData:
-						if ret.Results.FieldsData[k].GetScalars().GetBoolData() == nil {
-							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_BoolData{
-									BoolData: &schemapb.BoolArray{
-										Data: []bool{scalarType.BoolData.Data[curIdx]},
-									},
-								},
-							}
-						} else {
-							ret.Results.FieldsData[k].GetScalars().GetBoolData().Data = append(ret.Results.FieldsData[k].GetScalars().GetBoolData().Data, scalarType.BoolData.Data[curIdx])
-						}
-					case *schemapb.ScalarField_IntData:
-						if ret.Results.FieldsData[k].GetScalars().GetIntData() == nil {
-							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_IntData{
-									IntData: &schemapb.IntArray{
-										Data: []int32{scalarType.IntData.Data[curIdx]},
-									},
-								},
-							}
-						} else {
-							ret.Results.FieldsData[k].GetScalars().GetIntData().Data = append(ret.Results.FieldsData[k].GetScalars().GetIntData().Data, scalarType.IntData.Data[curIdx])
-						}
-					case *schemapb.ScalarField_LongData:
-						if ret.Results.FieldsData[k].GetScalars().GetLongData() == nil {
-							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_LongData{
-									LongData: &schemapb.LongArray{
-										Data: []int64{scalarType.LongData.Data[curIdx]},
-									},
-								},
-							}
-						} else {
-							ret.Results.FieldsData[k].GetScalars().GetLongData().Data = append(ret.Results.FieldsData[k].GetScalars().GetLongData().Data, scalarType.LongData.Data[curIdx])
-						}
-					case *schemapb.ScalarField_FloatData:
-						if ret.Results.FieldsData[k].GetScalars().GetFloatData() == nil {
-							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_FloatData{
-									FloatData: &schemapb.FloatArray{
-										Data: []float32{scalarType.FloatData.Data[curIdx]},
-									},
-								},
-							}
-						} else {
-							ret.Results.FieldsData[k].GetScalars().GetFloatData().Data = append(ret.Results.FieldsData[k].GetScalars().GetFloatData().Data, scalarType.FloatData.Data[curIdx])
-						}
-					case *schemapb.ScalarField_DoubleData:
-						if ret.Results.FieldsData[k].GetScalars().GetDoubleData() == nil {
-							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_DoubleData{
-									DoubleData: &schemapb.DoubleArray{
-										Data: []float64{scalarType.DoubleData.Data[curIdx]},
-									},
-								},
-							}
-						} else {
-							ret.Results.FieldsData[k].GetScalars().GetDoubleData().Data = append(ret.Results.FieldsData[k].GetScalars().GetDoubleData().Data, scalarType.DoubleData.Data[curIdx])
-						}
-					default:
-						log.Debug("Not supported field type")
-						return nil, fmt.Errorf("not supported field type: %s", fieldData.Type.String())
-					}
-				case *schemapb.FieldData_Vectors:
-					dim := fieldType.Vectors.Dim
-					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetVectors() == nil {
-						ret.Results.FieldsData[k] = &schemapb.FieldData{
-							FieldName: fieldData.FieldName,
-							FieldId:   fieldData.FieldId,
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: dim,
-								},
-							},
-						}
-					}
-					switch vectorType := fieldType.Vectors.Data.(type) {
-					case *schemapb.VectorField_BinaryVector:
-						if ret.Results.FieldsData[k].GetVectors().GetBinaryVector() == nil {
-							bvec := &schemapb.VectorField_BinaryVector{
-								BinaryVector: vectorType.BinaryVector[curIdx*(dim/8) : (curIdx+1)*(dim/8)],
-							}
-							ret.Results.FieldsData[k].GetVectors().Data = bvec
-						} else {
-							ret.Results.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(ret.Results.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector, vectorType.BinaryVector[curIdx*(dim/8):(curIdx+1)*(dim/8)]...)
-						}
-					case *schemapb.VectorField_FloatVector:
-						if ret.Results.FieldsData[k].GetVectors().GetFloatVector() == nil {
-							fvec := &schemapb.VectorField_FloatVector{
-								FloatVector: &schemapb.FloatArray{
-									Data: vectorType.FloatVector.Data[curIdx*dim : (curIdx+1)*dim],
-								},
-							}
-							ret.Results.FieldsData[k].GetVectors().Data = fvec
-						} else {
-							ret.Results.FieldsData[k].GetVectors().GetFloatVector().Data = append(ret.Results.FieldsData[k].GetVectors().GetFloatVector().Data, vectorType.FloatVector.Data[curIdx*dim:(curIdx+1)*dim]...)
-						}
-					}
+
+			// remove duplicates
+			if math.Abs(float64(score)-float64(prevScore)) > 0.00001 {
+				copySearchResultData(ret.Results, searchResultData[sel], idx)
+				ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
+				ret.Results.Scores = append(ret.Results.Scores, score)
+				prevScore = score
+				prevIDSet = map[int64]struct{}{id: {}}
+				j++
+			} else {
+				// To handle this case:
+				//    e1: [100, 0.99]
+				//    e2: [101, 0.99]   ==> not duplicated, should keep
+				//    e3: [100, 0.99]   ==> duplicated, should remove
+				if _, ok := prevIDSet[id]; !ok {
+					copySearchResultData(ret.Results, searchResultData[sel], idx)
+					ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
+					ret.Results.Scores = append(ret.Results.Scores, score)
+					prevIDSet[id] = struct{}{}
+					j++
+				} else {
+					// entity with same id and same score must be duplicated
+					log.Debug("skip duplicated search result",
+						zap.Int64("id", id),
+						zap.Float32("score", score),
+						zap.Float32("prevScore", prevScore))
 				}
 			}
-			ret.Results.Scores = append(ret.Results.Scores, searchResultData[choice].Scores[idx*topk+choiceOffset])
-			locs[choice]++
+			offsets[sel]++
 		}
 		if realTopK != -1 && realTopK != j {
 			log.Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
@@ -1989,15 +2026,6 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 	return ret, nil
 }
 
-func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, availableQueryNodeNum int64,
-	nq int64, topk int64, metricType string) (*milvuspb.SearchResults, error) {
-	t := time.Now()
-	defer func() {
-		log.Debug("reduceSearchResults", zap.Any("time cost", time.Since(t)))
-	}()
-	return reduceSearchResultDataParallel(searchResultData, availableQueryNodeNum, nq, topk, metricType, runtime.NumCPU())
-}
-
 //func printSearchResult(partialSearchResult *internalpb.SearchResults) {
 //	for i := 0; i < len(partialSearchResult.Hits); i++ {
 //		testHits := milvuspb.Hits{}
@@ -2013,9 +2041,9 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, avail
 func (st *searchTask) PostExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-PostExecute")
 	defer sp.Finish()
-	t0 := time.Now()
+	tr := timerecord.NewTimeRecorder("searchTask PostExecute")
 	defer func() {
-		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))
+		tr.Elapse("done")
 	}()
 	for {
 		select {
@@ -2024,11 +2052,11 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			return fmt.Errorf("searchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
-			filterSearchResult := make([]*internalpb.SearchResults, 0)
+			filterSearchResults := make([]*internalpb.SearchResults, 0)
 			var filterReason string
 			for _, partialSearchResult := range searchResults {
 				if partialSearchResult.Status.ErrorCode == commonpb.ErrorCode_Success {
-					filterSearchResult = append(filterSearchResult, partialSearchResult)
+					filterSearchResults = append(filterSearchResults, partialSearchResult)
 					// For debugging, please don't delete.
 					// printSearchResult(partialSearchResult)
 				} else {
@@ -2036,10 +2064,10 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 				}
 			}
 
-			availableQueryNodeNum := len(filterSearchResult)
+			availableQueryNodeNum := len(filterSearchResults)
 			log.Debug("Proxy Search PostExecute stage1",
-				zap.Any("availableQueryNodeNum", availableQueryNodeNum),
-				zap.Any("time cost", time.Since(t0)))
+				zap.Any("availableQueryNodeNum", availableQueryNodeNum))
+			tr.Record("Proxy Search PostExecute stage1 done")
 			if availableQueryNodeNum <= 0 {
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
@@ -2050,19 +2078,17 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 				return fmt.Errorf("No Available Query node result, filter reason %s: id %d", filterReason, st.ID())
 			}
 
-			availableQueryNodeNum = 0
-			for _, partialSearchResult := range filterSearchResult {
-				if partialSearchResult.SlicedBlob == nil {
-					filterReason += "empty search result\n"
-				} else {
-					availableQueryNodeNum++
-				}
+			validSearchResults, err := decodeSearchResults(filterSearchResults)
+			if err != nil {
+				return err
 			}
+
 			log.Debug("Proxy Search PostExecute stage2", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
 
-			if availableQueryNodeNum <= 0 {
+			if len(validSearchResults) <= 0 {
 				log.Debug("Proxy Search PostExecute stage2 failed", zap.Any("filterReason", filterReason))
 
+				filterReason += "empty search result\n"
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_Success,
@@ -2076,13 +2102,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 				return nil
 			}
 
-			results, err := decodeSearchResults(filterSearchResult)
-			if err != nil {
-				return err
-			}
-
-			st.result, err = reduceSearchResultData(results, int64(availableQueryNodeNum),
-				searchResults[0].NumQueries, searchResults[0].TopK, searchResults[0].MetricType)
+			st.result, err = reduceSearchResultData(validSearchResults, searchResults[0].NumQueries, searchResults[0].TopK, searchResults[0].MetricType)
 			if err != nil {
 				return err
 			}
@@ -2205,7 +2225,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 
 	collectionName := qt.query.CollectionName
 
-	if err := ValidateCollectionName(qt.query.CollectionName); err != nil {
+	if err := validateCollectionName(qt.query.CollectionName); err != nil {
 		log.Debug("Invalid collection name.", zap.Any("collectionName", collectionName),
 			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 		return err
@@ -2223,7 +2243,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
 	for _, tag := range qt.query.PartitionNames {
-		if err := ValidatePartitionTag(tag, false); err != nil {
+		if err := validatePartitionTag(tag, false); err != nil {
 			log.Debug("Invalid partition name.", zap.Any("partitionName", tag),
 				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 			return err
@@ -2430,9 +2450,9 @@ func (qt *queryTask) Execute(ctx context.Context) error {
 }
 
 func (qt *queryTask) PostExecute(ctx context.Context) error {
-	t0 := time.Now()
+	tr := timerecord.NewTimeRecorder("queryTask PostExecute")
 	defer func() {
-		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))
+		tr.Elapse("done")
 	}()
 	select {
 	case <-qt.TraceCtx().Done():
@@ -2602,7 +2622,7 @@ func (hct *hasCollectionTask) PreExecute(ctx context.Context) error {
 	hct.Base.MsgType = commonpb.MsgType_HasCollection
 	hct.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(hct.CollectionName); err != nil {
+	if err := validateCollectionName(hct.CollectionName); err != nil {
 		return err
 	}
 	return nil
@@ -2677,7 +2697,7 @@ func (dct *describeCollectionTask) PreExecute(ctx context.Context) error {
 		return nil
 	}
 
-	return ValidateCollectionName(dct.CollectionName)
+	return validateCollectionName(dct.CollectionName)
 }
 
 func (dct *describeCollectionTask) Execute(ctx context.Context) error {
@@ -2967,7 +2987,7 @@ func (sct *showCollectionsTask) PreExecute(ctx context.Context) error {
 	sct.Base.SourceID = Params.ProxyID
 	if sct.GetType() == milvuspb.ShowType_InMemory {
 		for _, collectionName := range sct.CollectionNames {
-			if err := ValidateCollectionName(collectionName); err != nil {
+			if err := validateCollectionName(collectionName); err != nil {
 				return err
 			}
 		}
@@ -3122,11 +3142,11 @@ func (cpt *createPartitionTask) PreExecute(ctx context.Context) error {
 
 	collName, partitionTag := cpt.CollectionName, cpt.PartitionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 
@@ -3199,11 +3219,11 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 
 	collName, partitionTag := dpt.CollectionName, dpt.PartitionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 
@@ -3276,11 +3296,11 @@ func (hpt *hasPartitionTask) PreExecute(ctx context.Context) error {
 
 	collName, partitionTag := hpt.CollectionName, hpt.PartitionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 	return nil
@@ -3351,13 +3371,13 @@ func (spt *showPartitionsTask) PreExecute(ctx context.Context) error {
 	spt.Base.MsgType = commonpb.MsgType_ShowPartitions
 	spt.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(spt.CollectionName); err != nil {
+	if err := validateCollectionName(spt.CollectionName); err != nil {
 		return err
 	}
 
 	if spt.GetType() == milvuspb.ShowType_InMemory {
 		for _, partitionName := range spt.PartitionNames {
-			if err := ValidatePartitionTag(partitionName, true); err != nil {
+			if err := validatePartitionTag(partitionName, true); err != nil {
 				return err
 			}
 		}
@@ -3517,11 +3537,11 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 
 	collName, fieldName := cit.CollectionName, cit.FieldName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
-	if err := ValidateFieldName(fieldName); err != nil {
+	if err := validateFieldName(fieldName); err != nil {
 		return err
 	}
 
@@ -3629,7 +3649,7 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
 	dit.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(dit.CollectionName); err != nil {
+	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
 
@@ -3708,11 +3728,11 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
-	if err := ValidateFieldName(fieldName); err != nil {
+	if err := validateFieldName(fieldName); err != nil {
 		return err
 	}
 
@@ -3790,7 +3810,7 @@ func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
 	gibpt.Base.MsgType = commonpb.MsgType_GetIndexBuildProgress
 	gibpt.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(gibpt.CollectionName); err != nil {
+	if err := validateCollectionName(gibpt.CollectionName); err != nil {
 		return err
 	}
 
@@ -4011,7 +4031,7 @@ func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 	gist.Base.MsgType = commonpb.MsgType_GetIndexState
 	gist.Base.SourceID = Params.ProxyID
 
-	if err := ValidateCollectionName(gist.CollectionName); err != nil {
+	if err := validateCollectionName(gist.CollectionName); err != nil {
 		return err
 	}
 
@@ -4312,7 +4332,7 @@ func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 
 	collName := lct.CollectionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -4407,7 +4427,7 @@ func (rct *releaseCollectionTask) PreExecute(ctx context.Context) error {
 
 	collName := rct.CollectionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -4492,7 +4512,7 @@ func (lpt *loadPartitionsTask) PreExecute(ctx context.Context) error {
 
 	collName := lpt.CollectionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -4587,7 +4607,7 @@ func (rpt *releasePartitionsTask) PreExecute(ctx context.Context) error {
 
 	collName := rpt.CollectionName
 
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
@@ -4626,9 +4646,11 @@ func (rpt *releasePartitionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+type BaseDeleteTask = msgstream.DeleteMsg
+
 type deleteTask struct {
 	Condition
-	*internalpb.DeleteRequest
+	BaseDeleteTask
 	ctx       context.Context
 	req       *milvuspb.DeleteRequest
 	result    *milvuspb.MutationResult
@@ -4714,7 +4736,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 
 	collName := dt.req.CollectionName
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		log.Error("Invalid collection name", zap.String("collectionName", collName))
 		return err
 	}
@@ -4728,7 +4750,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	// If partitionName is not empty, partitionID will be set.
 	if len(dt.req.PartitionName) > 0 {
 		partName := dt.req.PartitionName
-		if err := ValidatePartitionTag(partName, true); err != nil {
+		if err := validatePartitionTag(partName, true); err != nil {
 			log.Error("Invalid partition name", zap.String("partitionName", partName))
 			return err
 		}
@@ -4753,7 +4775,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		log.Error("Failed to get primary keys from expr", zap.Error(err))
 		return err
 	}
-	log.Debug("get primary keys from expr", zap.Any("primary keys", dt.DeleteRequest.PrimaryKeys))
+	log.Debug("get primary keys from expr", zap.Any("primary keys", primaryKeys))
 	dt.DeleteRequest.PrimaryKeys = primaryKeys
 
 	// set result
@@ -4763,6 +4785,8 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		},
 	}
 	dt.result.DeleteCnt = int64(len(primaryKeys))
+
+	dt.HashPK(primaryKeys)
 
 	rowNum := len(primaryKeys)
 	dt.Timestamps = make([]uint64, rowNum)
@@ -4777,15 +4801,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(dt.ctx, "Proxy-Delete-Execute")
 	defer sp.Finish()
 
-	var tsMsg msgstream.TsMsg = &msgstream.DeleteMsg{
-		DeleteRequest: *dt.DeleteRequest,
-		BaseMsg: msgstream.BaseMsg{
-			Ctx:            ctx,
-			HashValues:     []uint32{uint32(Params.ProxyID)},
-			BeginTimestamp: dt.BeginTs(),
-			EndTimestamp:   dt.EndTs(),
-		},
-	}
+	var tsMsg msgstream.TsMsg = &dt.BaseDeleteTask
 	msgPack := msgstream.MsgPack{
 		BeginTs: dt.BeginTs(),
 		EndTs:   dt.EndTs(),
@@ -4820,8 +4836,64 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 			return err
 		}
 	}
+	result := make(map[int32]msgstream.TsMsg)
+	hashKeys := stream.ComputeProduceChannelIndexes(msgPack.Msgs)
+	// For each msg, assign PK to different message buckets by hash value of PK.
+	for i, request := range msgPack.Msgs {
+		deleteRequest := request.(*msgstream.DeleteMsg)
+		keys := hashKeys[i]
+		collectionName := deleteRequest.CollectionName
+		collectionID := deleteRequest.CollectionID
+		partitionID := deleteRequest.PartitionID
+		partitionName := deleteRequest.PartitionName
+		proxyID := deleteRequest.Base.SourceID
+		for index, key := range keys {
+			ts := deleteRequest.Timestamps[index]
+			pks := deleteRequest.PrimaryKeys[index]
+			_, ok := result[key]
+			if !ok {
+				sliceRequest := internalpb.DeleteRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Delete,
+						MsgID:     dt.Base.MsgID,
+						Timestamp: ts,
+						SourceID:  proxyID,
+					},
+					CollectionID:   collectionID,
+					PartitionID:    partitionID,
+					CollectionName: collectionName,
+					PartitionName:  partitionName,
+				}
+				deleteMsg := &msgstream.DeleteMsg{
+					BaseMsg: msgstream.BaseMsg{
+						Ctx: ctx,
+					},
+					DeleteRequest: sliceRequest,
+				}
+				result[key] = deleteMsg
+			}
+			curMsg := result[key].(*msgstream.DeleteMsg)
+			curMsg.HashValues = append(curMsg.HashValues, deleteRequest.HashValues[index])
+			curMsg.Timestamps = append(curMsg.Timestamps, ts)
+			curMsg.PrimaryKeys = append(curMsg.PrimaryKeys, pks)
+		}
+	}
 
-	err = stream.Produce(&msgPack)
+	newPack := &msgstream.MsgPack{
+		BeginTs:        msgPack.BeginTs,
+		EndTs:          msgPack.EndTs,
+		StartPositions: msgPack.StartPositions,
+		EndPositions:   msgPack.EndPositions,
+		Msgs:           make([]msgstream.TsMsg, 0),
+	}
+
+	for _, msg := range result {
+		if msg != nil {
+			newPack.Msgs = append(newPack.Msgs, msg)
+		}
+	}
+
+	err = stream.Produce(newPack)
 	if err != nil {
 		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		dt.result.Status.Reason = err.Error()
@@ -4832,6 +4904,14 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+func (dt *deleteTask) HashPK(pks []int64) {
+	dt.HashValues = make([]uint32, 0, len(pks))
+	for _, pk := range pks {
+		hash, _ := typeutil.Hash32Int64(pk)
+		dt.HashValues = append(dt.HashValues, hash)
+	}
 }
 
 type CreateAliasTask struct {
@@ -4890,7 +4970,7 @@ func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	}
 
 	collName := c.CollectionName
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 	return nil
@@ -5027,7 +5107,7 @@ func (a *AlterAliasTask) PreExecute(ctx context.Context) error {
 	}
 
 	collName := a.CollectionName
-	if err := ValidateCollectionName(collName); err != nil {
+	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 

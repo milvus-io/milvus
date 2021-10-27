@@ -20,11 +20,11 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -55,6 +55,7 @@ type DelDataBuf struct {
 	tsFrom   Timestamp
 	tsTo     Timestamp
 	fileSize int64
+	filePath string
 }
 
 func (ddb *DelDataBuf) updateSize(size int64) {
@@ -73,7 +74,7 @@ func (ddb *DelDataBuf) updateTimeRange(tr TimeRange) {
 func newDelDataBuf() *DelDataBuf {
 	return &DelDataBuf{
 		delData: &DeleteData{
-			Data: make(map[string]int64),
+			Data: make(map[int64]int64),
 		},
 		size:   0,
 		tsFrom: math.MaxUint64,
@@ -115,18 +116,23 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 			log.Error("primary keys and timestamp's element num mis-match")
 		}
 
-		newBuf := newDelDataBuf()
-		delDataBuf, _ := dn.delBuf.LoadOrStore(segID, newBuf)
-		delData := delDataBuf.(*DelDataBuf).delData
+		var delDataBuf *DelDataBuf
+		value, ok := dn.delBuf.Load(segID)
+		if ok {
+			delDataBuf = value.(*DelDataBuf)
+		} else {
+			delDataBuf = newDelDataBuf()
+		}
+		delData := delDataBuf.delData
 
 		for i := 0; i < rows; i++ {
-			delData.Data[strconv.FormatInt(pks[i], 10)] = tss[i]
+			delData.Data[pks[i]] = tss[i]
 			log.Debug("delete", zap.Int64("primary key", pks[i]), zap.Int64("ts", tss[i]))
 		}
 
 		// store
-		delDataBuf.(*DelDataBuf).updateSize(int64(rows))
-		delDataBuf.(*DelDataBuf).updateTimeRange(tr)
+		delDataBuf.updateSize(int64(rows))
+		delDataBuf.updateTimeRange(tr)
 		dn.delBuf.Store(segID, delDataBuf)
 	}
 
@@ -134,14 +140,14 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 }
 
 func (dn *deleteNode) showDelBuf() {
-	segments := dn.replica.filterSegments(dn.channelName, 0)
+	segments := dn.replica.filterSegments(dn.channelName, common.InvalidPartitionID)
 	for _, seg := range segments {
 		segID := seg.segmentID
 		if v, ok := dn.delBuf.Load(segID); ok {
 			delDataBuf, _ := v.(*DelDataBuf)
 			log.Debug("del data buffer status", zap.Int64("segID", segID), zap.Int64("size", delDataBuf.size))
 			for pk, ts := range delDataBuf.delData.Data {
-				log.Debug("del data", zap.String("pk", pk), zap.Int64("ts", ts))
+				log.Debug("del data", zap.Int64("pk", pk), zap.Int64("ts", ts))
 			}
 		} else {
 			log.Error("segment not exist", zap.Int64("segID", segID))

@@ -56,3 +56,23 @@ func TestMemoryKV_LoadPartial(t *testing.T) {
 	_, err = memKV.LoadPartial(key, start, end)
 	assert.Error(t, err)
 }
+
+func TestMemoryKV_GetSize(t *testing.T) {
+	memKV := NewMemoryKV()
+
+	key := "TestMemoryKV_GetSize_key"
+	value := "TestMemoryKV_GetSize_value"
+
+	err := memKV.Save(key, value)
+	assert.NoError(t, err)
+
+	size, err := memKV.GetSize(key)
+	assert.NoError(t, err)
+	assert.Equal(t, size, int64(len(value)))
+
+	key2 := "TestMemoryKV_GetSize_key2"
+
+	size, err = memKV.GetSize(key2)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), size)
+}

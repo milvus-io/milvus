@@ -36,7 +36,6 @@ class TestInsertBase:
         params=ut.gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")) == "CPU":
         if request.param["index_type"] in ut.index_cpu_not_support():
             pytest.skip("CPU not support index_type: ivf_sq8h")
         logging.getLogger().info(request.param)
@@ -399,7 +398,7 @@ class TestInsertBase:
     def test_insert_partition_repeatedly(self, connect, collection):
         """
         target: test insert entities in collection created before
-        method: create collection and insert entities in it repeatly, with the partition_name param
+        method: create collection and insert entities in it repeatedly, with the partition_name param
         expected: the collection row count equals to nq
         """
         connect.create_partition(collection, default_tag)

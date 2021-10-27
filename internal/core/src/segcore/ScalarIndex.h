@@ -25,6 +25,8 @@ class ScalarIndexBase {
  public:
     virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const = 0;
+    virtual std::pair<std::vector<idx_t>, std::vector<SegOffset>>
+    do_search_ids(const std::vector<idx_t>& ids) const = 0;
     virtual ~ScalarIndexBase() = default;
     virtual std::string
     debug() const = 0;
@@ -43,6 +45,9 @@ class ScalarIndexVector : public ScalarIndexBase {
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const override;
+
+    std::pair<std::vector<idx_t>, std::vector<SegOffset>>
+    do_search_ids(const std::vector<idx_t>& ids) const override;
 
     std::string
     debug() const override {

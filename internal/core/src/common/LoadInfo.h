@@ -10,8 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <string>
+
 #include <map>
+#include <string>
 
 #include "knowhere/index/vector_index/VecIndex.h"
 
@@ -26,5 +27,11 @@ struct LoadIndexInfo {
 struct LoadFieldDataInfo {
     int64_t field_id;
     const void* blob = nullptr;
+    int64_t row_count = -1;
+};
+
+struct LoadDeletedRecordInfo {
+    const void* timestamps = nullptr;
+    const void* primary_keys = nullptr;
     int64_t row_count = -1;
 };

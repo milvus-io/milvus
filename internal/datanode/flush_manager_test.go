@@ -158,6 +158,95 @@ func TestRendezvousFlushManager(t *testing.T) {
 	finish.Wait()
 
 	assert.EqualValues(t, size, counter.Load())
+}
+
+func TestRendezvousFlushManager_Inject(t *testing.T) {
+	kv := memkv.NewMemoryKV()
+
+	size := 1000
+	var counter atomic.Int64
+	finish := sync.WaitGroup{}
+	finish.Add(size)
+	packs := make([]*segmentFlushPack, 0, size+1)
+	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) error {
+		packs = append(packs, pack)
+		counter.Inc()
+		finish.Done()
+		return nil
+	})
+
+	injected := make(chan struct{})
+	injectOver := make(chan bool)
+	m.injectFlush(taskInjection{
+		injected:   injected,
+		injectOver: injectOver,
+		postInjection: func(*segmentFlushPack) {
+		},
+	}, 1)
+	<-injected
+	injectOver <- true
+
+	ids := make([][]byte, 0, size)
+	for i := 0; i < size; i++ {
+		id := make([]byte, 10)
+		rand.Read(id)
+		ids = append(ids, id)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(size)
+	for i := 0; i < size; i++ {
+		m.flushDelData(nil, 1, &internalpb.MsgPosition{
+			MsgID: ids[i],
+		})
+		m.flushBufferData(nil, 1, true, &internalpb.MsgPosition{
+			MsgID: ids[i],
+		})
+		wg.Done()
+	}
+	wg.Wait()
+	finish.Wait()
+
+	assert.EqualValues(t, size, counter.Load())
+
+	finish.Add(1)
+	id := make([]byte, 10)
+	rand.Read(id)
+	m.flushBufferData(nil, 2, true, &internalpb.MsgPosition{
+		MsgID: id,
+	})
+
+	m.injectFlush(taskInjection{
+		injected:   injected,
+		injectOver: injectOver,
+		postInjection: func(pack *segmentFlushPack) {
+			pack.segmentID = 3
+		},
+	}, 2)
+
+	go func() {
+		<-injected
+		injectOver <- true
+	}()
+	m.flushDelData(nil, 2, &internalpb.MsgPosition{
+		MsgID: id,
+	})
+
+	finish.Wait()
+	assert.EqualValues(t, size+1, counter.Load())
+	assert.EqualValues(t, 3, packs[size].segmentID)
+
+	finish.Add(1)
+	rand.Read(id)
+	m.flushBufferData(nil, 2, false, &internalpb.MsgPosition{
+		MsgID: id,
+	})
+	m.flushDelData(nil, 2, &internalpb.MsgPosition{
+		MsgID: id,
+	})
+	finish.Wait()
+	assert.EqualValues(t, size+2, counter.Load())
+	assert.EqualValues(t, 3, packs[size+1].segmentID)
 
 }
 

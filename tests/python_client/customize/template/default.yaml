@@ -9,12 +9,12 @@ spec:
     etcd:
       inCluster:
         deletionPolicy: Delete
-        persistenceKeep: false
+        pvcDeletion: true
     pulsar:
       inCluster:
         deletionPolicy: Delete
-        persistenceKeep: false
+        pvcDeletion: true
     storage:
       inCluster:
         deletionPolicy: Delete
-        persistenceKeep: false
+        pvcDeletion: true

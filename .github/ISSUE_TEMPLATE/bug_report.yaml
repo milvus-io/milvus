@@ -18,6 +18,22 @@ body:
       required: true
 - type: textarea
   attributes:
+    label: Environment
+    description: |
+      Enter the Environment Details:
+    value: |
+      - Milvus version:
+      - Deployment mode(standalone or cluster):
+      - SDK version(e.g. pymilvus v2.0.0rc2):
+      - OS(Ubuntu or CentOS): 
+      - CPU/Memory: 
+      - GPU: 
+      - Others: 
+    render: markdown
+  validations:
+    required: false
+- type: textarea
+  attributes:
     label: Current Behavior
     description: A concise description of what you're experiencing.
     placeholder: |
@@ -41,22 +57,6 @@ body:
       2. With this config...
       3. Run '...'
       4. See error...
-    render: markdown
-  validations:
-    required: false
-- type: textarea
-  attributes:
-    label: Environment
-    description: |
-      Enter the Environment Details:
-    value: |
-      - Milvus version:
-      - Deployment mode(standalone or cluster):
-      - SDK version(e.g. pymilvus v2.0.0rc2):
-      - OS(Ubuntu or CentOS): 
-      - CPU/Memory: 
-      - GPU: 
-      - Others: 
     render: markdown
   validations:
     required: false
