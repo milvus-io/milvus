@@ -835,6 +835,29 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    def test_search_with_ndarray(self, dim, auto_id, _async):
+        """
+        target: test search with ndarray
+        method: search using ndarray data
+        expected: search successfully
+        """
+        # 1. initialize without data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        # 2. search collection without data
+        log.info("test_search_with_ndarray: Searching collection %s "
+                 "using ndarray" % collection_w.name)
+        vectors = np.random.randn(default_nq, dim)
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("search_params", [{}, {"params": {}}, {"params": {"nprobe": 10}}])
     def test_search_normal_default_params(self, dim, auto_id, search_params, _async):
         """
