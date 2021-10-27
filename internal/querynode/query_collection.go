@@ -221,6 +221,8 @@ func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
 	for !q.tSafeUpdate {
 		q.watcherCond.Wait()
 	}
+	q.tSafeUpdate = false
+	q.watcherCond.Broadcast()
 	q.watcherCond.L.Unlock()
 	q.tSafeWatchersMu.RLock()
 	defer q.tSafeWatchersMu.RUnlock()
