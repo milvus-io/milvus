@@ -37,6 +37,9 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 
 two direction(to and from) network isolation between a pod and the rest of the pods
 
+#### pod failure
+
+Set the pod（querynode, indexnode and datanode）as multiple replicas, make one of them failure, and test milvus's functionality
 ### Milvus in standalone mode
 1. standalone pod is killed
 
