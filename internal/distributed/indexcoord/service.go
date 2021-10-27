@@ -63,10 +63,11 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-
+	log.Debug("IndexCoord init done ...")
 	if err := s.start(); err != nil {
 		return err
 	}
+	log.Debug("IndexCoord start done ...")
 	return nil
 }
 
