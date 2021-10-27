@@ -49,7 +49,14 @@ class MilvusOperator(object):
         return cus_res.create(new_configs)
 
     def uninstall(self, release_name, namespace='default', delete_depends=True, delete_pvc=True):
-        """ delete custom resource object to uninstall milvus """
+        """
+        Method: delete custom resource object to uninstall milvus
+        Params:
+            release_name: release name of milvus
+            namespace: namespace that the milvus is running in
+            delete_depends: whether to delete the dependent etcd, pulsar and minio services. default: True
+            delete_pvc: whether to delete the data persistent pvc volumes. default: True
+        """
         cus_res = CusResource(kind=self.plural, group=self.group,
                               version=self.version, namespace=namespace)
         del_configs = {}

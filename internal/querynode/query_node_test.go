@@ -193,7 +193,7 @@ func newQueryNodeMock() *QueryNode {
 	}
 	svr := NewQueryNode(ctx, msFactory)
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, svr.msFactory, etcdKV)
-	svr.streaming = newStreaming(ctx, msFactory, etcdKV)
+	svr.streaming = newStreaming(ctx, msFactory, etcdKV, svr.historical.replica)
 	svr.etcdKV = etcdKV
 
 	return svr
@@ -327,15 +327,15 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		err = node.historical.replica.removeSegment(defaultSegmentID)
 		assert.NoError(t, err)
 
-		info := genSimpleChangeInfo()
-		info.OnlineSegments = nil
-		info.OfflineNodeID = Params.QueryNodeID
+		segmentChangeInfos := genSimpleChangeInfo()
+		segmentChangeInfos.Infos[0].OnlineSegments = nil
+		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeID
 
 		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
 		assert.NoError(t, err)
 		qc.globalSegmentManager.removeGlobalSegmentInfo(defaultSegmentID)
 
-		err = node.adjustByChangeInfo(info)
+		err = node.adjustByChangeInfo(segmentChangeInfos)
 		assert.Error(t, err)
 	})
 }
@@ -390,9 +390,9 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		err = node.historical.replica.removeSegment(defaultSegmentID)
 		assert.NoError(t, err)
 
-		info := genSimpleChangeInfo()
-		info.OnlineSegments = nil
-		info.OfflineNodeID = Params.QueryNodeID
+		segmentChangeInfos := genSimpleChangeInfo()
+		segmentChangeInfos.Infos[0].OnlineSegments = nil
+		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeID
 
 		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
 		assert.NoError(t, err)
@@ -400,7 +400,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 
 		go node.watchChangeInfo()
 
-		value, err := proto.Marshal(info)
+		value, err := proto.Marshal(segmentChangeInfos)
 		assert.NoError(t, err)
 		err = saveChangeInfo("0", string(value))
 		assert.NoError(t, err)

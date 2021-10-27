@@ -14,12 +14,14 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"path"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -1230,4 +1232,28 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.NotNil(t, err)
 	_, err = mt.GetPartitionByName(2, partName2, tsoStart)
 	assert.NotNil(t, err)
+}
+
+func TestFixIssue10540(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	randVal := rand.Int()
+	Params.Init()
+	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
+
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+
+	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
+	assert.Nil(t, err)
+	assert.NotNil(t, skv)
+	//txnKV := etcdkv.NewEtcdKVWithClient(etcdCli, rootPath)
+	txnKV := memkv.NewMemoryKV()
+	// compose rc7 legace tombstone cases
+	txnKV.Save(path.Join(ProxyMetaPrefix, "1"), string(suffixSnapshotTombstone))
+	txnKV.Save(path.Join(SegmentIndexMetaPrefix, "2"), string(suffixSnapshotTombstone))
+	txnKV.Save(path.Join(IndexMetaPrefix, "3"), string(suffixSnapshotTombstone))
+
+	_, err = NewMetaTable(txnKV, skv)
+	assert.Nil(t, err)
 }

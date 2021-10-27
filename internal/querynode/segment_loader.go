@@ -407,7 +407,10 @@ func (loader *segmentLoader) estimateSegmentSize(segment *Segment,
 		for _, binlogPath := range fb.Binlogs {
 			logSize, err := storage.EstimateMemorySize(loader.minioKV, binlogPath)
 			if err != nil {
-				return 0, err
+				logSize, err = storage.GetBinlogSize(loader.minioKV, binlogPath)
+				if err != nil {
+					return 0, err
+				}
 			}
 			segmentSize += logSize
 		}

@@ -67,7 +67,7 @@ func (c *Cluster) UnRegister(node *NodeInfo) error {
 
 // Watch try to add a channel in datanode cluster
 func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
-	return c.channelManager.Watch(&channel{name: ch, collectionID: collectionID})
+	return c.channelManager.Watch(&channel{Name: ch, CollectionID: collectionID})
 }
 
 // Flush sends flush requests to corresponding datanodes according to channels that segments belong to
@@ -80,7 +80,7 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 	// channel -> node
 	for _, c := range channels {
 		for _, ch := range c.Channels {
-			channelNodes[ch.name] = c.NodeID
+			channelNodes[ch.Name] = c.NodeID
 		}
 	}
 	// find node on which segment exists

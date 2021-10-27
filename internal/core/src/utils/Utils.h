@@ -7,22 +7,27 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
 #include <cstdint>
+#include "exceptions/EasyAssert.h"
 
 namespace milvus {
 
-typedef void (*signal_func_ptr)(int32_t);
+inline int64_t
+upper_align(int64_t value, int64_t align) {
+    Assert(align > 0);
+    auto groups = (value + align - 1) / align;
+    return groups * align;
+}
 
-extern signal_func_ptr signal_routine_func;
-
-extern void
-HandleSignal(int signum);
-
-extern void
-PrintStacktrace();
+inline int64_t
+upper_div(int64_t value, int64_t align) {
+    Assert(align > 0);
+    auto groups = (value + align - 1) / align;
+    return groups;
+}
 
 }  // namespace milvus

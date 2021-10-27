@@ -1428,6 +1428,11 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 			continue
 		}
 
+		if collectionInfo.LoadType == querypb.LoadType_loadCollection && ht.meta.hasReleasePartition(collectionID, partitionID) {
+			log.Debug("handoffTask: partition has not been released", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
+			continue
+		}
+
 		partitionLoaded := false
 		for _, id := range collectionInfo.PartitionIDs {
 			if id == partitionID {

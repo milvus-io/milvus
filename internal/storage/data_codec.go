@@ -49,8 +49,13 @@ const (
 const maxLengthPerRowOfIndexFile = 4 * 1024 * 1024
 
 type (
-	UniqueID  = typeutil.UniqueID
-	FieldID   = typeutil.UniqueID
+	// UniqueID is type alias of typeutil.UniqueID
+	UniqueID = typeutil.UniqueID
+
+	// FieldID represent the identity number of filed in collection and its type is UniqueID
+	FieldID = typeutil.UniqueID
+
+	// Timestamp is type alias of typeutil.Timestamp
 	Timestamp = typeutil.Timestamp
 )
 

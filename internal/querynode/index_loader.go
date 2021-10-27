@@ -152,7 +152,10 @@ func (loader *indexLoader) estimateIndexBinlogSize(segment *Segment, fieldID Fie
 	for _, p := range indexPaths {
 		logSize, err := storage.EstimateMemorySize(loader.kv, p)
 		if err != nil {
-			return 0, err
+			logSize, err = storage.GetBinlogSize(loader.kv, p)
+			if err != nil {
+				return 0, err
+			}
 		}
 		indexSize += logSize
 	}

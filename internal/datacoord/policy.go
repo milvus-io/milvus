@@ -50,6 +50,63 @@ func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet 
 	return opSet
 }
 
+func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
+	opSet := BufferChannelAssignPolicy(store, nodeID)
+	if len(opSet) != 0 {
+		return opSet
+	}
+
+	infos := store.GetNodesChannels()
+	infos = filterNode(infos, nodeID)
+
+	channelNum := 0
+	for _, info := range infos {
+		channelNum += len(info.Channels)
+	}
+	avg := channelNum / (len(store.GetNodes()) + 1)
+	if avg == 0 {
+		return nil
+	}
+
+	// sort in descending order and reallocate
+	sort.Slice(infos, func(i, j int) bool {
+		return len(infos[i].Channels) > len(infos[j].Channels)
+	})
+
+	deletes := make(map[int64][]*channel)
+	adds := make(map[int64][]*channel)
+	for i := 0; i < avg; {
+		t := infos[i%len(infos)]
+		idx := i / len(infos)
+		if idx >= len(t.Channels) {
+			continue
+		}
+		deletes[t.NodeID] = append(deletes[t.NodeID], t.Channels[idx])
+		adds[nodeID] = append(adds[nodeID], t.Channels[idx])
+		i++
+	}
+
+	opSet = ChannelOpSet{}
+	for k, v := range deletes {
+		opSet.Delete(k, v)
+	}
+	for k, v := range adds {
+		opSet.Add(k, v)
+	}
+	return opSet
+}
+
+func filterNode(infos []*NodeChannelInfo, nodeID int64) []*NodeChannelInfo {
+	filtered := make([]*NodeChannelInfo, 0)
+	for _, info := range infos {
+		if info.NodeID == nodeID {
+			continue
+		}
+		filtered = append(filtered, info)
+	}
+	return filtered
+}
+
 // ConsistentHashRegisterPolicy use a consistent hash to matain the mapping
 func ConsistentHashRegisterPolicy(hashring *consistent.Consistent) RegisterPolicy {
 	return func(store ROChannelStore, nodeID int64) ChannelOpSet {
@@ -71,10 +128,10 @@ func ConsistentHashRegisterPolicy(hashring *consistent.Consistent) RegisterPolic
 		channelsInfo := store.GetNodesChannels()
 		for _, c := range channelsInfo {
 			for _, ch := range c.Channels {
-				idstr, err := hashring.Get(ch.name)
+				idstr, err := hashring.Get(ch.Name)
 				if err != nil {
 					log.Warn("receive error when getting from hashring",
-						zap.String("channel", ch.name), zap.Error(err))
+						zap.String("channel", ch.Name), zap.Error(err))
 					return nil
 				}
 				did, err := deformatNodeID(idstr)
@@ -161,10 +218,10 @@ func ConsistentHashChannelAssignPolicy(hashring *consistent.Consistent) ChannelA
 
 		adds := make(map[int64][]*channel)
 		for _, c := range filteredChannels {
-			idstr, err := hashring.Get(c.name)
+			idstr, err := hashring.Get(c.Name)
 			if err != nil {
 				log.Warn("receive error when getting from hashring",
-					zap.String("channel", c.name), zap.Error(err))
+					zap.String("channel", c.Name), zap.Error(err))
 				return nil
 			}
 			did, err := deformatNodeID(idstr)
@@ -190,13 +247,13 @@ func ConsistentHashChannelAssignPolicy(hashring *consistent.Consistent) ChannelA
 func filterChannels(store ROChannelStore, channels []*channel) []*channel {
 	channelsMap := make(map[string]*channel)
 	for _, c := range channels {
-		channelsMap[c.name] = c
+		channelsMap[c.Name] = c
 	}
 
 	allChannelsInfo := store.GetChannels()
 	for _, info := range allChannelsInfo {
 		for _, c := range info.Channels {
-			delete(channelsMap, c.name)
+			delete(channelsMap, c.Name)
 		}
 	}
 
@@ -286,9 +343,9 @@ func ConsistentHashDeregisterPolicy(hashring *consistent.Consistent) DeregisterP
 		// reassign channels of deleted node
 		updates := make(map[int64][]*channel)
 		for _, c := range deletedInfo.Channels {
-			idstr, err := hashring.Get(c.name)
+			idstr, err := hashring.Get(c.Name)
 			if err != nil {
-				log.Warn("failed to get channel in hash ring", zap.String("channel", c.name))
+				log.Warn("failed to get channel in hash ring", zap.String("channel", c.Name))
 				return nil
 			}
 
@@ -380,7 +437,7 @@ func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 				Channels: make([]*channel, 0),
 			}
 			for _, c := range ch.Channels {
-				k := buildChannelKey(ch.NodeID, c.name)
+				k := buildChannelKey(ch.NodeID, c.Name)
 				v, err := kv.Load(k)
 				if err != nil {
 					return nil, err

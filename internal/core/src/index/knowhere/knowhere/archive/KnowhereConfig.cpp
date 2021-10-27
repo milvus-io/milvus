@@ -9,27 +9,21 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <string>
+
 #include "KnowhereConfig.h"
+#include "NGT/lib/NGT/defines.h"
+#include "faiss/Clustering.h"
+#include "faiss/FaissHook.h"
+#include "faiss/common.h"
+#include "faiss/utils/distances.h"
+#include "faiss/utils/utils.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
-#include <faiss/Clustering.h>
-#include <faiss/utils/distances.h>
-
-#include "NGT/lib/NGT/defines.h"
-#include "faiss/FaissHook.h"
-#include "faiss/common.h"
-#include "faiss/utils/utils.h"
-#include "knowhere/common/Log.h"
-#include "knowhere/index/IndexType.h"
-#include "knowhere/index/vector_index/IndexHNSW.h"
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
-#include "utils/ConfigUtils.h"
-#include "utils/Error.h"
-#include "knowhere/common/Exception.h"
-
-#include <string>
-#include <vector>
 
 namespace milvus {
 namespace engine {

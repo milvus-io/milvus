@@ -98,7 +98,7 @@ type SnapShotKV interface {
 
 For the `Read` operations (`Load` and `LoadWithPrefix`), the input parameter `typeutil.Timestamp` is used to tell `metaSnapShot` to load the value based on that `Timestamp`.
 
-For the `Write` operations (`Save`, `MiltiSave`, `MultiSaveAndRemoveWithPrefix`), return values include `typeutil.Timestamp`, which is used to tell the caller when these write operations happened.
+For the `Write` operations (`Save`, `MultiSave`, `MultiSaveAndRemoveWithPrefix`), return values include `typeutil.Timestamp`, which is used to tell the caller when these write operations happened.
 
 You might be curious about the parameter `additions` of `MultiSave` and `MultiSaveAndRemoveWithPrefix`: What does `additions` do, and why?
 

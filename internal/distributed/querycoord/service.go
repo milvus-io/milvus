@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+// Server is the grpc server of QueryCoord.
 type Server struct {
 	wg         sync.WaitGroup
 	loopCtx    context.Context
@@ -60,6 +61,7 @@ type Server struct {
 	closer io.Closer
 }
 
+// NewServer create a new QueryCoord grpc server.
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	svr, err := qc.NewQueryCoord(ctx1, factory)
@@ -77,6 +79,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 	}, nil
 }
 
+// Run initializes and starts QueryCoord's grpc service.
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {

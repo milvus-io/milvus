@@ -137,4 +137,12 @@ class TestChaosData:
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
     def test_chaos_memory_stress_indexnode(self, connection, chaos_yaml):
+        """
+        target: test inject memory stress into indexnode
+        method: 1.Deploy milvus and limit indexnode memory resource
+                2.Create collection and insert some data
+                3.Create index
+                4.Inject memory stress chaos
+        expected:
+        """
         pass

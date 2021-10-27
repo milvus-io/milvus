@@ -47,7 +47,7 @@ func NewChannelPolicyFactoryV1(kv kv.TxnKV) *ChannelPolicyFactoryV1 {
 
 // NewRegisterPolicy implementing ChannelPolicyFactory returns BufferChannelAssignPolicy
 func (f *ChannelPolicyFactoryV1) NewRegisterPolicy() RegisterPolicy {
-	return BufferChannelAssignPolicy
+	return AvgAssignRegisterPolicy
 }
 
 // NewDeregisterPolicy implementing ChannelPolicyFactory returns AvgAssignUnregisteredChannels

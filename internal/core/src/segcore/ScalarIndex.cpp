@@ -39,7 +39,7 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
         }
         // TODO: for repeated key, decide the final offset with Timestamp
         // no repeated key, simplified logic
-        AssertInfo(iter_beg + 1 == iter_end, "There are no repeated keys in more than one results");
+        // AssertInfo(iter_beg + 1 == iter_end, "There are no repeated keys in more than one results");
         auto [entry_id, entry_offset] = *iter_beg;
 
         dst_ids->add_data(entry_id);
@@ -65,7 +65,7 @@ ScalarIndexVector::do_search_ids(const std::vector<idx_t>& ids) const {
         }
         // TODO: for repeated key, decide the final offset with Timestamp
         // no repeated key, simplified logic
-        AssertInfo(iter_beg + 1 == iter_end, "There are no repeated keys in more than one results");
+        // AssertInfo(iter_beg + 1 == iter_end, "There are no repeated keys in more than one results");
         auto [entry_id, entry_offset] = *iter_beg;
 
         dst_ids.push_back(entry_id);

@@ -7,22 +7,11 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
-#include <cstdint>
+#include <stdint.h>
 
-namespace milvus {
-
-typedef void (*signal_func_ptr)(int32_t);
-
-extern signal_func_ptr signal_routine_func;
-
-extern void
-HandleSignal(int signum);
-
-extern void
-PrintStacktrace();
-
-}  // namespace milvus
+const int64_t INVALID_SEG_OFFSET = -1;
+const int64_t INVALID_ID = -1;

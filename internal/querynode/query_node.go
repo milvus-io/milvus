@@ -43,7 +43,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -181,7 +180,7 @@ func (node *QueryNode) Init() error {
 			node.indexCoord,
 			node.msFactory,
 			node.etcdKV)
-		node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV)
+		node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV, node.historical.replica)
 
 		node.InitSegcore()
 
@@ -307,93 +306,83 @@ func (node *QueryNode) watchChangeInfo() {
 	}
 }
 
-func (node *QueryNode) waitChangeInfo(info *querypb.SealedSegmentsChangeInfo) error {
+func (node *QueryNode) waitChangeInfo(segmentChangeInfos *querypb.SealedSegmentsChangeInfo) error {
 	fn := func() error {
-		canDoLoadBalance := true
-		// Check online segments:
-		for _, segmentInfo := range info.OnlineSegments {
-			if node.queryService.hasQueryCollection(segmentInfo.CollectionID) {
-				qc, err := node.queryService.getQueryCollection(segmentInfo.CollectionID)
-				if err != nil {
-					canDoLoadBalance = false
-					break
-				}
-				if info.OnlineNodeID == Params.QueryNodeID && !qc.globalSegmentManager.hasGlobalSegment(segmentInfo.SegmentID) {
-					canDoLoadBalance = false
-					break
-				}
-			}
-		}
-		// Check offline segments:
-		for _, segmentInfo := range info.OfflineSegments {
-			if node.queryService.hasQueryCollection(segmentInfo.CollectionID) {
-				qc, err := node.queryService.getQueryCollection(segmentInfo.CollectionID)
-				if err != nil {
-					canDoLoadBalance = false
-					break
-				}
-				if info.OfflineNodeID == Params.QueryNodeID && qc.globalSegmentManager.hasGlobalSegment(segmentInfo.SegmentID) {
-					canDoLoadBalance = false
-					break
+		for _, info := range segmentChangeInfos.Infos {
+			canDoLoadBalance := true
+			// Check online segments:
+			for _, segmentInfo := range info.OnlineSegments {
+				if node.queryService.hasQueryCollection(segmentInfo.CollectionID) {
+					qc, err := node.queryService.getQueryCollection(segmentInfo.CollectionID)
+					if err != nil {
+						canDoLoadBalance = false
+						break
+					}
+					if info.OnlineNodeID == Params.QueryNodeID && !qc.globalSegmentManager.hasGlobalSegment(segmentInfo.SegmentID) {
+						canDoLoadBalance = false
+						break
+					}
 				}
 			}
+			// Check offline segments:
+			for _, segmentInfo := range info.OfflineSegments {
+				if node.queryService.hasQueryCollection(segmentInfo.CollectionID) {
+					qc, err := node.queryService.getQueryCollection(segmentInfo.CollectionID)
+					if err != nil {
+						canDoLoadBalance = false
+						break
+					}
+					if info.OfflineNodeID == Params.QueryNodeID && qc.globalSegmentManager.hasGlobalSegment(segmentInfo.SegmentID) {
+						canDoLoadBalance = false
+						break
+					}
+				}
+			}
+			if canDoLoadBalance {
+				return nil
+			}
+			return errors.New(fmt.Sprintln("waitChangeInfo failed, infoID = ", segmentChangeInfos.Base.GetMsgID()))
 		}
-		if canDoLoadBalance {
-			return nil
-		}
-		return errors.New(fmt.Sprintln("waitChangeInfo failed, infoID = ", info.Base.GetMsgID()))
+
+		return nil
 	}
 
 	return retry.Do(context.TODO(), fn, retry.Attempts(10))
 }
 
-func (node *QueryNode) adjustByChangeInfo(info *querypb.SealedSegmentsChangeInfo) error {
-	err := node.waitChangeInfo(info)
+func (node *QueryNode) adjustByChangeInfo(segmentChangeInfos *querypb.SealedSegmentsChangeInfo) error {
+	err := node.waitChangeInfo(segmentChangeInfos)
 	if err != nil {
 		log.Error("waitChangeInfo failed", zap.Any("error", err.Error()))
 		return err
 	}
 
-	// For online segments:
-	for _, segmentInfo := range info.OnlineSegments {
-		// 1. update excluded segment, cluster have been loaded sealed segments,
-		// so we need to avoid getting growing segment from flow graph.
-		node.streaming.replica.addExcludedSegments(segmentInfo.CollectionID, []*datapb.SegmentInfo{
-			{
-				ID:            segmentInfo.SegmentID,
-				CollectionID:  segmentInfo.CollectionID,
-				PartitionID:   segmentInfo.PartitionID,
-				InsertChannel: segmentInfo.ChannelID,
-				NumOfRows:     segmentInfo.NumRows,
-				// TODO: add status, remove query pb segment status, use common pb segment status?
-				DmlPosition: &internalpb.MsgPosition{
-					// use max timestamp to filter out dm messages
-					Timestamp: typeutil.MaxTimestamp,
-				},
-			},
-		})
-		// 2. delete growing segment because these segments are loaded in historical.
-		hasGrowingSegment := node.streaming.replica.hasSegment(segmentInfo.SegmentID)
-		if hasGrowingSegment {
-			err := node.streaming.replica.removeSegment(segmentInfo.SegmentID)
-			if err != nil {
-				return err
+	for _, info := range segmentChangeInfos.Infos {
+		// For online segments:
+		for _, segmentInfo := range info.OnlineSegments {
+			// delete growing segment because these segments are loaded in historical.
+			hasGrowingSegment := node.streaming.replica.hasSegment(segmentInfo.SegmentID)
+			if hasGrowingSegment {
+				err := node.streaming.replica.removeSegment(segmentInfo.SegmentID)
+				if err != nil {
+					return err
+				}
+				log.Debug("remove growing segment in adjustByChangeInfo",
+					zap.Any("collectionID", segmentInfo.CollectionID),
+					zap.Any("segmentID", segmentInfo.SegmentID),
+					zap.Any("infoID", segmentChangeInfos.Base.GetMsgID()),
+				)
 			}
-			log.Debug("remove growing segment in adjustByChangeInfo",
-				zap.Any("collectionID", segmentInfo.CollectionID),
-				zap.Any("segmentID", segmentInfo.SegmentID),
-				zap.Any("infoID", info.Base.GetMsgID()),
-			)
 		}
-	}
 
-	// For offline segments:
-	for _, segment := range info.OfflineSegments {
-		// 1. load balance or compaction, remove old sealed segments.
-		if info.OfflineNodeID == Params.QueryNodeID {
-			err := node.historical.replica.removeSegment(segment.SegmentID)
-			if err != nil {
-				return err
+		// For offline segments:
+		for _, segment := range info.OfflineSegments {
+			// load balance or compaction, remove old sealed segments.
+			if info.OfflineNodeID == Params.QueryNodeID {
+				err := node.historical.replica.removeSegment(segment.SegmentID)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
