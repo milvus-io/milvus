@@ -476,6 +476,14 @@ func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	return ret.(*datapb.GetRecoveryInfoResponse), err
 }
 
+// GetFlushedSegments returns flushed segment list of requested collection/parition
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the collection/partition id to query
+//  when partition is lesser or equal to 0, all flushed segments of collection will be returned
+//
+// response struct `GetFlushedSegmentsResponse` contains flushed segment id list
+// error is returned only when some communication issue occurs
 func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
