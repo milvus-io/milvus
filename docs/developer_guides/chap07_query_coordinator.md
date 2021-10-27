@@ -11,6 +11,7 @@ type QueryCoord interface {
 	Component
 	TimeTickProvider
 
+  // ShowCollections notifies RootCoord to list all collection names and other info in database at specified timestamp
 	ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)
 	LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
