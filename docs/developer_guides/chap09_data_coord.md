@@ -11,6 +11,7 @@ type DataCoord interface {
 	Component
 	TimeTickProvider
 
+  // Flush notifies DataCoord to flush all current growing segments of specified Collection
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
 
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
