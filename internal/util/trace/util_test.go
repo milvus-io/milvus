@@ -110,11 +110,11 @@ func TestInject(t *testing.T) {
 
 func TestTraceError(t *testing.T) {
 	// context normally can be propagated through func params
-	sp, ctx := StartSpanFromContext(nil)
+	sp, ctx := StartSpanFromContext(context.TODO())
 	assert.Nil(t, ctx)
 	assert.NotNil(t, sp)
 
-	sp, ctx = StartSpanFromContextWithOperationName(nil, "test")
+	sp, ctx = StartSpanFromContextWithOperationName(context.TODO(), "test")
 	assert.Nil(t, ctx)
 	assert.NotNil(t, sp)
 
@@ -129,7 +129,7 @@ func TestTraceError(t *testing.T) {
 	assert.Equal(t, sampled, false)
 	assert.Equal(t, found, false)
 
-	id, sampled, found = InfoFromContext(nil)
+	id, sampled, found = InfoFromContext(context.TODO())
 	assert.Equal(t, id, "")
 	assert.Equal(t, sampled, false)
 	assert.Equal(t, found, false)
