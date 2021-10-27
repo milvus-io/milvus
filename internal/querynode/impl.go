@@ -457,15 +457,17 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 	}
 	infos := make([]*queryPb.SegmentInfo, 0)
 	// TODO: remove segmentType and use queryPb.SegmentState instead
-	getSegmentStateBySegmentType := func(segType segmentType) queryPb.SegmentState {
+	getSegmentStateBySegmentType := func(segType segmentType) commonpb.SegmentState {
 		switch segType {
 		case segmentTypeGrowing:
-			return queryPb.SegmentState_Growing
+			return commonpb.SegmentState_Growing
 		case segmentTypeSealed:
-			return queryPb.SegmentState_sealed
+			return commonpb.SegmentState_Sealed
+		// TODO: remove segmentTypeIndexing
+		case segmentTypeIndexing:
+			return commonpb.SegmentState_Sealed
 		default:
-			// TODO: remove segmentTypeIndexing
-			return queryPb.SegmentState_None
+			return commonpb.SegmentState_NotExist
 		}
 	}
 	getSegmentInfo := func(segment *Segment) *queryPb.SegmentInfo {
@@ -487,7 +489,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 			IndexName:    indexName,
 			IndexID:      indexID,
 			ChannelID:    segment.vChannelID,
-			SegmentState: getSegmentStateBySegmentType(segment.segmentType),
+			State:        getSegmentStateBySegmentType(segment.segmentType),
 		}
 		return info
 	}
