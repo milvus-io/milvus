@@ -183,7 +183,7 @@ func (qc *QueryCoord) Start() error {
 	go qc.watchHandoffSegmentLoop()
 
 	go qc.session.LivenessCheck(qc.loopCtx, func() {
-		qc.Stop()
+		log.Fatal("Query Coord disconnected from etcd, process will exit", zap.Int64("Server Id", qc.session.ServerID))
 	})
 
 	return nil

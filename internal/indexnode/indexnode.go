@@ -185,7 +185,7 @@ func (i *IndexNode) Start() error {
 
 		//start liveness check
 		go i.session.LivenessCheck(i.loopCtx, func() {
-			i.Stop()
+			log.Fatal("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
 		})
 
 		i.UpdateStateCode(internalpb.StateCode_Healthy)
