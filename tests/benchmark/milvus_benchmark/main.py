@@ -50,6 +50,7 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
         start_status = False
         # Initialize the class of the reported metric
         metric = api.Metric()
+        global_params.metric = metric
         deploy_mode = env_params["deploy_mode"]
         deploy_opology = env_params["deploy_opology"] if "deploy_opology" in env_params else None
         env = get_env(env_mode, deploy_mode)
