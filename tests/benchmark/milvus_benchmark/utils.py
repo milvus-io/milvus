@@ -4,6 +4,7 @@ import logging
 import string
 import random
 import json
+import os
 from yaml.representer import SafeRepresenter
 # from yaml import full_load, dump
 import yaml
@@ -202,6 +203,35 @@ def search_param_analysis(vector_query, filter_query):
     }
     # logger.debug("[search_param_analysis] search_param_analysis: %s" % str(result))
     return result
+
+
+def modify_file(file_path_list, is_modify=False, input_content=""):
+    """
+    file_path_list : file list -> list[<file_path>]
+    is_modify : does the file need to be reset
+    input_content ：the content that need to insert to the file
+    """
+    if not isinstance(file_path_list, list):
+        print("[modify_file] file is not a list.")
+
+    for file_path in file_path_list:
+        folder_path, file_name = os.path.split(file_path)
+        if not os.path.isdir(folder_path):
+            print("[modify_file] folder(%s) is not exist." % folder_path)
+            os.makedirs(folder_path)
+
+        if not os.path.isfile(file_path):
+            print("[modify_file] file(%s) is not exist." % file_path)
+            os.mknod(file_path)
+        else:
+            if is_modify is True:
+                print("[modify_file] start modifying file(%s)..." % file_path)
+                with open(file_path, "r+") as f:
+                    f.seek(0)
+                    f.truncate()
+                    f.write(input_content)
+                    f.close()
+                print("[modify_file] file(%s) modification is complete." % file_path_list)
 
 
 def read_json_file(file_name):
