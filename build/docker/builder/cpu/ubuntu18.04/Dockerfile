@@ -35,6 +35,8 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-am
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
+RUN ln -s /go/bin/dlv /go/bin/dlv-dap
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gdb gdbserver && \
     apt-get remove --purge -y && \

@@ -137,7 +137,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			}
 
 			ds, err := newDataSyncService(ctx,
-				&flushChans{make(chan *flushMsg), make(chan *flushMsg)},
+				make(chan flushMsg),
 				replica,
 				NewAllocatorFactory(),
 				test.inMsgFactory,
@@ -153,28 +153,6 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, ds)
-
-				// save binlog
-				fu := &segmentFlushUnit{
-					collID:     1,
-					segID:      100,
-					field2Path: map[UniqueID]string{100: "path1"},
-					checkPoint: map[UniqueID]segmentCheckPoint{100: {100, internalpb.MsgPosition{}}},
-				}
-
-				df.SaveBinlogPathError = true
-				err := ds.saveBinlog(fu)
-				assert.Error(t, err)
-
-				df.SaveBinlogPathError = false
-				df.SaveBinlogPathNotSucess = true
-				err = ds.saveBinlog(fu)
-				assert.Error(t, err)
-
-				df.SaveBinlogPathError = false
-				df.SaveBinlogPathNotSucess = false
-				err = ds.saveBinlog(fu)
-				assert.NoError(t, err)
 
 				// start
 				ds.fg = nil
@@ -198,11 +176,11 @@ func TestDataSyncService_Start(t *testing.T) {
 	pulsarURL := Params.PulsarAddress
 
 	Factory := &MetaFactory{}
-	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 	mockRootCoord := &RootCoordFactory{}
 	collectionID := UniqueID(1)
 
-	flushChan := &flushChans{make(chan *flushMsg, 100), make(chan *flushMsg, 100)}
+	flushChan := make(chan flushMsg, 100)
 	replica, err := newReplica(context.Background(), mockRootCoord, collectionID)
 	assert.Nil(t, err)
 

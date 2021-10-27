@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 
 	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/milvus-io/milvus/internal/common"
 )
 
 const (
@@ -43,7 +42,7 @@ func (sw *StatsWriter) GetBuffer() []byte {
 	return sw.buffer
 }
 
-func (sw *StatsWriter) StatsInt64(fieldID int64, msgs []int64) error {
+func (sw *StatsWriter) StatsInt64(fieldID int64, isPrimaryKey bool, msgs []int64) error {
 	if len(msgs) < 1 {
 		// return error: msgs must has one element at least
 		return nil
@@ -53,9 +52,9 @@ func (sw *StatsWriter) StatsInt64(fieldID int64, msgs []int64) error {
 		FieldID: fieldID,
 		Max:     msgs[len(msgs)-1],
 		Min:     msgs[0],
-		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 	}
-	if fieldID == common.RowIDField {
+	if isPrimaryKey {
+		stats.BF = bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive)
 		b := make([]byte, 8)
 		for _, msg := range msgs {
 			binary.LittleEndian.PutUint64(b, uint64(msg))
@@ -89,8 +88,8 @@ func (sr *StatsReader) GetInt64Stats() (*Int64Stats, error) {
 }
 
 func DeserializeStats(blobs []*Blob) ([]*Int64Stats, error) {
-	results := make([]*Int64Stats, len(blobs))
-	for i, blob := range blobs {
+	results := make([]*Int64Stats, 0, len(blobs))
+	for _, blob := range blobs {
 		if blob.Value == nil {
 			continue
 		}
@@ -100,8 +99,7 @@ func DeserializeStats(blobs []*Blob) ([]*Int64Stats, error) {
 		if err != nil {
 			return nil, err
 		}
-		results[i] = stats
+		results = append(results, stats)
 	}
 	return results, nil
-
 }

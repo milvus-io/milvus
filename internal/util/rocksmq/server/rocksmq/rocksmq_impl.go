@@ -202,7 +202,7 @@ func (rmq *rocksmq) Close() {
 
 func (rmq *rocksmq) stopRetention() {
 	if rmq.retentionInfo != nil {
-		rmq.retentionInfo.cancel()
+		rmq.retentionInfo.Stop()
 	}
 }
 
@@ -572,6 +572,10 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 	return nil
 }
 
+// Consume steps:
+// 1. Consume n messages from rocksdb
+// 2. Update current_id to the last consumed message
+// 3. Update ack informations in rocksdb
 func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error) {
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
@@ -664,6 +668,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	return consumerMessage, nil
 }
 
+// Seek updates the current id to the given msgID
 func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) error {
 	/* Step I: Check if key exists */
 	rmq.storeMu.Lock()
@@ -699,6 +704,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	return nil
 }
 
+// SeekToLatest updates current id to the msg id of latest message
 func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
@@ -731,6 +737,7 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	return err
 }
 
+// Notify sends a mutex in MsgMutex channel to tell consumers to consume
 func (rmq *rocksmq) Notify(topicName, groupName string) {
 	if vals, ok := rmq.consumers.Load(topicName); ok {
 		for _, v := range vals.([]*Consumer) {
@@ -746,6 +753,7 @@ func (rmq *rocksmq) Notify(topicName, groupName string) {
 	}
 }
 
+// updateAckedInfo update acked informations for retention after consume
 func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, newID UniqueID, msgSize int64) error {
 	ll, ok := topicMu.Load(topicName)
 	if !ok {

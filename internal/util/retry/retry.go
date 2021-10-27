@@ -32,15 +32,18 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
-			if ok := IsUncoverable(err); ok {
-				return err
-			}
+
 			el = append(el, err)
+
+			if ok := IsUncoverable(err); ok {
+				return el
+			}
 
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
-				return ctx.Err()
+				el = append(el, ctx.Err())
+				return el
 			}
 
 			c.sleep *= 2

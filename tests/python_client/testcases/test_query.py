@@ -932,7 +932,7 @@ class TestQueryOperation(TestcaseBase):
         limit = 1000
         nb_old = 500
         collection_w, vectors, binary_raw_vectors, insert_ids = \
-            self.init_collection_general(prefix, True, nb_old)
+            self.init_collection_general(prefix, True, nb_old)[0:4]
 
         # 2. search for original data after load
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
@@ -1062,6 +1062,29 @@ class TestQueryOperation(TestcaseBase):
         res, _ = collection_w.query(term_expr, partition_names=[ct.default_partition_name, partition_w.name])
         assert len(res) == 1
         assert res[0][ct.default_int64_field_name] == half
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_growing_segment_data(self):
+        """
+        target: test query data in the growing segment
+        method: 1. create collection
+                2.load collection
+                3.insert without flush
+                4.query
+        expected: Data can be queried
+        """
+        import time
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        # load collection
+        collection_w.load()
+        tmp_nb = 100
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        res = df.iloc[1:2, :1].to_dict('records')
+        time.sleep(1)
+        collection_w.query(f'{ct.default_int64_field_name} in [1]',
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     """
     ******************************************************************

@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/viper"
 )
 
+// UniqueID is type alias of typeutil.UniqueID
 type UniqueID = typeutil.UniqueID
 
 type Base interface {
@@ -255,6 +256,54 @@ func (gp *BaseTable) tryloadFromEnv() {
 		insertBufferFlushSize = "16777216" //use default
 	}
 	err = gp.Save("_DATANODE_INSERTBUFSIZE", insertBufferFlushSize)
+	if err != nil {
+		panic(err)
+	}
+
+	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
+	if minioAccessKey == "" {
+		minioAccessKey, err = gp.Load("minio.accessKeyID")
+		if err != nil {
+			panic(err)
+		}
+	}
+	err = gp.Save("_MinioAccessKeyID", minioAccessKey)
+	if err != nil {
+		panic(err)
+	}
+
+	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
+	if minioSecretKey == "" {
+		minioSecretKey, err = gp.Load("minio.secretAccessKey")
+		if err != nil {
+			panic(err)
+		}
+	}
+	err = gp.Save("_MinioSecretAccessKey", minioSecretKey)
+	if err != nil {
+		panic(err)
+	}
+
+	minioUseSSL := os.Getenv("MINIO_USE_SSL")
+	if minioUseSSL == "" {
+		minioUseSSL, err = gp.Load("minio.useSSL")
+		if err != nil {
+			panic(err)
+		}
+	}
+	err = gp.Save("_MinioUseSSL", minioUseSSL)
+	if err != nil {
+		panic(err)
+	}
+
+	minioBucketName := os.Getenv("MINIO_BUCKET_NAME")
+	if minioBucketName == "" {
+		minioBucketName, err = gp.Load("minio.bucketName")
+		if err != nil {
+			panic(err)
+		}
+	}
+	err = gp.Save("_MinioBucketName", minioBucketName)
 	if err != nil {
 		panic(err)
 	}

@@ -16,20 +16,22 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/stretchr/testify/assert"
 )
 
 type testTask struct {
-	BaseTask
-	baseMsg *commonpb.MsgBase
-	cluster Cluster
-	meta    Meta
-	nodeID  int64
+	baseTask
+	baseMsg    *commonpb.MsgBase
+	cluster    Cluster
+	meta       Meta
+	nodeID     int64
+	binlogSize int
 }
 
 func (tt *testTask) msgBase() *commonpb.MsgBase {
@@ -58,18 +60,51 @@ func (tt *testTask) execute(ctx context.Context) error {
 	log.Debug("test task execute...")
 
 	switch tt.baseMsg.MsgType {
+	case commonpb.MsgType_LoadCollection:
+		binlogs := make([]*datapb.FieldBinlog, 0)
+		binlogs = append(binlogs, &datapb.FieldBinlog{
+			FieldID: 0,
+			Binlogs: []string{funcutil.RandomString(tt.binlogSize)},
+		})
+		for id := 0; id < 10; id++ {
+			segmentInfo := &querypb.SegmentLoadInfo{
+				SegmentID:    UniqueID(id),
+				PartitionID:  defaultPartitionID,
+				CollectionID: defaultCollectionID,
+				BinlogPaths:  binlogs,
+			}
+			req := &querypb.LoadSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_LoadSegments,
+				},
+				Infos: []*querypb.SegmentLoadInfo{segmentInfo},
+			}
+			loadTask := &loadSegmentTask{
+				baseTask: &baseTask{
+					ctx:              tt.ctx,
+					condition:        newTaskCondition(tt.ctx),
+					triggerCondition: tt.triggerCondition,
+				},
+				LoadSegmentsRequest: req,
+				meta:                tt.meta,
+				cluster:             tt.cluster,
+				excludeNodeIDs:      []int64{},
+			}
+			loadTask.setParentTask(tt)
+			tt.addChildTask(loadTask)
+		}
 	case commonpb.MsgType_LoadSegments:
-		childTask := &LoadSegmentTask{
-			BaseTask: &BaseTask{
+		childTask := &loadSegmentTask{
+			baseTask: &baseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        newTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadSegments,
 				},
-				NodeID: tt.nodeID,
+				DstNodeID: tt.nodeID,
 			},
 			meta:           tt.meta,
 			cluster:        tt.cluster,
@@ -77,10 +112,10 @@ func (tt *testTask) execute(ctx context.Context) error {
 		}
 		tt.addChildTask(childTask)
 	case commonpb.MsgType_WatchDmChannels:
-		childTask := &WatchDmChannelTask{
-			BaseTask: &BaseTask{
+		childTask := &watchDmChannelTask{
+			baseTask: &baseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        newTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			WatchDmChannelsRequest: &querypb.WatchDmChannelsRequest{
@@ -95,10 +130,10 @@ func (tt *testTask) execute(ctx context.Context) error {
 		}
 		tt.addChildTask(childTask)
 	case commonpb.MsgType_WatchQueryChannels:
-		childTask := &WatchQueryChannelTask{
-			BaseTask: &BaseTask{
+		childTask := &watchQueryChannelTask{
+			baseTask: &baseTask{
 				ctx:              tt.ctx,
-				Condition:        NewTaskCondition(tt.ctx),
+				condition:        newTaskCondition(tt.ctx),
 				triggerCondition: tt.triggerCondition,
 			},
 			AddQueryChannelRequest: &querypb.AddQueryChannelRequest{
@@ -134,9 +169,9 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	nodeID := queryNode.queryNodeID
 	waitQueryNodeOnline(queryCoord.cluster, nodeID)
 	testTask := &testTask{
-		BaseTask: BaseTask{
+		baseTask: baseTask{
 			ctx:              baseCtx,
-			Condition:        NewTaskCondition(baseCtx),
+			condition:        newTaskCondition(baseCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		baseMsg: &commonpb.MsgBase{
@@ -173,8 +208,8 @@ func TestUnMarshalTask(t *testing.T) {
 		cancel: cancel,
 	}
 
-	t.Run("Test LoadCollectionTask", func(t *testing.T) {
-		loadTask := &LoadCollectionTask{
+	t.Run("Test loadCollectionTask", func(t *testing.T) {
+		loadTask := &loadCollectionTask{
 			LoadCollectionRequest: &querypb.LoadCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadCollection,
@@ -195,7 +230,7 @@ func TestUnMarshalTask(t *testing.T) {
 	})
 
 	t.Run("Test LoadPartitionsTask", func(t *testing.T) {
-		loadTask := &LoadPartitionTask{
+		loadTask := &loadPartitionTask{
 			LoadPartitionsRequest: &querypb.LoadPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadPartitions,
@@ -215,8 +250,8 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadPartitions)
 	})
 
-	t.Run("Test ReleaseCollectionTask", func(t *testing.T) {
-		releaseTask := &ReleaseCollectionTask{
+	t.Run("Test releaseCollectionTask", func(t *testing.T) {
+		releaseTask := &releaseCollectionTask{
 			ReleaseCollectionRequest: &querypb.ReleaseCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ReleaseCollection,
@@ -236,8 +271,8 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_ReleaseCollection)
 	})
 
-	t.Run("Test ReleasePartitionTask", func(t *testing.T) {
-		releaseTask := &ReleasePartitionTask{
+	t.Run("Test releasePartitionTask", func(t *testing.T) {
+		releaseTask := &releasePartitionTask{
 			ReleasePartitionsRequest: &querypb.ReleasePartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ReleasePartitions,
@@ -257,8 +292,8 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_ReleasePartitions)
 	})
 
-	t.Run("Test LoadSegmentTask", func(t *testing.T) {
-		loadTask := &LoadSegmentTask{
+	t.Run("Test loadSegmentTask", func(t *testing.T) {
+		loadTask := &loadSegmentTask{
 			LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadSegments,
@@ -278,8 +313,8 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadSegments)
 	})
 
-	t.Run("Test ReleaseSegmentTask", func(t *testing.T) {
-		releaseTask := &ReleaseSegmentTask{
+	t.Run("Test releaseSegmentTask", func(t *testing.T) {
+		releaseTask := &releaseSegmentTask{
 			ReleaseSegmentsRequest: &querypb.ReleaseSegmentsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ReleaseSegments,
@@ -299,8 +334,8 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_ReleaseSegments)
 	})
 
-	t.Run("Test WatchDmChannelTask", func(t *testing.T) {
-		watchTask := &WatchDmChannelTask{
+	t.Run("Test watchDmChannelTask", func(t *testing.T) {
+		watchTask := &watchDmChannelTask{
 			WatchDmChannelsRequest: &querypb.WatchDmChannelsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_WatchDmChannels,
@@ -320,8 +355,8 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchDmChannels)
 	})
 
-	t.Run("Test WatchQueryChannelTask", func(t *testing.T) {
-		watchTask := &WatchQueryChannelTask{
+	t.Run("Test watchQueryChannelTask", func(t *testing.T) {
+		watchTask := &watchQueryChannelTask{
 			AddQueryChannelRequest: &querypb.AddQueryChannelRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_WatchQueryChannels,
@@ -341,8 +376,8 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchQueryChannels)
 	})
 
-	t.Run("Test LoadBalanceTask", func(t *testing.T) {
-		loadBalanceTask := &LoadBalanceTask{
+	t.Run("Test loadBalanceTask", func(t *testing.T) {
+		loadBalanceTask := &loadBalanceTask{
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadBalanceSegments,
@@ -363,6 +398,28 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadBalanceSegments)
 	})
 
+	t.Run("Test handoffTask", func(t *testing.T) {
+		handoffTask := &handoffTask{
+			HandoffSegmentsRequest: &querypb.HandoffSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_HandoffSegments,
+				},
+			},
+		}
+
+		blobs, err := handoffTask.marshal()
+		assert.Nil(t, err)
+		err = kv.Save("testMarshalHandoffTask", string(blobs))
+		assert.Nil(t, err)
+		defer kv.RemoveWithPrefix("testMarshalHandoffTask")
+		value, err := kv.Load("testMarshalHandoffTask")
+		assert.Nil(t, err)
+
+		task, err := taskScheduler.unmarshalTask(1008, value)
+		assert.Nil(t, err)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_HandoffSegments)
+	})
+
 	taskScheduler.Close()
 }
 
@@ -379,7 +436,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 	}
 
 	kvs := make(map[string]string)
-	triggerTask := &LoadCollectionTask{
+	triggerTask := &loadCollectionTask{
 		LoadCollectionRequest: &querypb.LoadCollectionRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: 1,
@@ -392,7 +449,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 	triggerTaskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, 100)
 	kvs[triggerTaskKey] = string(triggerBlobs)
 
-	activeTask := &LoadSegmentTask{
+	activeTask := &loadSegmentTask{
 		LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: 2,
@@ -412,7 +469,43 @@ func TestReloadTaskFromKV(t *testing.T) {
 
 	taskScheduler.reloadFromKV()
 
-	task := taskScheduler.triggerTaskQueue.PopTask()
+	task := taskScheduler.triggerTaskQueue.popTask()
 	assert.Equal(t, taskDone, task.getState())
 	assert.Equal(t, 1, len(task.getChildTask()))
+}
+
+func Test_saveInternalTaskToEtcd(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	testTask := &testTask{
+		baseTask: baseTask{
+			ctx:              ctx,
+			condition:        newTaskCondition(ctx),
+			triggerCondition: querypb.TriggerCondition_grpcRequest,
+			taskID:           100,
+		},
+		baseMsg: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		cluster: queryCoord.cluster,
+		meta:    queryCoord.meta,
+		nodeID:  defaultQueryNodeID,
+	}
+
+	t.Run("Test SaveEtcdFail", func(t *testing.T) {
+		// max send size limit of etcd is 2097152
+		testTask.binlogSize = 3000000
+		err = queryCoord.scheduler.processTask(testTask)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test SaveEtcdSuccess", func(t *testing.T) {
+		testTask.childTasks = []task{}
+		testTask.binlogSize = 500000
+		err = queryCoord.scheduler.processTask(testTask)
+		assert.Nil(t, err)
+	})
 }

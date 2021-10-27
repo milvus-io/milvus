@@ -1,1 +1,2 @@
 python-benedict==0.24.3
+pytest-dependency==0.5.1

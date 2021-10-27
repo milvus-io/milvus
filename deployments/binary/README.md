@@ -9,10 +9,10 @@ Before installing, you can refer to [docker-compose.yml](https://github.com/milv
 #### Refer: https://github.com/etcd-io/etcd/releases
 
 ```shell
-wget https://github.com/etcd-io/etcd/releases/download/v3.5.0/etcd-v3.5.0-linux-amd64.tar.gz
-tar zxvf etcd-v3.5.0-linux-amd64.tar.gz
-cd etcd-v3.5.0-linux-amd64
-./etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+$ wget https://github.com/etcd-io/etcd/releases/download/v3.5.0/etcd-v3.5.0-linux-amd64.tar.gz
+$ tar zxvf etcd-v3.5.0-linux-amd64.tar.gz
+$ cd etcd-v3.5.0-linux-amd64
+$ ./etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 ```
 
 ## Start MinIO service
@@ -20,9 +20,9 @@ cd etcd-v3.5.0-linux-amd64
 #### Refer: https://min.io/download#/linux
 
 ```shell
-wget https://dl.min.io/server/minio/release/linux-amd64/minio
-chmod +x minio
-./minio server /minio
+$ wget https://dl.min.io/server/minio/release/linux-amd64/minio
+$ chmod +x minio
+$ ./minio server /minio
 ```
 
 ## Start Milvus standalone service
@@ -30,22 +30,22 @@ chmod +x minio
 To start Milvus service, you need a Milvus binary file. Currently you can get the latest version of Milvus binary file through the Milvus docker image. (We will upload Milvus binary files in the future)
 
 ```shell
-docker run -d --name milvus milvusdb/milvus:v2.0.0-rc7-20211011-d567b21 /bin/bash
-docker cp milvus:/milvus .
+$ docker run -d --name milvus milvusdb/milvus:v2.0.0-rc7-20211011-d567b21 /bin/bash
+$ docker cp milvus:/milvus .
 ```
 
 ### Install Milvus dependencies
 
 ```shell
-sudo apt-get install libopenblas-dev
-sudo apt-get install libgomp1
-sudo apt-get install libtbb2
+$ sudo apt-get install libopenblas-dev
+$ sudo apt-get install libgomp1
+$ sudo apt-get install libtbb2
 ```
 
 ### Start Milvus service
 
 ```shell
-cd milvus
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PWD/lib
-./bin/milvus run standalone
+$ cd milvus
+$ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PWD/lib
+$ ./bin/milvus run standalone
 ```

@@ -5,6 +5,7 @@ from pymilvus import connections
 from chaos.checker import (CreateChecker, InsertFlushChecker,
                            SearchChecker, QueryChecker, IndexChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
+from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
@@ -44,10 +45,20 @@ class TestChaosBase:
         tests_yaml = constants.TESTS_CONFIG_LOCATION + 'testcases.yaml'
         tests_config = cc.gen_experiment_config(tests_yaml)
         test_collections = tests_config.get('Collections', None)
+        ms = MilvusSys(alias="default")
+        node_map = {
+            "querynode": "query_nodes",
+            "datanode": "data_nodes",
+            "indexnode": "index_nodes"
+        }
         for t in test_collections:
             test_chaos = t.get('testcase', {}).get('chaos', {})
             if test_chaos in chaos_yaml:
                 expects = t.get('testcase', {}).get('expectation', {}).get('cluster_1_node', {})
+                # for cluster_n_node mode
+                for node in node_map.keys():
+                    if node in test_chaos and len(getattr(ms, node_map[node])) > 1:
+                        expects = t.get('testcase', {}).get('expectation', {}).get('cluster_n_node', {})
                 log.info(f"yaml.expects: {expects}")
                 self.expect_create = expects.get(Op.create.value, constants.SUCC)
                 self.expect_insert = expects.get(Op.insert.value, constants.SUCC)
@@ -112,7 +123,7 @@ class TestChaos(TestChaosBase):
         # parse chaos object
         chaos_config = cc.gen_experiment_config(chaos_yaml)
         self._chaos_config = chaos_config  # cache the chaos config for tear down
-        log.info(chaos_config)
+        log.info(f"chaos_config: {chaos_config}")
 
         # parse the test expectations in testcases.yaml
         if self.parser_testcase_config(chaos_yaml) is False:
@@ -138,7 +149,7 @@ class TestChaos(TestChaosBase):
         cc.reset_counting(self.health_checkers)
 
         # wait 40s
-        sleep(constants.WAIT_PER_OP * 4)
+        sleep(constants.CHAOS_DURATION)
 
         for k, t in self.checker_threads.items():
             log.info(f"10s later: Thread {k} is_alive(): {t.is_alive()}")

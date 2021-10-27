@@ -5,12 +5,12 @@ update: 6.21.2021, by [Goose](https://github.com/XuanYang-cn)
 
 ## 1. Common Sense
 
-A. One message stream to one vchannel, so there are one start position and one end position in one message pack
-B. Only when datanode flushes, datanode will update every segment's position
+A. One message stream to one vchannel, so there are one start position and one end position in one message pack.
+B. Only when datanode flushes, datanode will update every segment's position.
 An optimization: update position of
 
 - a. Current flushing segment
-- b. StartPosition of segments never been flushed.
+- b. StartPosition of segments has never been flushed.
   C. DataNode auto-flush is a valid flush.
   D. DDL messages are now in DML Vchannels.
 
@@ -37,7 +37,7 @@ Whether save successfully:
 
 ### B. Recovery from a set of checkpoints
 
-1. We need all positions of all segments in this vchannel `p1, p2, ... pn`
+1. We need all positions of all segments in this vchannel `p1, p2, ... pn`.
 
 A design of WatchDmChannelReq
 

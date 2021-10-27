@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
@@ -31,8 +47,8 @@ type ChannelManager struct {
 }
 
 type channel struct {
-	name         string
-	collectionID UniqueID
+	Name         string
+	CollectionID UniqueID
 }
 
 // ChannelManagerOpt is to set optional parameters in channel manager
@@ -47,10 +63,9 @@ func defaultFactory(hash *consistent.Consistent) ChannelPolicyFactory {
 
 // NewChannelManager return a new ChannelManager
 func NewChannelManager(kv kv.TxnKV, posProvider positionProvider, options ...ChannelManagerOpt) (*ChannelManager, error) {
-	hashring := consistent.New()
 	c := &ChannelManager{
 		posProvider: posProvider,
-		factory:     defaultFactory(hashring),
+		factory:     NewChannelPolicyFactoryV1(kv),
 		store:       NewChannelStore(kv),
 	}
 
@@ -209,7 +224,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	return err
 }
 
-// Watch try to add the chanel to cluster. If the channel already exists, do nothing
+// Watch try to add the channel to cluster. If the channel already exists, do nothing
 func (c *ChannelManager) Watch(ch *channel) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -235,7 +250,7 @@ func (c *ChannelManager) Watch(ch *channel) error {
 
 func (c *ChannelManager) fillChannelPosition(update *ChannelOp) {
 	for _, ch := range update.Channels {
-		vchan := c.posProvider.GetVChanPositions(ch.name, ch.collectionID, true)
+		vchan := c.posProvider.GetVChanPositions(ch.Name, ch.CollectionID, true)
 		info := &datapb.ChannelWatchInfo{
 			Vchan:   vchan,
 			StartTs: time.Now().Unix(),
@@ -272,7 +287,7 @@ func (c *ChannelManager) Match(nodeID int64, channel string) bool {
 	}
 
 	for _, ch := range info.Channels {
-		if ch.name == channel {
+		if ch.Name == channel {
 			return true
 		}
 	}

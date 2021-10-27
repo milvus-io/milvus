@@ -12,7 +12,6 @@
 package rocksmq
 
 import (
-	"context"
 	"reflect"
 	"sync"
 
@@ -25,26 +24,21 @@ type client struct {
 	server          RocksMQ
 	producerOptions []ProducerOptions
 	consumerOptions []ConsumerOptions
-	ctx             context.Context
-	cancel          context.CancelFunc
 	wg              *sync.WaitGroup
+	closeCh         chan struct{}
+	closeOnce       sync.Once
 }
 
 func newClient(options ClientOptions) (*client, error) {
 	if options.Server == nil {
-		return nil, newError(InvalidConfiguration, "Server is nil")
-	}
-
-	if options.Ctx == nil {
-		options.Ctx, options.Cancel = context.WithCancel(context.Background())
+		return nil, newError(InvalidConfiguration, "options.Server is nil")
 	}
 
 	c := &client{
 		server:          options.Server,
 		producerOptions: []ProducerOptions{},
-		ctx:             options.Ctx,
-		cancel:          options.Cancel,
 		wg:              &sync.WaitGroup{},
+		closeCh:         make(chan struct{}),
 	}
 	return c, nil
 }
@@ -57,7 +51,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	}
 
 	if reflect.ValueOf(c.server).IsNil() {
-		return nil, newError(0, "rmq server is nil")
+		return nil, newError(0, "Rmq server is nil")
 	}
 	// Create a topic in rocksmq, ignore if topic exists
 	err = c.server.CreateTopic(options.Topic)
@@ -72,7 +66,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	// Create a consumer
 	if reflect.ValueOf(c.server).IsNil() {
-		return nil, newError(0, "rmq server is nil")
+		return nil, newError(0, "Rmq server is nil")
 	}
 	if exist, con := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName); exist {
 		log.Debug("ConsumerGroup already existed", zap.Any("topic", options.Topic), zap.Any("SubscriptionName", options.SubscriptionName))
@@ -128,12 +122,12 @@ func (c *client) consume(consumer *consumer) {
 	defer c.wg.Done()
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.closeCh:
 			return
 		case _, ok := <-consumer.MsgMutex():
 			if !ok {
 				// consumer MsgMutex closed, goroutine exit
-				log.Debug("consumer MsgMutex closed")
+				log.Debug("Consumer MsgMutex closed")
 				return
 			}
 
@@ -164,11 +158,13 @@ func (c *client) consume(consumer *consumer) {
 
 func (c *client) Close() {
 	// TODO(yukun): Should call server.close() here?
-	c.cancel()
-	// Wait all consume goroutines exit
-	c.wg.Wait()
-	if c.server != nil {
-		c.server.Close()
-	}
-	c.consumerOptions = nil
+	c.closeOnce.Do(func() {
+		close(c.closeCh)
+		c.wg.Wait()
+		if c.server != nil {
+			c.server.Close()
+		}
+		// Wait all consume goroutines exit
+		c.consumerOptions = nil
+	})
 }

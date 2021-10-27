@@ -85,7 +85,7 @@ class TestCollectionParams(TestcaseBase):
     def test_collection_empty_name(self):
         """
         target: test collection with empty name
-        method: create collection with a empty name
+        method: create collection with an empty name
         expected: raise exception
         """
         self._connect()
@@ -2049,8 +2049,8 @@ class TestCreateCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_multithread(self, connect):
         """
-        target: test create collection with multithread
-        method: create collection using multithread,
+        target: test create collection with multi-thread
+        method: create collection using multi-thread,
         expected: collections are created
         """
         threads_num = 8
@@ -2263,8 +2263,8 @@ class TestDescribeCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_multithread(self, connect):
         """
-        target: test create collection with multithread
-        method: create collection using multithread,
+        target: test create collection with multi-thread
+        method: create collection using multi-thread,
         expected: collections are created
         """
         threads_num = 4
@@ -2387,7 +2387,7 @@ class TestDropCollection:
         """
         target: test if collection not created
         method: random a collection name, which not existed in db,
-            assert the exception raised returned by drp_collection method
+                assert the exception raised returned by drp_collection method
         expected: False
         """
         collection_name = gen_unique_str(uid_drop)
@@ -2402,8 +2402,8 @@ class TestDropCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_collection_multithread(self, connect):
         """
-        target: test create and drop collection with multithread
-        method: create and drop collection using multithread,
+        target: test create and drop collection with multi-thread
+        method: create and drop collection using multi-thread,
         expected: collections are created, and dropped
         """
         threads_num = 8
@@ -2485,7 +2485,7 @@ class TestHasCollection:
         """
         target: test if collection not created
         method: random a collection name, create this collection then drop it,
-            assert the value returned by has_collection method
+                assert the value returned by has_collection method
         expected: False
         """
         collection_name = gen_unique_str(uid_has)
@@ -2497,8 +2497,8 @@ class TestHasCollection:
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_multithread(self, connect):
         """
-        target: test create collection with multithread
-        method: create collection using multithread,
+        target: test create collection with multi-thread
+        method: create collection using multi-thread,
         expected: collections are created
         """
         threads_num = 4
@@ -2854,11 +2854,15 @@ class TestLoadCollection:
         """
         target: test load collection without flush
         method: insert entities without flush, then load collection
-        expected: load collection failed
+        expected: No exception and data can be queried
         """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
+        result = connect.insert(collection, gen_entities(100))
+        assert len(result.primary_keys) == 100
         connect.load_collection(collection)
+        int_field_name = "int64"
+        term_expr = f'{int_field_name} in {result.primary_keys[:1]}'
+        res = connect.query(collection, term_expr)
+        assert res == [{int_field_name: result.primary_keys[0]}]
 
     # TODO
     @pytest.mark.tags(CaseLabel.L2)
@@ -2922,7 +2926,6 @@ class TestLoadCollection:
         connect.release_collection(collection)
         with pytest.raises(Exception):
             connect.search(collection, **default_single_query)
-        # assert len(res[0]) == 0
 
 
 class TestReleaseAdvanced:

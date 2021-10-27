@@ -91,14 +91,14 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 	wg.Add(1)
 	go func() {
 		rootcoord.Params.Init()
-
 		if !localMsg {
 			logutil.SetupLogger(&rootcoord.Params.Log)
 			defer log.Sync()
 		}
 
 		factory := newMsgFactory(localMsg)
-		rc, err := grpcrootcoord.NewServer(ctx, factory)
+		var err error
+		rc, err = grpcrootcoord.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -304,7 +304,7 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 func TestProxy(t *testing.T) {
 	var err error
 
-	path := "/tmp/milvus/rocksmq"
+	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
 	err = os.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
 	assert.NoError(t, err)
@@ -470,11 +470,12 @@ func TestProxy(t *testing.T) {
 	})
 
 	prefix := "test_proxy_"
+	partitionPrefix := "test_proxy_partition_"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	otherCollectionName := collectionName + funcutil.GenRandomStr()
-	partitionName := prefix + funcutil.GenRandomStr()
-	otherPartitionName := partitionName + funcutil.GenRandomStr()
+	otherCollectionName := collectionName + "_other_" + funcutil.GenRandomStr()
+	partitionName := partitionPrefix + funcutil.GenRandomStr()
+	otherPartitionName := partitionPrefix + "_other_" + funcutil.GenRandomStr()
 	shardsNum := int32(2)
 	int64Field := "int64"
 	floatVecField := "fVec"
@@ -1166,7 +1167,7 @@ func TestProxy(t *testing.T) {
 		// waiting for collection to be loaded
 		counter := 0
 		for !f() {
-			if counter > 10 {
+			if counter > 100 {
 				loaded = false
 				break
 			}
@@ -1175,9 +1176,7 @@ func TestProxy(t *testing.T) {
 			counter++
 		}
 	})
-	if !loaded {
-		log.Warn("load operation was not sure to be done")
-	}
+	assert.True(t, loaded)
 
 	wg.Add(1)
 	t.Run("show in-memory collections", func(t *testing.T) {

@@ -1,17 +1,25 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
 	"context"
+	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -211,11 +219,14 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta, err := newMeta(memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
-		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0"}}}}}
+		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0"}}},
+			Statslogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog0"}}}}}
 		err = meta.AddSegment(segment1)
 		assert.Nil(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, true, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog1"}}},
+			[]*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog1"}}},
+			[]*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.Nil(t, err)
 
@@ -224,6 +235,8 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 			ID: 1, State: commonpb.SegmentState_Flushing, NumOfRows: 10,
 			StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}},
 			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0", "binlog1"}}},
+			Statslogs:     []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog0", "statslog1"}}},
+			Deltalogs:     []*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
 		}}
 		assert.EqualValues(t, expected, updated)
 	})
@@ -232,7 +245,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta, err := newMeta(memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil)
+		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil, nil, nil)
 		assert.Nil(t, err)
 	})
 
@@ -244,7 +257,8 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		err = meta.AddSegment(segment1)
 		assert.Nil(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, false, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
+		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
+
 			[]*datapb.SegmentStartPosition{{SegmentID: 2, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.Nil(t, err)
 		assert.Nil(t, meta.GetSegment(2))
@@ -266,6 +280,8 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta.segments.SetSegment(1, segmentInfo)
 
 		err = meta.UpdateFlushSegmentsInfo(1, true, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog"}}},
+			[]*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog"}}},
+			[]*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.NotNil(t, err)
 		assert.Equal(t, "mocked fail", err.Error())
@@ -275,4 +291,27 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		assert.Nil(t, segmentInfo.Binlogs)
 		assert.Nil(t, segmentInfo.StartPosition)
 	})
+}
+
+func TestSaveHandoffMeta(t *testing.T) {
+	meta, err := newMeta(memkv.NewMemoryKV())
+	assert.Nil(t, err)
+
+	info := &datapb.SegmentInfo{
+		ID:    100,
+		State: commonpb.SegmentState_Flushed,
+	}
+	segmentInfo := &SegmentInfo{
+		SegmentInfo: info,
+	}
+
+	err = meta.saveSegmentInfo(segmentInfo)
+	assert.Nil(t, err)
+
+	keys, _, err := meta.client.LoadWithPrefix(handoffSegmentPrefix)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(keys))
+	segmentID, err := strconv.ParseInt(filepath.Base(keys[0]), 10, 64)
+	assert.Nil(t, err)
+	assert.Equal(t, 100, int(segmentID))
 }

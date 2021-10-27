@@ -23,6 +23,10 @@ def gen_str_by_length(length=8):
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
+def gen_digits_by_length(length=8):
+    return "".join(random.choice(string.digits) for _ in range(length))
+
+
 def gen_bool_field(name=ct.default_bool_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     bool_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BOOL, description=description,
                                                               is_primary=is_primary, **kwargs)
@@ -485,7 +489,7 @@ def gen_partitions(collection_w, partition_num=1):
 
 
 def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
-                auto_id=False, dim=ct.default_dim):
+                auto_id=False, dim=ct.default_dim, insert_offset=0):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -496,23 +500,24 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
     vectors = []
     binary_raw_vectors = []
     insert_ids = []
+    start = insert_offset
     log.info("insert_data: inserting data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     for i in range(num):
-        default_data = gen_default_dataframe_data(nb // num, dim=dim)
+        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start)
         if is_binary:
-            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim)
+            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start)
             binary_raw_vectors.extend(binary_raw_data)
         if is_all_data_type:
-            default_data = gen_dataframe_all_data_type(nb // num, dim=dim)
+            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start)
         if auto_id:
             default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
         insert_res = collection_w.insert(default_data, par[i].name)[0]
+        time_stamp = insert_res.timestamp
         insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)
-    log.info("insert_data: inserted data into collection %s (num_entities: %s)"
-             % (collection_w.name, nb))
-    return collection_w, vectors, binary_raw_vectors, insert_ids
+        start = start + nb // num
+    return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
 
 def _check_primary_keys(primary_keys, nb):

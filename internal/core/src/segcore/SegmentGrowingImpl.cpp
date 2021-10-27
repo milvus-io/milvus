@@ -9,25 +9,22 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <random>
-
 #include <algorithm>
-#include <numeric>
-#include <thread>
-#include <queue>
-
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <faiss/utils/distances.h>
-#include <query/SearchOnSealed.h>
 #include <iostream>
-#include "query/generated/ExecPlanNodeVisitor.h"
-#include "segcore/SegmentGrowingImpl.h"
-#include "query/PlanNode.h"
-#include "query/PlanImpl.h"
-#include "segcore/Reduce.h"
-#include "utils/tools.h"
+#include <numeric>
+#include <queue>
+#include <random>
+#include <thread>
 #include <boost/iterator/counting_iterator.hpp>
+
+#include "common/Consts.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "query/PlanNode.h"
+#include "query/SearchOnSealed.h"
+#include "query/generated/ExecPlanNodeVisitor.h"
+#include "segcore/Reduce.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "utils/Utils.h"
 
 namespace milvus::segcore {
 
@@ -43,14 +40,14 @@ SegmentGrowingImpl::PreDelete(int64_t size) {
     return reserved_begin;
 }
 
-auto
+std::shared_ptr<DeletedRecord::TmpBitmap>
 SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
                                        Timestamp query_timestamp,
                                        int64_t insert_barrier,
-                                       bool force) -> std::shared_ptr<DeletedRecord::TmpBitmap> {
+                                       bool force) const {
     auto old = deleted_record_.get_lru_entry();
 
-    if (!force || old->bitmap_ptr->count() == insert_barrier) {
+    if (old->bitmap_ptr->count() == insert_barrier) {
         if (old->del_barrier == del_barrier) {
             return old;
         }
@@ -115,20 +112,29 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
     return current;
 }
 
-const BitsetView
-SegmentGrowingImpl::get_filtered_bitmap(BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) {
+BitsetView
+SegmentGrowingImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    if (del_barrier == 0) {
+        return bitset;
+    }
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
+    if (bitmap_holder == nullptr) {
+        return bitset;
+    }
     AssertInfo(bitmap_holder, "bitmap_holder is null");
     auto deleted_bitmap = bitmap_holder->bitmap_ptr;
-    AssertInfo(deleted_bitmap->count() == bitset.u8size(), "Deleted bitmap count not equal to filtered bitmap count");
+    if (bitset.size() == 0) {
+        return BitsetView(deleted_bitmap);
+    }
+    AssertInfo(deleted_bitmap->count() == bitset.size(), "Deleted bitmap count not equal to filtered bitmap count");
 
-    auto filtered_bitmap =
-        std::make_shared<faiss::ConcurrentBitset>(faiss::ConcurrentBitset(bitset.u8size(), bitset.data()));
+    auto filtered_bitmap = std::make_shared<faiss::ConcurrentBitset>(bitset.size(), bitset.data());
 
     auto final_bitmap = (*deleted_bitmap.get()) | (*filtered_bitmap.get());
 
-    return BitsetView(final_bitmap);
+    BitsetView res = BitsetView(final_bitmap);
+    return res;
 }
 
 Status
@@ -287,7 +293,6 @@ SegmentGrowingImpl::vector_search(int64_t vec_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
-    // TODO(yukun): get final filtered bitmap
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_offset_)) {
         query::SearchOnSealed(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset,
@@ -368,7 +373,7 @@ SegmentGrowingImpl::bulk_subscript_impl(int64_t element_sizeof,
     for (int i = 0; i < count; ++i) {
         auto dst = output_base + i * element_sizeof;
         auto offset = seg_offsets[i];
-        const uint8_t* src = offset == -1 ? empty.data() : (const uint8_t*)vec.get_element(offset);
+        const uint8_t* src = (offset == INVALID_SEG_OFFSET ? empty.data() : (const uint8_t*)vec.get_element(offset));
         memcpy(dst, src, element_sizeof);
     }
 }
@@ -384,7 +389,7 @@ SegmentGrowingImpl::bulk_subscript_impl(
     auto output = reinterpret_cast<T*>(output_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        output[i] = offset == -1 ? default_value : vec[offset];
+        output[i] = (offset == INVALID_SEG_OFFSET ? default_value : vec[offset]);
     }
 }
 
@@ -397,7 +402,7 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
         case SystemFieldType::Timestamp:
             PanicInfo("timestamp unsupported");
         case SystemFieldType::RowId:
-            bulk_subscript_impl<int64_t>(this->record_.uids_, seg_offsets, count, -1, output);
+            bulk_subscript_impl<int64_t>(this->record_.uids_, seg_offsets, count, INVALID_ID, output);
             break;
         default:
             PanicInfo("unknown subscript fields");
@@ -460,6 +465,27 @@ SegmentGrowingImpl::search_ids(const boost::dynamic_bitset<>& bitset, Timestamp 
 
     for (int i = 0; i < bitset.size(); i++) {
         if (bitset[i]) {
+            SegOffset the_offset(-1);
+            auto offset = SegOffset(i);
+            if (record_.timestamps_[offset.get()] < timestamp) {
+                the_offset = std::max(the_offset, offset);
+            }
+
+            if (the_offset == SegOffset(-1)) {
+                continue;
+            }
+            res_offsets.push_back(the_offset);
+        }
+    }
+    return res_offsets;
+}
+
+std::vector<SegOffset>
+SegmentGrowingImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) const {
+    std::vector<SegOffset> res_offsets;
+
+    for (int i = 0; i < bitset.size(); ++i) {
+        if (!bitset.test(i)) {
             SegOffset the_offset(-1);
             auto offset = SegOffset(i);
             if (record_.timestamps_[offset.get()] < timestamp) {

@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package datacoord
 
@@ -166,8 +171,8 @@ func TestRegister(t *testing.T) {
 		channelManager, err := NewChannelManager(kv, dummyPosProvider{})
 		assert.Nil(t, err)
 		err = channelManager.Watch(&channel{
-			name:         "ch1",
-			collectionID: 0,
+			Name:         "ch1",
+			CollectionID: 0,
 		})
 		assert.Nil(t, err)
 		cluster := NewCluster(sessionManager, channelManager)
@@ -186,7 +191,7 @@ func TestRegister(t *testing.T) {
 		nodeChannels := channelManager.GetChannels()
 		assert.EqualValues(t, 1, len(nodeChannels))
 		assert.EqualValues(t, 1, nodeChannels[0].NodeID)
-		assert.EqualValues(t, "ch1", nodeChannels[0].Channels[0].name)
+		assert.EqualValues(t, "ch1", nodeChannels[0].Channels[0].Name)
 	})
 
 	t.Run("register and restart with no channel", func(t *testing.T) {
@@ -266,7 +271,7 @@ func TestUnregister(t *testing.T) {
 		assert.EqualValues(t, 1, len(channels))
 		assert.EqualValues(t, 2, channels[0].NodeID)
 		assert.EqualValues(t, 1, len(channels[0].Channels))
-		assert.EqualValues(t, "ch1", channels[0].Channels[0].name)
+		assert.EqualValues(t, "ch1", channels[0].Channels[0].Name)
 	})
 
 	t.Run("remove all channels after unregsiter", func(t *testing.T) {
@@ -295,7 +300,7 @@ func TestUnregister(t *testing.T) {
 		channel := channelManager.GetBuffer()
 		assert.NotNil(t, channel)
 		assert.EqualValues(t, 1, len(channel.Channels))
-		assert.EqualValues(t, "ch_1", channel.Channels[0].name)
+		assert.EqualValues(t, "ch_1", channel.Channels[0].Name)
 	})
 }
 
@@ -323,7 +328,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		assert.Nil(t, err)
 		channels := channelManager.GetChannels()
 		assert.EqualValues(t, 1, len(channels))
-		assert.EqualValues(t, "ch1", channels[0].Channels[0].name)
+		assert.EqualValues(t, "ch1", channels[0].Channels[0].Name)
 	})
 
 	t.Run("watch channel to empty cluster", func(t *testing.T) {
@@ -341,7 +346,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		assert.Empty(t, channels)
 		channel := channelManager.GetBuffer()
 		assert.NotNil(t, channel)
-		assert.EqualValues(t, "ch1", channel.Channels[0].name)
+		assert.EqualValues(t, "ch1", channel.Channels[0].Name)
 	})
 }
 
@@ -392,7 +397,8 @@ func TestConsistentHashPolicy(t *testing.T) {
 	}
 
 	hash.Remove("1")
-	cluster.UnRegister(nodeInfo1)
+	err = cluster.UnRegister(nodeInfo1)
+	assert.Nil(t, err)
 	for _, c := range channels {
 		idstr, err := hash.Get(c)
 		assert.Nil(t, err)
@@ -403,7 +409,8 @@ func TestConsistentHashPolicy(t *testing.T) {
 	}
 
 	hash.Remove("2")
-	cluster.UnRegister(nodeInfo2)
+	err = cluster.UnRegister(nodeInfo2)
+	assert.Nil(t, err)
 	for _, c := range channels {
 		idstr, err := hash.Get(c)
 		assert.Nil(t, err)
@@ -414,7 +421,40 @@ func TestConsistentHashPolicy(t *testing.T) {
 	}
 
 	hash.Remove("3")
-	cluster.UnRegister(nodeInfo3)
+	err = cluster.UnRegister(nodeInfo3)
+	assert.Nil(t, err)
 	bufferChannels := channelManager.GetBuffer()
 	assert.EqualValues(t, 3, len(bufferChannels.Channels))
+}
+
+func TestCluster_Flush(t *testing.T) {
+	kv := memkv.NewMemoryKV()
+	sessionManager := NewSessionManager()
+	channelManager, err := NewChannelManager(kv, dummyPosProvider{})
+	assert.Nil(t, err)
+	cluster := NewCluster(sessionManager, channelManager)
+	defer cluster.Close()
+	addr := "localhost:8080"
+	info := &NodeInfo{
+		Address: addr,
+		NodeID:  1,
+	}
+	nodes := []*NodeInfo{info}
+	err = cluster.Startup(nodes)
+	assert.Nil(t, err)
+
+	err = cluster.Watch("chan-1", 1)
+	assert.NoError(t, err)
+
+	// flush empty should impact nothing
+	assert.NotPanics(t, func() {
+		cluster.Flush(context.Background(), []*datapb.SegmentInfo{}, []*datapb.SegmentInfo{})
+	})
+
+	// flush not watched channel
+	assert.NotPanics(t, func() {
+		cluster.Flush(context.Background(), []*datapb.SegmentInfo{{ID: 1, InsertChannel: "chan-2"}},
+			[]*datapb.SegmentInfo{{ID: 2, InsertChannel: "chan-3"}})
+	})
+	//TODO add a method to verify datanode has flush request after client injection is available
 }

@@ -9,7 +9,7 @@ All PRs are checked in automatically by the sre-robot, with the following condit
 
 Generally speaking, reviewer is volunteered and can be anyone in the community who is familiar with the packages the PR modifies.
 Reviewers are responsible for the logic correctness, error handling, unit test coverage and code readability.
-While Approver focus on overall design, code readability, and ensuring the PR follows code of
+While Approver focuses on overall design, code readability, and ensuring the PR follows code of
 conduct(Such as meaningful title and commit message, marked with correct labels, meaningful comments). Currently,
 all Approvers are listed under OWNERS_ALIASES file.
 
@@ -17,7 +17,7 @@ all Approvers are listed under OWNERS_ALIASES file.
 
 - Read the title, commit message and related issue of the PR, if it's not easy to understand, ask for improvement
 
-- For a bug fix PR, there should be a detailed bug description in related issue, and make sure there test cases to cover this bug.
+- For a bug fix PR, there should be a detailed bug description in related issue, and make sure the test cases to cover this bug.
 
 - For a function enhancement PR, understand the function use case, make sure the functionality is reasonable.
 
@@ -29,7 +29,7 @@ all Approvers are listed under OWNERS_ALIASES file.
 
 - Does the code follow style guide?
 
-- Does the code do excatly the same as title and commit message describe?
+- Does the code do exactly the same as title and commit message describe?
 
 - Can this function and variable's behavior be inferred by its name
 
@@ -71,6 +71,6 @@ Besides All the reviewer's responsibility listed above, Approvers should also ma
 
 - PR sets kind label
 
-- The variable names appearing in the source code need to be readable. Comments are necessary if it is a unusual abbreviations
+- The variable names appearing in the source code need to be readable. Comments are necessary if it is an unusual abbreviations
 
 Thanks for [Code Review Guide](https://github.com/pingcap/tidb/blob/master/code_review_guide.md) from Pingcap community.

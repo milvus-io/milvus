@@ -268,7 +268,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "metric type not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6727")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
@@ -282,13 +281,14 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("skip in FLAT index")
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
-                                                                      is_index=True)
+                                                                      is_index=True)[0:4]
         # 2. create index and load
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search
         invalid_search_params = cf.gen_invaild_search_params_type()
+        message = "Search params check failed"
         for invalid_search_param in invalid_search_params:
             if index == invalid_search_param["index_type"]:
                 search_params = {"metric_type": "L2", "params": invalid_search_param["search_params"]}
@@ -297,7 +297,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
                                     check_items={"err_code": 0,
-                                                 "err_msg": "metric type not found"})
+                                                 "err_msg": message})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_limit_type(self, get_invalid_limit):
@@ -500,10 +500,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "limit": 0})
         # 4. search with data inserted but not load again
         data = cf.gen_default_dataframe_data(nb=2000)
+
         insert_res, _ = collection_w.insert(data)
+
+        sleep(1)
+
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,
-                            guarantee_timestamp=insert_res.timestamp + 1,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_res.primary_keys,
@@ -551,7 +554,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
                                                                       partition_num=1,
-                                                                      is_index=True)
+                                                                      is_index=True)[0:4]
         # 2. create different index
         if params.get("m"):
             if (default_dim % params["m"]) != 0:
@@ -638,7 +641,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True)
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True)[0:4]
         # 2. search
         log.info("test_search_with_output_fields_not_exist: Searching collection %s" % collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -724,17 +727,28 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: test search normal case
         method: create connection, collection, insert and search
-        expected: search successfully with limit(topK)
+        expected: 1. search returned with 0 before travel timestamp
+                  2. search successfully with limit(topK) after travel timestamp
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)
-        # 2. search
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0:5]
+        # 2. search before insert time_stamp
         log.info("test_search_normal: searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp,
+                            travel_timestamp=time_stamp-1,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": [],
+                                         "limit": 0})
+        # 3. search after insert time_stamp
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            travel_timestamp=time_stamp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -748,7 +762,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with limit(topK) and can be hit at top 1 (min distance is 0)
         """
         collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0:4]
         # get vectors that inserted into collection
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(nq)]
@@ -764,6 +778,42 @@ class TestCollectionSearch(TestcaseBase):
         for hits in search_res:
             # verify that top 1 hit is itself,so min distance is 0
             assert hits.distances[0] == 0.0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_dup_primary_key(self, dim, auto_id, _async):
+        """
+        target: test search with duplicate primary key
+        method: 1.insert same data twice
+                2.search
+        expected: search results are de-duplicated
+        """
+        # initialize with data
+        nb = ct.default_nb
+        nq = ct.default_nq
+        collection_w, insert_data, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                                auto_id=auto_id,
+                                                                                dim=dim)[0:4]
+        # insert data again
+        insert_res, _ = collection_w.insert(insert_data[0])
+        insert_ids.extend(insert_res.primary_keys)
+        # search
+        vectors = [[random.random() for _ in range(dim)]
+                   for _ in range(default_nq)]
+        search_res, _ = collection_w.search(vectors[:nq], default_search_field,
+                                            default_search_params, default_limit,
+                                            default_search_exp, _async=_async,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": nq,
+                                                         "ids": insert_ids,
+                                                         "limit": default_limit,
+                                                         "_async": _async})
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+        # assert that search results are de-duplicated
+        for hits in search_res:
+            ids = hits.ids
+            assert sorted(list(set(ids))) == sorted(ids)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self, dim, auto_id, _async):
@@ -794,13 +844,14 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0:4]
         # 2. search
         log.info("test_search_normal: searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_params, default_limit,
                             default_search_exp, _async=_async,
+                            travel_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
@@ -823,7 +874,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       partition_num,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)
+                                                                      dim=dim)[0:4]
         # 2. search all the partitions before partition deletion
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         log.info("test_search_before_after_delete: searching before deleting partitions")
@@ -870,7 +921,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       partition_num,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)
+                                                                      dim=dim)[0:4]
         # 2. search all the partitions before partition deletion
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         log.info("test_search_partition_after_release_one: searching before deleting partitions")
@@ -915,7 +966,7 @@ class TestCollectionSearch(TestcaseBase):
         limit = 1000
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       1, auto_id=auto_id,
-                                                                      dim=dim)
+                                                                      dim=dim)[0:4]
         # 2. search all the partitions before partition deletion
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         log.info("test_search_partition_after_release_all: searching before deleting partitions")
@@ -954,9 +1005,9 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize without data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      1, auto_id=auto_id,
-                                                                      dim=dim)
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
+                                                                                  1, auto_id=auto_id,
+                                                                                  dim=dim)[0:5]
         # 2. release collection
         log.info("test_search_collection_after_release_load: releasing collection %s" % collection_w.name)
         collection_w.release()
@@ -968,6 +1019,7 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(vectors[:nq], default_search_field, default_search_params,
                             default_limit, default_search_exp, _async=_async,
+                            travel_timestamp=time_stamp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -986,9 +1038,9 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize without data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      1, auto_id=auto_id,
-                                                                      dim=dim)
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
+                                                                                  1, auto_id=auto_id,
+                                                                                  dim=dim)[0:5]
         # 2. release collection
         log.info("test_search_partition_after_release_load: releasing a partition")
         par = collection_w.partitions
@@ -1002,6 +1054,7 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(vectors[:nq], default_search_field, default_search_params,
                             limit, default_search_exp, _async=_async,
+                            travel_timestamp=time_stamp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -1015,6 +1068,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:nq], default_search_field, default_search_params,
                             limit, default_search_exp,
                             [par[1].name], _async=_async,
+                            travel_timestamp=time_stamp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids[par[0].num_entities:],
@@ -1062,15 +1116,16 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         limit = 1000
         nb_old = 500
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim)
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb_old,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim)[0:5]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         log.info("test_search_new_data: searching for original data after load")
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp, _async=_async,
+                            travel_timestamp=time_stamp+1,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -1078,8 +1133,9 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
         # 3. insert new data
         nb_new = 300
-        insert_ids_new = cf.insert_data(collection_w, nb_new,
-                                        auto_id=auto_id, dim=dim)[3]
+        _, _, _, insert_ids_new, time_stamp = cf.insert_data(collection_w, nb_new,
+                                                             auto_id=auto_id, dim=dim,
+                                                             insert_offset=nb_old)
         insert_ids.extend(insert_ids_new)
         # gracefulTime is default as 1s which allows data
         # could not be searched instantly in gracefulTime
@@ -1088,6 +1144,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp, _async=_async,
+                            travel_timestamp=time_stamp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -1104,7 +1161,7 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 100,
                                                                       auto_id=auto_id,
-                                                                      dim=max_dim)
+                                                                      dim=max_dim)[0:4]
         # 2. search
         nq = 2
         log.info("test_search_max_dim: searching collection %s" % collection_w.name)
@@ -1129,10 +1186,10 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with limit(topK)
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
-                                                                      partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim, is_index=True)
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim, is_index=True)[0:5]
         # 2. create index and load
         if params.get("m"):
             if (dim % params["m"]) != 0:
@@ -1151,6 +1208,7 @@ class TestCollectionSearch(TestcaseBase):
             collection_w.search(vectors[:default_nq], default_search_field,
                                 search_param, default_limit,
                                 default_search_exp, _async=_async,
+                                travel_timestamp=time_stamp,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
@@ -1168,10 +1226,10 @@ class TestCollectionSearch(TestcaseBase):
         expected: searched successfully
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
-                                                                      partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim, is_index=True)
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim, is_index=True)[0:5]
         # 2. create different index
         if params.get("m"):
             if (dim % params["m"]) != 0:
@@ -1192,6 +1250,7 @@ class TestCollectionSearch(TestcaseBase):
             collection_w.search(vectors[:default_nq], default_search_field,
                                 search_param, default_limit,
                                 default_search_exp, _async=_async,
+                                travel_timestamp=time_stamp,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
@@ -1208,7 +1267,7 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)
+                                                                      dim=dim)[0:4]
         # 2. search for multiple times
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         for i in range(search_num):
@@ -1231,9 +1290,9 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with limit(topK)
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim)
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim)[0:5]
         # 2. search
         log.info("test_search_sync_async_multiple_times: searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -1243,6 +1302,7 @@ class TestCollectionSearch(TestcaseBase):
                 collection_w.search(vectors[:nq], default_search_field,
                                     default_search_params, default_limit,
                                     default_search_exp, _async=_async,
+                                    travel_timestamp=time_stamp,
                                     check_task=CheckTasks.check_search_results,
                                     check_items={"nq": nq,
                                                  "ids": insert_ids,
@@ -1305,10 +1365,10 @@ class TestCollectionSearch(TestcaseBase):
         expected: searched successfully
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      is_index=True)
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  is_index=True)[0:5]
 
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -1326,6 +1386,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_params, limit, default_search_exp,
                             [par[1].name], _async=_async,
+                            travel_timestamp=time_stamp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids[par[0].num_entities:],
@@ -1344,7 +1405,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       dim=dim,
-                                                                      is_index=True)
+                                                                      is_index=True)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -1378,7 +1439,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)
+                                                                      dim=dim)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -1443,11 +1504,11 @@ class TestCollectionSearch(TestcaseBase):
         expected: the return distance equals to the computed value
         """
         # 1. initialize with binary data
-        collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
-                                                                                      is_binary=True,
-                                                                                      auto_id=auto_id,
-                                                                                      dim=dim,
-                                                                                      is_index=True)
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
+                                                                                                  is_binary=True,
+                                                                                                  auto_id=auto_id,
+                                                                                                  dim=dim,
+                                                                                                  is_index=True)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
@@ -1461,6 +1522,7 @@ class TestCollectionSearch(TestcaseBase):
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
+                                  travel_timestamp=time_stamp,
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": nq,
                                                "ids": insert_ids,
@@ -1484,7 +1546,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True)
+                                                                                      is_index=True)[0:4]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "HAMMING"}
         collection_w.create_index("binary_vector", default_index)
@@ -1522,7 +1584,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True)
+                                                                                      is_index=True)[0:4]
         log.info("auto_id= %s, _async= %s" % (auto_id, _async))
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "TANIMOTO"}
@@ -1559,7 +1621,7 @@ class TestCollectionSearch(TestcaseBase):
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
                                                                              nb, dim=dim,
-                                                                             is_index=True)
+                                                                             is_index=True)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -1610,7 +1672,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                              is_all_data_type=True,
                                                                              auto_id=auto_id,
-                                                                             dim=dim)
+                                                                             dim=dim)[0:4]
 
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
@@ -1663,7 +1725,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                              auto_id=True,
                                                                              dim=dim,
-                                                                             is_index=True)
+                                                                             is_index=True)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -1710,7 +1772,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       is_all_data_type=True,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)
+                                                                      dim=dim)[0:4]
         # 2. search
         log.info("test_search_expression_all_data_type: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -1742,7 +1804,7 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)
+                                                                      dim=dim)[0:4]
         # 2. search
         log.info("test_search_with_output_fields_empty: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -1769,7 +1831,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      auto_id=auto_id)
+                                                                      auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
 
@@ -1799,7 +1861,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       is_all_data_type=True,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)
+                                                                      dim=dim)[0:4]
         # 2. search
         log.info("test_search_with_output_fields: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -1829,7 +1891,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      auto_id=auto_id)
+                                                                      auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
 
@@ -1862,7 +1924,7 @@ class TestCollectionSearch(TestcaseBase):
             log.info("test_search_multi_collections: search round %d" % (i + 1))
             collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                           auto_id=auto_id,
-                                                                          dim=dim)
+                                                                          dim=dim)[0:4]
             # 2. search
             vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
             log.info("test_search_multi_collections: searching %s entities (nq = %s) from collection %s" %
@@ -1886,15 +1948,16 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         threads_num = 10
         threads = []
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim)
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim)[0:5]
 
         def search(collection_w):
             vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
             collection_w.search(vectors[:nq], default_search_field,
                                 default_search_params, default_limit,
                                 default_search_exp, _async=_async,
+                                travel_timestamp=time_stamp,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": nq,
                                              "ids": insert_ids,
@@ -2673,4 +2736,3 @@ class TestSearchDSL(object):
         query = {}
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
-

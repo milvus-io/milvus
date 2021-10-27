@@ -242,13 +242,13 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
+	sp, ctx2 := trace.StartSpanFromContextWithOperationName(i.loopCtx, "IndexNode-CreateIndex")
 	defer sp.Finish()
 	sp.SetTag("IndexBuildID", strconv.FormatInt(request.IndexBuildID, 10))
 
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
-			ctx:  ctx,
+			ctx:  ctx2,
 			done: make(chan error),
 		},
 		req:    request,

@@ -19,9 +19,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
-func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *LoadCollectionTask {
+func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCollectionTask {
 	req := &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
@@ -30,8 +31,8 @@ func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *LoadCol
 		Schema:       genCollectionSchema(defaultCollectionID, false),
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
-	loadCollectionTask := &LoadCollectionTask{
-		BaseTask:              baseTask,
+	loadCollectionTask := &loadCollectionTask{
+		baseTask:              baseTask,
 		LoadCollectionRequest: req,
 		rootCoord:             queryCoord.rootCoordClient,
 		dataCoord:             queryCoord.dataCoordClient,
@@ -41,17 +42,18 @@ func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *LoadCol
 	return loadCollectionTask
 }
 
-func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *LoadPartitionTask {
+func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *loadPartitionTask {
 	req := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadPartitions,
 		},
 		CollectionID: defaultCollectionID,
 		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
-	loadPartitionTask := &LoadPartitionTask{
-		BaseTask:              baseTask,
+	loadPartitionTask := &loadPartitionTask{
+		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
 		dataCoord:             queryCoord.dataCoordClient,
 		cluster:               queryCoord.cluster,
@@ -60,7 +62,7 @@ func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *LoadPart
 	return loadPartitionTask
 }
 
-func genReleaseCollectionTask(ctx context.Context, queryCoord *QueryCoord) *ReleaseCollectionTask {
+func genReleaseCollectionTask(ctx context.Context, queryCoord *QueryCoord) *releaseCollectionTask {
 	req := &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleaseCollection,
@@ -68,8 +70,8 @@ func genReleaseCollectionTask(ctx context.Context, queryCoord *QueryCoord) *Rele
 		CollectionID: defaultCollectionID,
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
-	releaseCollectionTask := &ReleaseCollectionTask{
-		BaseTask:                 baseTask,
+	releaseCollectionTask := &releaseCollectionTask{
+		baseTask:                 baseTask,
 		ReleaseCollectionRequest: req,
 		rootCoord:                queryCoord.rootCoordClient,
 		cluster:                  queryCoord.cluster,
@@ -79,7 +81,7 @@ func genReleaseCollectionTask(ctx context.Context, queryCoord *QueryCoord) *Rele
 	return releaseCollectionTask
 }
 
-func genReleasePartitionTask(ctx context.Context, queryCoord *QueryCoord) *ReleasePartitionTask {
+func genReleasePartitionTask(ctx context.Context, queryCoord *QueryCoord) *releasePartitionTask {
 	req := &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleasePartitions,
@@ -88,8 +90,8 @@ func genReleasePartitionTask(ctx context.Context, queryCoord *QueryCoord) *Relea
 		PartitionIDs: []UniqueID{defaultPartitionID},
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
-	releasePartitionTask := &ReleasePartitionTask{
-		BaseTask:                 baseTask,
+	releasePartitionTask := &releasePartitionTask{
+		baseTask:                 baseTask,
 		ReleasePartitionsRequest: req,
 		cluster:                  queryCoord.cluster,
 	}
@@ -97,7 +99,7 @@ func genReleasePartitionTask(ctx context.Context, queryCoord *QueryCoord) *Relea
 	return releasePartitionTask
 }
 
-func genReleaseSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *ReleaseSegmentTask {
+func genReleaseSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *releaseSegmentTask {
 	req := &querypb.ReleaseSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleaseSegments,
@@ -108,15 +110,15 @@ func genReleaseSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 		SegmentIDs:   []UniqueID{defaultSegmentID},
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
-	releaseSegmentTask := &ReleaseSegmentTask{
-		BaseTask:               baseTask,
+	releaseSegmentTask := &releaseSegmentTask{
+		baseTask:               baseTask,
 		ReleaseSegmentsRequest: req,
 		cluster:                queryCoord.cluster,
 	}
 	return releaseSegmentTask
 }
 
-func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *WatchDmChannelTask {
+func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *watchDmChannelTask {
 	schema := genCollectionSchema(defaultCollectionID, false)
 	vChannelInfo := &datapb.VchannelInfo{
 		CollectionID: defaultCollectionID,
@@ -134,8 +136,8 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
 	baseTask.taskID = 100
-	watchDmChannelTask := &WatchDmChannelTask{
-		BaseTask:               baseTask,
+	watchDmChannelTask := &watchDmChannelTask{
+		baseTask:               baseTask,
 		WatchDmChannelsRequest: req,
 		cluster:                queryCoord.cluster,
 		meta:                   queryCoord.meta,
@@ -151,8 +153,9 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 	}
 	baseParentTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
 	baseParentTask.taskID = 10
-	parentTask := &LoadCollectionTask{
-		BaseTask:              baseParentTask,
+	baseParentTask.setState(taskDone)
+	parentTask := &loadCollectionTask{
+		baseTask:              baseParentTask,
 		LoadCollectionRequest: parentReq,
 		rootCoord:             queryCoord.rootCoordClient,
 		dataCoord:             queryCoord.dataCoordClient,
@@ -167,7 +170,7 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 	queryCoord.meta.addCollection(defaultCollectionID, schema)
 	return watchDmChannelTask
 }
-func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *LoadSegmentTask {
+func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *loadSegmentTask {
 	schema := genCollectionSchema(defaultCollectionID, false)
 	segmentInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    defaultSegmentID,
@@ -178,14 +181,14 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadSegments,
 		},
-		NodeID: nodeID,
-		Schema: schema,
-		Infos:  []*querypb.SegmentLoadInfo{segmentInfo},
+		DstNodeID: nodeID,
+		Schema:    schema,
+		Infos:     []*querypb.SegmentLoadInfo{segmentInfo},
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
 	baseTask.taskID = 100
-	loadSegmentTask := &LoadSegmentTask{
-		BaseTask:            baseTask,
+	loadSegmentTask := &loadSegmentTask{
+		baseTask:            baseTask,
 		LoadSegmentsRequest: req,
 		cluster:             queryCoord.cluster,
 		meta:                queryCoord.meta,
@@ -201,8 +204,9 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 	}
 	baseParentTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
 	baseParentTask.taskID = 10
-	parentTask := &LoadCollectionTask{
-		BaseTask:              baseParentTask,
+	baseParentTask.setState(taskDone)
+	parentTask := &loadCollectionTask{
+		baseTask:              baseParentTask,
 		LoadCollectionRequest: parentReq,
 		rootCoord:             queryCoord.rootCoordClient,
 		dataCoord:             queryCoord.dataCoordClient,
@@ -648,6 +652,137 @@ func Test_RescheduleDmChannelsEndWithFail(t *testing.T) {
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 
 	waitTaskFinalState(loadCollectionTask, taskFailed)
+
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_AssignInternalTask(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	schema := genCollectionSchema(defaultCollectionID, false)
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+	loadSegmentRequests := make([]*querypb.LoadSegmentsRequest, 0)
+	binlogs := make([]*datapb.FieldBinlog, 0)
+	binlogs = append(binlogs, &datapb.FieldBinlog{
+		FieldID: 0,
+		Binlogs: []string{funcutil.RandomString(1000)},
+	})
+	for id := 0; id < 3000; id++ {
+		segmentInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    UniqueID(id),
+			PartitionID:  defaultPartitionID,
+			CollectionID: defaultCollectionID,
+			BinlogPaths:  binlogs,
+		}
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadSegments,
+			},
+			DstNodeID: node1.queryNodeID,
+			Schema:    schema,
+			Infos:     []*querypb.SegmentLoadInfo{segmentInfo},
+		}
+		loadSegmentRequests = append(loadSegmentRequests, req)
+	}
+
+	err = assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, false)
+	assert.Nil(t, err)
+
+	assert.NotEqual(t, 1, len(loadCollectionTask.getChildTask()))
+
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+	queryCoord.scheduler.Enqueue(loadCollectionTask)
+	waitTaskFinalState(loadCollectionTask, taskExpired)
+
+	node2, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+
+	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node2.queryNodeID)
+	parentTask := loadSegmentTask.parentTask
+
+	kv := &testKv{
+		returnFn: failedResult,
+	}
+	queryCoord.meta.setKvClient(kv)
+
+	err = updateSegmentInfoFromTask(ctx, parentTask, queryCoord.meta)
+	assert.NotNil(t, err)
+
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_handoffSegmentFail(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadCollectionTask, taskExpired)
+
+	node1.loadSegment = returnFailedResult
+
+	infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
+	assert.NotEqual(t, 0, len(infos))
+	segmentID := defaultSegmentID + 4
+	baseTask := newBaseTask(ctx, querypb.TriggerCondition_handoff)
+
+	segmentInfo := &querypb.SegmentInfo{
+		SegmentID:    segmentID,
+		CollectionID: defaultCollectionID,
+		PartitionID:  defaultPartitionID + 2,
+		SegmentState: querypb.SegmentState_sealed,
+	}
+	handoffReq := &querypb.HandoffSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_HandoffSegments,
+		},
+		SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
+	}
+	handoffTask := &handoffTask{
+		baseTask:               baseTask,
+		HandoffSegmentsRequest: handoffReq,
+		dataCoord:              queryCoord.dataCoordClient,
+		cluster:                queryCoord.cluster,
+		meta:                   queryCoord.meta,
+	}
+	err = queryCoord.scheduler.Enqueue(handoffTask)
+	assert.Nil(t, err)
+
+	waitTaskFinalState(handoffTask, taskFailed)
 
 	queryCoord.Stop()
 	err = removeAllSession()

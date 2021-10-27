@@ -34,6 +34,7 @@ To test deployment by docker-compose(Both standalone and cluster)
 │   ├── action_before_upgrade.py
 │   ├── action_reinstall.py
 │   └── utils.py
+├── cluster-values.yaml # config for helm deployment
 ├── test.sh # script to run a single task
 └── run.sh # script to run all tasks
 ```
@@ -63,5 +64,5 @@ Provides a way to periodically run docker-compose deployment tests through GitHu
 - [x] Parallel testing for four deployment scenarios
 - [x] Upload logs to artifacts for further debug
 - [x] Email notification for test failure
-- [ ] Support helm deployment tests
+- [x] Support helm deployment tests
 - [x] Cover more detail information in email notification

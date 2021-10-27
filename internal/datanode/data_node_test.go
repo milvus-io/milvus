@@ -345,6 +345,53 @@ func TestDataNode(t *testing.T) {
 		}()
 
 		wg.Wait()
+		// dup call
+		status, err := node1.FlushSegments(node1.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+		// failure call
+		req = &datapb.FlushSegmentsRequest{
+			Base:         &commonpb.MsgBase{},
+			DbID:         0,
+			CollectionID: 1,
+			SegmentIDs:   []int64{1},
+		}
+
+		status, err = node1.FlushSegments(node1.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+		req = &datapb.FlushSegmentsRequest{
+			Base:           &commonpb.MsgBase{},
+			DbID:           0,
+			CollectionID:   1,
+			SegmentIDs:     []int64{},
+			MarkSegmentIDs: []int64{2},
+		}
+
+		status, err = node1.FlushSegments(node1.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+		// manual inject meta error
+		node1.chanMut.Lock()
+		node1.vchan2FlushChs[dmChannelName+"1"] = node1.vchan2FlushChs[dmChannelName]
+		delete(node1.vchan2FlushChs, dmChannelName)
+		node1.chanMut.Unlock()
+		node1.segmentCache.Remove(0)
+
+		req = &datapb.FlushSegmentsRequest{
+			Base:         &commonpb.MsgBase{},
+			DbID:         0,
+			CollectionID: 1,
+			SegmentIDs:   []int64{0},
+		}
+
+		status, err = node1.FlushSegments(node1.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
 	})
 
 	t.Run("Test GetTimeTickChannel", func(t *testing.T) {

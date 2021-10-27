@@ -214,40 +214,12 @@ func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *q
 	defer c.Unlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
-		segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
-		for _, info := range in.Infos {
-			segmentID := info.SegmentID
-			segmentInfo, err := c.clusterMeta.getSegmentInfoByID(segmentID)
-			if err == nil {
-				segmentInfos[segmentID] = proto.Clone(segmentInfo).(*querypb.SegmentInfo)
-				if in.LoadCondition != querypb.TriggerCondition_loadBalance {
-					segmentInfo.SegmentState = querypb.SegmentState_sealing
-					segmentInfo.NodeID = nodeID
-				}
-			} else {
-				segmentInfo = &querypb.SegmentInfo{
-					SegmentID:    segmentID,
-					CollectionID: info.CollectionID,
-					PartitionID:  info.PartitionID,
-					NodeID:       nodeID,
-					SegmentState: querypb.SegmentState_sealing,
-				}
-			}
-			c.clusterMeta.setSegmentInfo(segmentID, segmentInfo)
-		}
 		err := node.loadSegments(ctx, in)
 		if err != nil {
-			for _, info := range in.Infos {
-				segmentID := info.SegmentID
-				if _, ok = segmentInfos[segmentID]; ok {
-					c.clusterMeta.setSegmentInfo(segmentID, segmentInfos[segmentID])
-					continue
-				}
-				c.clusterMeta.deleteSegmentInfoByID(segmentID)
-			}
 			log.Debug("LoadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
+
 		return nil
 	}
 	return errors.New("LoadSegments: Can't find query node by nodeID ")
@@ -268,9 +240,6 @@ func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in
 			return err
 		}
 
-		for _, segmentID := range in.SegmentIDs {
-			c.clusterMeta.deleteSegmentInfoByID(segmentID)
-		}
 		return nil
 	}
 

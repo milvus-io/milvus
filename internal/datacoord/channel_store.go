@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
@@ -14,8 +30,9 @@ import (
 )
 
 const (
-	bufferID  = math.MinInt64
-	delimeter = "/"
+	bufferID            = math.MinInt64
+	delimeter           = "/"
+	maxOperationsPerTxn = 128
 )
 
 var errUnknownOpType error = errors.New("unknown operation type")
@@ -134,8 +151,8 @@ func (c *ChannelStore) Reload() error {
 
 		c.Add(nodeID)
 		channel := &channel{
-			name:         temp.GetVchan().GetChannelName(),
-			collectionID: temp.GetVchan().GetCollectionID(),
+			Name:         temp.GetVchan().GetChannelName(),
+			CollectionID: temp.GetVchan().GetCollectionID(),
 		}
 		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
 	}
@@ -156,6 +173,50 @@ func (c *ChannelStore) Add(nodeID int64) {
 
 // Update applies the operations in opSet
 func (c *ChannelStore) Update(opSet ChannelOpSet) error {
+	totalChannelNum := 0
+	for _, op := range opSet {
+		totalChannelNum += len(op.Channels)
+	}
+	if totalChannelNum <= maxOperationsPerTxn {
+		return c.update(opSet)
+	}
+	// split opset to many txn; same channel's operations should be executed in one txn.
+	channelsOpSet := make(map[string]ChannelOpSet)
+	for _, op := range opSet {
+		for i, ch := range op.Channels {
+			chOp := &ChannelOp{
+				Type:     op.Type,
+				NodeID:   op.NodeID,
+				Channels: []*channel{ch},
+			}
+			if op.Type == Add {
+				chOp.ChannelWatchInfos = []*datapb.ChannelWatchInfo{op.ChannelWatchInfos[i]}
+			}
+			channelsOpSet[ch.Name] = append(channelsOpSet[ch.Name], chOp)
+		}
+	}
+
+	// execute a txn per 128 operations
+	count := 0
+	operations := make([]*ChannelOp, 0, maxOperationsPerTxn)
+	for _, opset := range channelsOpSet {
+		if count+len(opset) > maxOperationsPerTxn {
+			if err := c.update(operations); err != nil {
+				return err
+			}
+			count = 0
+			operations = make([]*ChannelOp, 0, maxOperationsPerTxn)
+		}
+		count += len(opset)
+		operations = append(operations, opset...)
+	}
+	if count == 0 {
+		return nil
+	}
+	return c.update(operations)
+}
+
+func (c *ChannelStore) update(opSet ChannelOpSet) error {
 	if err := c.txn(opSet); err != nil {
 		return err
 	}
@@ -167,12 +228,12 @@ func (c *ChannelStore) Update(opSet ChannelOpSet) error {
 		case Delete:
 			filter := make(map[string]struct{})
 			for _, ch := range v.Channels {
-				filter[ch.name] = struct{}{}
+				filter[ch.Name] = struct{}{}
 			}
 			origin := c.channelsInfo[v.NodeID].Channels
 			res := make([]*channel, 0, len(origin))
 			for _, ch := range origin {
-				if _, ok := filter[ch.name]; !ok {
+				if _, ok := filter[ch.Name]; !ok {
 					res = append(res, ch)
 				}
 			}
@@ -261,7 +322,7 @@ func (c *ChannelStore) txn(opSet ChannelOpSet) error {
 	removals := make([]string, 0)
 	for _, update := range opSet {
 		for i, c := range update.Channels {
-			k := buildChannelKey(update.NodeID, c.name)
+			k := buildChannelKey(update.NodeID, c.Name)
 			switch update.Type {
 			case Add:
 				val, err := proto.Marshal(update.ChannelWatchInfos[i])
@@ -305,7 +366,7 @@ func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	cstr := "["
 	if len(cu.Channels) > 0 {
 		for _, s := range cu.Channels {
-			cstr += s.name
+			cstr += s.Name
 			cstr += ", "
 		}
 		cstr = cstr[:len(cstr)-2]

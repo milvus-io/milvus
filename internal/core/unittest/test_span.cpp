@@ -10,13 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "utils/tools.h"
-#include "test_utils/DataGen.h"
-#include "segcore/SegmentGrowing.h"
 
-namespace {
+#include "segcore/SegmentGrowing.h"
+#include "test_utils/DataGen.h"
+#include "utils/Utils.h"
+
 const int64_t ROW_COUNT = 100 * 1000;
-}
 
 TEST(Span, Naive) {
     using namespace milvus;

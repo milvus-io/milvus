@@ -126,14 +126,13 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 		return status, err
 	}
 	consumeChannels := []string{in.RequestChannelID}
+	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
+	sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
 	if in.SeekPosition == nil || len(in.SeekPosition.MsgID) == 0 {
 		// as consumer
-		consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
-		sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
 		log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 	} else {
 		// seek query channel
-		sc.queryMsgStream.AsConsumer(consumeChannels, in.SeekPosition.MsgGroup)
 		err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{in.SeekPosition})
 		if err != nil {
 			status := &commonpb.Status{
@@ -457,55 +456,120 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		return res, err
 	}
 	infos := make([]*queryPb.SegmentInfo, 0)
+	// TODO: remove segmentType and use queryPb.SegmentState instead
+	getSegmentStateBySegmentType := func(segType segmentType) queryPb.SegmentState {
+		switch segType {
+		case segmentTypeGrowing:
+			return queryPb.SegmentState_Growing
+		case segmentTypeSealed:
+			return queryPb.SegmentState_sealed
+		default:
+			// TODO: remove segmentTypeIndexing
+			return queryPb.SegmentState_None
+		}
+	}
 	getSegmentInfo := func(segment *Segment) *queryPb.SegmentInfo {
 		var indexName string
 		var indexID int64
 		// TODO:: segment has multi vec column
-		if len(segment.indexInfos) > 0 {
-			for fieldID := range segment.indexInfos {
-				indexName = segment.getIndexName(fieldID)
-				indexID = segment.getIndexID(fieldID)
-				break
-			}
+		for fieldID := range segment.indexInfos {
+			indexName = segment.getIndexName(fieldID)
+			indexID = segment.getIndexID(fieldID)
+			break
 		}
 		info := &queryPb.SegmentInfo{
 			SegmentID:    segment.ID(),
 			CollectionID: segment.collectionID,
 			PartitionID:  segment.partitionID,
+			NodeID:       Params.QueryNodeID,
 			MemSize:      segment.getMemSize(),
 			NumRows:      segment.getRowCount(),
 			IndexName:    indexName,
 			IndexID:      indexID,
+			ChannelID:    segment.vChannelID,
+			SegmentState: getSegmentStateBySegmentType(segment.segmentType),
 		}
 		return info
 	}
 	// get info from historical
 	node.historical.replica.printReplica()
-	for _, id := range in.SegmentIDs {
-		log.Debug("QueryNode::Impl::GetSegmentInfo for historical", zap.Any("SegmentID", id))
-		segment, err := node.historical.replica.getSegmentByID(id)
-		if err != nil {
-			log.Debug("QueryNode::Impl::GetSegmentInfo, for historical segmentID not exist", zap.Any("SegmentID", id))
-			continue
+	partitionIDs, err := node.historical.replica.getPartitionIDs(in.CollectionID)
+	if err != nil {
+		res := &queryPb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
 		}
-		info := getSegmentInfo(segment)
-		log.Debug("QueryNode::Impl::GetSegmentInfo for historical", zap.Any("SegmentID", id), zap.Any("info", info))
-
-		infos = append(infos, info)
+		return res, err
 	}
+	for _, partitionID := range partitionIDs {
+		segmentIDs, err := node.historical.replica.getSegmentIDs(partitionID)
+		if err != nil {
+			res := &queryPb.GetSegmentInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}
+			return res, err
+		}
+		for _, id := range segmentIDs {
+			segment, err := node.historical.replica.getSegmentByID(id)
+			if err != nil {
+				res := &queryPb.GetSegmentInfoResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    err.Error(),
+					},
+				}
+				return res, err
+			}
+			info := getSegmentInfo(segment)
+			log.Debug("QueryNode::Impl::GetSegmentInfo for historical", zap.Any("SegmentID", id), zap.Any("info", info))
+
+			infos = append(infos, info)
+		}
+	}
+
 	// get info from streaming
 	node.streaming.replica.printReplica()
-	for _, id := range in.SegmentIDs {
-		log.Debug("QueryNode::Impl::GetSegmentInfo for streaming", zap.Any("SegmentID", id))
-
-		segment, err := node.streaming.replica.getSegmentByID(id)
-		if err != nil {
-			log.Debug("QueryNode::Impl::GetSegmentInfo, for streaming segmentID not exist", zap.Any("SegmentID", id))
-			continue
+	partitionIDs, err = node.streaming.replica.getPartitionIDs(in.CollectionID)
+	if err != nil {
+		res := &queryPb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
 		}
-		info := getSegmentInfo(segment)
-		log.Debug("QueryNode::Impl::GetSegmentInfo for streaming", zap.Any("SegmentID", id), zap.Any("info", info))
-		infos = append(infos, info)
+		return res, err
+	}
+	for _, partitionID := range partitionIDs {
+		segmentIDs, err := node.streaming.replica.getSegmentIDs(partitionID)
+		if err != nil {
+			res := &queryPb.GetSegmentInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}
+			return res, err
+		}
+		for _, id := range segmentIDs {
+			segment, err := node.streaming.replica.getSegmentByID(id)
+			if err != nil {
+				res := &queryPb.GetSegmentInfoResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    err.Error(),
+					},
+				}
+				return res, err
+			}
+			info := getSegmentInfo(segment)
+			log.Debug("QueryNode::Impl::GetSegmentInfo for streaming", zap.Any("SegmentID", id), zap.Any("info", info))
+			infos = append(infos, info)
+		}
 	}
 	return &queryPb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{

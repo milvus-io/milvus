@@ -183,8 +183,38 @@ type DataCoord interface {
 	// response struct `GetSegmentInfoResponse` contains the list of segment info
 	// error is returned only when some communication issue occurs
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
+
+	// GetRecoveryInfo request segment recovery info of collection/partition
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection/partition id to query
+	//
+	// response struct `GetRecoveryInfoResponse` contains the list of segments info and corresponding vchannel info
+	// error is returned only when some communication issue occurs
 	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
+
+	// SaveBinlogPaths updates segments binlogs(including insert binlogs, stats logs and delta logs)
+	//  and related message stream positions
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection/partition id to query
+	//
+	// response status contains the status/error code and failing reason if any
+	// error is returned only when some communication issue occurs
+	//
+	// there is a constraint that the `SaveBinlogPaths` requests of same segment shall be passed in sequence
+	// 	the root reason is each `SaveBinlogPaths` will overwrite the checkpoint position
+	//  if the constraint is broken, the checkpoint position will not be monotonically increasing and the integrity will be compromised
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
+
+	// GetFlushedSegments returns flushed segment list of requested collection/parition
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection/partition id to query
+	//  when partition is lesser or equal to 0, all flushed segments of collection will be returned
+	//
+	// response struct `GetFlushedSegmentsResponse` contains flushed segment id list
+	// error is returned only when some communication issue occurs
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)

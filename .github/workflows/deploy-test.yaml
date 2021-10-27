@@ -152,7 +152,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v2
         with:
-          name: logs-${{ matrix.pod }}
+          name: helm-deploy-logs-${{ matrix.task }}
           path: tests/python_client/deploy/k8s_logs       
           
 

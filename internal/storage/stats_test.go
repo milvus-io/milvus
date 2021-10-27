@@ -23,7 +23,7 @@ import (
 func TestStatsWriter_StatsInt64(t *testing.T) {
 	data := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9}
 	sw := &StatsWriter{}
-	err := sw.StatsInt64(common.RowIDField, data)
+	err := sw.StatsInt64(common.RowIDField, true, data)
 	assert.NoError(t, err)
 	b := sw.GetBuffer()
 
@@ -40,6 +40,6 @@ func TestStatsWriter_StatsInt64(t *testing.T) {
 	}
 
 	msgs := []int64{}
-	err = sw.StatsInt64(rootcoord.RowIDField, msgs)
+	err = sw.StatsInt64(rootcoord.RowIDField, true, msgs)
 	assert.Nil(t, err)
 }

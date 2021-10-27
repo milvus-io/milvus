@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -49,6 +50,7 @@ const (
 
 	defaultVecFieldName   = "vec"
 	defaultConstFieldName = "const"
+	defaultPKFieldName    = "pk"
 	defaultTopK           = int64(10)
 	defaultRoundDecimal   = int64(6)
 	defaultDim            = 128
@@ -108,6 +110,11 @@ var simpleConstField = constFieldParam{
 	dataType: schemapb.DataType_Int32,
 }
 
+var simplePKField = constFieldParam{
+	id:       102,
+	dataType: schemapb.DataType_Int64,
+}
+
 var uidField = constFieldParam{
 	id:       rowIDFieldID,
 	dataType: schemapb.DataType_Int64,
@@ -123,6 +130,16 @@ func genConstantField(param constFieldParam) *schemapb.FieldSchema {
 		FieldID:      param.id,
 		Name:         defaultConstFieldName,
 		IsPrimaryKey: false,
+		DataType:     param.dataType,
+	}
+	return field
+}
+
+func genPKField(param constFieldParam) *schemapb.FieldSchema {
+	field := &schemapb.FieldSchema{
+		FieldID:      param.id,
+		Name:         defaultPKFieldName,
+		IsPrimaryKey: true,
 		DataType:     param.dataType,
 	}
 	return field
@@ -284,13 +301,15 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 func genSimpleSegCoreSchema() *schemapb.CollectionSchema {
 	fieldVec := genFloatVectorField(simpleVecField)
 	fieldInt := genConstantField(simpleConstField)
+	fieldPK := genPKField(simplePKField)
 
 	schema := schemapb.CollectionSchema{ // schema for segCore
 		Name:   defaultCollectionName,
-		AutoID: true,
+		AutoID: false,
 		Fields: []*schemapb.FieldSchema{
 			fieldVec,
 			fieldInt,
+			fieldPK,
 		},
 	}
 	return &schema
@@ -580,6 +599,10 @@ func genCommonBlob(msgLength int, schema *schemapb.CollectionSchema) ([]*commonp
 				bs := make([]byte, 4)
 				binary.LittleEndian.PutUint32(bs, uint32(i))
 				rawData = append(rawData, bs...)
+			case schemapb.DataType_Int64:
+				bs := make([]byte, 8)
+				binary.LittleEndian.PutUint32(bs, uint32(i))
+				rawData = append(rawData, bs...)
 			case schemapb.DataType_FloatVector:
 				dim := simpleVecField.dim // if no dim specified, use simpleVecField's dim
 				for _, p := range f.TypeParams {
@@ -806,7 +829,7 @@ func genSealedSegment(schemaForCreate *schemapb.CollectionSchema,
 		case *storage.DoubleFieldData:
 			numRows = fieldData.NumRows
 			data = fieldData.Data
-		case storage.StringFieldData:
+		case *storage.StringFieldData:
 			numRows = fieldData.NumRows
 			data = fieldData.Data
 		case *storage.FloatVectorFieldData:
@@ -900,7 +923,11 @@ func genSimpleStreaming(ctx context.Context) (*streaming, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := newStreaming(ctx, fac, kv)
+	historicalReplica, err := genSimpleReplica()
+	if err != nil {
+		return nil, err
+	}
+	s := newStreaming(ctx, fac, kv, historicalReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -1226,6 +1253,37 @@ func consumeSimpleRetrieveResult(stream msgstream.MsgStream) (*msgstream.Retriev
 	return res.Msgs[0].(*msgstream.RetrieveResultMsg), nil
 }
 
+func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
+	changeInfo := &querypb.SegmentChangeInfo{
+		OnlineNodeID: Params.QueryNodeID,
+		OnlineSegments: []*querypb.SegmentInfo{
+			genSimpleSegmentInfo(),
+		},
+		OfflineNodeID: Params.QueryNodeID + 1,
+		OfflineSegments: []*querypb.SegmentInfo{
+			genSimpleSegmentInfo(),
+		},
+	}
+
+	return &querypb.SealedSegmentsChangeInfo{
+		Base:  genCommonMsgBase(commonpb.MsgType_LoadBalanceSegments),
+		Infos: []*querypb.SegmentChangeInfo{changeInfo},
+	}
+}
+
+func saveChangeInfo(key string, value string) error {
+	log.Debug(".. [query node unittest] Saving change info")
+
+	kv, err := genEtcdKV()
+	if err != nil {
+		return err
+	}
+
+	key = changeInfoMetaPrefix + "/" + key
+
+	return kv.Save(key, value)
+}
+
 // node
 func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 	fac, err := genFactory()
@@ -1233,6 +1291,13 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 		return nil, err
 	}
 	node := NewQueryNode(ctx, fac)
+
+	etcdKV, err := genEtcdKV()
+	if err != nil {
+		return nil, err
+	}
+
+	node.etcdKV = etcdKV
 
 	streaming, err := genSimpleStreaming(ctx)
 	if err != nil {

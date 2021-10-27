@@ -14,6 +14,6 @@ echo "export logs start"
 for pod in ${array[*]}
 do
 echo "export logs for pod $pod "
-kubectl logs $pod -n ${ns_name} > ./$log_dir/$pod.log
+kubectl logs $pod -n ${ns_name} > ./$log_dir/$pod.log 2>&1
 done
 echo "export logs done"

@@ -16,7 +16,7 @@
 #include <unistd.h>
 #include "easyloggingpp/easylogging++.h"
 
-namespace milvus {
+// namespace milvus {
 
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
@@ -80,26 +80,6 @@ namespace milvus {
 #define LOG_SEGCORE_FATAL_ LOG(FATAL) << SEGCORE_MODULE_FUNCTION
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-#define KNOWHERE_MODULE_NAME "KNOWHERE"
-#define KNOWHERE_MODULE_CLASS_FUNCTION \
-    LogOut("[%s][%s::%s][%s] ", KNOWHERE_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
-#define KNOWHERE_MODULE_FUNCTION LogOut("[%s][%s][%s] ", KNOWHERE_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
-
-#define LOG_KNOWHERE_TRACE_C LOG(TRACE) << KNOWHERE_MODULE_CLASS_FUNCTION
-#define LOG_KNOWHERE_DEBUG_C LOG(DEBUG) << KNOWHERE_MODULE_CLASS_FUNCTION
-#define LOG_KNOWHERE_INFO_C LOG(INFO) << KNOWHERE_MODULE_CLASS_FUNCTION
-#define LOG_KNOWHERE_WARNING_C LOG(WARNING) << KNOWHERE_MODULE_CLASS_FUNCTION
-#define LOG_KNOWHERE_ERROR_C LOG(ERROR) << KNOWHERE_MODULE_CLASS_FUNCTION
-#define LOG_KNOWHERE_FATAL_C LOG(FATAL) << KNOWHERE_MODULE_CLASS_FUNCTION
-
-#define LOG_KNOWHERE_TRACE_ LOG(TRACE) << KNOWHERE_MODULE_FUNCTION
-#define LOG_KNOWHERE_DEBUG_ LOG(DEBUG) << KNOWHERE_MODULE_FUNCTION
-#define LOG_KNOWHERE_INFO_ LOG(INFO) << KNOWHERE_MODULE_FUNCTION
-#define LOG_KNOWHERE_WARNING_ LOG(WARNING) << KNOWHERE_MODULE_FUNCTION
-#define LOG_KNOWHERE_ERROR_ LOG(ERROR) << KNOWHERE_MODULE_FUNCTION
-#define LOG_KNOWHERE_FATAL_ LOG(FATAL) << KNOWHERE_MODULE_FUNCTION
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
 #define SERVER_MODULE_NAME "SERVER"
 #define SERVER_MODULE_CLASS_FUNCTION \
     LogOut("[%s][%s::%s][%s] ", SERVER_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
@@ -133,4 +113,4 @@ GetThreadName();
 int64_t
 get_thread_start_timestamp();
 
-}  // namespace milvus
+// }  // namespace milvus

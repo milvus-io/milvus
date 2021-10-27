@@ -3,10 +3,12 @@ import time
 import logging
 import string
 import random
-from yaml import full_load, dump
+import json
+from yaml.representer import SafeRepresenter
+# from yaml import full_load, dump
 import yaml
 import tableprint as tp
-from pprint import pprint
+# from pprint import pprint
 import config
 
 logger = logging.getLogger("milvus_benchmark.utils")
@@ -14,7 +16,7 @@ logger = logging.getLogger("milvus_benchmark.utils")
 
 def timestr_to_int(time_str):
     """ Parse the test time set in the yaml configuration file and convert it to int type """
-    time_int = 0
+    # time_int = 0
     if isinstance(time_str, int) or time_str.isdigit():
         time_int = int(time_str)
     elif time_str.endswith("s"):
@@ -40,7 +42,7 @@ def change_style(style, representer):
     return new_representer
 
 
-from yaml.representer import SafeRepresenter
+# from yaml.representer import SafeRepresenter
 
 # represent_str does handle some corner cases, so use that
 # instead of calling represent_scalar directly
@@ -99,6 +101,7 @@ def get_unique_name(prefix=None):
 
 
 def get_current_time():
+    """ return current time"""
     return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
 
 
@@ -140,12 +143,12 @@ def get_server_tag(deploy_params):
     server_tag = ""
     if deploy_params and "server" in deploy_params:
         server = deploy_params["server"]
-        # server_name = server["server_name"] if "server_name" in server else ""
         server_tag = server["server_tag"] if "server_tag" in server else ""
     return server_tag
 
 
 def search_param_analysis(vector_query, filter_query):
+    """ Search parameter adjustment, applicable pymilvus version >= 2.0.0rc7.dev24 """
 
     if "vector" in vector_query:
         vector = vector_query["vector"]
@@ -183,7 +186,6 @@ def search_param_analysis(vector_query, filter_query):
                         expression = expression + ' && ' + exp2
                     else:
                         expression = exp2
-
         else:
             logger.error("[search_param_analysis] filter_range not dict or len != 1: %s" % str(filter_range))
             return False
@@ -200,3 +202,9 @@ def search_param_analysis(vector_query, filter_query):
     }
     # logger.debug("[search_param_analysis] search_param_analysis: %s" % str(result))
     return result
+
+
+def read_json_file(file_name):
+    with open(file_name) as f:
+        file_dict = json.load(f)
+    return file_dict

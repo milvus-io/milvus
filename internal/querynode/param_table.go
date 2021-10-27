@@ -21,9 +21,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
 
@@ -36,7 +38,9 @@ type ParamTable struct {
 	QueryNodeIP   string
 	QueryNodePort int64
 	QueryNodeID   UniqueID
-	CacheSize     int64
+	// TODO: remove cacheSize
+	CacheSize   int64 // deprecated
+	InContainer bool
 
 	// channel prefix
 	ClusterChannelPrefix     string
@@ -82,19 +86,23 @@ type ParamTable struct {
 	UpdatedTime time.Time
 }
 
+// Params is a package scoped variable of type ParamTable.
 var Params ParamTable
 var once sync.Once
 
+// InitAlias initializes an alias for the QueryNode role.
 func (p *ParamTable) InitAlias(alias string) {
 	p.Alias = alias
 }
 
+// InitOnce is used to initialize configuration items, and it will only be called once.
 func (p *ParamTable) InitOnce() {
 	once.Do(func() {
 		p.Init()
 	})
 }
 
+// Init is used to initialize configuration items.
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 	if err := p.LoadYaml("advanced/query_node.yaml"); err != nil {
@@ -105,6 +113,7 @@ func (p *ParamTable) Init() {
 	}
 
 	p.initCacheSize()
+	p.initInContainer()
 
 	p.initMinioEndPoint()
 	p.initMinioAccessKeyID()
@@ -159,6 +168,15 @@ func (p *ParamTable) initCacheSize() {
 		return
 	}
 	p.CacheSize = value
+}
+
+func (p *ParamTable) initInContainer() {
+	var err error
+	p.InContainer, err = metricsinfo.InContainer()
+	if err != nil {
+		panic(err)
+	}
+	log.Debug("init InContainer", zap.Any("is query node running inside a container? :", p.InContainer))
 }
 
 // ---------------------------------------------------------- minio

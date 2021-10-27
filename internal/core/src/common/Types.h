@@ -10,19 +10,22 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "utils/Types.h"
-#include "faiss/utils/BitsetView.h"
-#include <faiss/MetricType.h>
-#include <string>
-#include <boost/align/aligned_allocator.hpp>
+
 #include <memory>
-#include <vector>
-#include <utility>
 #include <limits>
+#include <string>
+#include <utility>
+#include <vector>
+#include <boost/align/aligned_allocator.hpp>
 #include <NamedType/named_type.hpp>
+
+#include "faiss/utils/BitsetView.h"
+#include "faiss/MetricType.h"
 #include "pb/schema.pb.h"
+#include "utils/Types.h"
 
 namespace milvus {
+
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 constexpr auto MAX_TIMESTAMP = std::numeric_limits<Timestamp>::max();
 
@@ -33,11 +36,11 @@ using ScalarArray = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;
 using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
-
 using MetricType = faiss::MetricType;
 
 MetricType
 GetMetricType(const std::string& type);
+
 std::string
 MetricTypeToName(MetricType metric_type);
 
@@ -51,8 +54,6 @@ constexpr std::false_type always_false{};
 
 template <typename T>
 using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 64>>;
-
-struct EntityResult {};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct SearchResult {
@@ -72,12 +73,13 @@ struct SearchResult {
     int64_t num_queries_;
     int64_t topk_;
     std::vector<float> result_distances_;
+    std::vector<int64_t> internal_seg_offsets_;
 
  public:
     // TODO(gexi): utilize these field
     void* segment_;
-    std::vector<int64_t> internal_seg_offsets_;
     std::vector<int64_t> result_offsets_;
+    std::vector<int64_t> primary_keys_;
     std::vector<std::vector<char>> row_data_;
 };
 
@@ -93,10 +95,6 @@ struct RetrieveResult {
 };
 
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
-
-struct EntityResults {
-    // use protobuf results to simplify
-};
 
 namespace impl {
 // hide identifier name to make auto completion happy

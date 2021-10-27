@@ -62,6 +62,8 @@ func (qc *QueryCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
+// GetStatisticsChannel return the statistics channel
+// Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
 func (qc *QueryCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -144,8 +146,8 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
-	loadCollectionTask := &LoadCollectionTask{
-		BaseTask:              baseTask,
+	loadCollectionTask := &loadCollectionTask{
+		baseTask:              baseTask,
 		LoadCollectionRequest: req,
 		rootCoord:             qc.rootCoordClient,
 		dataCoord:             qc.dataCoordClient,
@@ -193,8 +195,8 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
-	releaseCollectionTask := &ReleaseCollectionTask{
-		BaseTask:                 baseTask,
+	releaseCollectionTask := &releaseCollectionTask{
+		baseTask:                 baseTask,
 		ReleaseCollectionRequest: req,
 		cluster:                  qc.cluster,
 		meta:                     qc.meta,
@@ -336,8 +338,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
-	loadPartitionTask := &LoadPartitionTask{
-		BaseTask:              baseTask,
+	loadPartitionTask := &loadPartitionTask{
+		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
 		dataCoord:             qc.dataCoordClient,
 		cluster:               qc.cluster,
@@ -407,8 +409,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 
 	req.PartitionIDs = toReleasedPartitions
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
-	releasePartitionTask := &ReleasePartitionTask{
-		BaseTask:                 baseTask,
+	releasePartitionTask := &releasePartitionTask{
+		baseTask:                 baseTask,
 		ReleasePartitionsRequest: req,
 		cluster:                  qc.cluster,
 	}
@@ -447,7 +449,7 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 	}
 
 	collectionID := req.CollectionID
-	queryChannel, queryResultChannel, err := qc.meta.getQueryChannel(collectionID)
+	info, err := qc.meta.getQueryChannelInfoByID(collectionID)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -459,8 +461,8 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 
 	return &querypb.CreateQueryChannelResponse{
 		Status:         status,
-		RequestChannel: queryChannel,
-		ResultChannel:  queryResultChannel,
+		RequestChannel: info.QueryChannelID,
+		ResultChannel:  info.QueryResultChannelID,
 	}, nil
 }
 

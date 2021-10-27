@@ -111,6 +111,11 @@ build-cpp-with-unittest:
 # Run the tests.
 unittest: test-cpp test-go
 
+test-proxy:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/proxy -v
+
+
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
@@ -118,7 +123,8 @@ test-go: build-cpp-with-unittest
 
 test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
-	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
+	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
+#	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
 # Run code coverage.
 codecov: codecov-go codecov-cpp

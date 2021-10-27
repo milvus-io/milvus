@@ -33,7 +33,7 @@ func GetPulsarClientInstance(opts pulsar.ClientOptions) (*pulsarClient, error) {
 	once.Do(func() {
 		c, err := pulsar.NewClient(opts)
 		if err != nil {
-			log.Error("Set pulsar client failed, error", zap.Error(err))
+			log.Error("Failed to set pulsar client: ", zap.Error(err))
 			return
 		}
 		cli := &pulsarClient{client: c}

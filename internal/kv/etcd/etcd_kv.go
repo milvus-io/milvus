@@ -51,6 +51,13 @@ func NewEtcdKV(etcdEndpoints []string, rootPath string) (*EtcdKV, error) {
 	return kv, nil
 }
 
+func NewEtcdKVWithClient(cli *clientv3.Client, rootPath string) *EtcdKV {
+	return &EtcdKV{
+		client:   cli,
+		rootPath: rootPath,
+	}
+}
+
 func (kv *EtcdKV) Close() {
 	kv.client.Close()
 }

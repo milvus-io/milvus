@@ -49,13 +49,13 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 - (**Recommended**) Provide answers for issue labeled `question`.
 - Provide help for issues labeled `bug`, `improvement`, and `enhancement` by
-  - (**Recommended**) Ask questions, reproduce the issue, or providie solutions.
+  - (**Recommended**) Ask questions, reproduce the issue, or provide solutions.
   - Pull a request to fix the issue.
 
 **If you require new feature or major enhancement, you can**
 
 - (**Recommended**) File an issue about the feature/enhancement with reasons.
-- Provide a MEP for the feature/enhancement.
+- Provide an MEP for the feature/enhancement.
 - Pull a request to implement the MEP.
 
 **If you are a reviewer/approver of Milvus, you can**
@@ -68,7 +68,7 @@ If you want to become a contributor of Milvus, send us your pull requests! For t
 All submissions will be reviewed as quickly as possible.
 There will be a reviewer to review the codes, and an approver to review everything aside the codes, see [code review](CODE_REVIEW.md) for details.
 If everything is perfect, the reviewer will label `/lgtm`, and the approver will label `/approve`.
-Once the 2 labels are on your PR, and all actions pass, your PR will be merged into base branch automaticaly by our @sre-ci-robot
+Once the 2 labels are on your PR, and all actions pass, your PR will be merged into base branch automatically by our @sre-ci-robot
 
 ### GitHub workflow
 
@@ -77,7 +77,7 @@ Generally, we follow the "fork-and-pull" Git workflow.
 1.  [Fork](https://docs.github.com/en/github/getting-started-with-github/fork-a-repo) the repository on GitHub.
 2.  Clone your fork to your local machine with `git clone git@github.com:<yourname>/milvus.git`.
 3.  Create a branch with `git checkout -b my-topic-branch`.
-4.  [Commit](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/committing-changes-to-a-pull-request-branch-created-from-a-fork) changes to your own branch, then push to to GitHub with `git push origin my-topic-branch`.
+4.  [Commit](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/committing-changes-to-a-pull-request-branch-created-from-a-fork) changes to your own branch, then push to GitHub with `git push origin my-topic-branch`.
 5.  Submit a [pull request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/about-pull-requests) so that we can review your changes.
 
 ![](docs/developer_guides/figs/fork-and-pull.png)
@@ -184,7 +184,7 @@ ok  	github.com/milvus-io/milvus/internal/datanode 3.874s	coverage: 88.2% of sta
 
 You can run a sub unit test.
 
-In this case, we only concern about the tests with name "SegmentReplica" and
+In this case, we are only concerned about the tests with name "SegmentReplica" and
 sub tests with name "segmentFlushed". When running sub tests, the coverage is not concerned.
 
 ```shell

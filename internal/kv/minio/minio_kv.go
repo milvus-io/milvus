@@ -27,6 +27,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// MinIOKV implements DataKV interface and relies on underling MinIO service.
+// MinIOKV object contains a client which can be used to access the MinIO service.
 type MinIOKV struct {
 	ctx         context.Context
 	minioClient *minio.Client
@@ -105,13 +107,14 @@ func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	}
 	objectsValues, err := kv.MultiLoad(objectsKeys)
 	if err != nil {
-		log.Debug("MinIO", zap.String("cannot load value with prefix:%s", key))
+		log.Error(fmt.Sprintf("MinIO load with prefix error. path = %s", key), zap.Error(err))
+		return nil, nil, err
 	}
 
 	return objectsKeys, objectsValues, nil
 }
 
-// LoadWithPrefix load an object with @key.
+// Load loads an object with @key.
 func (kv *MinIOKV) Load(key string) (string, error) {
 	object, err := kv.minioClient.GetObject(kv.ctx, kv.bucketName, key, minio.GetObjectOptions{})
 	if object != nil {
@@ -246,6 +249,7 @@ func (kv *MinIOKV) MultiRemove(keys []string) error {
 	return resultErr
 }
 
+// LoadPartial loads partial data ranged in [start, end) with @key.
 func (kv *MinIOKV) LoadPartial(key string, start, end int64) ([]byte, error) {
 	switch {
 	case start < 0 || end < 0:
@@ -269,6 +273,16 @@ func (kv *MinIOKV) LoadPartial(key string, start, end int64) ([]byte, error) {
 	defer object.Close()
 
 	return ioutil.ReadAll(object)
+}
+
+// GetSize obtains the data size of the object with @key.
+func (kv *MinIOKV) GetSize(key string) (int64, error) {
+	objectInfo, err := kv.minioClient.StatObject(kv.ctx, kv.bucketName, key, minio.StatObjectOptions{})
+	if err != nil {
+		return 0, err
+	}
+
+	return objectInfo.Size, nil
 }
 
 func (kv *MinIOKV) Close() {

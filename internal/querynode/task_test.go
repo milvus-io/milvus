@@ -253,39 +253,6 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("test execute load balance", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		task := loadSegmentsTask{
-			req:  genLoadEmptySegmentsRequest(),
-			node: node,
-		}
-		task.req.Infos = []*querypb.SegmentLoadInfo{
-			{
-				SegmentID:    defaultSegmentID + 1,
-				PartitionID:  defaultPartitionID + 1,
-				CollectionID: defaultCollectionID + 1,
-			},
-		}
-		task.req.LoadCondition = querypb.TriggerCondition_loadBalance
-		err = task.Execute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("test execute load hand-off", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		task := loadSegmentsTask{
-			req:  genLoadEmptySegmentsRequest(),
-			node: node,
-		}
-		task.req.LoadCondition = querypb.TriggerCondition_handoff
-		err = task.Execute(ctx)
-		assert.Error(t, err)
-	})
-
 	t.Run("test OOM", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)

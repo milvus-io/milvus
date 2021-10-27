@@ -42,22 +42,28 @@ deleted from the MetaTable.
 
 When IndexCoordinate receives a query index status request from other components, first check whether the corresponding
 index task is marked for deletion in the MetaTable. If marked for deletion, the return index does not exist, otherwise,
-it returns the index information
+it returns the index information.
 
 ## 8.3 Feature Design
 
 IndexCoord has two main structures, NodeManager and MetaTable. NodeManager is used to manage IndexNode node information,
 and MetaTable is used to maintain index related information.
 
-IndexCoord mainly has these functions: `watchNodeLoop`, `watchMetaLoop`, `assignTaskLoop` and `recycleUnusedIndexFiles`.
-`watchNodeLoop` is mainly responsible for monitoring the changes of IndexNode nodes, `watchMetaLoop` is mainly
-responsible for monitoring the changes of Meta, `assignTaskLoop` is mainly responsible for assigning index building tasks,
-and `recycleUnusedIndexFiles` is mainly responsible for cleaning up useless index files and deleted index records.
+IndexCoord mainly has these functions: 
+
+`watchNodeLoop` is mainly responsible for monitoring the changes of IndexNode nodes;
+
+`watchMetaLoop` is mainly responsible for monitoring the changes of Meta;
+
+`assignTaskLoop` is mainly responsible for assigning index building tasks;
+
+`recycleUnusedIndexFiles` is mainly responsible for cleaning up useless index files and deleted index records;
 
 ### 8.3.1 The relationship between IndexCoord and IndexNode
 
-IndexCoord is responsible for assigning index construction tasks and maintaining index status, and IndexNode is the
-node that executes index building tasks.
+IndexCoord is responsible for assigning index construction tasks and maintaining index status. 
+
+IndexNode is a node that executes index building tasks.
 
 ### 8.3.2 NodeManager
 
@@ -66,8 +72,8 @@ load information of each IndexNode. The load information of IndexNode is based o
 When the IndexCoord service starts, it first obtains the node information of all
 current IndexNodes from etcd, and then adds the node information to the NodeManager. After that, the online and offline
 information of IndexNode node is obtained from watchNodeLoop. Then it will traverse the entire MetaTable, get the load
-information corresponding to each IndexNode node, and update the priority queue in the NodeManager. Whenever the task
-of building an index needs to be allocated, the IndexNode with the lowest load will be selected according to the
+information corresponding to each IndexNode node, and update the priority queue in the NodeManager. When an index building 
+task need to be allocated, the IndexNode with the lowest load will be selected according to the
 priority queue to execute the task.
 
 ### 8.3.3 MetaTable
@@ -94,10 +100,10 @@ IndexCoord adds or deletes the corresponding IndexNode information in NodeManage
 
 ### 8.3.5 watchMetaLoop
 
-`watchMetaLoop` is used to monitor whether the Meta in etcd has been changed. When the Meta in the etcd is monitored,
-the result of the Meta update is obtained from the etcd, and the `Event.Kv.Version` of the update event is compared
+`watchMetaLoop` is used to monitor whether the Meta in etcd has been changed. When the Meta in etcd is monitored,
+the result of the Meta update is obtained from etcd, and the `Event.Kv.Version` of the update event is compared
 with the `revision` in the MetaTable. If the `Event.Kv.Version` is greater than the `revision` in the MetaTable,
-Explain that this update is initiated by IndexNode, and then update the MetaTable in IndexCoord. Since this update
+it means that this update is initiated by IndexNode, and then update the MetaTable in IndexCoord. Since this update
 is initiated by IndexNode, it indicates that this IndexNode has completed this task, so update the load of this
 IndexNode in NodeManager, and the task amount is reduced by one.
 
@@ -114,12 +120,12 @@ IndexNode for execution, and update the index status in the MetaTable.
 
 Delete useless index files, including lower version index files and index files corresponding to the deleted index.
 In order to distinguish whether the low version index file corresponding to the index has been cleaned up, recycled is
-introduced as a mark. Only after the index task is completed will the lower version index files be cleaned up, and the
-index file corresponding to the lower version index file that has been cleaned up is marked as True.
+introduced as a mark. Only after the index task is completed, the lower version index files will be cleaned up, and the
+index file corresponding to the lower version index file will be marked as True.
 
 This is also a timer, which periodically traverses the MetaTable to obtain the index corresponding to the index file
-that needs to be cleaned up. If the index is marked as deleted, the information corresponding to the index is deleted
-in the MetaTable. Otherwise, it just cleans up the index file of the lower version.
+that need to be cleaned up. If the index is marked as deleted, the information corresponding to the index is deleted
+in the MetaTable. Otherwise, only the lower version index file is cleaned up.
 
 ## 8.4 IndexNode Create Index
 

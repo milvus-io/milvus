@@ -12,20 +12,28 @@
 package querynode
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"strconv"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 type insertNode struct {
 	baseNode
-	replica ReplicaInterface
+	streamingReplica  ReplicaInterface
+	historicalReplica ReplicaInterface
 }
 
 type insertData struct {
@@ -33,6 +41,7 @@ type insertData struct {
 	insertTimestamps map[UniqueID][]Timestamp
 	insertRecords    map[UniqueID][]*commonpb.Blob
 	insertOffset     map[UniqueID]int64
+	insertPKs        map[UniqueID][]int64
 }
 
 type deleteData struct {
@@ -64,6 +73,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		insertTimestamps: make(map[UniqueID][]Timestamp),
 		insertRecords:    make(map[UniqueID][]*commonpb.Blob),
 		insertOffset:     make(map[UniqueID]int64),
+		insertPKs:        make(map[UniqueID][]int64),
 	}
 
 	if iMsg == nil {
@@ -80,8 +90,8 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 1. hash insertMessages to insertData
 	for _, task := range iMsg.insertMessages {
 		// check if partition exists, if not, create partition
-		if hasPartition := iNode.replica.hasPartition(task.PartitionID); !hasPartition {
-			err := iNode.replica.addPartition(task.CollectionID, task.PartitionID)
+		if hasPartition := iNode.streamingReplica.hasPartition(task.PartitionID); !hasPartition {
+			err := iNode.streamingReplica.addPartition(task.CollectionID, task.PartitionID)
 			if err != nil {
 				log.Warn(err.Error())
 				continue
@@ -89,8 +99,8 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 
 		// check if segment exists, if not, create this segment
-		if !iNode.replica.hasSegment(task.SegmentID) {
-			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, task.ShardName, segmentTypeGrowing, true)
+		if !iNode.streamingReplica.hasSegment(task.SegmentID) {
+			err := iNode.streamingReplica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, task.ShardName, segmentTypeGrowing, true)
 			if err != nil {
 				log.Warn(err.Error())
 				continue
@@ -100,11 +110,12 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		iData.insertIDs[task.SegmentID] = append(iData.insertIDs[task.SegmentID], task.RowIDs...)
 		iData.insertTimestamps[task.SegmentID] = append(iData.insertTimestamps[task.SegmentID], task.Timestamps...)
 		iData.insertRecords[task.SegmentID] = append(iData.insertRecords[task.SegmentID], task.RowData...)
+		iData.insertPKs[task.SegmentID] = iNode.getPrimaryKeys(task)
 	}
 
 	// 2. do preInsert
 	for segmentID := range iData.insertRecords {
-		var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
+		var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 		if err != nil {
 			log.Warn(err.Error())
 		}
@@ -117,6 +128,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 			iData.insertOffset[segmentID] = offset
 			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segmentID))
+			targetSegment.updateBloomFilter(iData.insertPKs[segmentID])
 		}
 	}
 
@@ -125,6 +137,28 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for segmentID := range iData.insertRecords {
 		wg.Add(1)
 		go iNode.insert(&iData, segmentID, &wg)
+	}
+	wg.Wait()
+
+	delData := &deleteData{
+		deleteIDs:        make(map[UniqueID][]int64),
+		deleteTimestamps: make(map[UniqueID][]Timestamp),
+		deleteOffset:     make(map[UniqueID]int64),
+	}
+	// 1. filter segment by bloom filter
+	for _, delMsg := range iMsg.deleteMessages {
+		if iNode.streamingReplica != nil {
+			processDeleteMessages(iNode.streamingReplica, delMsg, delData)
+		}
+		if iNode.historicalReplica != nil {
+			processDeleteMessages(iNode.historicalReplica, delMsg, delData)
+		}
+	}
+
+	// 2. do delete
+	for segmentID := range delData.deleteIDs {
+		wg.Add(1)
+		go iNode.delete(delData, segmentID, &wg)
 	}
 	wg.Wait()
 
@@ -138,9 +172,75 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
+func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, delData *deleteData) {
+	var partitionIDs []UniqueID
+	var err error
+	if msg.PartitionID != -1 {
+		partitionIDs = []UniqueID{msg.PartitionID}
+	} else {
+		partitionIDs, err = replica.getPartitionIDs(msg.CollectionID)
+		if err != nil {
+			log.Warn(err.Error())
+			return
+		}
+	}
+	resultSegmentIDs := make([]UniqueID, 0)
+	for _, partitionID := range partitionIDs {
+		segmentIDs, err := replica.getSegmentIDs(partitionID)
+		if err != nil {
+			log.Warn(err.Error())
+			continue
+		}
+		resultSegmentIDs = append(resultSegmentIDs, segmentIDs...)
+	}
+	for _, segmentID := range resultSegmentIDs {
+		segment, err := replica.getSegmentByID(segmentID)
+		if err != nil {
+			log.Warn(err.Error())
+			continue
+		}
+		pks, err := filterSegmentsByPKs(msg.PrimaryKeys, segment)
+		if err != nil {
+			log.Warn(err.Error())
+			continue
+		}
+		if len(pks) > 0 {
+			offset := segment.segmentPreDelete(len(pks))
+			if err != nil {
+				log.Warn(err.Error())
+				continue
+			}
+			delData.deleteIDs[segmentID] = append(delData.deleteIDs[segmentID], pks...)
+			// TODO(yukun) get offset of pks
+			delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], msg.Timestamps[:len(pks)]...)
+			delData.deleteOffset[segmentID] = offset
+		}
+	}
+}
+
+func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
+	if pks == nil {
+		return nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
+	}
+	if segment == nil {
+		return nil, fmt.Errorf("segments is nil when getSegmentsByPKs")
+	}
+	buf := make([]byte, 8)
+	res := make([]int64, 0)
+	for _, pk := range pks {
+		binary.LittleEndian.PutUint64(buf, uint64(pk))
+		exist := segment.pkFilter.Test(buf)
+		if exist {
+			res = append(res, pk)
+		}
+	}
+	log.Debug("In filterSegmentsByPKs", zap.Any("pk len", len(res)), zap.Any("segment", segment.segmentID))
+	return res, nil
+}
+
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) {
 	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
-	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
+	var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 	if err != nil {
 		log.Warn("cannot find segment:", zap.Int64("segmentID", segmentID))
 		// TODO: add error handling
@@ -166,21 +266,16 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 		return
 	}
 
-	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])),
-		zap.Int64("segmentID", segmentID))
+	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])), zap.Int64("segmentID", segmentID))
 	wg.Done()
 }
 
 func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
-	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
-	if err != nil {
-		log.Warn("Cannot find segment:", zap.Int64("segmentID", segmentID))
-		return
-	}
-
-	if targetSegment.segmentType != segmentTypeGrowing {
+	targetSegment := iNode.getSegmentInReplica(segmentID)
+	if targetSegment == nil {
+		log.Warn("targetSegment is nil")
 		return
 	}
 
@@ -188,7 +283,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
 
-	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
+	err := targetSegment.segmentDelete(offset, &ids, &timestamps)
 	if err != nil {
 		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
 		return
@@ -197,7 +292,115 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
 }
 
-func newInsertNode(replica ReplicaInterface) *insertNode {
+func (iNode *insertNode) getSegmentInReplica(segmentID int64) *Segment {
+	streamingSegment, err := iNode.streamingReplica.getSegmentByID(segmentID)
+	if err != nil {
+		log.Warn("Cannot find segment in streaming replica:", zap.Int64("segmentID", segmentID))
+	} else {
+		return streamingSegment
+	}
+	historicalSegment, err := iNode.historicalReplica.getSegmentByID(segmentID)
+	if err != nil {
+		log.Warn("Cannot find segment in historical replica:", zap.Int64("segmentID", segmentID))
+	} else {
+		return historicalSegment
+	}
+	log.Warn("Cannot find segment in both streaming and historical replica:", zap.Int64("segmentID", segmentID))
+	return nil
+}
+
+func (iNode *insertNode) getCollectionInReplica(segmentID int64) *Collection {
+	streamingCollection, err := iNode.streamingReplica.getCollectionByID(segmentID)
+	if err != nil {
+		log.Warn("Cannot find collection in streaming replica:", zap.Int64("collectionID", segmentID))
+	} else {
+		return streamingCollection
+	}
+	historicalCollection, err := iNode.historicalReplica.getCollectionByID(segmentID)
+	if err != nil {
+		log.Warn("Cannot find collection in historical replica:", zap.Int64("collectionID", segmentID))
+	} else {
+		return historicalCollection
+	}
+	log.Warn("Cannot find collection in both streaming and historical replica:", zap.Int64("collectionID", segmentID))
+	return nil
+}
+
+func (iNode *insertNode) getPrimaryKeys(msg *msgstream.InsertMsg) []int64 {
+	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
+		log.Warn("misaligned messages detected")
+		return nil
+	}
+	collectionID := msg.GetCollectionID()
+
+	collection := iNode.getCollectionInReplica(collectionID)
+	if collection == nil {
+		log.Warn("collectio is nil")
+		return nil
+	}
+	offset := 0
+	for _, field := range collection.schema.Fields {
+		if field.IsPrimaryKey {
+			break
+		}
+		switch field.DataType {
+		case schemapb.DataType_Bool:
+			offset++
+		case schemapb.DataType_Int8:
+			offset++
+		case schemapb.DataType_Int16:
+			offset += 2
+		case schemapb.DataType_Int32:
+			offset += 4
+		case schemapb.DataType_Int64:
+			offset += 8
+		case schemapb.DataType_Float:
+			offset += 4
+		case schemapb.DataType_Double:
+			offset += 8
+		case schemapb.DataType_FloatVector:
+			for _, t := range field.TypeParams {
+				if t.Key == "dim" {
+					dim, err := strconv.Atoi(t.Value)
+					if err != nil {
+						log.Error("strconv wrong on get dim", zap.Error(err))
+						break
+					}
+					offset += dim * 4
+					break
+				}
+			}
+		case schemapb.DataType_BinaryVector:
+			for _, t := range field.TypeParams {
+				if t.Key == "dim" {
+					dim, err := strconv.Atoi(t.Value)
+					if err != nil {
+						log.Error("strconv wrong on get dim", zap.Error(err))
+						return nil
+					}
+					offset += dim / 8
+					break
+				}
+			}
+		}
+	}
+
+	blobReaders := make([]io.Reader, len(msg.RowData))
+	for i, blob := range msg.RowData {
+		blobReaders[i] = bytes.NewReader(blob.GetValue()[offset : offset+8])
+	}
+	pks := make([]int64, len(blobReaders))
+
+	for i, reader := range blobReaders {
+		err := binary.Read(reader, binary.LittleEndian, &pks[i])
+		if err != nil {
+			log.Warn("binary read blob value failed", zap.Error(err))
+		}
+	}
+
+	return pks
+}
+func newInsertNode(streamingReplica ReplicaInterface, historicalReplica ReplicaInterface) *insertNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -206,7 +409,8 @@ func newInsertNode(replica ReplicaInterface) *insertNode {
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		baseNode: baseNode,
-		replica:  replica,
+		baseNode:          baseNode,
+		streamingReplica:  streamingReplica,
+		historicalReplica: historicalReplica,
 	}
 }
