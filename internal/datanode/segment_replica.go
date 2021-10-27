@@ -59,7 +59,10 @@ type Replica interface {
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
 	updateSegmentCheckPoint(segID UniqueID)
 	updateSegmentPKRange(segID UniqueID, rowIDs []int64)
+	refreshFlushedSegmentPKRange(segID UniqueID, rowIDs []int64)
+	addFlushedSegmentWithPKs(segID, collID, partID UniqueID, channelName string, numOfRow int64, rowIDs []int64)
 	hasSegment(segID UniqueID, countFlushed bool) bool
+	removeSegment(segID UniqueID)
 
 	updateStatistics(segID UniqueID, numRows int64)
 	getSegmentStatisticsUpdates(segID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
@@ -515,8 +518,13 @@ func (replica *SegmentReplica) updateSegmentPKRange(segID UniqueID, pks []int64)
 	log.Warn("No match segment to update PK range", zap.Int64("ID", segID))
 }
 
-func (replica *SegmentReplica) removeSegment(segID UniqueID) error {
-	return nil
+func (replica *SegmentReplica) removeSegment(segID UniqueID) {
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
+
+	delete(replica.newSegments, segID)
+	delete(replica.normalSegments, segID)
+	delete(replica.flushedSegments, segID)
 }
 
 // hasSegment checks whether this replica has a segment according to segment ID.
@@ -627,4 +635,56 @@ func (replica *SegmentReplica) updateSegmentCheckPoint(segID UniqueID) {
 	}
 
 	log.Warn("There's no segment", zap.Int64("ID", segID))
+}
+
+// please call hasSegment first
+func (replica *SegmentReplica) refreshFlushedSegmentPKRange(segID UniqueID, rowIDs []int64) {
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
+
+	seg, ok := replica.flushedSegments[segID]
+	if ok {
+		seg.pkFilter.ClearAll()
+		seg.updatePKRange(rowIDs)
+		return
+	}
+
+	log.Warn("No match segment to update PK range", zap.Int64("ID", segID))
+}
+
+func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, channelName string, numOfRows int64, rowIDs []int64) {
+	if collID != replica.collectionID {
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
+		return
+	}
+
+	log.Debug("Add Flushed segment",
+		zap.Int64("segment ID", segID),
+		zap.Int64("collection ID", collID),
+		zap.Int64("partition ID", partID),
+		zap.String("channel name", channelName),
+	)
+
+	seg := &Segment{
+		collectionID: collID,
+		partitionID:  partID,
+		segmentID:    segID,
+		channelName:  channelName,
+		numRows:      numOfRows,
+
+		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+		minPK:    math.MaxInt64, // use max value, represents no value
+		maxPK:    math.MinInt64, // use min value represents no value
+	}
+
+	seg.updatePKRange(rowIDs)
+
+	seg.isNew.Store(false)
+	seg.isFlushed.Store(true)
+
+	replica.segMu.Lock()
+	replica.flushedSegments[segID] = seg
+	replica.segMu.Unlock()
 }
