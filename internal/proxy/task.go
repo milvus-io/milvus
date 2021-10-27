@@ -1925,6 +1925,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
 
+	var skipDupCnt int64 = 0
 	var realTopK int64 = -1
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, len(searchResultData))
@@ -1967,10 +1968,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 					j++
 				} else {
 					// entity with same id and same score must be duplicated
-					log.Debug("skip duplicated search result",
-						zap.Int64("id", id),
-						zap.Float32("score", score),
-						zap.Float32("prevScore", prevScore))
+					skipDupCnt++
 				}
 			}
 			offsets[sel]++
@@ -1982,7 +1980,9 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 	}
-
+	if skipDupCnt > 0 {
+		log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
+	}
 	ret.Results.TopK = realTopK
 
 	if metricType != "IP" {
