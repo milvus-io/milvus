@@ -649,7 +649,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_exp, output_fields=["int63"],
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1,
-                                         ct.err_msg: 'Field int63 not exist'})
+                                         ct.err_msg: "Field int63 not exist"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("output_fields", [[default_search_field], ["%"]])
