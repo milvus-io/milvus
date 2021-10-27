@@ -44,7 +44,9 @@ const (
 	// MaxRetryNum is the maximum number of times that each task can be retried
 	MaxRetryNum = 5
 	// MaxSendSizeToEtcd is the default limit size of etcd messages that can be sent and received
-	MaxSendSizeToEtcd = 2097152
+	// MaxSendSizeToEtcd = 2097152
+	// Limit size of every loadSegmentReq to 200k
+	MaxSendSizeToEtcd = 200000
 )
 
 type taskState int
