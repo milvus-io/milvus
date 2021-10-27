@@ -79,7 +79,7 @@ struct SearchResult {
     // TODO(gexi): utilize these field
     void* segment_;
     std::vector<int64_t> result_offsets_;
-    std::vector<int64_t> primary_keys_;
+    std::vector<int64_t> row_ids_;
     std::vector<std::vector<char>> row_data_;
 };
 

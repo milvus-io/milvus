@@ -11,36 +11,24 @@
 
 #include "segcore/SegmentInterface.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
+
 namespace milvus::segcore {
 class Naive;
 
 void
-SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const {
+SegmentInternalInterface::FillRowID(const query::Plan* plan, SearchResult& results) const {
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.result_distances_.size();
     AssertInfo(results.internal_seg_offsets_.size() == size,
                "Size of result distances is not equal to size of segment offsets");
-    Assert(results.primary_keys_.size() == 0);
-
-    results.primary_keys_.resize(size);
+    Assert(results.row_ids_.size() == 0);
+    results.row_ids_.resize(size);
 
     auto element_sizeof = sizeof(int64_t);
-
     aligned_vector<char> blob(size * element_sizeof);
-    if (plan->schema_.get_is_auto_id()) {
-        bulk_subscript(SystemFieldType::RowId, results.internal_seg_offsets_.data(), size, blob.data());
-    } else {
-        auto key_offset_opt = get_schema().get_primary_key_offset();
-        AssertInfo(key_offset_opt.has_value(), "Cannot get primary key offset from schema");
-        auto key_offset = key_offset_opt.value();
-        AssertInfo(get_schema()[key_offset].get_data_type() == DataType::INT64, "Primary key field is not INT64 type");
-        bulk_subscript(key_offset, results.internal_seg_offsets_.data(), size, blob.data());
-    }
-
-    for (int64_t i = 0; i < size; ++i) {
-        results.primary_keys_[i] = *(int64_t*)(blob.data() + element_sizeof * i);
-    }
+    bulk_subscript(SystemFieldType::RowId, results.internal_seg_offsets_.data(), size, blob.data());
+    memcpy(results.row_ids_.data(), blob.data(), element_sizeof * size);
 }
 
 void

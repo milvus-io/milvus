@@ -455,22 +455,22 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
     auto topk = sr->topk_;
     auto num_queries = sr->num_queries_;
 
-    std::unordered_set<int64_t> pk_set;
+    std::unordered_set<int64_t> row_id_set;
     std::unordered_set<float> distance_set;
     for (int i = 0; i < results.size(); i++) {
         auto search_result = (SearchResult*)results[i];
         auto size = search_result->result_offsets_.size();
         for (int j = 0; j < size; j++) {
-            auto ret = pk_set.insert(search_result->primary_keys_[j]);
+            auto ret = row_id_set.insert(search_result->row_ids_[j]);
             // std::cout << j << ": " << ret.second << "  "
-            //           << search_result->primary_keys_[j] << "  "
+            //           << search_result->row_ids_[j] << "  "
             //           << search_result->result_distances_[j] << std::endl;
             distance_set.insert(search_result->result_distances_[j]);
         }
     }
-    std::cout << pk_set.size() << "  " << distance_set.size() << "  " << topk * num_queries << std::endl;
+    std::cout << row_id_set.size() << "  " << distance_set.size() << "  " << topk * num_queries << std::endl;
     // TODO: find 1 duplicated result (pk = 10345), need check
-    assert(pk_set.size() == topk * num_queries - 1);
+    assert(row_id_set.size() == topk * num_queries - 1);
 }
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
@@ -486,8 +486,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     assert(ins_res.error_code == Success);
 
-    const char* dsl_string = R"(
-    {
+    const char* dsl_string = R"({
         "bool": {
             "vector": {
                 "fakevec": {

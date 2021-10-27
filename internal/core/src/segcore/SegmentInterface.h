@@ -10,21 +10,23 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+
+#include <deque>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "FieldIndexing.h"
 #include "common/Types.h"
 #include "common/Schema.h"
-#include "query/Plan.h"
 #include "common/Span.h"
-#include "FieldIndexing.h"
-#include <knowhere/index/vector_index/VecIndex.h>
 #include "common/SystemProperty.h"
-#include "query/PlanNode.h"
-#include "pb/schema.pb.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "pb/segcore.pb.h"
-#include <memory>
-#include <deque>
-#include <vector>
-#include <utility>
-#include <string>
+#include "pb/schema.pb.h"
+#include "query/Plan.h"
+#include "query/PlanNode.h"
 
 namespace milvus::segcore {
 
@@ -32,7 +34,7 @@ namespace milvus::segcore {
 class SegmentInterface {
  public:
     virtual void
-    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const = 0;
+    FillRowID(const query::Plan* plan, SearchResult& results) const = 0;
 
     virtual void
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
@@ -90,7 +92,7 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp timestamp) const override;
 
     void
-    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const override;
+    FillRowID(const query::Plan* plan, SearchResult& results) const override;
 
     void
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const override;

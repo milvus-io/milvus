@@ -85,31 +85,31 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
 #else
     int64_t skip_dup_cnt = 0;
     float prev_dis = MAXFLOAT;
-    std::unordered_set<int64_t> prev_pk_set;
+    std::unordered_set<int64_t> prev_id_set;
     while (loc_offset - query_offset < topk) {
         result_pairs[0].reset_distance();
         std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
         auto& result_pair = result_pairs[0];
         auto index = result_pair.index_;
-        int64_t curr_pk = result_pair.search_result_->primary_keys_[result_pair.offset_];
+        int64_t curr_id = result_pair.search_result_->row_ids_[result_pair.offset_];
         float curr_dis = result_pair.search_result_->result_distances_[result_pair.offset_];
         // remove duplicates
-        if (curr_pk == INVALID_ID || std::abs(curr_dis - prev_dis) > 0.00001) {
+        if (curr_id == INVALID_ID || std::abs(curr_dis - prev_dis) > 0.00001) {
             result_pair.search_result_->result_offsets_.push_back(loc_offset++);
             search_records[index].push_back(result_pair.offset_);
             prev_dis = curr_dis;
-            prev_pk_set.clear();
-            prev_pk_set.insert(curr_pk);
+            prev_id_set.clear();
+            prev_id_set.insert(curr_id);
         } else {
             // To handle this case:
             //    e1: [100, 0.99]
             //    e2: [101, 0.99]   ==> not duplicated, should keep
             //    e3: [100, 0.99]   ==> duplicated, should remove
-            if (prev_pk_set.count(curr_pk) == 0) {
+            if (prev_id_set.count(curr_id) == 0) {
                 result_pair.search_result_->result_offsets_.push_back(loc_offset++);
                 search_records[index].push_back(result_pair.offset_);
-                // prev_pk_set keeps all primary keys with same distance
-                prev_pk_set.insert(curr_pk);
+                // prev_id_set keeps all row ids with same distance
+                prev_id_set.insert(curr_id);
             } else {
                 // the entity with same distance and same primary key must be duplicated
                 skip_dup_cnt++;
@@ -134,21 +134,21 @@ ResetSearchResult(std::vector<std::vector<int64_t>>& search_records, std::vector
             continue;
         }
 
-        std::vector<int64_t> primary_keys;
+        std::vector<int64_t> row_ids;
         std::vector<float> result_distances;
         std::vector<int64_t> internal_seg_offsets;
 
         for (int j = 0; j < search_records[i].size(); j++) {
             auto& offset = search_records[i][j];
-            auto primary_key = search_result->primary_keys_[offset];
+            auto row_id = search_result->row_ids_[offset];
             auto distance = search_result->result_distances_[offset];
             auto internal_seg_offset = search_result->internal_seg_offsets_[offset];
-            primary_keys.push_back(primary_key);
+            row_ids.push_back(row_id);
             result_distances.push_back(distance);
             internal_seg_offsets.push_back(internal_seg_offset);
         }
 
-        search_result->primary_keys_ = primary_keys;
+        search_result->row_ids_ = row_ids;
         search_result->result_distances_ = result_distances;
         search_result->internal_seg_offsets_ = internal_seg_offsets;
     }
@@ -169,7 +169,7 @@ ReduceSearchResultsAndFillData(CSearchPlan c_plan, CSearchResult* c_search_resul
         // get primary keys for duplicates removal
         for (auto& search_result : search_results) {
             auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
-            segment->FillPrimaryKeys(plan, *search_result);
+            segment->FillRowID(plan, *search_result);
         }
 
         for (int i = 0; i < num_queries; ++i) {
