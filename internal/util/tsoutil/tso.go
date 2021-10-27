@@ -37,10 +37,10 @@ func ParseTS(ts uint64) (time.Time, uint64) {
 }
 
 // ParseHybridTs parses the ts to (physical, logical), physical part is of utc-timestamp format.
-func ParseHybridTs(ts uint64) (uint64, uint64) {
+func ParseHybridTs(ts uint64) (int64, int64) {
 	logical := ts & logicalBitsMask
 	physical := ts >> logicalBits
-	return physical, logical
+	return int64(physical), int64(logical)
 }
 
 // Mod24H parses the ts to millisecond in one day
@@ -49,6 +49,13 @@ func Mod24H(ts uint64) uint64 {
 	physical := ts >> logicalBits
 	physical = physical % (uint64(24 * 60 * 60 * 1000))
 	return (physical << logicalBits) | logical
+}
+
+// AddPhysicalTimeOnTs adds physical time on ts and return ts
+func AddPhysicalTimeOnTs(timeInMs int64, ts uint64) uint64 {
+	physical, logical := ParseHybridTs(ts)
+
+	return ComposeTS(physical+timeInMs, logical)
 }
 
 // NewTSOKVBase returns a etcdkv.EtcdKV object

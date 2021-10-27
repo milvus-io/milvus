@@ -423,7 +423,7 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 
 	t.Rsp.CreatedTimestamp = collInfo.CreateTime
 	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)
-	t.Rsp.CreatedUtcTimestamp = createdPhysicalTime
+	t.Rsp.CreatedUtcTimestamp = uint64(createdPhysicalTime)
 	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID)
 	t.Rsp.StartPositions = collInfo.GetStartPositions()
 	return nil
@@ -455,7 +455,7 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, meta.ID)
 		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, meta.CreateTime)
 		physical, _ := tsoutil.ParseHybridTs(meta.CreateTime)
-		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, physical)
+		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, uint64(physical))
 	}
 	return nil
 }
@@ -716,7 +716,7 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 	t.Rsp.CreatedUtcTimestamps = make([]uint64, 0, len(coll.PartitionCreatedTimestamps))
 	for _, ts := range coll.PartitionCreatedTimestamps {
 		physical, _ := tsoutil.ParseHybridTs(ts)
-		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, physical)
+		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, uint64(physical))
 	}
 
 	return nil
