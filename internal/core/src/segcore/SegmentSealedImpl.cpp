@@ -242,12 +242,6 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
                                       bool force) const {
     auto old = deleted_record_.get_lru_entry();
 
-    if (old->bitmap_ptr->count() == insert_barrier) {
-        if (old->del_barrier == del_barrier) {
-            return old;
-        }
-    }
-
     auto current = old->clone(insert_barrier);
     current->del_barrier = del_barrier;
     auto bitmap = current->bitmap_ptr;
@@ -259,6 +253,9 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
     std::copy_n(uids_ptr, del_size, ids.data());
 
     auto [uids, seg_offsets] = primary_key_index_->do_search_ids(ids);
+    for (int i = 0; i < uids.size(); ++i) {
+        bitmap->set(seg_offsets[i].get());
+    }
 
     if (del_barrier < old->del_barrier) {
         for (auto del_index = del_barrier; del_index < old->del_barrier; ++del_index) {

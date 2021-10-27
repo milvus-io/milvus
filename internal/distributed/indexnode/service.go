@@ -60,10 +60,11 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-
+	log.Debug("IndexNode init done ...")
 	if err := s.start(); err != nil {
 		return err
 	}
+	log.Debug("IndexNode start done ...")
 	return nil
 }
 
