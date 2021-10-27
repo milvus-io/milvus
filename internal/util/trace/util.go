@@ -177,7 +177,7 @@ func InfoFromSpan(span opentracing.Span) (traceID string, sampled bool, found bo
 }
 
 // InfoFromContext is a method return details of span associated with context.
-func InfoFromContext(ctx context.Context) (traceID string, sampled bool, found bool) {
+func InfoFromContext(ctx context.Context) (traceID string, sampled, found bool) {
 	if ctx != nil {
 		if span := opentracing.SpanFromContext(ctx); span != nil {
 			return InfoFromSpan(span)
