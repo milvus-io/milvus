@@ -37,10 +37,10 @@ type Iterator interface {
 
 // Value is the return value of HasNext
 type Value struct {
-	id        int64
-	timestamp int64
-	isDeleted bool
-	value     interface{}
+	ID        int64
+	Timestamp int64
+	IsDeleted bool
+	Value     interface{}
 }
 
 // InsertBinlogIterator is the iterator of binlog
@@ -87,10 +87,10 @@ func (itr *InsertBinlogIterator) Next() (interface{}, error) {
 	}
 
 	v := &Value{
-		id:        itr.data.Data[rootcoord.RowIDField].Get(itr.pos).(int64),
-		timestamp: itr.data.Data[rootcoord.TimeStampField].Get(itr.pos).(int64),
-		isDeleted: false,
-		value:     m,
+		ID:        itr.data.Data[rootcoord.RowIDField].Get(itr.pos).(int64),
+		Timestamp: itr.data.Data[rootcoord.TimeStampField].Get(itr.pos).(int64),
+		IsDeleted: false,
+		Value:     m,
 	}
 	itr.pos++
 	return v, nil
@@ -247,7 +247,7 @@ func (itr *MergeIterator) hasNext() bool {
 		if tmpRecord == nil {
 			continue
 		}
-		if minRecord == nil || tmpRecord.id < minRecord.id {
+		if minRecord == nil || tmpRecord.ID < minRecord.ID {
 			minRecord = tmpRecord
 			minPos = i
 		}
