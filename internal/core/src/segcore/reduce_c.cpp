@@ -83,6 +83,7 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
         search_records[index].push_back(result_pair.offset_++);
     }
 #else
+    int64_t skip_dup_cnt = 0;
     float prev_dis = MAXFLOAT;
     std::unordered_set<int64_t> prev_pk_set;
     while (loc_offset - query_offset < topk) {
@@ -111,10 +112,13 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
                 prev_pk_set.insert(curr_pk);
             } else {
                 // the entity with same distance and same primary key must be duplicated
-                LOG_SEGCORE_DEBUG_ << "skip duplicated search result, primary key " << curr_pk;
+                skip_dup_cnt++;
             }
         }
         result_pair.offset_++;
+    }
+    if (skip_dup_cnt > 0) {
+        LOG_SEGCORE_DEBUG_ << "skip duplicated search result, count = " << skip_dup_cnt;
     }
 #endif
 }
