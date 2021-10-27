@@ -105,6 +105,9 @@ func (node *Proxy) Register() error {
 	Params.ProxyID = node.session.ServerID
 	Params.SetLogger(Params.ProxyID)
 	Params.initProxySubName()
+	go node.session.LivenessCheck(node.ctx, func() {
+		log.Fatal("Proxy disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+	})
 	// TODO Reset the logger
 	//Params.initLogCfg()
 	return nil

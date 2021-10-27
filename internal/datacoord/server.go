@@ -317,9 +317,7 @@ func (s *Server) startServerLoop() {
 	go s.startWatchService(s.serverLoopCtx)
 	go s.startFlushLoop(s.serverLoopCtx)
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		if err := s.Stop(); err != nil {
-			log.Error("failed to stop server", zap.Error(err))
-		}
+		log.Fatal("Data Coord disconnected from etcd, process will exit", zap.Int64("Server Id", s.session.ServerID))
 	})
 }
 

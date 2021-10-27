@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -1103,11 +1102,7 @@ func (c *Core) Start() error {
 		go c.checkFlushedSegmentsLoop()
 
 		go c.session.LivenessCheck(c.ctx, func() {
-			log.Error("rootcoord disconnected from etcd, process will exit in 1 second")
-			go func() {
-				time.Sleep(time.Second)
-				os.Exit(-1)
-			}()
+			log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		})
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
