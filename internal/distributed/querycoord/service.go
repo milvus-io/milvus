@@ -218,6 +218,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	}
 }
 
+// start starts QueryCoord's grpc service.
 func (s *Server) start() error {
 	return s.queryCoord.Start()
 }
