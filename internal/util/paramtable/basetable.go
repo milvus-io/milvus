@@ -345,7 +345,7 @@ func (gp *BaseTable) LoadYaml(fileName string) error {
 					if err != nil {
 						panic(err)
 					}
-					if len(str) == 0 {
+					if str == "" {
 						str = ss
 					} else {
 						str = str + "," + ss
@@ -498,7 +498,7 @@ func (gp *BaseTable) SetLogger(id UniqueID) {
 	if err != nil {
 		panic(err)
 	}
-	if len(rootPath) != 0 {
+	if rootPath != "" {
 		log.Debug("Set logger ", zap.Int64("id", id), zap.String("role", gp.RoleName))
 		if id < 0 {
 			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+".log")
