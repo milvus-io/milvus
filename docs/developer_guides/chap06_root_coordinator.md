@@ -30,8 +30,11 @@ type RootCoord interface {
 	ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 
 	//index builder service
+  // CreateIndex notifies RootCoord to create an index for the specified field in the collection
 	CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+  // DescribeIndex notifies RootCoord to get specified index information for specified field
 	DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+  // DropIndex notifies RootCoord to drop the specified index for the specified field
 	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	//global timestamp allocator
