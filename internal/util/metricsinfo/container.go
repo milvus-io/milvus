@@ -18,7 +18,7 @@ import (
 	"github.com/containerd/cgroups"
 )
 
-// IfServiceInContainer checks if the service is running inside a container
+// InContainer checks if the service is running inside a container.
 func InContainer() (bool, error) {
 	paths, err := cgroups.ParseCgroupFile("/proc/1/cgroup")
 	if err != nil {
