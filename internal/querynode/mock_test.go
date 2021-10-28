@@ -1323,3 +1323,118 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 
 	return node, nil
 }
+
+func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, fieldValue interface{}, dim int64) *schemapb.FieldData {
+	var fieldData *schemapb.FieldData
+	switch fieldType {
+	case schemapb.DataType_Bool:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Bool,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: fieldValue.([]bool),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Int32:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int32,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: fieldValue.([]int32),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Int64:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: fieldValue.([]int64),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Float:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Float,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: fieldValue.([]float32),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Double:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Double,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: fieldValue.([]float64),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_BinaryVector:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_BinaryVector,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: fieldValue.([]byte),
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_FloatVector:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: fieldValue.([]float32),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	default:
+		log.Error("not supported field type", zap.String("field type", fieldType.String()))
+	}
+
+	return fieldData
+}
