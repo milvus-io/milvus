@@ -141,10 +141,9 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     query::dataset::SearchDataset search_dataset{metric_type, num_queries, topk, round_decimal, dim, query_data};
 
     auto vec_ptr = record.get_field_data<BinaryVector>(vecfield_offset);
-
     auto max_indexed_id = 0;
-    // step 4: brute force search where small indexing is unavailable
 
+    // step 4: brute force search where small indexing is unavailable
     auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
     auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
     SubSearchResult final_result(num_queries, topk, metric_type, round_decimal);
