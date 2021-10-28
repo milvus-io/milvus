@@ -19,6 +19,7 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
@@ -49,6 +50,7 @@ func (qs *QueryCoord) Run() error {
 	if err := qs.svr.Run(); err != nil {
 		panic(err)
 	}
+	log.Debug("QueryCoord successfully started")
 	return nil
 }
 

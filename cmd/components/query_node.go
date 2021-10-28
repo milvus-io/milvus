@@ -19,6 +19,7 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
@@ -50,6 +51,7 @@ func (q *QueryNode) Run() error {
 	if err := q.svr.Run(); err != nil {
 		panic(err)
 	}
+	log.Debug("QueryNode successfully started")
 	return nil
 }
 

@@ -19,6 +19,7 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
@@ -48,6 +49,7 @@ func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {
 		return err
 	}
+	log.Debug("Proxy successfully started")
 	return nil
 }
 
