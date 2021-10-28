@@ -349,7 +349,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	} else {
 		err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
 		if err != nil {
-			log.Error("failed to set deploy mode: ", zap.Error(err))
+			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
 	}
 
@@ -449,7 +449,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 			w.Header().Set(healthz.ContentTypeHeader, healthz.ContentTypeText)
 			_, err := fmt.Fprint(w, "OK")
 			if err != nil {
-				log.Warn("failed to send response",
+				log.Warn("Failed to send response",
 					zap.Error(err))
 			}
 
