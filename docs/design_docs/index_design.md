@@ -146,7 +146,7 @@ of index data. After the index is built, record the index file directory in Inde
 
 ### 8.5.1 BuildIndex
 
-Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task and
+Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task, and
 the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
 execution.
 
@@ -156,7 +156,7 @@ The following figure shows the state machine of IndexTask during execution:
 
 ### 8.5.2 DropIndex
 
-DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
+DropIndex deletes an index based on IndexID. One IndexID corresponds to the index of an entire column. A column is
 divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
 index tasks. Therefore, when DropIndex, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
 
