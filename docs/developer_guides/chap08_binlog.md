@@ -70,7 +70,7 @@ In binlog file, we have stored many common fields in fixed part, such as `Collec
 
 However, different binlog files have some other different information which differs from each other.
 
-So, `ExtraBytes` was designed to store these different information.
+So, `ExtraBytes` was designed to store this different information.
 
 For example, for index binlog file, we will store `indexID`, `indexBuildID`, `indexID` and other index-related
 information to `ExtraBytes`.
