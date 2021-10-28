@@ -310,7 +310,7 @@ class TestInsertBase:
         """
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
         method: create collection and insert vectors in it
-        expected: raise an exception
+        expected: raise exception
         """
         ids = [i for i in range(1, default_nb)]
         logging.getLogger().info(len(ids))
@@ -325,7 +325,7 @@ class TestInsertBase:
         """
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
         method: create collection and insert vectors in it
-        expected: raise an exception
+        expected: raise exception
         """
         ids = [i for i in range(1, default_nb)]
         logging.getLogger().info(len(ids))
@@ -1039,7 +1039,7 @@ class TestInsertInvalid(object):
         """
         target: test insert, with using customize ids, which are not int64
         method: create collection and insert entities in it
-        expected: raise an exception
+        expected: raise exception
         """
         entity_id = get_entity_id
         ids = [entity_id for _ in range(default_nb)]
@@ -1205,7 +1205,7 @@ class TestInsertInvalidBinary(object):
         """
         target: test insert, with using customize ids, which are not int64
         method: create collection and insert entities in it
-        expected: raise an exception
+        expected: raise exception
         """
         entity_id = get_entity_id
         ids = [entity_id for _ in range(default_nb)]
