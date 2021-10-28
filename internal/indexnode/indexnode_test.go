@@ -180,7 +180,8 @@ func TestIndexNode(t *testing.T) {
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.kv.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 
@@ -291,7 +292,8 @@ func TestIndexNode(t *testing.T) {
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.kv.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 
@@ -408,7 +410,8 @@ func TestIndexNode(t *testing.T) {
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.kv.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 
@@ -589,7 +592,8 @@ func TestCreateIndexFailed(t *testing.T) {
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.kv.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 	})
@@ -708,7 +712,8 @@ func TestCreateIndexFailed(t *testing.T) {
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.kv.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 	})
