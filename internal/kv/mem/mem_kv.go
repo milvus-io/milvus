@@ -19,6 +19,8 @@ import (
 	"github.com/google/btree"
 )
 
+// MemoryKV implements DataKV interface and relies on underling btree.BTree.
+// As its name implies, all data is stored in memory.
 type MemoryKV struct {
 	sync.RWMutex
 	tree *btree.BTree
