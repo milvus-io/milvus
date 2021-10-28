@@ -138,12 +138,14 @@ class TestChaos(TestChaosBase):
         assert_statistic(self.health_checkers)
 
         # apply chaos object
+        meta_name = chaos_config.get('metadata', None).get('name', None)
         chaos_res = CusResource(kind=chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
                                 version=constants.CHAOS_VERSION,
                                 namespace=constants.CHAOS_NAMESPACE)
         chaos_res.create(chaos_config)
         log.info("chaos injected")
+        log.info(f"chaos information: {chaos_res.get(meta_name)}")
         sleep(constants.WAIT_PER_OP * 2.1)
         # reset counting
         cc.reset_counting(self.health_checkers)
@@ -166,7 +168,6 @@ class TestChaos(TestChaosBase):
                                        })
 
         # delete chaos
-        meta_name = chaos_config.get('metadata', None).get('name', None)
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
         for k, t in self.checker_threads.items():
