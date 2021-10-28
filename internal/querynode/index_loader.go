@@ -205,6 +205,9 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 	if len(pathResponse.FilePaths) <= 0 {
 		return errors.New("illegal index file paths")
 	}
+	if len(pathResponse.FilePaths[0].IndexFilePaths) == 0 {
+		return errors.New("empty index paths")
+	}
 
 	info := &indexInfo{
 		indexID:    response.IndexID,

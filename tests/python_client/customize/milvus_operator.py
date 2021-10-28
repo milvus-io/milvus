@@ -123,14 +123,15 @@ class MilvusOperator(object):
 if __name__ == '__main__':
 
     namespace = 'chaos-testing'
-    name = 'milvus-513b'
-    cus_configs = {'spec.components.image': 'milvusdb/milvus-dev:master-20211020-b40513b',
+    image = "master-20211027-c51155a"
+    name = f'milvus-{image.split("-")[2]}'
+    cus_configs = {'spec.components.image': f'milvusdb/milvus-dev:{name}',
                    'metadata.namespace': namespace,
                    'metadata.name': name,
                    'apiVersion': 'milvus.io/v1alpha1',
                    'kind': 'MilvusCluster',
-                   'spec.components.queryNode.replicas': 2,
-                   'spec.components.queryNode.resources.limits.memory': '2048Mi'
+                   'spec.components.queryNode.replicas': 1,
+                   'spec.components.proxy.serviceType': 'LoadBalancer'
                    }
 
     milvusOp = MilvusOperator()
@@ -149,5 +150,5 @@ if __name__ == '__main__':
     # endpoint = milvusOp.endpoint(name, namespace=namespace)
     # print(endpoint)
 
-    milvusOp.uninstall(name, namespace=namespace)
+    # milvusOp.uninstall(name, namespace=namespace)
 

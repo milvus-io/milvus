@@ -10359,6 +10359,8 @@ class QuerySegmentInfo :
     kMemSizeFieldNumber = 4,
     kNumRowsFieldNumber = 5,
     kIndexIDFieldNumber = 7,
+    kNodeIDFieldNumber = 8,
+    kStateFieldNumber = 9,
   };
   // string index_name = 6;
   void clear_index_name();
@@ -10401,6 +10403,16 @@ class QuerySegmentInfo :
   ::PROTOBUF_NAMESPACE_ID::int64 indexid() const;
   void set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // int64 nodeID = 8;
+  void clear_nodeid();
+  ::PROTOBUF_NAMESPACE_ID::int64 nodeid() const;
+  void set_nodeid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // .milvus.proto.common.SegmentState state = 9;
+  void clear_state();
+  ::milvus::proto::common::SegmentState state() const;
+  void set_state(::milvus::proto::common::SegmentState value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.QuerySegmentInfo)
  private:
   class _Internal;
@@ -10413,6 +10425,8 @@ class QuerySegmentInfo :
   ::PROTOBUF_NAMESPACE_ID::int64 mem_size_;
   ::PROTOBUF_NAMESPACE_ID::int64 num_rows_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 nodeid_;
+  int state_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -21503,6 +21517,34 @@ inline void QuerySegmentInfo::set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value) 
   
   indexid_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.QuerySegmentInfo.indexID)
+}
+
+// int64 nodeID = 8;
+inline void QuerySegmentInfo::clear_nodeid() {
+  nodeid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 QuerySegmentInfo::nodeid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.QuerySegmentInfo.nodeID)
+  return nodeid_;
+}
+inline void QuerySegmentInfo::set_nodeid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  nodeid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.QuerySegmentInfo.nodeID)
+}
+
+// .milvus.proto.common.SegmentState state = 9;
+inline void QuerySegmentInfo::clear_state() {
+  state_ = 0;
+}
+inline ::milvus::proto::common::SegmentState QuerySegmentInfo::state() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.QuerySegmentInfo.state)
+  return static_cast< ::milvus::proto::common::SegmentState >(state_);
+}
+inline void QuerySegmentInfo::set_state(::milvus::proto::common::SegmentState value) {
+  
+  state_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.QuerySegmentInfo.state)
 }
 
 // -------------------------------------------------------------------

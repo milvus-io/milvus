@@ -457,6 +457,18 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 			}
 			childTask.setTaskID(id)
 			childTaskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, childTask.getTaskID())
+			var protoSize int
+			switch childTask.msgType() {
+			case commonpb.MsgType_LoadSegments:
+				protoSize = proto.Size(childTask.(*loadSegmentTask).LoadSegmentsRequest)
+			case commonpb.MsgType_WatchDmChannels:
+				protoSize = proto.Size(childTask.(*watchDmChannelTask).WatchDmChannelsRequest)
+			case commonpb.MsgType_WatchQueryChannels:
+				protoSize = proto.Size(childTask.(*watchQueryChannelTask).AddQueryChannelRequest)
+			default:
+				//TODO::
+			}
+			log.Debug("updateKVFn: the size of internal request", zap.Int("size", protoSize), zap.Int64("taskID", childTask.getTaskID()))
 			blobs, err := childTask.marshal()
 			if err != nil {
 				return err

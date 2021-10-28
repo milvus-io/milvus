@@ -22,25 +22,25 @@ In addition to service discovery, Milvus also uses etcd as a reliable meta stora
 persistent status information to etcd. The purpose is to restore a certain Milvus component to its original
 state after power off and restart.
 
-## 8.2 Receive requests about index from RootCoordinate
+## 8.2 Receive requests about index from RootCoord
 
-IndexCoordinate receives requests from RootCoordinate to build an index, delete an index, and query the status of an index.
+IndexCoord receives requests from RootCoord to build an index, delete an index, and query the status of an index.
 
-In Milvus, index building is performed asynchronously. When IndexCoordinate receives a request to build an index from
-RootCoordinate, it will first check whether the same index has been created according to the index parameters. If yes, it would 
-return the IndexBuildID of the existing task. Otherwise, it would assign a globally unique IndexBuildID to the task, 
-record the task in the MetaTable, write the MetaTable to etcd, and then return the IndexBuildID to RootCoordinate.  
-RootCoordinate confirms the index building was generated successfully by the IndexBuildID. At this time, the index construction 
-is completed yet. IndexCoordinate starts a background process to find all the index tasks that need to be 
+In Milvus, index building is performed asynchronously. When IndexCoord receives a request to build an index from
+RootCoord, it will first check whether the same index has been created according to the index parameters. If yes, it would
+return the IndexBuildID of the existing task. Otherwise, it would assign a globally unique IndexBuildID to the task,
+record the task in the MetaTable, write the MetaTable to etcd, and then return the IndexBuildID to RootCoord.
+RootCoord confirms the index building was generated successfully by the IndexBuildID. At this time, the index construction
+is completed yet. IndexCoord starts a background process to find all the index tasks that need to be
 allocated periodically, and then allocates them to IndexNode for actual execution.
 
-When IndexCoordinate receives a request to delete an index from RootCoordinate, IndexCoordinate traverses the MetaTable,
+When IndexCoord receives a request to delete an index from RootCoord, IndexCoord traverses the MetaTable,
 marks the corresponding index task as deleted, and returns. It is not really deleted from the MetaTable at this time.
-IndexCoordinate has another background process that periodically queries the index tasks that need to be deleted.
+IndexCoord has another background process that periodically queries the index tasks that need to be deleted.
 When the index task is marked as deleted, and the index status is complete, the corresponding index task is actually
 deleted from the MetaTable.
 
-When IndexCoordinate receives a query index status request from other components, first check whether the corresponding
+When IndexCoord receives a query index status request from other components, first check whether the corresponding
 index task is marked for deletion in the MetaTable. If marked for deletion, the return index does not exist, otherwise,
 it returns the index information.
 
@@ -130,13 +130,13 @@ in the MetaTable. Otherwise, only the lower version index file is cleaned up.
 ## 8.4 IndexNode Create Index
 
 IndexNode is the execution node of index building tasks, and all index building tasks are forwarded to IndexNode by
-IndexCoordinate for execution. When IndexNode executes an index build request, it first reads IndexMeta information
-from etcd, and checks whether the index task is marked for deletion when IndexCoordinate is forwarded to IndexNode.
+IndexCoord for execution. When IndexNode executes an index build request, it first reads IndexMeta information
+from etcd, and checks whether the index task is marked for deletion when IndexCoord is forwarded to IndexNode.
 If it is marked as deleted, then there is no need to actually build the index, just mark the index task status as
-completed, and then write it to etcd. When IndexCoordinate perceives that the status corresponding to the index is
+completed, and then write it to etcd. When IndexCoord perceives that the status corresponding to the index is
 complete, it deletes the index task from the MetaTable. If it is checked that the index is not marked for deletion,
 then the index needs to be built. The original data must be loaded first when building the index. The original data
-is stored in MinIO/S3, and the storage path is notified by RootCoordinate in the index build request. After loading the
+is stored in MinIO/S3, and the storage path is notified by RootCoord in the index build request. After loading the
 original data, the data is deserialized into data blocks, and then cgo is called to build the index. When the index is
 built, the index data is serialized into data blocks, and then written into the file. The directory organization of the
 index file is "indexBuildID/IndexTaskVersion/partitionID/segmentID/key", where key corresponds to the serialized key

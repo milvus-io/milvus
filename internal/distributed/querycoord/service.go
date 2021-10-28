@@ -94,6 +94,7 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// init initializes QueryCoord's grpc service.
 func (s *Server) init() error {
 	Params.Init()
 
@@ -217,10 +218,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	}
 }
 
+// start starts QueryCoord's grpc service.
 func (s *Server) start() error {
 	return s.queryCoord.Start()
 }
 
+// Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() error {
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
@@ -245,6 +248,7 @@ func (s *Server) SetDataCoord(d types.DataCoord) error {
 	return nil
 }
 
+// GetComponentStates gets the component states of QueryCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.queryCoord.GetComponentStates(ctx)
 }

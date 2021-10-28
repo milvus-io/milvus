@@ -36,6 +36,8 @@ type flushManager interface {
 	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, pos *internalpb.MsgPosition) error
 	// notify flush manager del buffer data
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
+	// injectFlush injects compaction or other blocking task before flush sync
+	injectFlush(injection taskInjection, segments ...UniqueID)
 }
 
 // segmentFlushPack contains result to save into meta

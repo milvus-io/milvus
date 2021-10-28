@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -48,6 +49,10 @@ func (tk *testKv) Remove(key string) error {
 
 func (tk *testKv) LoadWithPrefix(key string) ([]string, []string, error) {
 	return nil, nil, nil
+}
+
+func (tk *testKv) Load(key string) (string, error) {
+	return "", nil
 }
 
 func TestReplica_Release(t *testing.T) {
@@ -85,10 +90,11 @@ func TestMetaFunc(t *testing.T) {
 	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	assert.Nil(t, err)
 	meta := &MetaReplica{
-		client:            kv,
-		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		segmentInfos:      map[UniqueID]*querypb.SegmentInfo{},
-		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
+		client:             kv,
+		collectionInfos:    map[UniqueID]*querypb.CollectionInfo{},
+		segmentInfos:       map[UniqueID]*querypb.SegmentInfo{},
+		queryChannelInfos:  map[UniqueID]*querypb.QueryChannelInfo{},
+		globalSeekPosition: &internalpb.MsgPosition{},
 	}
 
 	nodeID := int64(100)
@@ -342,4 +348,20 @@ func TestReloadMetaFromKV(t *testing.T) {
 	assert.Equal(t, true, ok)
 	_, ok = meta.queryChannelInfos[defaultCollectionID]
 	assert.Equal(t, true, ok)
+
+	t.Run("test no global query seek position", func(t *testing.T) {
+		err = kv.Remove(globalQuerySeekPositionPrefix)
+		assert.NoError(t, err)
+
+		err = meta.reloadFromKV()
+		assert.NoError(t, err)
+	})
+
+	t.Run("test wrong global query seek position", func(t *testing.T) {
+		err = kv.Save(globalQuerySeekPositionPrefix, "&%*&^*^(&%*&%&^%")
+		assert.NoError(t, err)
+
+		err = meta.reloadFromKV()
+		assert.Error(t, err)
+	})
 }

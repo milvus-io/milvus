@@ -5,16 +5,4 @@ metadata:
   labels:
     app: milvus
 spec:
-  dependencies:
-    etcd:
-      inCluster:
-        deletionPolicy: Delete
-        pvcDeletion: true
-    pulsar:
-      inCluster:
-        deletionPolicy: Delete
-        pvcDeletion: true
-    storage:
-      inCluster:
-        deletionPolicy: Delete
-        pvcDeletion: true
+  dependencies: {}

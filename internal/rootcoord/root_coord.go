@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -1089,33 +1088,28 @@ func (c *Core) Start() error {
 
 	c.startOnce.Do(func() {
 		if err := c.proxyManager.WatchProxy(); err != nil {
-			log.Debug("RootCoord Start WatchProxy failed", zap.Error(err))
-			return
+			log.Fatal("RootCoord Start WatchProxy failed", zap.Error(err))
+			// you can not just stuck here,
+			panic(err)
 		}
 		if err := c.reSendDdMsg(c.ctx, false); err != nil {
-			log.Debug("RootCoord Start reSendDdMsg failed", zap.Error(err))
-			return
+			log.Fatal("RootCoord Start reSendDdMsg failed", zap.Error(err))
+			panic(err)
 		}
 		c.wg.Add(4)
 		go c.startTimeTickLoop()
 		go c.tsLoop()
 		go c.chanTimeTick.StartWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
-
 		go c.session.LivenessCheck(c.ctx, func() {
-			log.Error("rootcoord disconnected from etcd, process will exit in 1 second")
-			go func() {
-				time.Sleep(time.Second)
-				os.Exit(-1)
-			}()
+			log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		})
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
 
 		c.stateCode.Store(internalpb.StateCode_Healthy)
+		log.Debug(typeutil.RootCoordRole+" start successfully ", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
 	})
-
-	log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
 
 	return nil
 }

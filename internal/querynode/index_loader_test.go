@@ -111,6 +111,24 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("test set indexinfo with empty indexFilePath", func(t *testing.T) {
+		historical, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		segment, err := genSimpleSealedSegment()
+		assert.NoError(t, err)
+
+		historical.loader.indexLoader.rootCoord = newMockRootCoord()
+		ic := newMockIndexCoord()
+		ic.idxFileInfo.IndexFilePaths = []string{}
+
+		historical.loader.indexLoader.indexCoord = ic
+
+		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, simpleVecField.id)
+		assert.Error(t, err)
+
+	})
+
 	//t.Run("test get index failed", func(t *testing.T) {
 	//	historical, err := genSimpleHistorical(ctx)
 	//	assert.NoError(t, err)

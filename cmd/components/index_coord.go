@@ -19,6 +19,7 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
@@ -47,6 +48,7 @@ func (s *IndexCoord) Run() error {
 	if err := s.svr.Run(); err != nil {
 		return err
 	}
+	log.Debug("IndexCoord successfully started")
 	return nil
 }
 

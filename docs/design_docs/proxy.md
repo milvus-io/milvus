@@ -119,9 +119,9 @@ collections. Shown as the figure below.
 
 ![collection_dm_channels](./graphs/collection_dm_channels.png)
 
-When each collection is created, the Root Coordinator needs to decide the number of its DmChannels and the physical
-channels mapped by each virtual channel, and persist these kinds of information as the meta information of the collection; In
-addition, when the system finds that the collection receives DmRequest frequently, we can allocate more virtual channels
+When a collection is created, Root Coordinator need to decide the number of its DmChannels and the physical
+channels mapped by each virtual channel, and persist these kinds of information as the meta information of the collection; 
+In addition, when the system finds that the collection receives DmRequest frequently, we can allocate more virtual channels
 to the collection to increase the parallelism and thus increase the system throughput. This function is a key point of
 future work.
 

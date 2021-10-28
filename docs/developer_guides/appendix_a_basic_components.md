@@ -2,7 +2,7 @@
 
 #### A.1 System Component
 
-Milvus has 9 different components and can be abstracted into basic Component.
+Milvus has 9 different components and can be abstracted into basic Components.
 
 ```go
 type Component interface {
@@ -42,7 +42,7 @@ type ComponentStates struct {
 
 ```
 
-If a component needs to process timetick message to align timetick, it needs to implement TimeTickProvider interface.
+If a component needs to process timetick message to align timetick, it needs to implement the TimeTickProvider interface.
 
 ```go
 type TimeTickProvider interface {
@@ -308,7 +308,7 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 
 ###### A.6.1 Timestamp
 
-Let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and an 18-bits logical component (used to distinguish between events with the same physical component).
+Let's take a brief review of the Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and an 18-bits logical component (used to distinguish between events with the same physical component).
 
 <img src="./figs/hlc.png" width=400>
 
@@ -320,7 +320,7 @@ B. or the logical part overflows.
 
 In either case, the physical part will be updated, and the logical part will be set to 0.
 
-Keep the physical part close to local wall time may face non-monotonic problems such as updates to POSIX time that could turn time backward. HLC avoids such problems, since if 'local wall time < HLC's physical part' holds, only case B is satisfied, thus monotonicity is guaranteed.
+Keeping the physical part close to local wall time may face non-monotonic problems such as updates to POSIX time that could turn time backward. HLC avoids such problems, since if 'local wall time < HLC's physical part' holds, only case B is satisfied, thus monotonicity is guaranteed.
 
 Milvus does not support transaction, but it should guarantee the deterministic execution of the multi-way WAL. The timestamp attached to each request should
 

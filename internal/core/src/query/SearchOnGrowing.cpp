@@ -34,12 +34,6 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     // step 1: binary search to find the barrier of the snapshot
     // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
-#if 0
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    Assert(bitmap_holder);
-    auto bitmap = bitmap_holder->bitmap_ptr;
-#endif
-
     // step 2.1: get meta
     // step 2.2: get which vector field to search
     auto vecfield_offset = info.field_offset_;
@@ -133,12 +127,6 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     auto metric_type = info.metric_type_;
     // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
-#if 0
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    Assert(bitmap_holder);
-    auto bitmap = bitmap_holder->bitmap_ptr;
-#endif
-
     // step 2.1: get meta
     // step 2.2: get which vector field to search
     auto vecfield_offset = info.field_offset_;
@@ -153,10 +141,9 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     query::dataset::SearchDataset search_dataset{metric_type, num_queries, topk, round_decimal, dim, query_data};
 
     auto vec_ptr = record.get_field_data<BinaryVector>(vecfield_offset);
-
     auto max_indexed_id = 0;
-    // step 4: brute force search where small indexing is unavailable
 
+    // step 4: brute force search where small indexing is unavailable
     auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
     auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
     SubSearchResult final_result(num_queries, topk, metric_type, round_decimal);

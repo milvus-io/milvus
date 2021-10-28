@@ -56,7 +56,6 @@ type Server struct {
 
 // Run initializes and starts IndexNode's grpc service.
 func (s *Server) Run() error {
-
 	if err := s.init(); err != nil {
 		return err
 	}
@@ -69,7 +68,6 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
-
 	defer s.loopWg.Done()
 
 	log.Debug("IndexNode", zap.String("network address", Params.Address), zap.Int("network port: ", grpcPort))
@@ -94,7 +92,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err
 	}
-
 }
 
 // init initializes IndexNode's grpc service.

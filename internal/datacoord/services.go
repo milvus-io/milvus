@@ -476,7 +476,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	channels := dresp.GetVirtualChannelNames()
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	for _, c := range channels {
-		channelInfo := s.GetVChanPositions(c, collectionID, false)
+		channelInfo := s.GetVChanPositions(c, collectionID, true)
 		channelInfos = append(channelInfos, channelInfo)
 	}
 

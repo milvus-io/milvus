@@ -246,6 +246,14 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 	return ret.(*commonpb.Status), err
 }
 
+// FlushSegments notifies DataNode to flush the segments req provids. The flush tasks are async to this
+//  rpc, DataNode will flush the segments in the background.
+//
+// Return UnexpectedError code in status:
+//     If DataNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY
+//     If DataNode doesn't find the correspounding segmentID in its memeory replica
+// Return Success code in status and trigers background flush:
+//     Log an info log if a segment is under flushing
 func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()

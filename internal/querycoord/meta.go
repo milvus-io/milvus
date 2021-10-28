@@ -37,6 +37,7 @@ const (
 	segmentMetaPrefix             = "queryCoord-segmentMeta"
 	queryChannelMetaPrefix        = "queryCoord-queryChannel"
 	sealedSegmentChangeInfoPrefix = "queryCoord-sealedSegmentChangeInfo"
+	globalQuerySeekPositionPrefix = "queryCoord-globalQuerySeekPosition"
 )
 
 type col2SegmentInfos = map[UniqueID][]*querypb.SegmentInfo
@@ -100,6 +101,7 @@ type MetaReplica struct {
 	queryStreams      map[UniqueID]msgstream.MsgStream
 	streamMu          sync.RWMutex
 
+	globalSeekPosition *internalpb.MsgPosition
 	//partitionStates map[UniqueID]*querypb.PartitionStates
 }
 
@@ -109,6 +111,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAll
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
 	queryMsgStream := make(map[UniqueID]msgstream.MsgStream)
+	position := &internalpb.MsgPosition{}
 
 	m := &MetaReplica{
 		ctx:         childCtx,
@@ -117,10 +120,11 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAll
 		msFactory:   factory,
 		idAllocator: idAllocator,
 
-		collectionInfos:   collectionInfos,
-		segmentInfos:      segmentInfos,
-		queryChannelInfos: queryChannelInfos,
-		queryStreams:      queryMsgStream,
+		collectionInfos:    collectionInfos,
+		segmentInfos:       segmentInfos,
+		queryChannelInfos:  queryChannelInfos,
+		queryStreams:       queryMsgStream,
+		globalSeekPosition: position,
 	}
 
 	err := m.reloadFromKV()
@@ -181,6 +185,15 @@ func (m *MetaReplica) reloadFromKV() error {
 			return err
 		}
 		m.queryChannelInfos[collectionID] = queryChannelInfo
+	}
+	globalSeekPosValue, err := m.client.Load(globalQuerySeekPositionPrefix)
+	if err == nil {
+		position := &internalpb.MsgPosition{}
+		err = proto.Unmarshal([]byte(globalSeekPosValue), position)
+		if err != nil {
+			return err
+		}
+		m.globalSeekPosition = position
 	}
 	//TODO::update partition states
 
@@ -399,6 +412,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 	}
 
 	queryChannelInfosMap := make(map[UniqueID]*querypb.QueryChannelInfo)
+	var globalSeekPositionTmp *internalpb.MsgPosition
 	for collectionID, segmentChangeInfos := range col2SegmentChangeInfos {
 		// get msgStream to produce sealedSegmentChangeInfos to query channel
 		queryChannelInfo, messageIDInfos, err := m.sendSealedSegmentChangeInfos(collectionID, segmentChangeInfos)
@@ -438,6 +452,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		}
 		queryChannelInfo.GlobalSealedSegments = globalSealedSegmentInfos
 		queryChannelInfosMap[collectionID] = queryChannelInfo
+		globalSeekPositionTmp = queryChannelInfo.SeekPosition
 	}
 
 	saveKvs := make(map[string]string)
@@ -460,6 +475,11 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		channelKey := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
 		saveKvs[channelKey] = string(channelInfoBytes)
 	}
+	seekPos, err := proto.Marshal(globalSeekPositionTmp)
+	if err != nil {
+		return col2SegmentChangeInfos, err
+	}
+	saveKvs[globalQuerySeekPositionPrefix] = string(seekPos)
 
 	// save segmentChangeInfo into etcd, query node will deal the changeInfo if the msgID key exist in etcd
 	// avoid the produce process success but save meta to etcd failed
@@ -474,7 +494,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		saveKvs[changeInfoKey] = string(changeInfoBytes)
 	}
 
-	err := m.client.MultiSave(saveKvs)
+	err = m.client.MultiSave(saveKvs)
 	if err != nil {
 		log.Error("updateGlobalSealedSegmentInfos: save info to etcd error", zap.Error(err))
 		return col2SegmentChangeInfos, err
@@ -492,6 +512,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 	for collectionID, channelInfo := range queryChannelInfosMap {
 		m.queryChannelInfos[collectionID] = channelInfo
 	}
+	m.globalSeekPosition = globalSeekPositionTmp
 	m.channelMu.Unlock()
 
 	return col2SegmentChangeInfos, nil
@@ -563,6 +584,11 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 	}
 	channelKey := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
 	saveKvs[channelKey] = string(channelInfoBytes)
+	seekPos, err := proto.Marshal(queryChannelInfo.SeekPosition)
+	if err != nil {
+		return col2SealedSegmentChangeInfos{collectionID: segmentChangeInfos}, err
+	}
+	saveKvs[globalQuerySeekPositionPrefix] = string(seekPos)
 
 	// save segmentChangeInfo into etcd, query node will deal the changeInfo if the msgID key exist in etcd
 	// avoid the produce process success but save meta to etcd failed
@@ -594,6 +620,7 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 
 	m.channelMu.Lock()
 	m.queryChannelInfos[collectionID] = queryChannelInfo
+	m.globalSeekPosition = queryChannelInfo.SeekPosition
 	m.channelMu.Unlock()
 
 	return col2SealedSegmentChangeInfos{collectionID: segmentChangeInfos}, nil
@@ -890,6 +917,10 @@ func (m *MetaReplica) getQueryChannelInfoByID(collectionID UniqueID) (*querypb.Q
 	// set info.collectionID from 0 to realID
 	info.CollectionID = collectionID
 	m.queryChannelInfos[collectionID] = info
+	info.SeekPosition = m.globalSeekPosition
+	if info.SeekPosition != nil {
+		info.SeekPosition.ChannelName = info.QueryChannelID
+	}
 	return proto.Clone(info).(*querypb.QueryChannelInfo), nil
 }
 

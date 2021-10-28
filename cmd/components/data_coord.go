@@ -19,6 +19,7 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
@@ -49,6 +50,7 @@ func (s *DataCoord) Run() error {
 	if err := s.svr.Run(); err != nil {
 		return err
 	}
+	log.Debug("DataCoord successfully started")
 	return nil
 }
 

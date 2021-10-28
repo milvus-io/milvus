@@ -439,6 +439,11 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 
+		seg.setType(segmentTypeIndexing)
+		rsp, err = node.GetSegmentInfo(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+
 		seg.setType(-100)
 		rsp, err = node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)

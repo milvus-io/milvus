@@ -155,14 +155,14 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	// 2. do predelete
+	// 2. do preDelete
 	for segmentID, pks := range delData.deleteIDs {
 		segment := iNode.getSegmentInReplica(segmentID)
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
 	}
 
-	// 2. do delete
+	// 3. do delete
 	for segmentID := range delData.deleteIDs {
 		wg.Add(1)
 		go iNode.delete(delData, segmentID, &wg)

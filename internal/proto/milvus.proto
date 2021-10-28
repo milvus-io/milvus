@@ -663,6 +663,8 @@ message QuerySegmentInfo {
   int64 num_rows = 5;
   string index_name = 6;
   int64 indexID = 7;
+  int64 nodeID = 8;
+  common.SegmentState state = 9;
 }
 
 message GetQuerySegmentInfoRequest {

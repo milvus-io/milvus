@@ -25,6 +25,7 @@ def setup_logging(config_path=LOG_CONFIG_PATH, default_level=logging.INFO):
 
 class GlobalParams:
     log_file_path = FILE_NAME
+    config_path = ''
     metric = None
 
 
