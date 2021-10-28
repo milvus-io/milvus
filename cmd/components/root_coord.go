@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
@@ -53,6 +54,7 @@ func (rc *RootCoord) Run() error {
 	if err := rc.svr.Run(); err != nil {
 		return err
 	}
+	log.Debug("RootCoord successfully started")
 	return nil
 }
 

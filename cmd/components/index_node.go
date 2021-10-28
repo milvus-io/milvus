@@ -19,6 +19,7 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
@@ -47,6 +48,7 @@ func (n *IndexNode) Run() error {
 	if err := n.svr.Run(); err != nil {
 		return err
 	}
+	log.Debug("IndexNode successfully started")
 	return nil
 }
 
