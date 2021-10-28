@@ -31,7 +31,7 @@ minio:
   address: localhost
   port: 9000   # Port of MinIO/S3
   accessKeyID: minioadmin
-  secretAccessKey: minioadmin
+  secretAccessKey: minioadmin # MinIO/S3 encryption string
   useSSL: false
   bucketName: "a-bucket"
   rootPath: files
