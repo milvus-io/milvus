@@ -243,6 +243,7 @@ func (s *Server) SetRootCoord(m types.RootCoord) error {
 	return nil
 }
 
+// SetDataCoord sets the QueryCoord's client for QueryNode component.
 func (s *Server) SetDataCoord(d types.DataCoord) error {
 	s.queryCoord.SetDataCoord(d)
 	return nil
