@@ -605,6 +605,7 @@ func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 	ms.AsConsumerWithPosition(channels, subName, mqclient.SubscriptionPositionEarliest)
 }
 
+// AsConsumerWithPosition subscribes channels as consumer for a MsgStream and seeks to a certain position.
 func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
