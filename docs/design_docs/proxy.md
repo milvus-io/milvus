@@ -153,10 +153,10 @@ nodes will store the data in the object storage in the unit of segment (in the a
 be divided into multiple small files for writing). In Milvus, segment is uniquely identified by segment ID, and the
 allocation logic of segment ID is the responsibility of the Data Coordinator. The SegmentID to which each row of data is
 written needs to be determined before writing to DmChannel. For a write operation, the proxy will hash each row of data
-again according to the hash value of its primary key, and then determine which DmChannel each row of data enters. After
+again according to the hash value of its primary key, and then determine into which DmChannel each row of data enters. After
 collecting the number of pieces to be written by each DmChannel, apply to the data coordinator for which SegmentIDs the
-newly written data of these dmchannels belong. In the specific implementation, the proxy needs to preallocate some
-quotas to the Data Coordinator to avoid frequent direct GPRC communication with the Data Coordinator.
+newly written data of these dmchannels belong. In the specific implementation, the proxy need to preallocate some
+quotas to the Data Coordinator to avoid frequent direct GRPC communication with the Data Coordinator.
 
 One consideration for uniformly assigning SegmentIDs by Data Coordinator is that Data Coordinator is responsible for
 coordinating the total number of each segment not to be too large, and the location is near a water level, so that the
