@@ -245,6 +245,7 @@ func (node *QueryNode) Stop() error {
 	return nil
 }
 
+// UpdateStateCode updata the state of query node, which can be initializing, healthy, and abnormal
 func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }
