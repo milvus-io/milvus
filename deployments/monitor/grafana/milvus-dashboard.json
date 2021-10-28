@@ -3630,7 +3630,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-second rate of watch_dm_channels as measured over the last 5 minutes",
+      "description": "per-minute rate of watch_dm_channels",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
