@@ -57,5 +57,11 @@ func GetContainerMemUsed() (uint64, error) {
 	if stats.Memory == nil || stats.Memory.Usage == nil {
 		return 0, errors.New("cannot find memory usage info from cGroups")
 	}
-	return stats.Memory.Usage.Usage, nil
+	// ref: <https://github.com/docker/cli/blob/e57b5f78de635e6e2b688686d10b830c4747c4dc/cli/command/container/stats_helpers.go#L239>
+	inactiveFile := stats.Memory.InactiveFile
+	usage := stats.Memory.Usage.Usage
+	if inactiveFile < usage {
+		return usage - inactiveFile, nil
+	}
+	return usage, nil
 }
