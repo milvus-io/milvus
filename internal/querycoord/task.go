@@ -1934,7 +1934,7 @@ func assignInternalTask(ctx context.Context,
 			node2Segments[nodeID] = append(node2Segments[nodeID], loadSegmentRequests[index])
 			sizeCounts[nodeID] = sizeOfReq
 		} else {
-			if sizeCounts[nodeID]+sizeOfReq > 2097152 {
+			if sizeCounts[nodeID]+sizeOfReq > MaxSendSizeToEtcd {
 				node2Segments[nodeID] = append(node2Segments[nodeID], loadSegmentRequests[index])
 				sizeCounts[nodeID] = sizeOfReq
 			} else {
