@@ -127,12 +127,6 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     auto metric_type = info.metric_type_;
     // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
-#if 0
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    Assert(bitmap_holder);
-    auto bitmap = bitmap_holder->bitmap_ptr;
-#endif
-
     // step 2.1: get meta
     // step 2.2: get which vector field to search
     auto vecfield_offset = info.field_offset_;
