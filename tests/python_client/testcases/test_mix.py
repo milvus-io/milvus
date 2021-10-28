@@ -18,7 +18,6 @@ top_k = 1
 nprobe = 1
 epsilon = 0.001
 nlist = 128
-# index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 16384}, "metric_type": "L2"}
 
 
