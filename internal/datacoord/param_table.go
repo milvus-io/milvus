@@ -182,15 +182,15 @@ func (p *ParamTable) initCollectionBinlogSubPath() {
 }
 
 func (p *ParamTable) initSegmentMaxSize() {
-	p.SegmentMaxSize = p.ParseFloat("datacoord.segment.maxSize")
+	p.SegmentMaxSize = p.ParseFloatWithDefault("dataCoord.segment.maxSize", 512.0)
 }
 
 func (p *ParamTable) initSegmentSealProportion() {
-	p.SegmentSealProportion = p.ParseFloat("datacoord.segment.sealProportion")
+	p.SegmentSealProportion = p.ParseFloatWithDefault("dataCoord.segment.sealProportion", 0.75)
 }
 
 func (p *ParamTable) initSegAssignmentExpiration() {
-	p.SegAssignmentExpiration = p.ParseInt64("datacoord.segment.assignmentExpiration")
+	p.SegAssignmentExpiration = p.ParseInt64WithDefault("dataCoord.segment.assignmentExpiration", 2000)
 }
 
 func (p *ParamTable) initClusterMsgChannelPrefix() {
