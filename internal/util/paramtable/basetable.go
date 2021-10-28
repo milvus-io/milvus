@@ -314,7 +314,7 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.params.Load(strings.ToLower(key))
 }
 
-func (gp *BaseTable) LoadWithDefault(key string, defaultValue string) (string, error) {
+func (gp *BaseTable) LoadWithDefault(key string, defaultValue string) string {
 	return gp.params.LoadWithDefault(strings.ToLower(key), defaultValue)
 }
 
@@ -376,10 +376,7 @@ func (gp *BaseTable) Save(key, value string) error {
 }
 
 func (gp *BaseTable) ParseBool(key string, defaultValue bool) bool {
-	valueStr, err := gp.LoadWithDefault(key, strconv.FormatBool(defaultValue))
-	if err != nil {
-		panic(err)
-	}
+	valueStr := gp.LoadWithDefault(key, strconv.FormatBool(defaultValue))
 	value, err := strconv.ParseBool(valueStr)
 	if err != nil {
 		panic(err)
@@ -400,10 +397,7 @@ func (gp *BaseTable) ParseFloat(key string) float64 {
 }
 
 func (gp *BaseTable) ParseFloatWithDefault(key string, defaultValue float64) float64 {
-	valueStr, err := gp.LoadWithDefault(key, fmt.Sprintf("%f", defaultValue))
-	if err != nil {
-		panic(err)
-	}
+	valueStr := gp.LoadWithDefault(key, fmt.Sprintf("%f", defaultValue))
 	value, err := strconv.ParseFloat(valueStr, 64)
 	if err != nil {
 		panic(err)
@@ -424,10 +418,7 @@ func (gp *BaseTable) ParseInt64(key string) int64 {
 }
 
 func (gp *BaseTable) ParseInt64WithDefault(key string, defaultValue int64) int64 {
-	valueStr, err := gp.LoadWithDefault(key, strconv.FormatInt(defaultValue, 10))
-	if err != nil {
-		panic(err)
-	}
+	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(defaultValue, 10))
 	value, err := strconv.ParseInt(valueStr, 10, 64)
 	if err != nil {
 		panic(err)
@@ -448,10 +439,7 @@ func (gp *BaseTable) ParseInt32(key string) int32 {
 }
 
 func (gp *BaseTable) ParseInt32WithDefault(key string, defaultValue int32) int32 {
-	valueStr, err := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
-	if err != nil {
-		panic(err)
-	}
+	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
 	value, err := strconv.ParseInt(valueStr, 10, 32)
 	if err != nil {
 		panic(err)
@@ -472,10 +460,7 @@ func (gp *BaseTable) ParseInt(key string) int {
 }
 
 func (gp *BaseTable) ParseIntWithDefault(key string, defaultValue int) int {
-	valueStr, err := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
-	if err != nil {
-		panic(err)
-	}
+	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
 	value, err := strconv.Atoi(valueStr)
 	if err != nil {
 		panic(err)

@@ -335,11 +335,9 @@ func (p *ParamTable) initSegcoreChunkRows() {
 }
 
 func (p *ParamTable) initKnowhereSimdType() {
-	simdType, err := p.LoadWithDefault("knowhere.simdType", "auto")
-	if err != nil {
-		panic(err)
-	}
+	simdType := p.LoadWithDefault("knowhere.simdType", "auto")
 	p.SimdType = simdType
+	log.Debug("initialize the knowhere simd type", zap.String("simd_type", p.SimdType))
 }
 
 func (p *ParamTable) initRoleName() {
