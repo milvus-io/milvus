@@ -76,8 +76,6 @@ type queryCollection struct {
 	globalSegmentManager *globalSealedSegmentManager
 }
 
-type ResultEntityIds []UniqueID
-
 func newQueryCollection(releaseCtx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
