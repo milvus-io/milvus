@@ -56,10 +56,9 @@ func (gp *BaseTable) Init() {
 	gp.configDir = gp.initConfPath()
 	log.Debug("config directory", zap.String("configDir", gp.configDir))
 
-	gp.loadFromMilvusYaml()
-
-	// TODO remove once we change helm deployment
 	gp.loadFromCommonYaml()
+
+	gp.loadFromMilvusYaml()
 
 	gp.tryloadFromEnv()
 

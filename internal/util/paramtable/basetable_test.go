@@ -141,10 +141,9 @@ func TestBaseTable_ConfDir(t *testing.T) {
 	baseParams.configDir = "./"
 
 	assert.Panics(t, func() { baseParams.loadFromMilvusYaml() })
-	assert.False(t, baseParams.loadFromCommonYaml())
 
 	baseParams.configDir = rightConfig
-	assert.True(t, baseParams.loadFromCommonYaml())
+	baseParams.loadFromMilvusYaml()
 }
 
 func TestBateTable_ConfPath(t *testing.T) {
