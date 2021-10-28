@@ -683,29 +683,30 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 	flushed := make([]*datapb.SegmentInfo, 0)
 	unflushed := make([]*datapb.SegmentInfo, 0)
 	var seekPosition *internalpb.MsgPosition
-	var useUnflushedPosition bool
 	for _, s := range segments {
 		if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
 			flushed = append(flushed, trimSegmentInfo(s.SegmentInfo))
-			if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
+			if seekPosition == nil || (s.DmlPosition.Timestamp < seekPosition.Timestamp) {
 				seekPosition = s.DmlPosition
 			}
 			continue
 		}
 
-		if s.DmlPosition == nil {
+		if s.DmlPosition == nil { // segment position all nil
 			continue
 		}
 
 		unflushed = append(unflushed, trimSegmentInfo(s.SegmentInfo))
 
-		if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
-			useUnflushedPosition = true
-			if !seekFromStartPosition {
-				seekPosition = s.DmlPosition
-			} else {
-				seekPosition = s.StartPosition
-			}
+		segmentPosition := s.DmlPosition
+		if seekFromStartPosition {
+			// need to use start position when load collection/partition, querynode does not support seek from checkpoint yet
+			// TODO silverxia remove seek from start logic after checkpoint supported in querynode
+			segmentPosition = s.StartPosition
+		}
+
+		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
+			seekPosition = segmentPosition
 		}
 	}
 	// use collection start position when segment position is not found

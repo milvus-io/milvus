@@ -1179,7 +1179,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 	}
 
-	t.Run("test get largest position of flushed segments as seek position", func(t *testing.T) {
+	t.Run("test get earliest position of flushed segments as seek position", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
@@ -1204,7 +1204,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegments()))
 		assert.ElementsMatch(t, []*datapb.SegmentInfo{trimSegmentInfo(seg1), trimSegmentInfo(seg2)}, resp.GetChannels()[0].GetFlushedSegments())
-		assert.EqualValues(t, 20, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
+		assert.EqualValues(t, 10, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
 	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
@@ -1232,6 +1232,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
+		assert.EqualValues(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
 	t.Run("test get binlogs", func(t *testing.T) {
