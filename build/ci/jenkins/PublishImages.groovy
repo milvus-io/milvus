@@ -55,6 +55,8 @@ pipeline {
                         withCredentials([usernamePassword(credentialsId: "${env.HARBOR_CREDENTIAL_ID}", usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
                             sh 'docker login harbor.zilliz.cc -u ${HARBOR_USERNAME} -p ${HARBOR_PASSWORD}'
                             sh """
+                                export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
+                                export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}"
                                 docker push \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                 docker logout
                             """
