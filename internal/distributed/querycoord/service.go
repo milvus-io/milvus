@@ -248,6 +248,7 @@ func (s *Server) SetDataCoord(d types.DataCoord) error {
 	return nil
 }
 
+// GetComponentStates gets the component states of QueryCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.queryCoord.GetComponentStates(ctx)
 }
