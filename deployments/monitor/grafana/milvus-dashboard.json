@@ -2929,10 +2929,10 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_list_of_proxy{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (client_id)",
+          "expr": "sum(milvus_rootcoord_list_of_proxy{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{client_id}}",
+          "legendFormat": "{{app_kubernetes_io_instance}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
