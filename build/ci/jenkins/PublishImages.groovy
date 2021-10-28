@@ -23,7 +23,7 @@ pipeline {
         IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
         DOCKER_CREDENTIALS_ID = "f0aacc8e-33f2-458a-ba9e-2c44f431b4d2"
         TARGET_REPO = "milvusdb"
-        HARBAR_CREDENTIAL_ID = "harbor-zilliz-cc-registry"
+        HARBOR_CREDENTIAL_ID = "harbor-zilliz-cc-registry"
         HARBOR_REPO = "harbor.zilliz.cc"
     }
 
@@ -52,8 +52,8 @@ pipeline {
                             """
                         }
                     }
-                        withCredentials([usernamePassword(credentialsId: "${env.HARBAR_CREDENTIAL_ID}", usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
-                            sh 'docker login ${env.HARBOR_REPO} -u ${HARBOR_USERNAME} -p ${HARBOR_PASSWORD}'
+                        withCredentials([usernamePassword(credentialsId: "${env.HARBOR_CREDENTIAL_ID}", usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
+                            sh 'docker login harbor.zilliz.cc -u ${HARBOR_USERNAME} -p ${HARBOR_PASSWORD}'
                             sh """
                                 docker push \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                 docker logout
