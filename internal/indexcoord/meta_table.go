@@ -173,6 +173,11 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 	//	return fmt.Errorf("can not set lease key, index with ID = %d state is %d", indexBuildID, meta.indexMeta.State)
 	//}
 
+	if meta.indexMeta.State == commonpb.IndexState_Finished || meta.indexMeta.State == commonpb.IndexState_Failed {
+		log.Debug("This index task has been finished", zap.Int64("indexBuildID", indexBuildID),
+			zap.Any("index state", meta.indexMeta.State))
+		return nil
+	}
 	meta.indexMeta.NodeID = nodeID
 	meta.indexMeta.State = commonpb.IndexState_InProgress
 
