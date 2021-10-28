@@ -103,13 +103,13 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 	collection := fdmNode.replica.hasCollection(msg.CollectionID)
 	partition := fdmNode.replica.hasPartition(msg.PartitionID)
 	if fdmNode.loadType == loadTypeCollection && !collection {
-		log.Debug("filter invalid delete message, collection dose not exist",
+		log.Debug("filter invalid delete message, collection does not exist",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
 	if fdmNode.loadType == loadTypePartition && !partition {
-		log.Debug("filter invalid delete message, partition dose not exist",
+		log.Debug("filter invalid delete message, partition does not exist",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil
@@ -162,14 +162,14 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	collection := fdmNode.replica.hasCollection(msg.CollectionID)
 	partition := fdmNode.replica.hasPartition(msg.PartitionID)
 	if fdmNode.loadType == loadTypeCollection && !collection {
-		log.Debug("filter invalid insert message, collection dose not exist",
+		log.Debug("filter invalid insert message, collection does not exist",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
 
 	if fdmNode.loadType == loadTypePartition && !partition {
-		log.Debug("filter invalid insert message, partition dose not exist",
+		log.Debug("filter invalid insert message, partition does not exist",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil
