@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+// Client is the grpc client for Proxy
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -90,6 +91,7 @@ func (c *Client) resetConnection() {
 	c.grpcClient = nil
 }
 
+// NewClient creates a new client instance
 func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
@@ -106,6 +108,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	return client, nil
 }
 
+// Init initializes Proxy's grpc client.
 func (c *Client) Init() error {
 	Params.Init()
 	return c.connect(retry.Attempts(20))
