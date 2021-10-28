@@ -51,7 +51,7 @@ pipeline {
                                 docker logout
                             """
                         }
-                    }
+
                         withCredentials([usernamePassword(credentialsId: "${env.HARBOR_CREDENTIAL_ID}", usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
                             sh 'docker login harbor.zilliz.cc -u ${HARBOR_USERNAME} -p ${HARBOR_PASSWORD}'
                             sh """
@@ -61,6 +61,7 @@ pipeline {
                                 docker logout
                             """
                         }
+                    }
                 }
             }
         }
