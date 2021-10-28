@@ -39,6 +39,7 @@ func (s memoryKVItem) Less(than btree.Item) bool {
 	return s.key < than.(memoryKVItem).key
 }
 
+// Load loads an object with @key.
 func (kv *MemoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
@@ -77,6 +78,7 @@ func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	return keys, values, nil
 }
 
+// Save object with @key to Minio. Object value is @value.
 func (kv *MemoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -84,6 +86,7 @@ func (kv *MemoryKV) Save(key, value string) error {
 	return nil
 }
 
+// Remove delete an object with @key.
 func (kv *MemoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -92,6 +95,7 @@ func (kv *MemoryKV) Remove(key string) error {
 	return nil
 }
 
+// MultiLoad loads objects with multi @keys.
 func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
