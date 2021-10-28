@@ -6,6 +6,8 @@ import argparse
 from yaml import full_load, dump
 import config
 import utils
+import requests
+import json
 
 
 def parse_server_tag(server_tag):
