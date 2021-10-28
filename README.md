@@ -83,6 +83,7 @@ Check the requirements first.
 go: 1.15
 cmake: >=3.18
 gcc: 7.5
+protobuf: >=3.7
 ```
 
 Clone Milvus repo and build.
