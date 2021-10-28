@@ -53,5 +53,6 @@ def save(obj):
     env_doc_id = insert_or_get(md5)
     obj.env = {"id": env_doc_id, "value": vars(obj.env)}
 
+    # insert data to mongoDB
     collection = _client[DB][DOC_COLLECTION]
     collection.insert_one(vars(obj))
