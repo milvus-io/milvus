@@ -172,16 +172,7 @@ func (pt *ParamTable) initRoleName() {
 }
 
 func (pt *ParamTable) initKnowhereSimdType() {
-	simdType, err := pt.LoadWithDefault("knowhere.simdType", "auto")
-	if err != nil {
-		log.Error("failed to initialize the simd type",
-			zap.Error(err))
-
-		panic(err)
-	}
-
+	simdType := pt.LoadWithDefault("knowhere.simdType", "auto")
 	pt.SimdType = simdType
-
-	log.Debug("initialize the knowhere simd type",
-		zap.String("simd_type", pt.SimdType))
+	log.Debug("initialize the knowhere simd type", zap.String("simd_type", pt.SimdType))
 }

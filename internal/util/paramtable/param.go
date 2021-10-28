@@ -80,18 +80,12 @@ func (p *BaseParamTable) initUseEmbedEtcd() {
 }
 
 func (p *BaseParamTable) initConfigPath() {
-	addr, err := p.LoadWithDefault("etcd.config.path", "")
-	if err != nil {
-		panic(err)
-	}
+	addr := p.LoadWithDefault("etcd.config.path", "")
 	p.EtcdConfigPath = addr
 }
 
 func (p *BaseParamTable) initEtcdDataDir() {
-	addr, err := p.LoadWithDefault("etcd.data.dir", "default.etcd")
-	if err != nil {
-		panic(err)
-	}
+	addr := p.LoadWithDefault("etcd.data.dir", "default.etcd")
 	p.EtcdDataDir = addr
 }
 
