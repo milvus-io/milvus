@@ -38,7 +38,13 @@ class MilvusOperator(object):
         return d_configs._dict if d_configs._dict is not None else d_configs
 
     def install(self, configs, template=None):
-        """apply new custom resource object to install milvus """
+        """
+        Method: apply a custom resource object to install milvus
+        Params:
+            configs: a dict type of configurations that describe the properties of milvus to be deployed
+            template: Optional. Pass the template file location if there is a template to apply
+        Return: custom resource object instance
+        """
         new_configs = self._update_configs(configs, template)
         print(new_configs)
         namespace = new_configs['metadata'].get('namespace', 'default')
