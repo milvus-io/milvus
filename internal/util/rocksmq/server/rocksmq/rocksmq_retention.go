@@ -28,6 +28,7 @@ import (
 
 // RocksmqRetentionTimeInMinutes is the time of retention
 var RocksmqRetentionTimeInMinutes int64
+var RocksmqRetentionTopicCheckPeriod int64
 
 // RocksmqRetentionSizeInMB is the size of retention
 var RocksmqRetentionSizeInMB int64
@@ -285,12 +286,11 @@ func (ri *retentionInfo) retention() error {
 	for {
 		select {
 		case <-ri.closeCh:
-			log.Debug("Rocksmq retention finish!")
+			log.Warn("Rocksmq retention routine exit!")
 			return nil
 		case t := <-ticker.C:
 			timeNow := t.Unix()
-			checkTime := atomic.LoadInt64(&RocksmqRetentionTimeInMinutes) * MINUTE / 10
-			log.Debug("In ticker: ", zap.Any("ticker", timeNow))
+
 			ri.mutex.RLock()
 			for _, topic := range ri.topics {
 				lastRetentionTsKey := LastRetTsTitle + topic
@@ -304,8 +304,8 @@ func (ri *retentionInfo) retention() error {
 					log.Warn("Can't parse lastRetentionTsVal to int", zap.Any("lastRetentionTsKey", lastRetentionTsKey))
 					continue
 				}
-				if lastRetentionTs+checkTime < timeNow {
-					err := ri.newExpiredCleanUp(topic)
+				if lastRetentionTs+RocksmqRetentionTopicCheckPeriod < timeNow {
+					err := ri.expiredCleanUp(topic)
 					if err != nil {
 						log.Warn("Retention expired clean failed", zap.Any("error", err))
 					}
@@ -323,7 +323,8 @@ func (ri *retentionInfo) Stop() {
 	})
 }
 
-func (ri *retentionInfo) newExpiredCleanUp(topic string) error {
+// Delete expired messages in specific topic
+func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	ll, ok := topicMu.Load(topic)
 	if !ok {

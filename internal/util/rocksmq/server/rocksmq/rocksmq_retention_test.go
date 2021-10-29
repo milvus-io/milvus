@@ -53,6 +53,7 @@ func genRandonName() string {
 func TestRmqRetention(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
+	atomic.StoreInt64(&RocksmqRetentionTopicCheckPeriod, 0)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 	defer atomic.StoreInt64(&TickerTimeInSeconds, 6)
 	kvPath := retentionPath + kvPathSuffix
@@ -145,6 +146,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 
 func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
+	atomic.StoreInt64(&RocksmqRetentionTopicCheckPeriod, 0)
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqPageSize, 100)
 	kvPath := retentionPath + "kv_" + genRandonName()
@@ -314,9 +316,10 @@ func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 	pageMsgPrefix, _ := constructKey(PageMsgSizeTitle, topicName)
 	pageMsgKey := pageMsgPrefix + "/dummy"
 	rmq.kv.Save(pageMsgKey, "0")
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 
-	//////////////////////////////////////////////////
+	/////////
+	/////////////////////////////////////////
 	rmq.retentionInfo.kv.DB = nil
 	wg.Add(1)
 	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
@@ -330,20 +333,21 @@ func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
 	//////////////////////////////////////////////////
 	topicMu.Delete(topicName)
 	topicMu.Store(topicName, topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 
 	//////////////////////////////////////////////////
 	topicMu.Delete(topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 
 	//////////////////////////////////////////////////
 	rmq.retentionInfo.ackedInfo.Delete(topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
+	rmq.retentionInfo.expiredCleanUp(topicName)
 }
 
 func TestRmqRetention_Complex(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 1)
+	atomic.StoreInt64(&RocksmqRetentionTopicCheckPeriod, 0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	kvPath := retentionPath + "kv_com"
 	defer os.RemoveAll(kvPath)
@@ -393,7 +397,7 @@ func TestRmqRetention_Complex(t *testing.T) {
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
 
-	checkTimeInterval := atomic.LoadInt64(&RocksmqRetentionTimeInMinutes) * MINUTE / 10
+	checkTimeInterval := atomic.LoadInt64(&RocksmqRetentionTopicCheckPeriod)
 	time.Sleep(time.Duration(checkTimeInterval*2) * time.Second)
 	// Seek to a previous consumed message, the message should be clean up
 	log.Debug("cMsg", zap.Any("id", cMsgs[10].MsgID))
@@ -409,6 +413,7 @@ func TestRmqRetention_Complex(t *testing.T) {
 func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
+	atomic.StoreInt64(&RocksmqRetentionTopicCheckPeriod, 0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	kvPath := retentionPath + "kv_com1"
 	os.RemoveAll(kvPath)

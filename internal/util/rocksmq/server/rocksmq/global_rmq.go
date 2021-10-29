@@ -65,8 +65,11 @@ func InitRocksMQ() error {
 		_ = idAllocator.Initialize()
 
 		atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, params.ParseInt64("rocksmq.retentionTimeInMinutes"))
+		atomic.StoreInt64(&RocksmqRetentionTopicCheckPeriod, params.ParseInt64("rocksmq.retentionTopicCheckPeriod"))
 		atomic.StoreInt64(&RocksmqRetentionSizeInMB, params.ParseInt64("rocksmq.retentionSizeInMB"))
-		log.Debug("Rocksmq retention: ", zap.Any("RocksmqRetentionTimeInMinutes", RocksmqRetentionTimeInMinutes), zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB))
+		log.Debug("Rocksmq retention: ", zap.Any("RocksmqRetentionTimeInMinutes", RocksmqRetentionTimeInMinutes),
+			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB),
+			zap.Any("RocksmqRetentionTopicCheckPeriod", RocksmqRetentionTopicCheckPeriod))
 		Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
 		if err != nil {
 			panic(err)
