@@ -118,7 +118,10 @@ func (node *QueryNode) Register() error {
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 	// start liveness check
 	go node.session.LivenessCheck(node.queryNodeLoopCtx, func() {
-		log.Fatal("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		if err := node.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
 	})
 
 	Params.QueryNodeID = node.session.ServerID

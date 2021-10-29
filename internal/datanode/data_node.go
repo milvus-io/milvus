@@ -173,7 +173,10 @@ func (node *DataNode) Register() error {
 	go node.StartWatchChannels(node.ctx)
 	// Start liveness check
 	go node.session.LivenessCheck(node.ctx, func() {
-		log.Fatal("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		if err := node.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
 	})
 
 	Params.initMsgChannelSubName()

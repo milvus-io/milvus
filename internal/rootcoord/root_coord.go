@@ -1103,6 +1103,9 @@ func (c *Core) Start() error {
 		go c.checkFlushedSegmentsLoop()
 		go c.session.LivenessCheck(c.ctx, func() {
 			log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
+			if err := c.Stop(); err != nil {
+				log.Fatal("failed to stop server", zap.Error(err))
+			}
 		})
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
