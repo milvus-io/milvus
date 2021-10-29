@@ -85,7 +85,7 @@ func NewChannelManager(kv kv.TxnKV, posProvider positionProvider, options ...Cha
 	return c, nil
 }
 
-// Startup adjust the channel store according to current cluster states
+// Startup adjusts the channel store according to current cluster states
 func (c *ChannelManager) Startup(nodes []int64) error {
 	channels := c.store.GetNodesChannels()
 	olds := make([]int64, 0, len(channels))
