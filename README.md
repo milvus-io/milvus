@@ -155,7 +155,7 @@ Blazing fast similarity search, substructure search, or superstructure search fo
 
 ## Bootcamps
 
-Milvus [bootcamp](https://github.com/milvus-io/bootcamp) are designed to expose users to both the simplicity and depth of the vector database. Discover how to run benchmark tests as well as build similarity search applications spanning chatbots, recommendation systems, reverse image search, molecular search, and much more.
+Milvus [bootcamp](https://github.com/milvus-io/bootcamp) is designed to expose users to both the simplicity and depth of the vector database. Discover how to run benchmark tests as well as build similarity search applications spanning chatbots, recommendation systems, reverse image search, molecular search, and much more.
 
 ## Contributing
 
