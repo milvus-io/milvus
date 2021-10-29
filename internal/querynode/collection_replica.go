@@ -51,6 +51,7 @@ type ReplicaInterface interface {
 	removeCollection(collectionID UniqueID) error
 	// getCollectionByID gets the collection which id is collectionID
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
+	// hasCollection checks if collectionReplica has the collection which id is collectionID
 	hasCollection(collectionID UniqueID) bool
 	getCollectionNum() int
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
