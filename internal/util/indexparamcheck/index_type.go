@@ -11,6 +11,7 @@
 
 package indexparamcheck
 
+// IndexType string.
 type IndexType = string
 
 const (
