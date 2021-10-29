@@ -410,9 +410,9 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	}
 
 	serviceTime := q.getServiceableTime()
+	gt, _ := tsoutil.ParseTS(guaranteeTs)
+	st, _ := tsoutil.ParseTS(serviceTime)
 	if guaranteeTs > serviceTime && len(collection.getVChannels()) > 0 {
-		gt, _ := tsoutil.ParseTS(guaranteeTs)
-		st, _ := tsoutil.ParseTS(serviceTime)
 		log.Debug("query node::receiveQueryMsg: add to unsolvedMsg",
 			zap.Any("collectionID", q.collectionID),
 			zap.Any("sm.GuaranteeTimestamp", gt),
@@ -435,6 +435,9 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 
 	log.Debug("doing query in receiveQueryMsg...",
 		zap.Int64("collectionID", collectionID),
+		zap.Any("sm.GuaranteeTimestamp", gt),
+		zap.Any("serviceTime", st),
+		zap.Any("delta seconds", (guaranteeTs-serviceTime)/(1000*1000*1000)),
 		zap.Int64("msgID", msg.ID()),
 		zap.String("msgType", msgTypeStr),
 	)
@@ -850,6 +853,11 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (q *queryCollection) search(msg queryMsg) error {
+	q.streaming.replica.queryRLock()
+	q.historical.replica.queryRLock()
+	defer q.historical.replica.queryRUnlock()
+	defer q.streaming.replica.queryRUnlock()
+
 	searchMsg := msg.(*msgstream.SearchMsg)
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()

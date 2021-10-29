@@ -358,6 +358,10 @@ func (node *QueryNode) adjustByChangeInfo(segmentChangeInfos *querypb.SealedSegm
 		return err
 	}
 
+	node.streaming.replica.queryLock()
+	node.historical.replica.queryLock()
+	defer node.streaming.replica.queryUnlock()
+	defer node.historical.replica.queryUnlock()
 	for _, info := range segmentChangeInfos.Infos {
 		// For online segments:
 		for _, segmentInfo := range info.OnlineSegments {
@@ -366,6 +370,7 @@ func (node *QueryNode) adjustByChangeInfo(segmentChangeInfos *querypb.SealedSegm
 			if hasGrowingSegment {
 				err := node.streaming.replica.removeSegment(segmentInfo.SegmentID)
 				if err != nil {
+
 					return err
 				}
 				log.Debug("remove growing segment in adjustByChangeInfo",
