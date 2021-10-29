@@ -13,8 +13,9 @@ type DataCoord interface {
 
   // Flush notifies DataCoord to flush all current growing segments of specified Collection
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
-
+	// AssignSegmentID applies allocations for specified Coolection/Partition and related Channel Name(Virtial Channel)
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
+  // GetSegmentStates requests segment state information
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)

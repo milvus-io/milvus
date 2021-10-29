@@ -179,15 +179,15 @@ func (p *ParamTable) initDmlChannelName() {
 }
 
 func (p *ParamTable) initDmlChannelNum() {
-	p.DmlChannelNum = p.ParseInt64("rootcoord.dmlChannelNum")
+	p.DmlChannelNum = p.ParseInt64WithDefault("rootCoord.dmlChannelNum", 256)
 }
 
 func (p *ParamTable) initMaxPartitionNum() {
-	p.MaxPartitionNum = p.ParseInt64("rootcoord.maxPartitionNum")
+	p.MaxPartitionNum = p.ParseInt64WithDefault("rootCoord.maxPartitionNum", 4096)
 }
 
 func (p *ParamTable) initMinSegmentSizeToEnableIndex() {
-	p.MinSegmentSizeToEnableIndex = p.ParseInt64("rootcoord.minSegmentSizeToEnableIndex")
+	p.MinSegmentSizeToEnableIndex = p.ParseInt64WithDefault("rootCoord.minSegmentSizeToEnableIndex", 1024)
 }
 
 func (p *ParamTable) initDefaultPartitionName() {
@@ -207,11 +207,11 @@ func (p *ParamTable) initDefaultIndexName() {
 }
 
 func (p *ParamTable) initTimeout() {
-	p.Timeout = p.ParseInt("rootcoord.timeout")
+	p.Timeout = p.ParseIntWithDefault("rootCoord.timeout", 3600)
 }
 
 func (p *ParamTable) initTimeTickInterval() {
-	p.TimeTickInterval = p.ParseInt("rootcoord.timeTickInterval")
+	p.TimeTickInterval = p.ParseIntWithDefault("rootCoord.timeTickInterval", 200)
 }
 
 func (p *ParamTable) initRoleName() {

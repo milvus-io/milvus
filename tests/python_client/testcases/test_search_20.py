@@ -797,8 +797,7 @@ class TestCollectionSearch(TestcaseBase):
         insert_res, _ = collection_w.insert(insert_data[0])
         insert_ids.extend(insert_res.primary_keys)
         # search
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:nq], default_search_field,
                                             default_search_params, default_limit,
                                             default_search_exp, _async=_async,

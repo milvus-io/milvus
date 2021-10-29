@@ -19,6 +19,8 @@ import (
 	"github.com/google/btree"
 )
 
+// MemoryKV implements DataKV interface and relies on underling btree.BTree.
+// As its name implies, all data is stored in memory.
 type MemoryKV struct {
 	sync.RWMutex
 	tree *btree.BTree
@@ -39,6 +41,7 @@ func (s memoryKVItem) Less(than btree.Item) bool {
 	return s.key < than.(memoryKVItem).key
 }
 
+// Load loads an object with @key.
 func (kv *MemoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
@@ -50,15 +53,15 @@ func (kv *MemoryKV) Load(key string) (string, error) {
 	return item.(memoryKVItem).value, nil
 }
 
-func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) (string, error) {
+func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) string {
 	kv.RLock()
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key, ""})
 
 	if item == nil {
-		return defaultValue, nil
+		return defaultValue
 	}
-	return item.(memoryKVItem).value, nil
+	return item.(memoryKVItem).value
 }
 
 func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
@@ -77,6 +80,7 @@ func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	return keys, values, nil
 }
 
+// Save object with @key to Minio. Object value is @value.
 func (kv *MemoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -84,6 +88,7 @@ func (kv *MemoryKV) Save(key, value string) error {
 	return nil
 }
 
+// Remove delete an object with @key.
 func (kv *MemoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -92,6 +97,7 @@ func (kv *MemoryKV) Remove(key string) error {
 	return nil
 }
 
+// MultiLoad loads objects with multi @keys.
 func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error) {
 	kv.RLock()
 	defer kv.RUnlock()

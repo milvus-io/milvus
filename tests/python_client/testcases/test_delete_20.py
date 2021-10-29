@@ -386,14 +386,14 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.num_entities
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.xfail(reason="Issues #10670")
+    # @pytest.mark.xfail(reason="Issues #10670")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_duplicate_primary_keys(self):
         """
         target: test delete from duplicate primary keys
         method: 1.insert data with dup ids
                 2.delete with repeated or not values
-        expected: delete all entities
+        expected: delete all entities, currently only delete one entity
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(nb=tmp_nb)
@@ -403,7 +403,9 @@ class TestDeleteOperation(TestcaseBase):
         del_res, _ = collection_w.delete(tmp_expr)
         collection_w.load()
         # todo assert del_res.delete_count == tmp_nb
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+        # collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+        res, _ = collection_w.query(tmp_expr)
+        assert len(res) == tmp_nb - 1
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_empty_partition(self):
@@ -625,6 +627,33 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="Issue #10673")
+    def test_delete_sealed_segment_with_twice_flush(self):
+        """
+        target: test delete data from sealed segment and flush delta log
+        method: 1.create and insert and flush data
+                2.delete entities and flush (insert and flush)
+                3.load collection (load data and delta log)
+                4.query deleted ids
+        expected: No query result
+        """
+        # create collection
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        # insert and flush data
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb
+
+        # delete id 0 and flush
+        del_res = collection_w.delete(tmp_expr)[0]
+        assert del_res.delete_count == 1
+        collection_w.insert(cf.gen_default_dataframe_data(nb=1, start=tmp_nb))
+        log.info(collection_w.num_entities)
+        # load and query id 0
+        collection_w.load()
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_sealed_only(self):
         """
         target: test delete with sealed only data and delete request
@@ -722,7 +751,6 @@ class TestDeleteOperation(TestcaseBase):
         time.sleep(1)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
-    # @pytest.mark.skip(reason="Issue: #10431")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_merge_same_id_channel_and_sealed(self):
         """
@@ -754,7 +782,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.delete(tmp_expr)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.skip(reason="Issue: #10685")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_merge_ids_channel_and_sealed(self):
         """

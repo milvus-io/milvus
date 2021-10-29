@@ -16,3 +16,4 @@ spec:
     memory:
       workers: 4
       size: 512Mi
+  duration: 2m

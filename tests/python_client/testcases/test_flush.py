@@ -193,7 +193,7 @@ class TestFlushBase:
         connect.flush([id_collection])
         timeout = 20
         start_time = time.time()
-        while (time.time() - start_time < timeout):
+        while time.time() - start_time < timeout:
             time.sleep(1)
             res = connect.get_collection_stats(id_collection)
             if res["row_count"] == default_nb:

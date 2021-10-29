@@ -139,34 +139,35 @@ class TestChaosData:
     def test_chaos_memory_stress_indexnode(self, connection, chaos_yaml):
         """
         target: test inject memory stress into indexnode
-        method: 1.Deploy milvus and limit indexnode memory resource
+        method: 1.Deploy milvus and limit indexnode memory resource 1Gi
                 2.Create collection and insert some data
                 3.Create index
-                4.Inject memory stress chaos
+                4.Inject memory stress chaos 512Mi
         expected:
         """
         # init collection and insert 250 nb
-        nb = 25600
+        nb = 50000  # vector size: 512*4*nb about 100Mi and create index need 600Mi memory
         dim = 512
         c_name = cf.gen_unique_str('chaos_memory')
         index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 128}}
 
         collection_w = ApiCollectionWrapper()
         collection_w.init_collection(name=c_name,
-                                     schema=cf.gen_default_collection_schema(dim=dim))
+                                     schema=cf.gen_default_collection_schema(dim=dim), shards_num=1)
+
         # insert 256000 512 dim entities 512Mi
-        for i in range(10):
+        for i in range(2):
             t0_insert = datetime.datetime.now()
-            df = cf.gen_default_dataframe_data(nb=nb, dim=dim)
+            df = cf.gen_default_dataframe_data(nb=nb // 2, dim=dim)
             res = collection_w.insert(df)[0]
-            assert res.insert_count == nb
+            assert res.insert_count == nb // 2
             # log.info(f'After {i + 1} insert, num_entities: {collection_w.num_entities}')
             tt_insert = datetime.datetime.now() - t0_insert
             log.info(f"{i} insert data cost: {tt_insert}")
 
         # flush
         t0_flush = datetime.datetime.now()
-        assert collection_w.num_entities == nb * 10
+        assert collection_w.num_entities == nb
         tt_flush = datetime.datetime.now() - t0_flush
         log.info(f'flush {nb * 10} entities cost: {tt_flush}')
 
@@ -189,10 +190,3 @@ class TestChaosData:
                                 namespace=constants.CHAOS_NAMESPACE)
         chaos_res.create(chaos_config)
         log.debug("inject chaos")
-
-        time.sleep(constants.WAIT_PER_OP)
-
-
-
-
-

@@ -251,6 +251,39 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.query(term_expr, output_fields=["*"],
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
+    @pytest.fixture(scope="function", params=cf.gen_normal_expressions())
+    def get_normal_expr(self, request):
+        if request.param == "":
+            pytest.skip("query with "" expr is invalid")
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_with_expression(self, get_normal_expr):
+        """
+        target: test query with different expr
+        method: query with different boolean expr
+        expected: verify query result
+        """
+        # 1. initialize with data
+        nb = 1000
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)[0:4]
+
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expr = get_normal_expr
+        expression = expr.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            int64 = _vectors.int64[i]
+            float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+
+        # query and verify result
+        res = collection_w.query(expr=expression)[0]
+        query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+        assert query_ids == set(filter_ids)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_wrong_term_keyword(self):
         """
@@ -1092,7 +1125,6 @@ class TestQueryOperation(TestcaseBase):
     ******************************************************************
     """
 
-
 def init_data(connect, collection, nb=ut.default_nb, partition_names=None, auto_id=True):
     """
     Generate entities and add it in collection
@@ -1230,5 +1262,3 @@ class TestQueryBase:
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
-
-

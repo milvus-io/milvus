@@ -87,7 +87,7 @@ func (ms *metaSnapshot) loadTs() error {
 	if err != nil {
 		return err
 	}
-	log.Info("load last ts", zap.Int64("version", version), zap.Int64("revision", revision))
+	log.Info("Load last ts", zap.Int64("version", version), zap.Int64("revision", revision))
 
 	ms.initTs(revision, ts)
 	// start from revision-1, until equals to create revision

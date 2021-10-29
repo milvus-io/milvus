@@ -37,7 +37,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// UniqueID is alias of typeutil.UniqueID
 type UniqueID = typeutil.UniqueID
+
+// Timestamp is alias of typeutil.Timestamp
 type Timestamp = typeutil.Timestamp
 
 const sendTimeTickMsgInterval = 200 * time.Millisecond

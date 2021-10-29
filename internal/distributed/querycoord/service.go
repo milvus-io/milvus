@@ -238,11 +238,13 @@ func (s *Server) Stop() error {
 	return err
 }
 
+// SetRootCoord sets the RootCoord's client for QueryCoord component.
 func (s *Server) SetRootCoord(m types.RootCoord) error {
 	s.queryCoord.SetRootCoord(m)
 	return nil
 }
 
+// SetDataCoord sets the QueryCoord's client for QueryNode component.
 func (s *Server) SetDataCoord(d types.DataCoord) error {
 	s.queryCoord.SetDataCoord(d)
 	return nil

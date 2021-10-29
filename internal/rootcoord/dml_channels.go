@@ -46,8 +46,8 @@ func newDmlChannels(c *Core, chanNamePrefix string, chanNum int64) *dmlChannels 
 		name := fmt.Sprintf("%s_%d", d.namePrefix, i)
 		ms, err := c.msFactory.NewMsgStream(c.ctx)
 		if err != nil {
-			log.Error("add msgstream failed", zap.String("name", name), zap.Error(err))
-			panic("add msgstream failed")
+			log.Error("Failed to add msgstream", zap.String("name", name), zap.Error(err))
+			panic("Failed to add msgstream")
 		}
 		ms.AsProducer([]string{name})
 		d.pool.Store(name, &ms)

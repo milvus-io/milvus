@@ -569,6 +569,7 @@ type Proxy interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
+// ProxyComponent defines the interface of proxy component.
 type ProxyComponent interface {
 	Proxy
 

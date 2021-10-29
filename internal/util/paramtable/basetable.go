@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"runtime"
@@ -56,10 +57,9 @@ func (gp *BaseTable) Init() {
 	gp.configDir = gp.initConfPath()
 	log.Debug("config directory", zap.String("configDir", gp.configDir))
 
-	gp.loadFromMilvusYaml()
-
-	// TODO remove once we change helm deployment
 	gp.loadFromCommonYaml()
+
+	gp.loadFromMilvusYaml()
 
 	gp.tryloadFromEnv()
 
@@ -313,7 +313,7 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.params.Load(strings.ToLower(key))
 }
 
-func (gp *BaseTable) LoadWithDefault(key string, defaultValue string) (string, error) {
+func (gp *BaseTable) LoadWithDefault(key string, defaultValue string) string {
 	return gp.params.LoadWithDefault(strings.ToLower(key), defaultValue)
 }
 
@@ -375,10 +375,7 @@ func (gp *BaseTable) Save(key, value string) error {
 }
 
 func (gp *BaseTable) ParseBool(key string, defaultValue bool) bool {
-	valueStr, err := gp.LoadWithDefault(key, strconv.FormatBool(defaultValue))
-	if err != nil {
-		panic(err)
-	}
+	valueStr := gp.LoadWithDefault(key, strconv.FormatBool(defaultValue))
 	value, err := strconv.ParseBool(valueStr)
 	if err != nil {
 		panic(err)
@@ -398,11 +395,29 @@ func (gp *BaseTable) ParseFloat(key string) float64 {
 	return value
 }
 
+func (gp *BaseTable) ParseFloatWithDefault(key string, defaultValue float64) float64 {
+	valueStr := gp.LoadWithDefault(key, fmt.Sprintf("%f", defaultValue))
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
 func (gp *BaseTable) ParseInt64(key string) int64 {
 	valueStr, err := gp.Load(key)
 	if err != nil {
 		panic(err)
 	}
+	value, err := strconv.ParseInt(valueStr, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
+func (gp *BaseTable) ParseInt64WithDefault(key string, defaultValue int64) int64 {
+	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(defaultValue, 10))
 	value, err := strconv.ParseInt(valueStr, 10, 64)
 	if err != nil {
 		panic(err)
@@ -422,11 +437,29 @@ func (gp *BaseTable) ParseInt32(key string) int32 {
 	return int32(value)
 }
 
+func (gp *BaseTable) ParseInt32WithDefault(key string, defaultValue int32) int32 {
+	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
+	value, err := strconv.ParseInt(valueStr, 10, 32)
+	if err != nil {
+		panic(err)
+	}
+	return int32(value)
+}
+
 func (gp *BaseTable) ParseInt(key string) int {
 	valueStr, err := gp.Load(key)
 	if err != nil {
 		panic(err)
 	}
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
+func (gp *BaseTable) ParseIntWithDefault(key string, defaultValue int) int {
+	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
 	value, err := strconv.Atoi(valueStr)
 	if err != nil {
 		panic(err)
