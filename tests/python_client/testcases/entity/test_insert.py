@@ -541,7 +541,7 @@ class TestInsertBase:
         """
         target: test collection rows_count is correct or not with multi threading
         method: create collection and insert entities in it(idmap),
-            assert the value returned by count_entities method is equal to length of entities
+                assert the value returned by count_entities method is equal to length of entities
         expected: the count is equal to the length of entities
         """
         if args["handler"] == "HTTP":
