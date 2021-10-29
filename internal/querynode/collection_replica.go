@@ -52,6 +52,7 @@ type ReplicaInterface interface {
 	// getCollectionByID gets the collection which id is collectionID
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	hasCollection(collectionID UniqueID) bool
+	// getCollectionNum returns num of collections in collectionReplica
 	getCollectionNum() int
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
 	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error)
