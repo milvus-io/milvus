@@ -94,7 +94,7 @@ func convertToByteArray(input interface{}) ([]byte, error) {
 	case []byte:
 		return output, nil
 	default:
-		return nil, errors.New("cannot convert interface{} to []byte")
+		return nil, errors.New("Cannot convert interface{} to []byte")
 	}
 }
 
