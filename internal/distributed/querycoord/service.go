@@ -260,6 +260,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTime
 	return s.queryCoord.GetTimeTickChannel(ctx)
 }
 
+// GetStatisticsChannel gets the statistics channel of QueryCoord.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.queryCoord.GetStatisticsChannel(ctx)
 }
