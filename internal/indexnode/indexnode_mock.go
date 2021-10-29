@@ -165,7 +165,9 @@ func (inm *Mock) Stop() error {
 	}
 	inm.cancel()
 	inm.wg.Wait()
-	inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole)
+	if err := inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -176,7 +178,9 @@ func (inm *Mock) Register() error {
 	}
 	Params.Init()
 	inm.etcdKV, _ = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-	inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole)
+	if err := inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole); err != nil {
+		return err
+	}
 	session := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 	session.Init(typeutil.IndexNodeRole, "localhost:21121", false)
 	return nil
