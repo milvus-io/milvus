@@ -1138,7 +1138,8 @@ class TestIndexBinary:
     def test_drop_index_partition(self, connect, binary_collection, get_jaccard_index):
         """
         target: test drop index interface
-        method: create collection, create partition and add entities in it, create index on collection, call drop collection index
+        method: create collection, create partition and add entities in it,
+                create index on collection, call drop collection index
         expected: return code 0, and default index param
         """
         connect.create_partition(binary_collection, default_tag)

@@ -32,7 +32,7 @@ class TestDeleteParams(TestcaseBase):
         target: test delete data from collection
         method: 1.create and insert nb with flush
                 2.load collection
-                3. delete half of nb
+                3.delete half of nb
                 4.query with deleted ids
         expected: Query result is empty
         """
