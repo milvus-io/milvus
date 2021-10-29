@@ -205,7 +205,7 @@ func CalcHammingBatch(dim int64, left []byte, lIndex int64, right []byte, result
 	}
 }
 
-func CalcHammingDistance(dim int64, left []byte, right []byte) ([]int32, error) {
+func CalcHammingDistance(dim int64, left, right []byte) ([]int32, error) {
 	if dim <= 0 {
 		err := errors.New("Invalid dimension")
 		return nil, err

@@ -165,7 +165,7 @@ func LogError(span opentracing.Span, err error) {
 }
 
 // InfoFromSpan is a method return span details.
-func InfoFromSpan(span opentracing.Span) (traceID string, sampled bool, found bool) {
+func InfoFromSpan(span opentracing.Span) (traceID string, sampled, found bool) {
 	if span != nil {
 		if spanContext, ok := span.Context().(jaeger.SpanContext); ok {
 			traceID = spanContext.TraceID().String()
