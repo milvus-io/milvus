@@ -2,13 +2,13 @@
 
 As the user access layer of Milvus, Proxy mainly plays a role that does some checks and preprocessing for requests from
 clients and then forward these requests to other components, such as Root Coordinator, Data Coordinator, Query
-Coordinator, Index Coordinator. The below figure shows that how Proxy interacts with other components.
+Coordinator, Index Coordinator. The below figure shows how Proxy interacts with other components.
 
 <img src="./graphs/proxy.png" width=700>
 
 Proxy divides requests from clients into three classes: `DdRequest`, `DmRequest`, `DqRequest`.
 
-DdRequest is the shorthand of `Data Definition Request`. It means a operation on the meta information of
+DdRequest is the shorthand of `Data Definition Request`. It means an operation on the meta information of
 collections, including two parts. One part is of the writing operations on collections, such as defining a schema,
 creating or dropping a partition, creating or dropping the index and etc. Another part is of the reading operations on
 collections, such as listing all collections or partitions, checking if a collection or a partition exists.
@@ -21,7 +21,7 @@ collection, querying for specific records of a collection and etc.
 
 For every request, Proxy will first check if it's valid to be executed by Milvus and if the request is invalid then
 Proxy will return the error to clients and won't continue to forward this request to other components. The check
-operation of Proxy includes two part, one part is static check and another is dynamic check. Static check includes
+operation of Proxy includes two parts, one part is static check and another is dynamic check. Static check includes
 parameters check, constraints check and etc. Dynamic check will check some related dependency of the request, take
 search requests for example, Proxy should check if the related collection exists in Milvus.
 
