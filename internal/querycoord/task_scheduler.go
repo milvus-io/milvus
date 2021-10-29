@@ -644,9 +644,12 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 
 			childTasks := triggerTask.getChildTask()
 			if len(childTasks) != 0 {
-				activateTasks := make([]task, len(childTasks))
-				copy(activateTasks, childTasks)
-				processInternalTaskFn(activateTasks, triggerTask)
+				// process loadSegment before watchDmChannel, avoid delete not taking effect
+				highPriorityTasks, lowPriorityTasks := sortInternalTaskByPriority(childTasks, commonpb.MsgType_LoadSegments)
+				processInternalTaskFn(highPriorityTasks, triggerTask)
+				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+					processInternalTaskFn(lowPriorityTasks, triggerTask)
+				}
 				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
 					err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
 					if err != nil {
@@ -965,4 +968,18 @@ func reverseSealedSegmentChangeInfo(changeInfosMap map[UniqueID]*querypb.SealedS
 	}
 
 	return result
+}
+
+func sortInternalTaskByPriority(tasks []task, taskType commonpb.MsgType) ([]task, []task) {
+	highPriorityTasks := make([]task, 0)
+	lowPriorityTasks := make([]task, 0)
+	for _, t := range tasks {
+		if t.msgType() == taskType {
+			highPriorityTasks = append(highPriorityTasks, t)
+		} else {
+			lowPriorityTasks = append(lowPriorityTasks, t)
+		}
+	}
+
+	return highPriorityTasks, lowPriorityTasks
 }
