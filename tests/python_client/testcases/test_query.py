@@ -1125,6 +1125,7 @@ class TestQueryOperation(TestcaseBase):
     ******************************************************************
     """
 
+
 def init_data(connect, collection, nb=ut.default_nb, partition_names=None, auto_id=True):
     """
     Generate entities and add it in collection
