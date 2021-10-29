@@ -82,8 +82,13 @@ def hello_milvus(host="127.0.0.1"):
             print(hit, hit.entity.get("random_value"))
     print("search latency = %.4fs" % (end_time - start_time))
 
-    # drop collection
-    # collection.drop()
+    #query
+    expr = "count in [2,4,6,8]"
+    output_fields = ["count", "random_value"]
+    res = collection.query(expr, output_fields)
+    sorted_res = sorted(res, key=lambda k: k['count'])
+    for r in sorted_res:
+        print(r)
 
 
 import argparse
