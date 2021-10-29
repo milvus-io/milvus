@@ -8,8 +8,9 @@ spec:
     namespaces:
       - chaos-testing
     labelSelectors:
-      app.kubernetes.io/instance: chaos-testing
-      component: querynode
+      app.kubernetes.io/name: milvus
+      app.kubernetes.io/instance: mic-memory
+      app.kubernetes.io/component: querynode
   mode: one
   stressors:
     memory:
