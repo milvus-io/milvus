@@ -45,7 +45,7 @@ lease in etcd. Otherwise, if some exceptions occurred in a node, or a node stopp
 the related node information. By using this mechanism, nodes in Milvus know if there are any other nodes going to be
 online or offline and synchronize the latest node information.
 
-#### 6.0 Interaction with Root Coordinator
+#### 6.1 Interaction with Root Coordinator
 
 Proxy will forward the DdRequest to Root Coordinator. These requests include:
 
@@ -233,18 +233,20 @@ taskScheduler maintains three queues: ddQueue, dmQueue and dqQueue correspond to
 respectively. The interface of taskQueue is defined as follows:
 
 ```go
-type TaskQueue interface {
-   utChan() <-chan int
-   utEmpty() bool
-   utFull() bool
-   addUnissuedTask(t task) error
-   FrontUnissuedTask() task
-   PopUnissuedTask() task
-   AddActiveTask(t task)
-   PopActiveTask(tID UniqueID) task
-   getTaskByReqID(reqID UniqueID) task
-   TaskDoneTest(ts Timestamp) bool
-   Enqueue(t task) error
+type taskQueue interface {
+  utChan() <-chan int
+  utEmpty() bool
+  utFull() bool
+  addUnissuedTask(t task) error
+  FrontUnissuedTask() task
+  PopUnissuedTask() task
+  AddActiveTask(t task)
+  PopActiveTask(tID UniqueID) task
+  getTaskByReqID(reqID UniqueID) task
+  TaskDoneTest(ts Timestamp) bool
+  Enqueue(t task) error
+	setMaxTaskNum(num int64)
+	getMaxTaskNum() int64
 }
 ```
 
@@ -253,20 +255,20 @@ definition of the task interface is as follows:
 
 ```go
 type task interface {
-   TraceCtx() context.Context
-   ID() UniqueID       // return ReqID
-   SetID(uid UniqueID) // set ReqID
-   Name() string
-   Type() commonpb.MsgType
-   BeginTs() Timestamp
-   EndTs() Timestamp
-   SetTs(ts Timestamp)
-   OnEnqueue() error
-   PreExecute(ctx context.Context) error
-   Execute(ctx context.Context) error
-   PostExecute(ctx context.Context) error
-   WaitToFinish() error
-   Notify(err error)
+  TraceCtx() context.Context
+  ID() UniqueID       // return ReqID
+  SetID(uid UniqueID) // set ReqID
+  Name() string
+  Type() commonpb.MsgType
+  BeginTs() Timestamp
+  EndTs() Timestamp
+  SetTs(ts Timestamp)
+  OnEnqueue() error
+  PreExecute(ctx context.Context) error
+  Execute(ctx context.Context) error
+  PostExecute(ctx context.Context) error
+  WaitToFinish() error
+  Notify(err error)
 }
 ```
 
