@@ -38,8 +38,11 @@ type RootCoord interface {
 	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	//global timestamp allocator
+  // AllocTimestamp notifies RootCoord to alloc timestamps
 	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
+  // AllocID notifies RootCoord to alloc IDs
 	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
+  // UpdateChannelTimeTick notifies RootCoord to update each Proxy's safe timestamp
 	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 
 	//segment
