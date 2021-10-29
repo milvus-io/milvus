@@ -40,6 +40,7 @@ type MinIOKV struct {
 	bucketName  string
 }
 
+// Option option when creates MinIOKV.
 type Option struct {
 	Address           string
 	AccessKeyID       string
@@ -199,8 +200,8 @@ func (kv *MinIOKV) Save(key, value string) error {
 	return err
 }
 
-// Save MultiObject, the path is the key of @kvs. The object value is the value
-// of @kvs.
+// MultiSave save multiple objects, the path is the key of @kvs.
+// The object value is the value of @kvs.
 func (kv *MinIOKV) MultiSave(kvs map[string]string) error {
 	var resultErr error
 	for key, value := range kvs {
@@ -214,7 +215,7 @@ func (kv *MinIOKV) MultiSave(kvs map[string]string) error {
 	return resultErr
 }
 
-// LoadWithPrefix remove all objects with the same prefix @prefix from minio .
+// RemoveWithPrefix remove all objects with the same prefix @prefix from minio.
 func (kv *MinIOKV) RemoveWithPrefix(prefix string) error {
 	objectsCh := make(chan minio.ObjectInfo)
 
@@ -290,6 +291,7 @@ func (kv *MinIOKV) GetSize(key string) (int64, error) {
 	return objectInfo.Size, nil
 }
 
+// Close close the MinIOKV.
 func (kv *MinIOKV) Close() {
 
 }
