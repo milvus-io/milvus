@@ -145,7 +145,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	fgMsg, ok := in[0].(*flowGraphMsg)
 	if !ok {
-		log.Error("type assertion failed for flowGraphMsg")
+		log.Warn("type assertion failed for flowGraphMsg")
 		ibNode.Close()
 		return []Msg{}
 	}
