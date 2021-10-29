@@ -14,6 +14,10 @@ package typeutil
 import (
 	"testing"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
@@ -323,4 +327,175 @@ func TestSchema_invalid(t *testing.T) {
 		_, err = helper.GetVectorDimFromID(107)
 		assert.NotNil(t, err)
 	})
+}
+
+func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, fieldValue interface{}, dim int64) *schemapb.FieldData {
+	var fieldData *schemapb.FieldData
+	switch fieldType {
+	case schemapb.DataType_Bool:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Bool,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: fieldValue.([]bool),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Int32:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int32,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: fieldValue.([]int32),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Int64:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: fieldValue.([]int64),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Float:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Float,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: fieldValue.([]float32),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Double:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Double,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: fieldValue.([]float64),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_BinaryVector:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_BinaryVector,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: fieldValue.([]byte),
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_FloatVector:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: fieldValue.([]float32),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	default:
+		log.Error("not supported field type", zap.String("field type", fieldType.String()))
+	}
+
+	return fieldData
+}
+
+func TestAppendFieldData(t *testing.T) {
+	const (
+		BoolFieldName         = "BoolField"
+		Int32FieldName        = "Int32Field"
+		Int64FieldName        = "Int64Field"
+		FloatFieldName        = "FloatField"
+		DoubleFieldName       = "DoubleField"
+		BinaryVectorFieldName = "BinaryVectorField"
+		FloatVectorFieldName  = "FloatVectorField"
+		BoolFieldID           = common.StartOfUserFieldID + 1
+		Int32FieldID          = common.StartOfUserFieldID + 2
+		Int64FieldID          = common.StartOfUserFieldID + 3
+		FloatFieldID          = common.StartOfUserFieldID + 4
+		DoubleFieldID         = common.StartOfUserFieldID + 5
+		BinaryVectorFieldID   = common.StartOfUserFieldID + 6
+		FloatVectorFieldID    = common.StartOfUserFieldID + 7
+	)
+	BoolArray := []bool{true, false}
+	Int32Array := []int32{1, 2}
+	Int64Array := []int64{11, 22}
+	FloatArray := []float32{1.0, 2.0}
+	DoubleArray := []float64{11.0, 22.0}
+	BinaryVector := []byte{0x12, 0x34}
+	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
+
+	result := make([]*schemapb.FieldData, 7)
+	var fieldDataArray1 []*schemapb.FieldData
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int32FieldName, Int32FieldID, schemapb.DataType_Int32, Int32Array[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatFieldName, FloatFieldID, schemapb.DataType_Float, FloatArray[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(DoubleFieldName, DoubleFieldID, schemapb.DataType_Double, DoubleArray[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(BinaryVectorFieldName, BinaryVectorFieldID, schemapb.DataType_BinaryVector, BinaryVector[0:1], 8))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:8], 8))
+
+	var fieldDataArray2 []*schemapb.FieldData
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int32FieldName, Int32FieldID, schemapb.DataType_Int32, Int32Array[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatFieldName, FloatFieldID, schemapb.DataType_Float, FloatArray[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(DoubleFieldName, DoubleFieldID, schemapb.DataType_Double, DoubleArray[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(BinaryVectorFieldName, BinaryVectorFieldID, schemapb.DataType_BinaryVector, BinaryVector[1:2], 8))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[8:16], 8))
+
+	AppendFieldData(result, fieldDataArray1, 0)
+	AppendFieldData(result, fieldDataArray2, 0)
+
+	assert.Equal(t, BoolArray, result[0].GetScalars().GetBoolData().Data)
+	assert.Equal(t, Int32Array, result[1].GetScalars().GetIntData().Data)
+	assert.Equal(t, Int64Array, result[2].GetScalars().GetLongData().Data)
+	assert.Equal(t, FloatArray, result[3].GetScalars().GetFloatData().Data)
+	assert.Equal(t, DoubleArray, result[4].GetScalars().GetDoubleData().Data)
+	assert.Equal(t, BinaryVector, result[5].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector)
+	assert.Equal(t, FloatVector, result[6].GetVectors().GetFloatVector().Data)
 }
