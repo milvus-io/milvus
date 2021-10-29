@@ -10,6 +10,17 @@ import requests
 import json
 
 
+def get_token(url):
+    rep = requests.get(url)
+    data = json.loads(rep.text)
+    if 'token' in data:
+        token = data['token']
+    else:
+        token = ''
+        print("Can not get token.")
+    return token
+
+
 def parse_server_tag(server_tag):
     """ paser server tag from server config"""
     # tag format: "8c"/"8c16m"/"8c16m1g"
