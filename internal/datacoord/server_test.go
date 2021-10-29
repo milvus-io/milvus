@@ -592,7 +592,7 @@ func TestService_WatchServices(t *testing.T) {
 	signal := make(chan struct{}, 1)
 
 	go func() {
-		svr.startWatchService(context.Background())
+		svr.watchService(context.Background())
 		flag = true
 		signal <- struct{}{}
 	}()
@@ -609,7 +609,7 @@ func TestService_WatchServices(t *testing.T) {
 	svr.serverLoopWg.Add(1)
 
 	go func() {
-		svr.startWatchService(ctx)
+		svr.watchService(ctx)
 		flag = true
 		signal <- struct{}{}
 	}()
