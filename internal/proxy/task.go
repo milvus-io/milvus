@@ -1753,124 +1753,6 @@ func selectSearchResultData(dataArray []*schemapb.SearchResultData, offsets []in
 	return sel
 }
 
-func copySearchResultData(dst *schemapb.SearchResultData, src *schemapb.SearchResultData, idx int64) {
-	for i, fieldData := range src.FieldsData {
-		switch fieldType := fieldData.Field.(type) {
-		case *schemapb.FieldData_Scalars:
-			if dst.FieldsData[i] == nil || dst.FieldsData[i].GetScalars() == nil {
-				dst.FieldsData[i] = &schemapb.FieldData{
-					FieldName: fieldData.FieldName,
-					FieldId:   fieldData.FieldId,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{},
-					},
-				}
-			}
-			switch scalarType := fieldType.Scalars.Data.(type) {
-			case *schemapb.ScalarField_BoolData:
-				if dst.FieldsData[i].GetScalars().GetBoolData() == nil {
-					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_BoolData{
-							BoolData: &schemapb.BoolArray{
-								Data: []bool{scalarType.BoolData.Data[idx]},
-							},
-						},
-					}
-				} else {
-					dst.FieldsData[i].GetScalars().GetBoolData().Data = append(dst.FieldsData[i].GetScalars().GetBoolData().Data, scalarType.BoolData.Data[idx])
-				}
-			case *schemapb.ScalarField_IntData:
-				if dst.FieldsData[i].GetScalars().GetIntData() == nil {
-					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_IntData{
-							IntData: &schemapb.IntArray{
-								Data: []int32{scalarType.IntData.Data[idx]},
-							},
-						},
-					}
-				} else {
-					dst.FieldsData[i].GetScalars().GetIntData().Data = append(dst.FieldsData[i].GetScalars().GetIntData().Data, scalarType.IntData.Data[idx])
-				}
-			case *schemapb.ScalarField_LongData:
-				if dst.FieldsData[i].GetScalars().GetLongData() == nil {
-					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{scalarType.LongData.Data[idx]},
-							},
-						},
-					}
-				} else {
-					dst.FieldsData[i].GetScalars().GetLongData().Data = append(dst.FieldsData[i].GetScalars().GetLongData().Data, scalarType.LongData.Data[idx])
-				}
-			case *schemapb.ScalarField_FloatData:
-				if dst.FieldsData[i].GetScalars().GetFloatData() == nil {
-					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_FloatData{
-							FloatData: &schemapb.FloatArray{
-								Data: []float32{scalarType.FloatData.Data[idx]},
-							},
-						},
-					}
-				} else {
-					dst.FieldsData[i].GetScalars().GetFloatData().Data = append(dst.FieldsData[i].GetScalars().GetFloatData().Data, scalarType.FloatData.Data[idx])
-				}
-			case *schemapb.ScalarField_DoubleData:
-				if dst.FieldsData[i].GetScalars().GetDoubleData() == nil {
-					dst.FieldsData[i].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_DoubleData{
-							DoubleData: &schemapb.DoubleArray{
-								Data: []float64{scalarType.DoubleData.Data[idx]},
-							},
-						},
-					}
-				} else {
-					dst.FieldsData[i].GetScalars().GetDoubleData().Data = append(dst.FieldsData[i].GetScalars().GetDoubleData().Data, scalarType.DoubleData.Data[idx])
-				}
-			default:
-				log.Debug("Not supported field type", zap.String("field type", fieldData.Type.String()))
-			}
-		case *schemapb.FieldData_Vectors:
-			dim := fieldType.Vectors.Dim
-			if dst.FieldsData[i] == nil || dst.FieldsData[i].GetVectors() == nil {
-				dst.FieldsData[i] = &schemapb.FieldData{
-					FieldName: fieldData.FieldName,
-					FieldId:   fieldData.FieldId,
-					Field: &schemapb.FieldData_Vectors{
-						Vectors: &schemapb.VectorField{
-							Dim: dim,
-						},
-					},
-				}
-			}
-			switch vectorType := fieldType.Vectors.Data.(type) {
-			case *schemapb.VectorField_BinaryVector:
-				if dst.FieldsData[i].GetVectors().GetBinaryVector() == nil {
-					bvec := &schemapb.VectorField_BinaryVector{
-						BinaryVector: vectorType.BinaryVector[idx*(dim/8) : (idx+1)*(dim/8)],
-					}
-					dst.FieldsData[i].GetVectors().Data = bvec
-				} else {
-					dst.FieldsData[i].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(dst.FieldsData[i].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector, vectorType.BinaryVector[idx*(dim/8):(idx+1)*(dim/8)]...)
-				}
-			case *schemapb.VectorField_FloatVector:
-				if dst.FieldsData[i].GetVectors().GetFloatVector() == nil {
-					fvec := &schemapb.VectorField_FloatVector{
-						FloatVector: &schemapb.FloatArray{
-							Data: vectorType.FloatVector.Data[idx*dim : (idx+1)*dim],
-						},
-					}
-					dst.FieldsData[i].GetVectors().Data = fvec
-				} else {
-					dst.FieldsData[i].GetVectors().GetFloatVector().Data = append(dst.FieldsData[i].GetVectors().GetFloatVector().Data, vectorType.FloatVector.Data[idx*dim:(idx+1)*dim]...)
-				}
-			default:
-				log.Debug("Not supported field type", zap.String("field type", fieldData.Type.String()))
-			}
-		}
-	}
-}
-
 //func printSearchResultData(data *schemapb.SearchResultData, header string) {
 //	size := len(data.Ids.GetIntId().Data)
 //	if size != len(data.Scores) {
@@ -1949,7 +1831,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 
 			// remove duplicates
 			if math.Abs(float64(score)-float64(prevScore)) > 0.00001 {
-				copySearchResultData(ret.Results, searchResultData[sel], idx)
+				typeutil.AppendFieldData(ret.Results.FieldsData, searchResultData[sel].FieldsData, idx)
 				ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				prevScore = score
@@ -1961,7 +1843,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 				//    e2: [101, 0.99]   ==> not duplicated, should keep
 				//    e3: [100, 0.99]   ==> duplicated, should remove
 				if _, ok := prevIDSet[id]; !ok {
-					copySearchResultData(ret.Results, searchResultData[sel], idx)
+					typeutil.AppendFieldData(ret.Results.FieldsData, searchResultData[sel].FieldsData, idx)
 					ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
 					ret.Results.Scores = append(ret.Results.Scores, score)
 					prevIDSet[id] = struct{}{}
