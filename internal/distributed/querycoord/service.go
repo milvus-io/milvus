@@ -255,6 +255,7 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.queryCoord.GetComponentStates(ctx)
 }
 
+// GetTimeTickChannel gets the time tick channel of QueryCoord.
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.queryCoord.GetTimeTickChannel(ctx)
 }
