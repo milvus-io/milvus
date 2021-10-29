@@ -57,6 +57,7 @@ type DataNode interface {
 	//     Log an info log if a segment is under flushing
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
 
+	// GetMetrics gets the metrics about DataNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
@@ -217,6 +218,7 @@ type DataCoord interface {
 	// error is returned only when some communication issue occurs
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
 
+	// GetMetrics gets the metrics about DataCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
@@ -228,6 +230,7 @@ type IndexNode interface {
 	// CreateIndex receives request from IndexCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
+
 	// GetMetrics gets the metrics about IndexNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
@@ -242,14 +245,18 @@ type IndexCoord interface {
 	// the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
 	// execution.
 	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+
 	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
 	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
 	// index tasks. Therefore, when DropIndex is called, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
 	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+
 	// GetIndexStates gets the index states of the IndexBuildIDs in the request from RootCoordinator.
 	GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
+
 	// GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
 	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
+
 	// GetMetrics gets the metrics about IndexCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
@@ -960,6 +967,7 @@ type QueryNode interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 
+	// GetMetrics gets the metrics about QueryNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
