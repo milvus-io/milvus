@@ -4,7 +4,15 @@
 
 Milvus installation may fail when images are not properly loaded from public Docker registries. To pull all images and save them into a directory that can be moved to the target host and loaded manually, perform the following procedures:
 
-### Step 1: Save Milvus manifests and Docker images
+### Step 1: Download files of scripts & requirements
+
+```shell
+$ wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/offline/requirements.txt
+$ wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/offline/save_image.py
+```
+Download requirements.txt and save_image.py, which will be used later.
+
+### Step 2: Save Milvus manifests and Docker images
 
 #### If you install Milvus with the **docker-compose.yml** file, use these commands:
 
@@ -51,7 +59,7 @@ $ python3 save_image.py --manifest milvus_manifest.yaml
 
 The Docker images will be stored under **images** directory.
 
-### Step 2: Load Docker images
+### Step 3: Load Docker images
 Enter the following command to load the Docker images:
 
 ```shell
