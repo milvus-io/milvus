@@ -203,7 +203,7 @@ print_query_result(const std::unique_ptr<milvus::indexbuilder::IndexWrapper::Que
 // test for: https://github.com/milvus-io/milvus/issues/6569
 TEST(BinIVFFlat, Build_and_Query) {
     milvus::engine::KnowhereConfig::SetStatisticsLevel(2);
-    
+
     auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
     auto metric_type = milvus::knowhere::Metric::TANIMOTO;
     auto conf = generate_conf(index_type, metric_type);

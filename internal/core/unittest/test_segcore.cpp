@@ -109,3 +109,46 @@ TEST(SegmentCoreTest, SmallIndex) {
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
 }
+
+TEST(SegmentCoreTest, Delete) {
+    using namespace milvus::segcore;
+    using namespace milvus::engine;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::INT32);
+
+    std::vector<char> raw_data;
+    std::vector<Timestamp> timestamps;
+    std::vector<int64_t> uids;
+    int N = 10000;
+    std::default_random_engine e(67);
+    for (int i = 0; i < N; ++i) {
+        uids.push_back(100000 + i);
+        timestamps.push_back(0);
+        // append vec
+        float vec[16];
+        for (auto& x : vec) {
+            x = e() % 2000 * 0.001 - 1.0;
+        }
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        int age = e() % 100;
+        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+    }
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    assert(raw_data.size() == line_sizeof * N);
+
+    auto segment = CreateGrowingSegment(schema);
+
+    RowBasedRawData data_chunk{raw_data.data(), (int)line_sizeof, N};
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset, N, uids.data(), timestamps.data(), data_chunk);
+
+    // Do delete
+    int64_t del_count = 5;
+    std::vector<idx_t> pks{1, 2, 3, 4, 5};
+    std::vector<Timestamp> del_timestamps{10, 10, 10, 10, 10};
+
+    auto reserved = segment->PreDelete(5);
+    assert(reserved == 0);
+    segment->Delete(reserved, del_count, pks.data(), del_timestamps.data());
+}
