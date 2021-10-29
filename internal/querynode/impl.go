@@ -55,6 +55,8 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.Comp
 	return stats, nil
 }
 
+// GetTimeTickChannel returns the time tick channel
+// TimeTickChannel contains many time tick messages, which will be sent by query nodes
 func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
