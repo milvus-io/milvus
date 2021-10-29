@@ -254,12 +254,6 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     deleted_record_.uids_.set_data(reserved_begin, uids.data(), size);
     deleted_record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
     return Status::OK();
-    //    for (int i = 0; i < size; ++i) {
-    //        auto key = row_ids[i];
-    //        auto time = timestamps[i];
-    //        delete_logs_.insert(std::make_pair(key, time));
-    //    }
-    //    return Status::OK();
 }
 
 int64_t
