@@ -235,6 +235,7 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
 
 
 def read_json_file(file_name):
+    """ return content of json file """
     with open(file_name) as f:
         file_dict = json.load(f)
     return file_dict
