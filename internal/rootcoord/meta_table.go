@@ -249,7 +249,7 @@ func (mt *MetaTable) AddTenant(te *pb.TenantMeta, ts typeutil.Timestamp) error {
 
 	err = mt.snapshot.Save(k, string(v), ts)
 	if err != nil {
-		log.Error("AddTenant Save fail", zap.Error(err))
+		log.Error("Failed to save TenantMeta in AddTenant", zap.Error(err))
 		return err
 	}
 	mt.tenantID2Meta[te.ID] = *te
