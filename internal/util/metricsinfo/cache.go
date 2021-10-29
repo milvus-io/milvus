@@ -19,6 +19,7 @@ import (
 )
 
 // TODO(dragondriver): load from config file
+// DefaultMetricsRetention defines the default retention of metrics cache.
 const DefaultMetricsRetention = time.Second * 5
 
 // TODO(dragondriver): we can use a map to manage the metrics if there are too many kind metrics
