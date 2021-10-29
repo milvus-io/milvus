@@ -31,11 +31,9 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
-    // step 1: binary search to find the barrier of the snapshot
-    // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
-    // step 2.1: get meta
-    // step 2.2: get which vector field to search
+    // step 1.1: get meta
+    // step 1.2: get which vector field to search
     auto vecfield_offset = info.field_offset_;
     auto& field = schema[vecfield_offset];
 
@@ -45,7 +43,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     auto total_count = topk * num_queries;
     auto metric_type = info.metric_type_;
     auto round_decimal = info.round_decimal_;
-    // step 3: small indexing search
+    // step 2: small indexing search
     // std::vector<int64_t> final_uids(total_count, -1);
     // std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
     SubSearchResult final_qr(num_queries, topk, metric_type, round_decimal);
@@ -80,7 +78,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         current_chunk_id = max_indexed_id;
     }
 
-    // step 4: brute force search where small indexing is unavailable
+    // step 3: brute force search where small indexing is unavailable
     auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
     auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
 
