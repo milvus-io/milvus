@@ -157,7 +157,7 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 		go func() {
 			for i := 0; i < len(nodeCtx.inputMessages); i++ {
 				for nodeCtx.inputMessages[i].TimeTick() != latestTime {
-					log.Debug("try to align timestamp", zap.Uint64("t1", latestTime), zap.Uint64("t2", nodeCtx.inputMessages[i].TimeTick()))
+					log.Debug("Try to align timestamp", zap.Uint64("t1", latestTime), zap.Uint64("t2", nodeCtx.inputMessages[i].TimeTick()))
 					channel := nodeCtx.inputChannels[i]
 					select {
 					case <-nodeCtx.closeCh:
