@@ -16,8 +16,6 @@ Collections:
             search: fail
             query: fail
           cluster_n_nodes:
-            search: succ
-            query: succ
   -
     testcase:
       name: test_indexnode_pod_failure
@@ -26,7 +24,6 @@ Collections:
           cluster_1_node:
             index: fail
           cluster_n_nodes:
-            index: succ
 
   -
     testcase:
@@ -36,4 +33,17 @@ Collections:
           cluster_1_node:
             insert: fail
           cluster_n_nodes:
-            insert: succ
+
+  -
+    testcase:
+      name: test_proxy_pod_failure
+      chaos: chaos_proxy_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            create: fail
+            insert: fail
+            flush: fail
+            index: fail
+            search: fail
+            query: fail
+          cluster_n_nodes:
