@@ -108,9 +108,6 @@ func (p *ParamTable) Init() {
 	if err := p.LoadYaml("advanced/query_node.yaml"); err != nil {
 		panic(err)
 	}
-	if err := p.LoadYaml("advanced/knowhere.yaml"); err != nil {
-		panic(err)
-	}
 
 	p.initCacheSize()
 	p.initInContainer()

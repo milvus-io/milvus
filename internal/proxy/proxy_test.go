@@ -865,7 +865,7 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, 1, len(resp.CollectionNames))
+		assert.Equal(t, 1, len(resp.CollectionNames), resp.CollectionNames)
 	})
 
 	wg.Add(1)
