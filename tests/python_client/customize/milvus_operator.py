@@ -3,7 +3,6 @@ from benedict import benedict
 from utils.util_log import test_log as log
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 
-
 template_yaml = 'template/default.yaml'
 MILVUS_GRP = 'milvus.io'
 MILVUS_VER = 'v1alpha1'
@@ -16,7 +15,6 @@ class MilvusOperator(object):
         self.group = MILVUS_GRP
         self.version = MILVUS_VER
         self.plural = MILVUS_PLURAL.lower()
-
 
     @staticmethod
     def _update_configs(configs, template=None):
@@ -120,7 +118,7 @@ class MilvusOperator(object):
             res_object = cus_res.get(release_name)
             if res_object.get('status', None) is not None:
                 if 'Healthy' == res_object['status']['status']:
-                    log.info(f"milvus healthy in {time.time()-starttime} seconds")
+                    log.info(f"milvus healthy in {time.time() - starttime} seconds")
                     return True
         log.info(f"end to check healthy until timeout {timeout}")
         return False
@@ -141,7 +139,6 @@ class MilvusOperator(object):
 
 
 if __name__ == '__main__':
-
     namespace = 'chaos-testing'
     image = "master-20211027-c51155a"
     name = f'milvus-{image.split("-")[2]}'
@@ -171,4 +168,3 @@ if __name__ == '__main__':
     # print(endpoint)
 
     # milvusOp.uninstall(name, namespace=namespace)
-
