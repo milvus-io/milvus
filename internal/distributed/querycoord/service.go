@@ -275,6 +275,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	return s.queryCoord.LoadCollection(ctx, req)
 }
 
+// ReleaseCollection releases the data of the specified collection in QueryCoord.
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	return s.queryCoord.ReleaseCollection(ctx, req)
 }
