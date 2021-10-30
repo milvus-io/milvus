@@ -924,7 +924,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total  RootCoord drop partition operations",
+      "description": "Total RootCoord drop partition operations",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
