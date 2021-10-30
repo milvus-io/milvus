@@ -43,6 +43,7 @@ func newClient(options ClientOptions) (*client, error) {
 	return c, nil
 }
 
+// CreateProducer create a rocksmq producer
 func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	// Create a producer
 	producer, err := newProducer(c, options)

@@ -16,6 +16,9 @@ import (
 	"fmt"
 	"strconv"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -179,5 +182,115 @@ func IsBoolType(dataType schemapb.DataType) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// AppendFieldData appends fields data of specified index from src to dst
+func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx int64) {
+	for i, fieldData := range src {
+		switch fieldType := fieldData.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			if dst[i] == nil || dst[i].GetScalars() == nil {
+				dst[i] = &schemapb.FieldData{
+					FieldName: fieldData.FieldName,
+					FieldId:   fieldData.FieldId,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{},
+					},
+				}
+			}
+			dstScalar := dst[i].GetScalars()
+			switch srcScalar := fieldType.Scalars.Data.(type) {
+			case *schemapb.ScalarField_BoolData:
+				if dstScalar.GetBoolData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: []bool{srcScalar.BoolData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetBoolData().Data = append(dstScalar.GetBoolData().Data, srcScalar.BoolData.Data[idx])
+				}
+			case *schemapb.ScalarField_IntData:
+				if dstScalar.GetIntData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{srcScalar.IntData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetIntData().Data = append(dstScalar.GetIntData().Data, srcScalar.IntData.Data[idx])
+				}
+			case *schemapb.ScalarField_LongData:
+				if dstScalar.GetLongData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{srcScalar.LongData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetLongData().Data = append(dstScalar.GetLongData().Data, srcScalar.LongData.Data[idx])
+				}
+			case *schemapb.ScalarField_FloatData:
+				if dstScalar.GetFloatData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: []float32{srcScalar.FloatData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetFloatData().Data = append(dstScalar.GetFloatData().Data, srcScalar.FloatData.Data[idx])
+				}
+			case *schemapb.ScalarField_DoubleData:
+				if dstScalar.GetDoubleData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: []float64{srcScalar.DoubleData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetDoubleData().Data = append(dstScalar.GetDoubleData().Data, srcScalar.DoubleData.Data[idx])
+				}
+			default:
+				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
+			}
+		case *schemapb.FieldData_Vectors:
+			dim := fieldType.Vectors.Dim
+			if dst[i] == nil || dst[i].GetVectors() == nil {
+				dst[i] = &schemapb.FieldData{
+					FieldName: fieldData.FieldName,
+					FieldId:   fieldData.FieldId,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: dim,
+						},
+					},
+				}
+			}
+			dstVector := dst[i].GetVectors()
+			switch srcVector := fieldType.Vectors.Data.(type) {
+			case *schemapb.VectorField_BinaryVector:
+				if dstVector.GetBinaryVector() == nil {
+					dstVector.Data = &schemapb.VectorField_BinaryVector{
+						BinaryVector: srcVector.BinaryVector[idx*(dim/8) : (idx+1)*(dim/8)],
+					}
+				} else {
+					dstBinaryVector := dstVector.Data.(*schemapb.VectorField_BinaryVector)
+					dstBinaryVector.BinaryVector = append(dstBinaryVector.BinaryVector, srcVector.BinaryVector[idx*(dim/8):(idx+1)*(dim/8)]...)
+				}
+			case *schemapb.VectorField_FloatVector:
+				if dstVector.GetFloatVector() == nil {
+					dstVector.Data = &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: srcVector.FloatVector.Data[idx*dim : (idx+1)*dim],
+						},
+					}
+				} else {
+					dstVector.GetFloatVector().Data = append(dstVector.GetFloatVector().Data, srcVector.FloatVector.Data[idx*dim:(idx+1)*dim]...)
+				}
+			default:
+				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
+			}
+		}
 	}
 }

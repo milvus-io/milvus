@@ -28,13 +28,12 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/common"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -52,8 +51,11 @@ type ReplicaInterface interface {
 	removeCollection(collectionID UniqueID) error
 	// getCollectionByID gets the collection which id is collectionID
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
+	// hasCollection checks if collectionReplica has the collection which id is collectionID
 	hasCollection(collectionID UniqueID) bool
+	// getCollectionNum returns num of collections in collectionReplica
 	getCollectionNum() int
+	// getPartitionIDs returns partition ids of collection
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
 	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error)
 	getPKFieldIDByCollectionID(collectionID UniqueID) (FieldID, error)
@@ -81,6 +83,12 @@ type ReplicaInterface interface {
 	addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo)
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
 
+	// query mu
+	queryLock()
+	queryUnlock()
+	queryRLock()
+	queryRUnlock()
+
 	getSegmentsMemSize() int64
 	freeAll()
 	printReplica()
@@ -94,9 +102,26 @@ type collectionReplica struct {
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
 
+	queryMu          sync.RWMutex
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
 	etcdKV *etcdkv.EtcdKV
+}
+
+func (colReplica *collectionReplica) queryLock() {
+	colReplica.queryMu.Lock()
+}
+
+func (colReplica *collectionReplica) queryUnlock() {
+	colReplica.queryMu.Unlock()
+}
+
+func (colReplica *collectionReplica) queryRLock() {
+	colReplica.queryMu.RLock()
+}
+
+func (colReplica *collectionReplica) queryRUnlock() {
+	colReplica.queryMu.RUnlock()
 }
 
 // getSegmentsMemSize get the memory size in bytes of all the Segments
@@ -152,6 +177,8 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 // removeCollection removes the collection from collectionReplica
 func (colReplica *collectionReplica) removeCollection(collectionID UniqueID) error {
 	colReplica.mu.Lock()
+	colReplica.queryMu.Lock()
+	defer colReplica.queryMu.Unlock()
 	defer colReplica.mu.Unlock()
 	return colReplica.removeCollectionPrivate(collectionID)
 }
@@ -300,6 +327,8 @@ func (colReplica *collectionReplica) addPartitionPrivate(collectionID UniqueID, 
 // removePartition removes the partition from collectionReplica
 func (colReplica *collectionReplica) removePartition(partitionID UniqueID) error {
 	colReplica.mu.Lock()
+	colReplica.queryMu.Lock()
+	defer colReplica.queryMu.Unlock()
 	defer colReplica.mu.Unlock()
 	return colReplica.removePartitionPrivate(partitionID)
 }

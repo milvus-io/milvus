@@ -118,7 +118,10 @@ func (node *QueryNode) Register() error {
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 	// start liveness check
 	go node.session.LivenessCheck(node.queryNodeLoopCtx, func() {
-		log.Fatal("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		if err := node.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
 	})
 
 	Params.QueryNodeID = node.session.ServerID
@@ -358,6 +361,10 @@ func (node *QueryNode) adjustByChangeInfo(segmentChangeInfos *querypb.SealedSegm
 		return err
 	}
 
+	node.streaming.replica.queryLock()
+	node.historical.replica.queryLock()
+	defer node.streaming.replica.queryUnlock()
+	defer node.historical.replica.queryUnlock()
 	for _, info := range segmentChangeInfos.Infos {
 		// For online segments:
 		for _, segmentInfo := range info.OnlineSegments {
@@ -366,6 +373,7 @@ func (node *QueryNode) adjustByChangeInfo(segmentChangeInfos *querypb.SealedSegm
 			if hasGrowingSegment {
 				err := node.streaming.replica.removeSegment(segmentInfo.SegmentID)
 				if err != nil {
+
 					return err
 				}
 				log.Debug("remove growing segment in adjustByChangeInfo",

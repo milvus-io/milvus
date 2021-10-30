@@ -253,7 +253,10 @@ func (i *IndexCoord) Start() error {
 		go i.watchMetaLoop()
 
 		go i.session.LivenessCheck(i.loopCtx, func() {
-			log.Fatal("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
+			log.Error("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
+			if err := i.Stop(); err != nil {
+				log.Fatal("failed to stop server", zap.Error(err))
+			}
 		})
 
 		startErr = i.sched.Start()

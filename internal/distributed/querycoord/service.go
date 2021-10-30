@@ -244,7 +244,7 @@ func (s *Server) SetRootCoord(m types.RootCoord) error {
 	return nil
 }
 
-// SetDataCoord sets the QueryCoord's client for QueryNode component.
+// SetDataCoord sets the DataCoord's client for QueryCoord component.
 func (s *Server) SetDataCoord(d types.DataCoord) error {
 	s.queryCoord.SetDataCoord(d)
 	return nil
@@ -255,10 +255,12 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.queryCoord.GetComponentStates(ctx)
 }
 
+// GetTimeTickChannel gets the time tick channel of QueryCoord.
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.queryCoord.GetTimeTickChannel(ctx)
 }
 
+// GetStatisticsChannel gets the statistics channel of QueryCoord.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.queryCoord.GetStatisticsChannel(ctx)
 }

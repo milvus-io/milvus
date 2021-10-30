@@ -22,7 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-// GIDAllocator is interface for GlobalIDAllocator.
+// GIDAllocator is an interface for GlobalIDAllocator.
 // Alloc allocates the id of the count number.
 // AllocOne allocates one id.
 // UpdateID update timestamp of allocator.

@@ -313,7 +313,7 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.params.Load(strings.ToLower(key))
 }
 
-func (gp *BaseTable) LoadWithDefault(key string, defaultValue string) string {
+func (gp *BaseTable) LoadWithDefault(key, defaultValue string) string {
 	return gp.params.LoadWithDefault(strings.ToLower(key), defaultValue)
 }
 

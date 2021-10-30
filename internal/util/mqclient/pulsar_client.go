@@ -67,9 +67,12 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	if err != nil {
 		return nil, err
 	}
-	//consumer.Seek(pulsar.EarliestMessageID())
-	//consumer.SeekByTime(time.Unix(0, 0))
+
 	pConsumer := &pulsarConsumer{c: consumer, closeCh: make(chan struct{})}
+	// prevent seek to earliest patch applied when using latest position options
+	if options.SubscriptionInitialPosition == SubscriptionPositionLatest {
+		pConsumer.hasSeek = true
+	}
 
 	return pConsumer, nil
 }

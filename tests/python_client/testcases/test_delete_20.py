@@ -16,7 +16,7 @@ query_res_tmp_expr = [{f'{ct.default_int64_field_name}': 0}]
 exp_res = "exp_res"
 
 
-@pytest.mark.skip(reason="Delete API disabled")
+@pytest.mark.xfail(reason="Delete API disabled")
 class TestDeleteParams(TestcaseBase):
     """
     Test case of delete interface
@@ -32,7 +32,7 @@ class TestDeleteParams(TestcaseBase):
         target: test delete data from collection
         method: 1.create and insert nb with flush
                 2.load collection
-                3. delete half of nb
+                3.delete half of nb
                 4.query with deleted ids
         expected: Query result is empty
         """
@@ -131,7 +131,6 @@ class TestDeleteParams(TestcaseBase):
         expr = f'{ct.default_int64_field_name} in {[0]}'
         del_res, _ = collection_w.delete(expr)
         assert del_res.delete_count == 1
-        time.sleep(1)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -150,7 +149,6 @@ class TestDeleteParams(TestcaseBase):
         assert del_res.delete_count == ct.default_nb
         assert collection_w.num_entities == ct.default_nb
 
-        time.sleep(1)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -222,7 +220,6 @@ class TestDeleteParams(TestcaseBase):
         assert del_res.delete_count == 1
 
         # query with deleted id and query with existed id
-        time.sleep(1)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty, partition_names=[partition_w.name])
         res = df.iloc[1:2, :1].to_dict('records')
         collection_w.query(f'{ct.default_int64_field_name} in [1]',
@@ -257,7 +254,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w.delete(tmp_expr, partition_name=partition_name, check_task=CheckTasks.err_res, check_items=error)
 
 
-@pytest.mark.skip(reason="Delete API disabled")
+@pytest.mark.xfail(reason="Delete API disabled")
 class TestDeleteOperation(TestcaseBase):
     """
     ******************************************************************
@@ -313,6 +310,7 @@ class TestDeleteOperation(TestcaseBase):
         assert collection_w.num_entities == tmp_nb - 1
         assert collection_w.has_index()
 
+    @pytest.mark.xfail(reason="Issue #10919")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_query_ids_both_sealed_and_channel(self):
         """
@@ -454,7 +452,6 @@ class TestDeleteOperation(TestcaseBase):
 
         # delete entities from own partition
         collection_w.delete(expr, partition_name=partition_w.name)
-        time.sleep(1)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -501,7 +498,6 @@ class TestDeleteOperation(TestcaseBase):
 
         # verify delete result
         assert res.delete_count == 1
-        time.sleep(1)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -528,7 +524,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_delete_without_flush(self):
+    def test_delete_sealed_segment_without_flush(self):
         """
         target: test delete without flush
         method: 1.insert and flush data
@@ -548,13 +544,12 @@ class TestDeleteOperation(TestcaseBase):
 
         # load and query with id
         collection_w.load()
-        time.sleep(1)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_delete_data_from_growing_segment(self):
+    def test_delete_growing_data_channel_delete(self):
         """
-        target: test delete entities from growing segment
+        target: test delete entities from growing segment, and channel deleteMsg
         method: 1.create collection
                 2.load collection
                 3.insert data and delete ids
@@ -572,11 +567,10 @@ class TestDeleteOperation(TestcaseBase):
         del_res = collection_w.delete(tmp_expr)[0]
         assert del_res.delete_count == 1
         # query id 0
-        time.sleep(1)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_delete_after_load_sealed_segment(self):
+    def test_delete_sealed_data_channel_delete(self):
         """
         target: test delete sealed data and get deleteMsg from insertChannel
         method: 1.create, insert and flush data
@@ -596,7 +590,6 @@ class TestDeleteOperation(TestcaseBase):
 
         # delete ids and query
         collection_w.delete(tmp_expr)
-        time.sleep(1)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -616,9 +609,12 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.insert(df)
         # assert collection_w.num_entities == tmp_nb
 
-        # delete id 0 and flush
+        # delete id 0
         del_res = collection_w.delete(tmp_expr)[0]
         assert del_res.delete_count == 1
+
+        # insert data and flush data and delete ids.
+        # if no insert, datanode will not really flush delete ids
         collection_w.insert(cf.gen_default_dataframe_data(nb=1, start=tmp_nb))
         log.info(f'Collection num entities: {collection_w.num_entities}')
 
@@ -654,11 +650,11 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_delete_sealed_only(self):
+    def test_delete_sealed_data_sealed_delete(self):
         """
-        target: test delete with sealed only data and delete request
+        target: test delete with sealed data and sealed delete request
         method: 1.create, insert
-                2.delete and flush
+                2.delete and flush (will flush data and delete)
                 3.load and query
         expected: Empty query result
         """
@@ -696,7 +692,6 @@ class TestDeleteOperation(TestcaseBase):
         del_res, _ = collection_w.delete(tmp_expr)
         assert del_res.delete_count == 1
         # assert collection_w.num_entities == tmp_nb
-        time.sleep(1)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
         # insert entity with primary key 0
@@ -704,10 +699,8 @@ class TestDeleteOperation(TestcaseBase):
 
         # query entity one
         res = df.iloc[0:1, :1].to_dict('records')
-        time.sleep(1)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})
 
-    @pytest.mark.xfail(reason="Issue: #10682")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_entity_loop(self):
         """
@@ -725,10 +718,8 @@ class TestDeleteOperation(TestcaseBase):
 
         # query with all ids
         expr = f'{ct.default_int64_field_name} in {ids}'
-        time.sleep(10)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.xfail(reason="Issue: #10682")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_flush_loop(self):
         """
@@ -748,7 +739,6 @@ class TestDeleteOperation(TestcaseBase):
 
         # query with all ids
         expr = f'{ct.default_int64_field_name} in {ids}'
-        time.sleep(1)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -809,7 +799,6 @@ class TestDeleteOperation(TestcaseBase):
 
         # delete id 1 and query id 0 and 1
         collection_w.delete(expr=f'{ct.default_int64_field_name} in {[1]}')
-        time.sleep(1)
         collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, 1]}', check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)

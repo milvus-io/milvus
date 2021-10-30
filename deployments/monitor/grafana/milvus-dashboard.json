@@ -387,7 +387,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of has_collection",
+      "description": "per-minute increasing rate of has_collection requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -490,7 +490,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of create_collection",
+      "description": "per-minute increasing rate of create_collection requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -593,7 +593,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of show_collections",
+      "description": "per-minute increasing rate of show_collections requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -4755,7 +4755,7 @@
           "expr": "go_memstats_alloc_bytes{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{component}}: {{pod}}",
+          "legendFormat": "{{pod}}",
           "queryType": "randomWalk",
           "refId": "A"
         }

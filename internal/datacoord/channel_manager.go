@@ -61,7 +61,7 @@ func defaultFactory(hash *consistent.Consistent) ChannelPolicyFactory {
 	return NewConsistentHashChannelPolicyFactory(hash)
 }
 
-// NewChannelManager return a new ChannelManager
+// NewChannelManager returns a new ChannelManager
 func NewChannelManager(kv kv.TxnKV, posProvider positionProvider, options ...ChannelManagerOpt) (*ChannelManager, error) {
 	c := &ChannelManager{
 		posProvider: posProvider,
@@ -85,7 +85,7 @@ func NewChannelManager(kv kv.TxnKV, posProvider positionProvider, options ...Cha
 	return c, nil
 }
 
-// Startup adjust the channel store according to current cluster states
+// Startup adjusts the channel store according to current cluster states
 func (c *ChannelManager) Startup(nodes []int64) error {
 	channels := c.store.GetNodesChannels()
 	olds := make([]int64, 0, len(channels))
