@@ -267,4 +267,4 @@ After the execution of the above query is complete, we will get its charts:
 
  <img src="assets/dash.png" />
 
-In this chart, we will found there has an improvement from 2.0.0-RC3 to 2.0.0-RC5.
+In this chart, we could find an improvement from 2.0.0-RC3 to 2.0.0-RC5.
