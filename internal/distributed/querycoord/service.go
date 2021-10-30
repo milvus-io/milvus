@@ -270,6 +270,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 	return s.queryCoord.ShowCollections(ctx, req)
 }
 
+// LoadCollection loads the data of the specified collection in QueryCoord.
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	return s.queryCoord.LoadCollection(ctx, req)
 }
