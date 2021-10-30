@@ -20,6 +20,13 @@ class MilvusOperator(object):
 
     @staticmethod
     def _update_configs(configs, template=None):
+        """
+        Method: update the template with customized configs
+        Params:
+            configs: a dict type of configurations that describe the properties of milvus to be deployed
+            template: Optional. Pass the template file location if there is a template to apply
+        Return: a dict type customized configs
+        """
         if not isinstance(configs, dict):
             log.error("customize configurations must be in dict type")
             return None
