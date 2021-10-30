@@ -265,6 +265,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.queryCoord.GetStatisticsChannel(ctx)
 }
 
+// ShowCollections shows the collections in the QueryCoord.
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	return s.queryCoord.ShowCollections(ctx, req)
 }
