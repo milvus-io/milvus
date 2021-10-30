@@ -49,7 +49,8 @@ class TestChaosBase:
         node_map = {
             "querynode": "query_nodes",
             "datanode": "data_nodes",
-            "indexnode": "index_nodes"
+            "indexnode": "index_nodes",
+            "proxy": "proxy_nodes"
         }
         for t in test_collections:
             test_chaos = t.get('testcase', {}).get('chaos', {})
