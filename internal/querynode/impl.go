@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// GetComponentStates return information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	stats := &internalpb.ComponentStates{
 		Status: &commonpb.Status{
