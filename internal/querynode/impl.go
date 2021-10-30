@@ -68,6 +68,8 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 	}, nil
 }
 
+// GetStatisticsChannel return the statistics channel
+// Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
 func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
