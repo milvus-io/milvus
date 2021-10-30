@@ -376,6 +376,7 @@ func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
+// MarshalLogArray implements the interface of ArrayMarshaler of zap
 func (cos ChannelOpSet) MarshalLogArray(enc zapcore.ArrayEncoder) error {
 	for _, o := range cos {
 		enc.AppendObject(o)
