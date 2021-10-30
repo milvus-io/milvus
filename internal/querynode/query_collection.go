@@ -1208,38 +1208,60 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	return nil
 }
 
-func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
-	var final *segcorepb.RetrieveResults
-	for _, data := range dataArr {
+func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
+	var ret *segcorepb.RetrieveResults
+	var skipDupCnt int64 = 0
+	var idSet = make(map[int64]struct{})
+
+	// merge results and remove duplicates
+	for _, rr := range retrieveResults {
 		// skip empty result, it will break merge result
-		if data == nil || len(data.Offset) == 0 {
+		if rr == nil || len(rr.Offset) == 0 {
 			continue
 		}
 
-		if final == nil {
-			final = proto.Clone(data).(*segcorepb.RetrieveResults)
-			continue
+		if ret == nil {
+			ret = &segcorepb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{},
+						},
+					},
+				},
+				FieldsData: make([]*schemapb.FieldData, len(rr.FieldsData)),
+			}
 		}
 
-		proto.Merge(final.Ids, data.Ids)
-		if len(final.FieldsData) != len(data.FieldsData) {
+		if len(ret.FieldsData) != len(rr.FieldsData) {
 			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
 		}
 
-		for i := range final.FieldsData {
-			proto.Merge(final.FieldsData[i], data.FieldsData[i])
+		dstIds := ret.Ids.GetIntId()
+		for i, id := range rr.Ids.GetIntId().GetData() {
+			if _, ok := idSet[id]; !ok {
+				dstIds.Data = append(dstIds.Data, id)
+				typeutil.AppendFieldData(ret.FieldsData, rr.FieldsData, int64(i))
+				idSet[id] = struct{}{}
+			} else {
+				// primary keys duplicate
+				skipDupCnt++
+			}
 		}
+	}
+	if skipDupCnt > 0 {
+		log.Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
 	}
 
 	// not found, return default values indicating not result found
-	if final == nil {
-		final = &segcorepb.RetrieveResults{
-			Ids:        nil,
+	if ret == nil {
+		ret = &segcorepb.RetrieveResults{
+			Ids:        &schemapb.IDs{},
 			FieldsData: []*schemapb.FieldData{},
 		}
 	}
 
-	return final, nil
+	return ret, nil
 }
 
 func (q *queryCollection) publishQueryResult(msg msgstream.TsMsg, collectionID UniqueID) error {
