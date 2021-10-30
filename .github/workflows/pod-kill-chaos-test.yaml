@@ -139,4 +139,6 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: logs-${{ matrix.pod }}
-          path: tests/python_client/chaos/k8s_logs
+          path: |
+            tests/python_client/chaos/k8s_logs
+            tests/python_client/chaos/reports
