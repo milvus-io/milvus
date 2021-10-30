@@ -1,7 +1,7 @@
 ## 6. Proxy
 
 As the user access layer of Milvus, Proxy mainly plays a role that does some checks and preprocessing for requests from
-clients and then forward these requests to other components, such as Root Coordinator, Data Coordinator, Query
+clients and then forwards these requests to other components, such as Root Coordinator, Data Coordinator, Query
 Coordinator, Index Coordinator. The below figure shows how Proxy interacts with other components.
 
 <img src="./graphs/proxy.png" width=700>
@@ -22,13 +22,13 @@ collection, querying for specific records of a collection and etc.
 For every request, Proxy will first check if it's valid to be executed by Milvus and if the request is invalid then
 Proxy will return the error to clients and won't continue to forward this request to other components. The check
 operation of Proxy includes two parts, one part is static check and another is dynamic check. Static check includes
-parameters check, constraints check and etc. Dynamic check will check some related dependency of the request, take
+parameters check, constraints check and etc. Dynamic check will check some related dependencies of the request, take
 search requests for example, Proxy should check if the related collection exists in Milvus.
 
 Also, Proxy will do some preprocessing for every request. Proxy will do little things for some requests in the
 preprocessing stage and a lot more for other requests. Every object in Milvus will be assigned with a `ID`, such as
 `CollectionID`, `PartitionID`, `IndexID`, `SegmentID`, etc. Components in Milvus communicate with each other by the
-object IDs, however, users only knows the object name. So as a user access layer of Milvus, Proxy should translate
+object IDs, however, users only know the object name. So as a user access layer of Milvus, Proxy should translate
 the object name into object ID. Also taking search request as example, Proxy should translate the `CollectionName` into
 `CollectionID` and then the Query Node will recognize the request. Proxy holds a cache that translate object name into
 object id and dynamically updates the cache.
