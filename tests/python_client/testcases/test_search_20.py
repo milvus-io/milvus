@@ -503,6 +503,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
         insert_res, _ = collection_w.insert(data)
 
+        # TODO: remove sleep with search grantee_timestamp when issue #10101 fixed
         sleep(1)
 
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
