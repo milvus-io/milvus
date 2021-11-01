@@ -455,22 +455,32 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
     auto topk = sr->topk_;
     auto num_queries = sr->num_queries_;
 
-    std::unordered_set<int64_t> pk_set;
-    std::unordered_set<float> distance_set;
+    // fill primary keys
+    std::vector<int64_t> result_pks(num_queries * topk);
     for (int i = 0; i < results.size(); i++) {
         auto search_result = (SearchResult*)results[i];
         auto size = search_result->result_offsets_.size();
+        if (size == 0) {
+            continue;
+        }
         for (int j = 0; j < size; j++) {
-            auto ret = pk_set.insert(search_result->primary_keys_[j]);
-            // std::cout << j << ": " << ret.second << "  "
-            //           << search_result->primary_keys_[j] << "  "
-            //           << search_result->result_distances_[j] << std::endl;
-            distance_set.insert(search_result->result_distances_[j]);
+            auto offset = search_result->result_offsets_[j];
+            result_pks[offset] = search_result->primary_keys_[j];
         }
     }
-    std::cout << pk_set.size() << "  " << distance_set.size() << "  " << topk * num_queries << std::endl;
-    // TODO: find 1 duplicated result (pk = 10345), need check
-    assert(pk_set.size() == topk * num_queries - 1);
+
+    // check primary key duplicates
+    int64_t cnt = 0;
+    std::unordered_set<int64_t> pk_set;
+    for (int qi = 0; qi < num_queries; qi++) {
+        pk_set.clear();
+        for (int k = 0; k < topk; k++) {
+            int64_t idx = topk * qi + k;
+            pk_set.insert(result_pks[idx]);
+        }
+        cnt += pk_set.size();
+    }
+    assert(cnt == topk * num_queries);
 }
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
