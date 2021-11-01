@@ -64,6 +64,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	return producer, nil
 }
 
+// Subscribe create a rocksmq consumer and start consume in a goroutine
 func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	// Create a consumer
 	if reflect.ValueOf(c.server).IsNil() {
