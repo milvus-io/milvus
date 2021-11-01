@@ -1,7 +1,7 @@
 kind: Schedule
 apiVersion: chaos-mesh.org/v1alpha1
 metadata:
-  name: test-minio-podkill
+  name: test-datacoord-pod-kill
   namespace: chaos-testing
 spec:
   schedule: '*/5 * * * * *'
@@ -14,8 +14,9 @@ spec:
       namespaces:
         - chaos-testing
       labelSelectors:
-        release: milvus-chaos
-        app: minio 
+        app.kubernetes.io/instance: milvus-chaos
+        app.kubernetes.io/name: milvus
+        component: datacoord
     mode: one
     action: pod-kill
     gracePeriod: 0

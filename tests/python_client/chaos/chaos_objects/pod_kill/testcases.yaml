@@ -11,8 +11,8 @@
 Collections:
   -
     testcase:
-      name: test_querynode_podkill
-      chaos: chaos_querynode_podkill.yaml
+      name: test_querynode_pod_kill
+      chaos: chaos_querynode_pod_kill.yaml
       expectation:
           cluster_1_node:
             search: fail
@@ -22,8 +22,8 @@ Collections:
             query: degrade
   -
     testcase:
-      name: test_querycoord_podkill
-      chaos: chaos_querycoord_podkill.yaml
+      name: test_querycoord_pod_kill
+      chaos: chaos_querycoord_pod_kill.yaml
       expectation:
         cluster_1_node:
           search: fail
@@ -33,8 +33,8 @@ Collections:
           query: degrade
   -
     testcase:
-      name: test_datanode_podkill
-      chaos: chaos_datanode_podkill.yaml
+      name: test_datanode_pod_kill
+      chaos: chaos_datanode_pod_kill.yaml
       expectation:
         cluster_1_node:
           insert: succ
@@ -43,8 +43,8 @@ Collections:
           insert: degrade
   -
     testcase:
-      name: test_datascoord_podkill
-      chaos: chaos_datacoord_podkill.yaml
+      name: test_datascoord_pod_kill
+      chaos: chaos_datacoord_pod_kill.yaml
       expectation:
         cluster_1_node:
           insert: succ
@@ -53,8 +53,8 @@ Collections:
           insert: degrade
   -
     testcase:
-      name: test_indexnode_podkill
-      chaos: chaos_indexnode_podkill.yaml
+      name: test_indexnode_pod_kill
+      chaos: chaos_indexnode_pod_kill.yaml
       expectation:
         cluster_1_node:
           index: fail
@@ -62,8 +62,8 @@ Collections:
           index: degrade
   -
     testcase:
-      name: test_indexcoord_podkill
-      chaos: chaos_indexcoord_podkill.yaml
+      name: test_indexcoord_pod_kill
+      chaos: chaos_indexcoord_pod_kill.yaml
       expectation:
         cluster_1_node:
           index: fail
@@ -71,8 +71,8 @@ Collections:
           insert: degrade
   -
     testcase:
-      name: test_proxy_podkill
-      chaos: chaos_proxy_podkill.yaml
+      name: test_proxy_pod_kill
+      chaos: chaos_proxy_pod_kill.yaml
       expectation:
         cluster_1_node:
           create: fail
@@ -85,8 +85,8 @@ Collections:
           insert: fail
   -
     testcase:
-      name: test_rootcoord_podkill
-      chaos: chaos_rootcoord_podkill.yaml
+      name: test_rootcoord_pod_kill
+      chaos: chaos_rootcoord_pod_kill.yaml
       expectation:
         cluster_1_node:
           create: fail
@@ -99,8 +99,8 @@ Collections:
           insert: degrade
   -
     testcase:
-      name: test_etcd_podkill
-      chaos: chaos_etcd_podkill.yaml
+      name: test_etcd_pod_kill
+      chaos: chaos_etcd_pod_kill.yaml
       expectation:
         cluster_1_node:
           create: fail
@@ -111,8 +111,8 @@ Collections:
           query: fail
   -
     testcase:
-      name: test_minio_podkill
-      chaos: chaos_minio_podkill.yaml
+      name: test_minio_pod_kill
+      chaos: chaos_minio_pod_kill.yaml
       expectation:
         cluster_1_node:
           create: fail
@@ -123,8 +123,8 @@ Collections:
           query: fail
   -
     testcase:
-      name: test_pulsar_podkill
-      chaos: chaos_pulsar_podkill.yaml
+      name: test_pulsar_pod_kill
+      chaos: chaos_pulsar_pod_kill.yaml
       expectation:
         cluster_1_node:
           create: fail
