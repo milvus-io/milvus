@@ -229,7 +229,7 @@ func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
 	buf := make([]byte, 8)
 	res := make([]int64, 0)
 	for _, pk := range pks {
-		binary.LittleEndian.PutUint64(buf, uint64(pk))
+		binary.BigEndian.PutUint64(buf, uint64(pk))
 		exist := segment.pkFilter.Test(buf)
 		if exist {
 			res = append(res, pk)
