@@ -31,7 +31,7 @@ const (
 // ValidateMetricType returns metric text or error
 func ValidateMetricType(metric string) (string, error) {
 	if metric == "" {
-		err := errors.New("Metric type is empty")
+		err := errors.New("metric type is empty")
 		return "", err
 	}
 
@@ -40,14 +40,14 @@ func ValidateMetricType(metric string) (string, error) {
 		return m, nil
 	}
 
-	err := errors.New("Invalid metric type")
+	err := errors.New("invalid metric type")
 	return metric, err
 }
 
 // ValidateFloatArrayLength is used validate float vector length
 func ValidateFloatArrayLength(dim int64, length int) error {
 	if length == 0 || int64(length)%dim != 0 {
-		err := errors.New("Invalid float vector length")
+		err := errors.New("invalid float vector length")
 		return err
 	}
 
@@ -94,13 +94,13 @@ func CalcFFBatch(dim int64, left []float32, lIndex int64, right []float32, metri
 
 func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float32, error) {
 	if dim <= 0 {
-		err := errors.New("Invalid dimension")
+		err := errors.New("invalid dimension")
 		return nil, err
 	}
 
 	metricUpper := strings.ToUpper(metric)
 	if metricUpper != L2 && metricUpper != IP {
-		err := errors.New("Invalid metric type")
+		err := errors.New("invalid metric type")
 		return nil, err
 	}
 
@@ -119,6 +119,7 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 
 	distArray := make([]float32, leftNum*rightNum)
 
+	// Multi-threads to calculate distance. TODO: avoid too many go routines
 	var waitGroup sync.WaitGroup
 	CalcWorker := func(index int64) {
 		CalcFFBatch(dim, left, index, right, metricUpper, &distArray)
@@ -151,7 +152,7 @@ func ValidateBinaryArrayLength(dim int64, length int) error {
 	singleBitLen := SingleBitLen(dim)
 	totalBitLen := int64(length * 8)
 	if length == 0 || totalBitLen%singleBitLen != 0 {
-		err := errors.New("Invalid binary vector length")
+		err := errors.New("invalid binary vector length")
 		return err
 	}
 
@@ -207,7 +208,7 @@ func CalcHammingBatch(dim int64, left []byte, lIndex int64, right []byte, result
 
 func CalcHammingDistance(dim int64, left, right []byte) ([]int32, error) {
 	if dim <= 0 {
-		err := errors.New("Invalid dimension")
+		err := errors.New("invalid dimension")
 		return nil, err
 	}
 
@@ -225,6 +226,7 @@ func CalcHammingDistance(dim int64, left, right []byte) ([]int32, error) {
 	rightNum := VectorCount(dim, len(right))
 	distArray := make([]int32, leftNum*rightNum)
 
+	// Multi-threads to calculate distance. TODO: avoid too many go routines
 	var waitGroup sync.WaitGroup
 	CalcWorker := func(index int64) {
 		CalcHammingBatch(dim, left, index, right, &distArray)
@@ -241,14 +243,14 @@ func CalcHammingDistance(dim int64, left, right []byte) ([]int32, error) {
 
 func CalcTanimotoCoefficient(dim int64, hamming []int32) ([]float32, error) {
 	if dim <= 0 || len(hamming) == 0 {
-		err := errors.New("Invalid input for tanimoto")
+		err := errors.New("invalid input for tanimoto")
 		return nil, err
 	}
 
 	array := make([]float32, len(hamming))
 	for i := 0; i < len(hamming); i++ {
 		if hamming[i] > int32(dim) {
-			err := errors.New("Invalid hamming for tanimoto")
+			err := errors.New("invalid hamming for tanimoto")
 			return nil, err
 		}
 		equalBits := int32(dim) - hamming[i]
