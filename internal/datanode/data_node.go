@@ -436,46 +436,14 @@ func (node *DataNode) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
-// WatchDmChannels create a new dataSyncService for every unique dmlVchannel name, ignore if dmlVchannel existed.
+// WatchDmChannels is not in use
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsTotal).Inc()
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}
+	log.Warn("DataNode WatchDmChannels is not in use")
 
-	switch {
-	case !node.isHealthy():
-		status.Reason = msgDataNodeIsUnhealthy(node.NodeID)
-		return status, nil
-
-	case len(in.GetVchannels()) == 0:
-		status.Reason = illegalRequestErrStr
-		return status, nil
-
-	default:
-		for _, chanInfo := range in.GetVchannels() {
-			log.Info("DataNode new dataSyncService",
-				zap.Int64("collectionID", chanInfo.GetCollectionID()),
-				zap.String("channel name", chanInfo.ChannelName),
-				zap.Any("channal Info", chanInfo),
-			)
-			if err := node.NewDataSyncService(chanInfo); err != nil {
-				log.Warn("Failed to new data sync service",
-					zap.Any("channel", chanInfo),
-					zap.Error(err))
-
-				// return error even partial success
-				// TODO Goose: release partial success resources?
-				status.Reason = err.Error()
-				return status, nil
-			}
-		}
-
-		status.ErrorCode = commonpb.ErrorCode_Success
-		log.Debug("DataNode WatchDmChannels Done")
-		metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
-		return status, nil
-	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "watchDmChannels do nothing",
+	}, nil
 }
 
 // GetComponentStates will return current state of DataNode
