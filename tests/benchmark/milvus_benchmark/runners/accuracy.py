@@ -265,6 +265,13 @@ class AccAccuracyRunner(AccuracyRunner):
         true_ids = case_param["true_ids"]
         nq = case_metric.search["nq"]
         top_k = case_metric.search["topk"]
+        start_time = time.time()
+        end_time = start_time + 500
+        cnt = 0
+        while cnt < 100 and start_time < end_time:
+            self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+            cnt += 1
+            start_time = time.time()
         query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
         result_ids = self.milvus.get_ids(query_res)
         # Calculate the accuracy of the result of query
