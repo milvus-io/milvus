@@ -27,6 +27,8 @@ type PQItem struct {
 
 	priority int // The priority of the item in the queue.
 	// The index is needed by update and is maintained by the heap.Interface methods.
+	weight int // The weight of the item in the queue.
+	// When the priority is the same, a smaller weight is more preferred.
 	index int // The index of the item in the heap.
 }
 
@@ -45,7 +47,8 @@ func (pq *PriorityQueue) Len() int {
 // must sort before the element with index j.
 func (pq *PriorityQueue) Less(i, j int) bool {
 	// We want Pop to give us the highest, not lowest, priority so we use greater than here.
-	return pq.items[i].priority < pq.items[j].priority
+	return (pq.items[i].priority < pq.items[j].priority) ||
+		(pq.items[i].priority == pq.items[j].priority && pq.items[i].weight < pq.items[j].weight)
 }
 
 // Swap swaps the elements with indexes i and j.
@@ -106,6 +109,9 @@ func (pq *PriorityQueue) IncPriority(key UniqueID, priority int) {
 	item := pq.getItemByKey(key)
 	if item != nil {
 		item.(*PQItem).priority += priority
+		if priority > 0 {
+			item.(*PQItem).weight += priority
+		}
 		heap.Fix(pq, item.(*PQItem).index)
 	}
 }
@@ -117,6 +123,7 @@ func (pq *PriorityQueue) UpdatePriority(key UniqueID, priority int) {
 	item := pq.getItemByKey(key)
 	if item != nil {
 		item.(*PQItem).priority = priority
+		item.(*PQItem).weight = priority
 		heap.Fix(pq, item.(*PQItem).index)
 	}
 }
