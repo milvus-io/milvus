@@ -67,6 +67,7 @@ type ReplicaInterface interface {
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
 	removePartition(partitionID UniqueID) error
 	getPartitionByID(partitionID UniqueID) (*Partition, error)
+	// hasPartition returns true if collectionReplica has the partition, false otherwise
 	hasPartition(partitionID UniqueID) bool
 	getPartitionNum() int
 	getSegmentIDs(partitionID UniqueID) ([]UniqueID, error)
