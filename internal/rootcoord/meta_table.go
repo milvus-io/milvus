@@ -243,7 +243,7 @@ func (mt *MetaTable) AddTenant(te *pb.TenantMeta, ts typeutil.Timestamp) error {
 	k := fmt.Sprintf("%s/%d", TenantMetaPrefix, te.ID)
 	v, err := proto.Marshal(te)
 	if err != nil {
-		log.Error("AddTenant Marshal fail", zap.Error(err))
+		log.Error("Failed to marshal TenantMeta in AddTenant", zap.Error(err))
 		return err
 	}
 
