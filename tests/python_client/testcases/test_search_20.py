@@ -2257,7 +2257,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: search collection with the given vectors and tags, check the result
         expected: the length of the result is top_k
         """
@@ -2292,7 +2292,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_flat(self, connect, collection, get_simple_index, get_top_k, get_nq):
         """
-        target: test basic search function, all the search params is correct, change top-k value
+        target: test basic search function, all the search params are correct, change top-k value
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         """
@@ -2309,7 +2309,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         """
@@ -2335,7 +2335,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_index_empty_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: add vectors into collection, search with the given vectors, check the result
         expected: the length of the result is top_k, search collection with partition tag return empty
         """
@@ -2368,7 +2368,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: search collection with the given vectors and tags, check the result
         expected: the length of the result is top_k
         """
