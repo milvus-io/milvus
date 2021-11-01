@@ -25,7 +25,7 @@ message FlushResponse{
 ```
 
 
-2. When `Proxy` receives `Flush` request, it would wrap this request into `FlushTask`, and push this task into `DdTaskQueue` queue. After that, `Proxy` would call method `WatiToFinish` to wait until the task finished.
+2. When `Proxy` receives `Flush` request, it would wrap this request into `FlushTask`, and push this task into `DdTaskQueue` queue. After that, `Proxy` would call `WatiToFinish` to wait until the task finished.
 ```go
 type task interface {
 	TraceCtx() context.Context
