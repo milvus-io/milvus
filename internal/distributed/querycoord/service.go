@@ -285,6 +285,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 	return s.queryCoord.ShowPartitions(ctx, req)
 }
 
+// GetPartitionStates gets the states of the specified partition.
 func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
 	return s.queryCoord.GetPartitionStates(ctx, req)
 }
