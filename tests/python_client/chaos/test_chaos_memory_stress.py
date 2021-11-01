@@ -146,7 +146,7 @@ class TestChaosData:
         collection_w.init_collection(name=c_name,
                                      schema=cf.gen_default_collection_schema(dim=dim), shards_num=1)
 
-        # insert 256000 512 dim entities 512Mi
+        # insert 256000 512 dim entities, size 512Mi
         for i in range(2):
             t0_insert = datetime.datetime.now()
             df = cf.gen_default_dataframe_data(nb=nb // 2, dim=dim)
@@ -163,7 +163,6 @@ class TestChaosData:
         log.info(f'flush {nb * 10} entities cost: {tt_flush}')
 
         # create index
-        # index
         t0_index = datetime.datetime.now()
         index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
                                              index_params=index_params)
