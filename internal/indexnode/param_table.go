@@ -63,18 +63,12 @@ func (pt *ParamTable) InitAlias(alias string) {
 // Init is used to initialize configuration items.
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
-	if err := pt.LoadYaml("advanced/knowhere.yaml"); err != nil {
-		panic(err)
-	}
-
 	// TODO, load index_node.yaml
 	/*err := pt.LoadYaml("advanced/index_node.yaml")
 	if err != nil {
 		panic(err)
 	}*/
-
 	pt.initParams()
-	pt.initKnowhereSimdType()
 }
 
 // InitOnce is used to initialize configuration items, and it will only be called once.
@@ -94,6 +88,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMetaRootPath()
 	pt.initIndexRootPath()
 	pt.initRoleName()
+	pt.initKnowhereSimdType()
 }
 
 func (pt *ParamTable) initMinIOAddress() {
