@@ -1,6 +1,7 @@
 # Drop Collection
 
-`Milvus 2.0` uses `Collection` to represent a set of data, like `Table` in traditional database. Users can create or drop `Collection`. Altering the `Schema` of `Collection` is not supported yet. This article introduces the execution path of `Drop Collection`. At the end of this article, you should know which components are involved in `Drop Collection`.
+`Milvus 2.0` uses `Collection` to represent a set of data, like `Table` in traditional database. Users can create or drop `Collection`. 
+This article introduces the execution path of `Drop Collection`. At the end of this article, you should know which components are involved in `Drop Collection`.
 
 The execution flow of `Drop Collection` is shown in the following figure:
 
