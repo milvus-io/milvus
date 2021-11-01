@@ -63,7 +63,7 @@ func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp,
 	return resp.Timestamp, nil
 }
 
-// allocID allocate an `UniqueID` from RootCoord, invoking AllocID grpc
+// allocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
 func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	resp, err := alloc.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
