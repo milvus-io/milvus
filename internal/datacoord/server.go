@@ -426,7 +426,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				}
 
 				staleSegments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
-					return !info.lastFlushTime.IsZero() && time.Since(info.lastFlushTime).Minutes() >= segmentTimedFlushDuration
+					return info.GetInsertChannel() == ch &&
+						!info.lastFlushTime.IsZero() &&
+						time.Since(info.lastFlushTime).Minutes() >= segmentTimedFlushDuration
 				})
 
 				if len(segments)+len(staleSegments) == 0 {
