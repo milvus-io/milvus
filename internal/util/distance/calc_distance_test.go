@@ -122,6 +122,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 	left := CreateFloatArray(leftNum, dim)
 	right := CreateFloatArray(rightNum, dim)
 
+	// Verify illegal cases
 	_, err := CalcFloatDistance(dim, left, right, "HAMMIN")
 	assert.Error(t, err)
 
@@ -137,6 +138,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 	distances, err := CalcFloatDistance(dim, left, right, "L2")
 	assert.Nil(t, err)
 
+	// Verify the L2 distance algorithm is correct
 	invalid := CreateFloatArray(rightNum, 10)
 	_, err = CalcFloatDistance(dim, left, invalid, "L2")
 	assert.Error(t, err)
@@ -150,6 +152,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 		}
 	}
 
+	// Verify the IP distance algorithm is correct
 	distances, err = CalcFloatDistance(dim, left, right, "IP")
 	assert.Nil(t, err)
 
