@@ -12,6 +12,7 @@
 package rocksmq
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strconv"
@@ -722,14 +723,30 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 
 	fixChanName, _ := fixChannelName(topicName)
 	iter.Seek([]byte(fixChanName + "/"))
+	var last []byte
+	// iter.SeekToLast bypass prefix limitation
+	// use for range until find next prefix for now
 	if iter.Valid() {
-		iter.SeekToLast()
+		last = iter.Key().Data()
+		current := last
+		for bytes.HasPrefix(current, []byte(topicName)) {
+			iter.Next()
+			if iter.Valid() {
+				current = last
+				last = iter.Key().Data()
+			} else {
+				break
+			}
+		}
 	} else {
 		// In this case there are no messages, so shouldn't return error
 		return nil
 	}
-	msgKey := iter.Key()
-	msgID, err := strconv.ParseInt(string(msgKey.Data())[FixedChannelNameLen+1:], 10, 64)
+
+	if len(last) <= FixedChannelNameLen {
+		return nil
+	}
+	msgID, err := strconv.ParseInt(string(last)[FixedChannelNameLen+1:], 10, 64)
 	if err != nil {
 		return err
 	}

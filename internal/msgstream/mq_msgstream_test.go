@@ -1619,3 +1619,42 @@ func printMsgPack(msgPack *MsgPack) {
 	}
 	log.Println("================")
 }
+
+func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
+
+	producerChannels := []string{"insert1"}
+	consumerChannels := []string{"insert1"}
+	consumerSubName := "subInsert"
+
+	rocksdbName := "/tmp/rocksmq_asconsumer_withpos"
+	etcdKV := initRmq(rocksdbName)
+	factory := ProtoUDFactory{}
+
+	rmqClient, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+
+	otherInputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+	otherInputStream.AsProducer([]string{"root_timetick"})
+	otherInputStream.Start()
+	otherInputStream.Produce(getTimeTickMsgPack(999))
+
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
+	inputStream.Start()
+
+	for i := 0; i < 100; i++ {
+		inputStream.Produce(getTimeTickMsgPack(int64(i)))
+	}
+
+	rmqClient2, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumerWithPosition(consumerChannels, consumerSubName, mqclient.SubscriptionPositionLatest)
+	outputStream.Start()
+
+	inputStream.Produce(getTimeTickMsgPack(1000))
+	pack := outputStream.Consume()
+	assert.NotNil(t, pack)
+	assert.Equal(t, 1, len(pack.Msgs))
+	assert.EqualValues(t, 1000, pack.Msgs[0].BeginTs())
+
+	Close(rocksdbName, inputStream, outputStream, etcdKV)
+}
