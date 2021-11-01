@@ -265,14 +265,17 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.queryCoord.GetStatisticsChannel(ctx)
 }
 
+// ShowCollections shows the collections in the QueryCoord.
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	return s.queryCoord.ShowCollections(ctx, req)
 }
 
+// LoadCollection loads the data of the specified collection in QueryCoord.
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	return s.queryCoord.LoadCollection(ctx, req)
 }
 
+// ReleaseCollection releases the data of the specified collection in QueryCoord.
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	return s.queryCoord.ReleaseCollection(ctx, req)
 }

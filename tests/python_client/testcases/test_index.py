@@ -539,8 +539,8 @@ class TestIndexBase:
     def test_create_index_collection_not_existed(self, connect):
         """
         target: test create index interface when collection name not existed
-        method: create collection and add entities in it, create index
-            , make sure the collection name not in index
+        method: create collection and add entities in it, create index,
+                make sure the collection name not in index
         expected: create index failed
         """
         collection_name = gen_unique_str(uid)
@@ -740,8 +740,8 @@ class TestIndexBase:
     def test_create_index_collection_not_existed_ip(self, connect, collection):
         """
         target: test create index interface when collection name not existed
-        method: create collection and add entities in it, create index
-            , make sure the collection name not in index
+        method: create collection and add entities in it, create index,
+                make sure the collection name not in index
         expected: return code not equals to 0, create index failed
         """
         collection_name = gen_unique_str(uid)
@@ -853,8 +853,8 @@ class TestIndexBase:
     def test_drop_index_collection_not_existed(self, connect):
         """
         target: test drop index interface when collection name not existed
-        method: create collection and add entities in it, create index
-            , make sure the collection name not in index, and then drop it
+        method: create collection and add entities in it, create index,
+                make sure the collection name not in index, and then drop it
         expected: return code not equals to 0, drop index failed
         """
         collection_name = gen_unique_str(uid)

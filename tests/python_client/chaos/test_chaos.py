@@ -1,4 +1,5 @@
 import pytest
+import os
 from time import sleep
 
 from pymilvus import connections
@@ -49,7 +50,8 @@ class TestChaosBase:
         node_map = {
             "querynode": "query_nodes",
             "datanode": "data_nodes",
-            "indexnode": "index_nodes"
+            "indexnode": "index_nodes",
+            "proxy": "proxy_nodes"
         }
         for t in test_collections:
             test_chaos = t.get('testcase', {}).get('chaos', {})
@@ -129,16 +131,22 @@ class TestChaos(TestChaosBase):
         if self.parser_testcase_config(chaos_yaml) is False:
             log.error("Fail to get the testcase info in testcases.yaml")
             assert False
-
+        # init report 
+        meta_name = chaos_config.get('metadata', None).get('name', None)
+        dir_name = "./reports"
+        file_name = f"./reports/{meta_name}.log"
+        if not os.path.exists(dir_name):
+            os.makedirs(dir_name)       
         # wait 20s
         sleep(constants.WAIT_PER_OP * 2)
 
         # assert statistic:all ops 100% succ
         log.info("******1st assert before chaos: ")
         assert_statistic(self.health_checkers)
-
+        with open(file_name, "a+") as f:
+            f.write("1st assert before chaos: ")
+            f.write(f"{self.health_checkers}\n")
         # apply chaos object
-        meta_name = chaos_config.get('metadata', None).get('name', None)
         chaos_res = CusResource(kind=chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
                                 version=constants.CHAOS_VERSION,
@@ -166,7 +174,9 @@ class TestChaos(TestChaosBase):
                                        Op.search: self.expect_search,
                                        Op.query: self.expect_query
                                        })
-
+        with open(file_name, "a+") as f:
+            f.write("2nd assert after chaos injected:")
+            f.write(f"{self.health_checkers}\n")
         # delete chaos
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
@@ -187,7 +197,9 @@ class TestChaos(TestChaosBase):
         # assert statistic: all ops success again
         log.info("******3rd assert after chaos deleted: ")
         assert_statistic(self.health_checkers)
-
+        with open(file_name, "a+") as f:
+            f.write("3rd assert after chaos deleted:")
+            f.write(f"{self.health_checkers}\n")
         # assert all expectations
         assert_expectations()
 

@@ -12,6 +12,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -488,31 +489,51 @@ func TestQueryCollection_waitNewTSafe(t *testing.T) {
 }
 
 func TestQueryCollection_mergeRetrieveResults(t *testing.T) {
-	fieldData := []*schemapb.FieldData{
-		{
-			Type:      schemapb.DataType_FloatVector,
-			FieldName: defaultVecFieldName,
-			FieldId:   simpleVecField.id,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: defaultDim,
-					Data: &schemapb.VectorField_FloatVector{
-						FloatVector: &schemapb.FloatArray{
-							Data: []float32{1.1, 2.2, 3.3, 4.4},
-						},
-					},
+	const (
+		Dim                  = 8
+		Int64FieldName       = "Int64Field"
+		FloatVectorFieldName = "FloatVectorField"
+		Int64FieldID         = common.StartOfUserFieldID + 1
+		FloatVectorFieldID   = common.StartOfUserFieldID + 2
+	)
+	Int64Array := []int64{11, 22}
+	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
+
+	var fieldDataArray1 []*schemapb.FieldData
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
+
+	var fieldDataArray2 []*schemapb.FieldData
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
+
+	result1 := &segcorepb.RetrieveResults{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{0, 1},
 				},
 			},
 		},
+		Offset:     []int64{0, 1},
+		FieldsData: fieldDataArray1,
 	}
-	result := &segcorepb.RetrieveResults{
-		Ids:        &schemapb.IDs{},
-		Offset:     []int64{0},
-		FieldsData: fieldData,
+	result2 := &segcorepb.RetrieveResults{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{0, 1},
+				},
+			},
+		},
+		Offset:     []int64{0, 1},
+		FieldsData: fieldDataArray2,
 	}
 
-	_, err := mergeRetrieveResults([]*segcorepb.RetrieveResults{result})
+	result, err := mergeRetrieveResults([]*segcorepb.RetrieveResults{result1, result2})
 	assert.NoError(t, err)
+	assert.Equal(t, 2, len(result.FieldsData[0].GetScalars().GetLongData().Data))
+	assert.Equal(t, 2*Dim, len(result.FieldsData[1].GetVectors().GetFloatVector().Data))
 
 	_, err = mergeRetrieveResults(nil)
 	assert.NoError(t, err)

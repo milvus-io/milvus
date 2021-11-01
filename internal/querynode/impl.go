@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// GetComponentStates return information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	stats := &internalpb.ComponentStates{
 		Status: &commonpb.Status{
@@ -67,6 +68,8 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 	}, nil
 }
 
+// GetStatisticsChannel return the statistics channel
+// Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
 func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -325,6 +328,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	return waitFunc()
 }
 
+// ReleaseCollection clears all data related to this collecion on the querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {

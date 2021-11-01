@@ -236,16 +236,11 @@ type QueryNode interface {
 	TimeTickProvider
 
 	// AddQueryChannel notifies QueryNode to subscribe a query channel and be a producer of a query result channel.
-	// `ctx` is the context to control request deadline and cancellation.
-	// `req` contains the request params, which are collection id, query channel and query result channel.
-	//
-	// Return UnexpectedError code in status:
-	//     If QueryNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY.
-	// Return Success code in status:
-	//     Subscribe a query channel and be a producer of a query result channel.
 	AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error)
 	RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error)
 	WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	// LoadSegments notifies QueryNode to load the sealed segments from storage. The load tasks are sync to this
+	// rpc, QueryNode will return after all the sealed segments are loaded.
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
 	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)

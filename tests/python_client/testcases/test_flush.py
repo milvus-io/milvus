@@ -123,8 +123,6 @@ class TestFlushBase:
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(collection_new, default_tag)
         ids = [i for i in range(default_nb)]
-        # ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
-        # ids = connect.insert(collection_new, default_entities, ids, partition_name=default_tag)
         connect.insert(id_collection, default_entities, partition_name=default_tag)
         connect.insert(collection_new, default_entities, partition_name=default_tag)
         connect.flush([id_collection])

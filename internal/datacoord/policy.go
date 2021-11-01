@@ -50,6 +50,7 @@ func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet 
 	return opSet
 }
 
+// AvgAssignRegisterPolicy assign channels with average to new registered node
 func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	opSet := BufferChannelAssignPolicy(store, nodeID)
 	if len(opSet) != 0 {

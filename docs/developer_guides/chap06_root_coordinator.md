@@ -46,8 +46,11 @@ type RootCoord interface {
 	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 
 	//segment
+	// DescribeSegment notifies RootCoord to get specified segment information in the collection
 	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
+	// ShowSegments notifies RootCoord to list all segment ids in the collection or partition
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
+	// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 
   // SegmentFlushCompleted notifies RootCoord that specified segment has been flushed

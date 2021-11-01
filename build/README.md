@@ -60,11 +60,11 @@ Check Wikipedia [CPU with AVX](https://en.wikipedia.org/wiki/Advanced_Vector_Ext
 
 The following scripts are found in the [`build/`](.) directory. Note that all scripts must be run from the Milvus root directory.
 
-* [`build/builder.sh`](builder.sh): Run a command in a build docker container. Common invocations:
-  * `build/builder.sh make` Build just linux binary in the container. Pass options and packages as necessary.
-  * `build/builder.sh make verifiers`: Run all pre-submission verification check
-  * `build/builder.sh make unittest`: Run all unit tests
-  * `build/builder.sh make clean`: Clean up all the generated files
+* [`build/builder.sh`](builder.sh): Run a command in a build docker container. Common invocations are:
+  * `build/builder.sh make`: Build just linux binary in the container. Pass options and packages as necessary.
+  * `build/builder.sh make verifiers`: Run all pre-submission verification check.
+  * `build/builder.sh make unittest`: Run all unit tests.
+  * `build/builder.sh make clean`: Clean up all the generated files.
 
 You can specify different OS for builder by setting `OS_NAME` which defaults to `ubuntu18.04`. Valid OS are `ubuntu18.04`, `centos7`.
 
