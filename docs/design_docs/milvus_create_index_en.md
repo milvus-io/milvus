@@ -26,7 +26,7 @@ message CreateIndexRequest {
 }
 ```
 
-2. When received the `CreateIndex` request, the `Proxy` would wrap this request into `CreateIndexTask`, and pushs this task into `DdTaskQueue` queue. After that, `Proxy` would call method of `WatiToFinish` to wait until the task finished.
+2. When received the `CreateIndex` request, the `Proxy` would wrap this request into `CreateIndexTask`, and push this task into `DdTaskQueue` queue. After that, `Proxy` would call method of `WatiToFinish` to wait until the task finished.
 
 ```go
 type task interface {
@@ -55,10 +55,10 @@ type createIndexTask struct {
 }
 ```
 
-3. There is a background service in `Proxy`, this service would get the `CreateIndexTask` from `DdTaskQueue`, and executes it in three phases.
+3. There is a background service in `Proxy`, this service would get the `CreateIndexTask` from `DdTaskQueue`, and execute it in three phases.
 
    - `PreExecute`, do some static checking at this phase, such as check if the index param is legal, etc.
-   - `Execute`, at this phase, `Proxy` would send `CreateIndex` request to `RootCoord` via `Grpc`,and wait the reponse, the `proto` is defined as follow:
+   - `Execute`, at this phase, `Proxy` would send `CreateIndex` request to `RootCoord` via `Grpc`, and wait the response, the `proto` is defined as the follow:
 
    ```proto
        service RootCoord {
