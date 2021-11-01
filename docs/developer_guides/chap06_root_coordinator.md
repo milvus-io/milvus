@@ -54,16 +54,6 @@ type RootCoord interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 
   // SegmentFlushCompleted notifies RootCoord that specified segment has been flushed
-	//
-	// ctx is the context to control request deadline and cancellation
-	// req contains the request params, including SegmentInfo
-	//
-	// The `ErrorCode` of `Status` is `Success` if process successfully;
-	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
-	// error is always nil
-	//
-	// This interface is only used by DataCoord, when RootCoord receives this request, RootCoord will notify IndexCoord
-	// to build index for this segment.
   SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error)
   // GetMetrics notifies RootCoord to collect metrics for specified component
   GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
