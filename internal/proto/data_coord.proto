@@ -64,6 +64,7 @@ message SegmentIDRequest {
   string channel_name = 2;
   int64 collectionID = 3;
   int64 partitionID = 4;
+  string delete_channel_name = 5;
 }
 
 message AssignSegmentIDRequest {
@@ -152,6 +153,11 @@ message GetPartitionStatisticsResponse {
 message GetSegmentInfoChannelRequest {
 }
 
+enum ChannelType {
+  UndefinedChannel = 0;
+  InsertChannel = 1;
+  DeleteChannel = 2;
+}
 
 message VchannelInfo {
   int64 collectionID = 1;
@@ -159,6 +165,7 @@ message VchannelInfo {
   internal.MsgPosition seek_position = 3;
   repeated SegmentInfo unflushedSegments = 4;
   repeated SegmentInfo flushedSegments = 5;
+  ChannelType channelType = 6;
 }
 
 message WatchDmChannelsRequest {

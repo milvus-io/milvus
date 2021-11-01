@@ -1985,6 +1985,7 @@ class DescribeCollectionResponse :
     kPhysicalChannelNamesFieldNumber = 5,
     kAliasesFieldNumber = 9,
     kStartPositionsFieldNumber = 10,
+    kDeleteChannelNamesFieldNumber = 11,
     kStatusFieldNumber = 1,
     kSchemaFieldNumber = 2,
     kCollectionIDFieldNumber = 3,
@@ -2054,6 +2055,23 @@ class DescribeCollectionResponse :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >&
       start_positions() const;
 
+  // repeated string delete_channel_names = 11;
+  int delete_channel_names_size() const;
+  void clear_delete_channel_names();
+  const std::string& delete_channel_names(int index) const;
+  std::string* mutable_delete_channel_names(int index);
+  void set_delete_channel_names(int index, const std::string& value);
+  void set_delete_channel_names(int index, std::string&& value);
+  void set_delete_channel_names(int index, const char* value);
+  void set_delete_channel_names(int index, const char* value, size_t size);
+  std::string* add_delete_channel_names();
+  void add_delete_channel_names(const std::string& value);
+  void add_delete_channel_names(std::string&& value);
+  void add_delete_channel_names(const char* value);
+  void add_delete_channel_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& delete_channel_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_delete_channel_names();
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -2099,6 +2117,7 @@ class DescribeCollectionResponse :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> physical_channel_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> aliases_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair > start_positions_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> delete_channel_names_;
   ::milvus::proto::common::Status* status_;
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
@@ -13390,6 +13409,71 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common:
 DescribeCollectionResponse::start_positions() const {
   // @@protoc_insertion_point(field_list:milvus.proto.milvus.DescribeCollectionResponse.start_positions)
   return start_positions_;
+}
+
+// repeated string delete_channel_names = 11;
+inline int DescribeCollectionResponse::delete_channel_names_size() const {
+  return delete_channel_names_.size();
+}
+inline void DescribeCollectionResponse::clear_delete_channel_names() {
+  delete_channel_names_.Clear();
+}
+inline const std::string& DescribeCollectionResponse::delete_channel_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+  return delete_channel_names_.Get(index);
+}
+inline std::string* DescribeCollectionResponse::mutable_delete_channel_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+  return delete_channel_names_.Mutable(index);
+}
+inline void DescribeCollectionResponse::set_delete_channel_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+  delete_channel_names_.Mutable(index)->assign(value);
+}
+inline void DescribeCollectionResponse::set_delete_channel_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+  delete_channel_names_.Mutable(index)->assign(std::move(value));
+}
+inline void DescribeCollectionResponse::set_delete_channel_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  delete_channel_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+}
+inline void DescribeCollectionResponse::set_delete_channel_names(int index, const char* value, size_t size) {
+  delete_channel_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+}
+inline std::string* DescribeCollectionResponse::add_delete_channel_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+  return delete_channel_names_.Add();
+}
+inline void DescribeCollectionResponse::add_delete_channel_names(const std::string& value) {
+  delete_channel_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+}
+inline void DescribeCollectionResponse::add_delete_channel_names(std::string&& value) {
+  delete_channel_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+}
+inline void DescribeCollectionResponse::add_delete_channel_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  delete_channel_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+}
+inline void DescribeCollectionResponse::add_delete_channel_names(const char* value, size_t size) {
+  delete_channel_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+DescribeCollectionResponse::delete_channel_names() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+  return delete_channel_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+DescribeCollectionResponse::mutable_delete_channel_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.DescribeCollectionResponse.delete_channel_names)
+  return &delete_channel_names_;
 }
 
 // -------------------------------------------------------------------

@@ -167,6 +167,7 @@ message DescribeCollectionResponse {
   repeated string aliases = 9;
   // The message ID/posititon when collection is created
   repeated common.KeyDataPair start_positions = 10;
+  repeated string delete_channel_names = 11;
 }
 
 /**
