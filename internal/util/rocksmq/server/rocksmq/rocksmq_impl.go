@@ -727,13 +727,13 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	// iter.SeekToLast bypass prefix limitation
 	// use for range until find next prefix for now
 	if iter.Valid() {
-		last = iter.Key().Data()
-		current := last
+		current := iter.Key().Data()
+		last = current
 		for bytes.HasPrefix(current, []byte(topicName)) {
 			iter.Next()
 			if iter.Valid() {
-				current = last
-				last = iter.Key().Data()
+				last = current
+				current = iter.Key().Data()
 			} else {
 				break
 			}
