@@ -264,7 +264,7 @@ func (mt *MetaTable) AddProxy(po *pb.ProxyMeta) error {
 	k := fmt.Sprintf("%s/%d", ProxyMetaPrefix, po.ID)
 	v, err := proto.Marshal(po)
 	if err != nil {
-		log.Error("AddProxy Marshal fail", zap.Error(err))
+		log.Error("Failed to marshal ProxyMeta in AddProxy", zap.Error(err))
 		return err
 	}
 
