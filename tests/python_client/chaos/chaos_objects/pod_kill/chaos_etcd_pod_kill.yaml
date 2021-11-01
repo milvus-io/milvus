@@ -1,7 +1,7 @@
 kind: Schedule
 apiVersion: chaos-mesh.org/v1alpha1
 metadata:
-  name: test-pulsar-podkill
+  name: test-etcd-pod-kill
   namespace: chaos-testing
 spec:
   schedule: '*/5 * * * * *'
@@ -14,9 +14,8 @@ spec:
       namespaces:
         - chaos-testing
       labelSelectors:
-        release: milvus-chaos
-        app: pulsar
+        app.kubernetes.io/instance: milvus-chaos
+        app.kubernetes.io/name: etcd
     mode: one
     action: pod-kill
     gracePeriod: 0
-

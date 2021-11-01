@@ -14,8 +14,8 @@ echo "platform: $platform"
 
 # define chaos testing object
 release=${1:-"milvus-chaos"}
-pod="pulsar"
-chaos_type="pod_kill"
+pod="proxy"
+chaos_type="pod_failure"
 release="milvus-chaos"
 ns="chaos-testing"
 
@@ -25,16 +25,24 @@ echo "uninstall milvus if exist"
 bash uninstall_milvus.sh ${release}|| true
 echo "install milvus"
 bash install_milvus.sh ${release}
+
+# if chaos_type is pod_failure, update replicas
+if [ "$chaos_type" == "pod_failure" ];
+then
+    declare -A pod_map=(["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
+    helm upgrade ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=2 --reuse-values
+fi
+
 popd
 
 # replace chaos object as defined
 if [ "$platform" == "Mac" ];
 then
     sed -i "" "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${chaos_type}\/'/g" constants.py
-    sed -i "" "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_podkill.yaml\'/g" constants.py
+    sed -i "" "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_${chaos_type}.yaml\'/g" constants.py
 else
     sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${chaos_type}\/'/g" constants.py
-    sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_podkill.yaml\'/g" constants.py
+    sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_${chaos_type}.yaml\'/g" constants.py
 fi
 
 # run chaos testing
