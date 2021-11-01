@@ -43,16 +43,20 @@ const (
 // Address.
 // Exclusive indicates that this server can only start one.
 type Session struct {
-	ctx        context.Context
+	ctx context.Context
+	// When outside context done, Session cancels its goroutines first, then uses
+	// keepAliceCancel to cancel the etcd KeepAlive
+	keepAliveCancel context.CancelFunc
+
 	ServerID   int64  `json:"ServerID,omitempty"`
 	ServerName string `json:"ServerName,omitempty"`
 	Address    string `json:"Address,omitempty"`
 	Exclusive  bool   `json:"Exclusive,omitempty"`
 
-	liveCh   <-chan bool
-	etcdCli  *clientv3.Client
-	leaseID  clientv3.LeaseID
-	cancel   context.CancelFunc
+	liveCh  <-chan bool
+	etcdCli *clientv3.Client
+	leaseID clientv3.LeaseID
+
 	metaRoot string
 }
 
@@ -61,10 +65,8 @@ type Session struct {
 // metaRoot is a path in etcd to save session information.
 // etcdEndpoints is to init etcdCli when NewSession
 func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *Session {
-	ctx, cancel := context.WithCancel(ctx)
 	session := &Session{
 		ctx:      ctx,
-		cancel:   cancel,
 		metaRoot: metaRoot,
 	}
 
@@ -214,7 +216,9 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
 		}
 
-		ch, err = s.etcdCli.KeepAlive(s.ctx, resp.ID)
+		keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
+		s.keepAliveCancel = keepAliveCancel
+		ch, err = s.etcdCli.KeepAlive(keepAliveCtx, resp.ID)
 		if err != nil {
 			fmt.Printf("keep alive error %s\n", err)
 			return err
@@ -237,7 +241,10 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 		for {
 			select {
 			case <-s.ctx.Done():
-				log.Error("keep alive", zap.Error(errors.New("context done")))
+				log.Warn("keep alive", zap.Error(errors.New("context done")))
+				if s.keepAliveCancel != nil {
+					s.keepAliveCancel()
+				}
 				return
 			case resp, ok := <-ch:
 				if !ok {
@@ -371,6 +378,10 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 			return
 		case <-ctx.Done():
 			log.Debug("liveness exits due to context done")
+			// cancel the etcd keepAlive context
+			if s.keepAliveCancel != nil {
+				s.keepAliveCancel()
+			}
 			return
 		}
 	}
