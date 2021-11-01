@@ -401,7 +401,7 @@ func TestGetSegmentsByPKs(t *testing.T) {
 	}
 	pks, err := filterSegmentsByPKs([]int64{0, 1, 2, 3, 4}, segment)
 	assert.Nil(t, err)
-	assert.Equal(t, len(pks), 1)
+	assert.Equal(t, len(pks), 3)
 
 	pks, err = filterSegmentsByPKs([]int64{}, segment)
 	assert.Nil(t, err)
