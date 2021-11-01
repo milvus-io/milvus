@@ -93,8 +93,8 @@ spec:
       requiredDuringSchedulingIgnoredDuringExecution:
       - labelSelector:
           matchExpressions:
-          - key: app
+          - key: jenkins/label
             operator: In
             values:
-            - milvus-e2e
+            - milvus-e2e-test-kind-nightly
         topologyKey: kubernetes.io/hostname
