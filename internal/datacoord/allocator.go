@@ -38,7 +38,7 @@ type rootCoordAllocator struct {
 	types.RootCoord
 }
 
-// newRootCoordAllocator get an allocator from RootCoord
+// newRootCoordAllocator gets an allocator from RootCoord
 func newRootCoordAllocator(rootCoordClient types.RootCoord) allocator {
 	return &rootCoordAllocator{
 		RootCoord: rootCoordClient,
