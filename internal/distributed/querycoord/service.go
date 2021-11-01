@@ -290,6 +290,7 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 	return s.queryCoord.GetPartitionStates(ctx, req)
 }
 
+// LoadPartitions loads the data of the specified partition in QueryCoord.
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	return s.queryCoord.LoadPartitions(ctx, req)
 }
