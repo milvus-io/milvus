@@ -1408,7 +1408,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful RootCoord Show partition operations",
+      "description": "Success count of show_partition requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1466,7 +1466,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Create partition operations",
+      "description": "Total count of create_partition requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1524,7 +1524,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful RootCoord Create partition operations",
+      "description": "Success count of create_partition requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -5924,5 +5924,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 109
+  "version": 112
 }
