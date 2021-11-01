@@ -16,16 +16,19 @@ import (
 	"sync"
 )
 
+// ConfAdapterMgr manages the conf adapter.
 type ConfAdapterMgr interface {
+	// GetAdapter gets the conf adapter by the index type.
 	GetAdapter(indexType string) (ConfAdapter, error)
 }
 
-// ConfAdapterMgrImpl implements ConfAdapter
+// ConfAdapterMgrImpl implements ConfAdapter.
 type ConfAdapterMgrImpl struct {
 	init     bool
 	adapters map[IndexType]ConfAdapter
 }
 
+// GetAdapter gets the conf adapter by the index type.
 func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error) {
 	if !mgr.init {
 		mgr.registerConfAdapter()
@@ -68,6 +71,7 @@ func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {
 var confAdapterMgr ConfAdapterMgr
 var getConfAdapterMgrOnce sync.Once
 
+// GetConfAdapterMgrInstance gets the instance of ConfAdapterMgr.
 func GetConfAdapterMgrInstance() ConfAdapterMgr {
 	getConfAdapterMgrOnce.Do(func() {
 		confAdapterMgr = newConfAdapterMgrImpl()
