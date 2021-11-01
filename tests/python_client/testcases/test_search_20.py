@@ -2538,7 +2538,8 @@ class TestSearchBase:
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
         distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
-        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="JACCARD")
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities,
+                                                default_top_k, nq, metric_type="JACCARD")
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, **query)
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
@@ -2569,7 +2570,8 @@ class TestSearchBase:
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = hamming(query_int_vectors[0], int_vectors[0])
         distance_1 = hamming(query_int_vectors[0], int_vectors[1])
-        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="HAMMING")
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities,
+                                                default_top_k, nq, metric_type="HAMMING")
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, **query)
         assert abs(res[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
@@ -2662,7 +2664,8 @@ class TestSearchBase:
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = tanimoto(query_int_vectors[0], int_vectors[0])
         distance_1 = tanimoto(query_int_vectors[0], int_vectors[1])
-        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="TANIMOTO")
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities,
+                                                default_top_k, nq, metric_type="TANIMOTO")
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, **query)
         assert abs(res[0][0].distance - min(distance_0, distance_1)) <= epsilon
