@@ -57,6 +57,7 @@ type ReplicaInterface interface {
 	getCollectionNum() int
 	// getPartitionIDs returns partition ids of collection
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
+	// getVecFieldIDsByCollectionID returns vector field ids of collection
 	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error)
 	getPKFieldIDByCollectionID(collectionID UniqueID) (FieldID, error)
 
