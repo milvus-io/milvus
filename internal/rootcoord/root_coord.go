@@ -928,9 +928,11 @@ func (c *Core) Init() error {
 		c.dmlChannels = newDmlChannels(c, Params.DmlChannelName, Params.DmlChannelNum)
 
 		// recover physical channels for all collections
-		pc := c.MetaTable.ListCollectionPhysicalChannels()
-		c.dmlChannels.AddProducerChannels(pc...)
-		log.Debug("recover all physical channels", zap.Any("chanNames", pc))
+		chanMap := c.MetaTable.ListCollectionPhysicalChannels()
+		for collID, chanNames := range chanMap {
+			c.dmlChannels.AddProducerChannels(chanNames...)
+			log.Debug("recover physical channels", zap.Int64("collID", collID), zap.Any("chanNames", chanNames))
+		}
 
 		c.chanTimeTick = newTimeTickSync(c)
 		c.chanTimeTick.AddProxy(c.session)

@@ -674,17 +674,21 @@ func TestRootCoord(t *testing.T) {
 
 		assert.Equal(t, shardsNum, int32(core.dmlChannels.GetNumChannels()))
 
-		pChan := core.MetaTable.ListCollectionPhysicalChannels()
-		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
+		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.Nil(t, err)
+		dmlStream.AsConsumer([]string{createMeta.PhysicalChannelNames[0]}, Params.MsgChannelSubName)
 		dmlStream.Start()
+
+		pChanMap := core.MetaTable.ListCollectionPhysicalChannels()
+		assert.Greater(t, len(pChanMap[createMeta.ID]), 0)
+		vChanMap := core.MetaTable.ListCollectionVirtualChannels()
+		assert.Greater(t, len(vChanMap[createMeta.ID]), 0)
 
 		// get CreateCollectionMsg
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
 		createMsg, ok := (msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
-		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
-		assert.Nil(t, err)
 		assert.Equal(t, createMeta.ID, createMsg.CollectionID)
 		assert.Equal(t, 1, len(createMeta.PartitionIDs))
 		assert.Equal(t, createMeta.PartitionIDs[0], createMsg.PartitionID)
@@ -2272,9 +2276,10 @@ func TestRootCoord2(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		pChan := core.MetaTable.ListCollectionPhysicalChannels()
+		collInfo, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.Nil(t, err)
 		dmlStream, _ := msFactory.NewMsgStream(ctx)
-		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.MsgChannelSubName)
 		dmlStream.Start()
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
