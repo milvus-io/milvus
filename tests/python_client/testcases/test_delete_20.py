@@ -623,7 +623,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="Issue #10673")
     def test_delete_sealed_segment_with_twice_flush(self):
         """
         target: test delete data from sealed segment and flush delta log
