@@ -56,6 +56,7 @@ func newMsgFactory(localMsg bool) msgstream.Factory {
 	return msgstream.NewPmsFactory()
 }
 
+// MilvusRoles determines to run which components.
 type MilvusRoles struct {
 	EnableRootCoord      bool `env:"ENABLE_ROOT_COORD"`
 	EnableProxy          bool `env:"ENABLE_PROXY"`
@@ -68,6 +69,7 @@ type MilvusRoles struct {
 	EnableMsgStreamCoord bool `env:"ENABLE_MSGSTREAM_COORD"`
 }
 
+// EnvValue not used now.
 func (mr *MilvusRoles) EnvValue(env string) bool {
 	env = strings.ToLower(env)
 	env = strings.Trim(env, " ")
@@ -330,6 +332,7 @@ func (mr *MilvusRoles) runMsgStreamCoord(ctx context.Context) *components.MsgStr
 	return mss
 }
 
+// Run runs Milvus components.
 func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
