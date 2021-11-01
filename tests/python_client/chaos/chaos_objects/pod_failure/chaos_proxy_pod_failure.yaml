@@ -1,7 +1,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: test-querynode-pod-failure
+  name: test-proxy-pod-failure
   namespace: chaos-testing
 spec:
   selector:
