@@ -177,6 +177,7 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	return status, nil
 }
 
+// RemoveQueryChannel remove queryChannel of the collection to stop receiving query message
 func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
 	// if node.searchService == nil || node.searchService.searchMsgStream == nil {
 	// 	errMsg := "null search service or null search result message stream"
