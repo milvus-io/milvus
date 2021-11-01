@@ -66,6 +66,7 @@ type ReplicaInterface interface {
 	// addPartition adds a new partition to collection
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
 	removePartition(partitionID UniqueID) error
+	// getPartitionByID returns the partition which id is partitionID
 	getPartitionByID(partitionID UniqueID) (*Partition, error)
 	hasPartition(partitionID UniqueID) bool
 	getPartitionNum() int
