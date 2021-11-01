@@ -1812,8 +1812,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, len(searchResultData))
 
-		var prevIDSet = make(map[int64]struct{})
-		var prevScore float32 = math.MaxFloat32
+		var idSet = make(map[int64]struct{})
 		var j int64
 		for j = 0; j < topk; {
 			sel := selectSearchResultData(searchResultData, offsets, topk, i)
@@ -1830,28 +1829,15 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 			}
 
 			// remove duplicates
-			if math.Abs(float64(score)-float64(prevScore)) > 0.00001 {
+			if _, ok := idSet[id]; !ok {
 				typeutil.AppendFieldData(ret.Results.FieldsData, searchResultData[sel].FieldsData, idx)
 				ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
 				ret.Results.Scores = append(ret.Results.Scores, score)
-				prevScore = score
-				prevIDSet = map[int64]struct{}{id: {}}
+				idSet[id] = struct{}{}
 				j++
 			} else {
-				// To handle this case:
-				//    e1: [100, 0.99]
-				//    e2: [101, 0.99]   ==> not duplicated, should keep
-				//    e3: [100, 0.99]   ==> duplicated, should remove
-				if _, ok := prevIDSet[id]; !ok {
-					typeutil.AppendFieldData(ret.Results.FieldsData, searchResultData[sel].FieldsData, idx)
-					ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
-					ret.Results.Scores = append(ret.Results.Scores, score)
-					prevIDSet[id] = struct{}{}
-					j++
-				} else {
-					// entity with same id and same score must be duplicated
-					skipDupCnt++
-				}
+				// skip entity with same id
+				skipDupCnt++
 			}
 			offsets[sel]++
 		}
