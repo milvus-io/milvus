@@ -73,7 +73,7 @@ When the IndexCoord service starts, it first obtains the node information of all
 current IndexNodes from etcd, and then adds the node information to the NodeManager. After that, the online and offline
 information of IndexNode node is obtained from watchNodeLoop. Then it will traverse the entire MetaTable, get the load
 information corresponding to each IndexNode node, and update the priority queue in the NodeManager. When an index building 
-task need to be allocated, the IndexNode with the lowest load will be selected according to the
+task needs to be allocated, the IndexNode with the lowest load will be selected according to the
 priority queue to execute the task.
 
 ### 8.3.3 MetaTable
