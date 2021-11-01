@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1635765051919,
+  "iteration": 1635767654886,
   "links": [],
   "panels": [
     {
@@ -387,7 +387,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of has_collection",
+      "description": "per-minute increasing rate of has_collection requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -490,7 +490,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of create_collection",
+      "description": "per-minute increasing rate of create_collection requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -593,7 +593,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of show_collections request",
+      "description": "per-minute increasing rate of show_collections requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -692,7 +692,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord describe collection operations",
+      "description": "Total count of describe_collection requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -750,7 +750,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success of RootCoord describe collection operations",
+      "description": "Success count of describe_collection requests",
       "fieldConfig": {
         "defaults": {
           "decimals": 0,
@@ -809,7 +809,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord drop collection operations",
+      "description": "Total count of drop_collection requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -867,7 +867,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success of RootCoord drop collection operations",
+      "description": "Success count of drop_collection requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -925,7 +925,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total  RootCoord drop partition operations",
+      "description": "Total count of drop_partition requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -983,7 +983,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful  RootCoord drop partition operations",
+      "description": "Success count of drop_partition requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1045,7 +1045,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "prometheus",
-      "description": "per-minute rate of describe_collection",
+      "description": "per-minute increasing rate of describe_collection requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1148,7 +1148,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of drop_collection",
+      "description": "per-minute increasing rate of drop_collection requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1251,7 +1251,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of drop partition",
+      "description": "per-minute increasing rate of drop_partition requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1350,7 +1350,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Show partition operations",
+      "description": "Total count of show_partition requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -4532,46 +4532,6 @@
       }
     },
     {
-      "alert": {
-        "alertRuleTags": {},
-        "conditions": [
-          {
-            "evaluator": {
-              "params": [
-                5000000000
-              ],
-              "type": "gt"
-            },
-            "operator": {
-              "type": "and"
-            },
-            "query": {
-              "params": [
-                "B",
-                "5m",
-                "now"
-              ]
-            },
-            "reducer": {
-              "params": [],
-              "type": "avg"
-            },
-            "type": "query"
-          }
-        ],
-        "executionErrorState": "alerting",
-        "for": "5m",
-        "frequency": "1m",
-        "handler": 1,
-        "message": "",
-        "name": "Memory alert",
-        "noDataState": "no_data",
-        "notifications": [
-          {
-            "uid": "PTgSPgFnk"
-          }
-        ]
-      },
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
@@ -4638,16 +4598,7 @@
           "refId": "B"
         }
       ],
-      "thresholds": [
-        {
-          "colorMode": "critical",
-          "fill": true,
-          "line": true,
-          "op": "gt",
-          "value": 5000000000,
-          "visible": true
-        }
-      ],
+      "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
@@ -5973,5 +5924,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 93
+  "version": 109
 }
