@@ -256,6 +256,9 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
     for (int i = 0; i < uids.size(); ++i) {
         bitmap->set(seg_offsets[i].get());
     }
+    if (uids.size() == 0 || seg_offsets.size() == 0) {
+        return current;
+    }
 
     if (del_barrier < old->del_barrier) {
         for (auto del_index = del_barrier; del_index < old->del_barrier; ++del_index) {
