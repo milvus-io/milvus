@@ -909,6 +909,7 @@ func createQueryChannel(collectionID UniqueID) *querypb.QueryChannelInfo {
 	return info
 }
 
+// Get Query channel info for collection, so far all the collection share the same query channel 0
 func (m *MetaReplica) getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error) {
 	m.channelMu.Lock()
 	defer m.channelMu.Unlock()
