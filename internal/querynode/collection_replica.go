@@ -63,6 +63,7 @@ type ReplicaInterface interface {
 	getPKFieldIDByCollectionID(collectionID UniqueID) (FieldID, error)
 
 	// partition
+	// addPartition adds a new partition to collection
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
 	removePartition(partitionID UniqueID) error
 	getPartitionByID(partitionID UniqueID) (*Partition, error)
