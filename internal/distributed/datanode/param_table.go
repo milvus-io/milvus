@@ -134,7 +134,7 @@ func (pt *ParamTable) initServerMaxRecvSize() {
 	}
 
 	value, err := strconv.Atoi(valueStr)
-	if err != nil { // not in valid format
+	if err != nil { // invalid format
 		log.Warn("Failed to parse dataNode.grpc.serverMaxRecvSize, set to default",
 			zap.String("dataNode.grpc.serverMaxRecvSize", valueStr),
 			zap.Error(err))
