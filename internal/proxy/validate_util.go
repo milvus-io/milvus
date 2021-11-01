@@ -210,7 +210,7 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func RepeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, error) {
+func repeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, error) {
 	resMap := make(map[string]string)
 	for _, kv := range kvPairs {
 		_, ok := resMap[kv.Key]
@@ -294,11 +294,11 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 		}
 
 		if isVec {
-			indexKv, err1 := RepeatedKeyValToMap(field.IndexParams)
+			indexKv, err1 := repeatedKeyValToMap(field.IndexParams)
 			if err1 != nil {
 				return err1
 			}
-			typeKv, err2 := RepeatedKeyValToMap(field.TypeParams)
+			typeKv, err2 := repeatedKeyValToMap(field.TypeParams)
 			if err2 != nil {
 				return err2
 			}
