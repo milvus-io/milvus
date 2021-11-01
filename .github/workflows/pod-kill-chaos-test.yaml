@@ -100,7 +100,26 @@ jobs:
           nc -vz 127.0.0.1 19530
 
           python scripts/hello_milvus.py
-
+      
+      - name: Deploy Milvus Again If Previous E2E Test Failed
+        timeout-minutes: 15
+        if: ${{ failure() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          bash scripts/uninstall_milvus.sh
+          helm install --wait --timeout 360s milvus-chaos milvus/milvus -f cluster-values.yaml  -n=chaos-testing
+          kubectl get pods -n chaos-testing
+          sleep 20s
+          kubectl get pods -n chaos-testing
+          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
+          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+          sleep 20s
+          # check whether port-forward success
+          nc -vz 127.0.0.1 19530
+          # check whether milvus server is healthy
+          python scripts/hello_milvus.py              
+      
       - name: Data Consist Test
         timeout-minutes: 5
         if: ${{ always() }}
