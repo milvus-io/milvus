@@ -45,7 +45,7 @@ func newRootCoordAllocator(rootCoordClient types.RootCoord) allocator {
 	}
 }
 
-// allocTimestamp allocate a Timestamp
+// allocTimestamp allocates a Timestamp
 // invoking RootCoord `AllocTimestamp`
 func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
 	resp, err := alloc.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
