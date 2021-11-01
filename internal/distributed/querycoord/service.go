@@ -280,6 +280,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	return s.queryCoord.ReleaseCollection(ctx, req)
 }
 
+// ShowPartitions shows the partitions in the QueryCoord.
 func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	return s.queryCoord.ShowPartitions(ctx, req)
 }
