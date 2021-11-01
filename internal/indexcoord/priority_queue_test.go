@@ -87,3 +87,34 @@ func TestPriorityQueue_IncPriority(t *testing.T) {
 	peekKey := pq.Peek()
 	assert.Equal(t, key, peekKey)
 }
+
+func TestPriorityQueue(t *testing.T) {
+	ret := &PriorityQueue{}
+	for i := 0; i < 4; i++ {
+		item := &PQItem{
+			key:      UniqueID(i),
+			priority: 0,
+			index:    i,
+		}
+		ret.items = append(ret.items, item)
+	}
+	heap.Init(ret)
+
+	peeKey1 := ret.Peek()
+	assert.Equal(t, int64(0), peeKey1)
+	ret.IncPriority(peeKey1, 1)
+
+	peeKey2 := ret.Peek()
+	assert.Equal(t, int64(1), peeKey2)
+	ret.IncPriority(peeKey2, 1)
+
+	ret.IncPriority(peeKey1, -1)
+	ret.IncPriority(peeKey2, -1)
+
+	peeKey1 = ret.Peek()
+	assert.Equal(t, int64(3), peeKey1)
+	ret.IncPriority(peeKey1, 1)
+
+	peeKey2 = ret.Peek()
+	assert.Equal(t, int64(2), peeKey2)
+}

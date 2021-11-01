@@ -54,6 +54,7 @@ func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
 	item := &PQItem{
 		key:      nodeID,
 		priority: 0,
+		weight:   0,
 	}
 	nm.nodeClients[nodeID] = client
 	nm.pq.Push(item)
