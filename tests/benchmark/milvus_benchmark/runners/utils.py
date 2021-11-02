@@ -84,7 +84,7 @@ def get_len_vectors_per_file(data_type, dimension):
 
 
 def get_vectors_from_binary(nq, dimension, data_type):
-    # use the first file, nq should be less than VECTORS_PER_FILE
+    # use the first file, nq should be less than VECTORS_PER_FILE 10001
     if nq > MAX_NQ:
         raise Exception("Over size nq")
     if data_type == "local":
