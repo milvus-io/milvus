@@ -107,6 +107,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
+          kubectl config set-context --current --namespace=chaos-testing
           bash scripts/uninstall_milvus.sh
           helm install --wait --timeout 360s milvus-chaos milvus/milvus -f cluster-values.yaml  -n=chaos-testing
           kubectl get pods -n chaos-testing
