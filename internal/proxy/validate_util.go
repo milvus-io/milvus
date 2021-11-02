@@ -210,6 +210,7 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+// RepeatedKeyValToMap transfer the kv pairs to map.
 func RepeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, error) {
 	resMap := make(map[string]string)
 	for _, kv := range kvPairs {
