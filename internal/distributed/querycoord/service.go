@@ -299,6 +299,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	return s.queryCoord.ReleasePartitions(ctx, req)
 }
 
+// CreateQueryChannel creates the channels for querying in QueryCoord.
 func (s *Server) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
 	return s.queryCoord.CreateQueryChannel(ctx, req)
 }
