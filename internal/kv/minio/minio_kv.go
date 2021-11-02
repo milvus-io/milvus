@@ -54,7 +54,6 @@ type Option struct {
 func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 	var minIOClient *minio.Client
 	var err error
-	log.Debug("MinioKV NewMinioKV", zap.Any("option", option))
 	minIOClient, err = minio.New(option.Address, &minio.Options{
 		Creds:  credentials.NewStaticV4(option.AccessKeyID, option.SecretAccessKeyID, ""),
 		Secure: option.UseSSL,
