@@ -543,7 +543,6 @@ func (s *Segment) checkIndexReady(fieldID int64) bool {
 }
 
 func (s *Segment) updateBloomFilter(pks []int64) {
-	log.Debug("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  updateBloom Filter", zap.Any("pks", pks))
 	buf := make([]byte, 8)
 	for _, pk := range pks {
 		common.Endian.PutUint64(buf, uint64(pk))
