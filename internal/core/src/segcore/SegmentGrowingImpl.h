@@ -164,7 +164,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const override;
+    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk,
+                         Timestamp timestamp,
+                         int64_t active_count) const override;
 
     void
     vector_search(int64_t vec_count,

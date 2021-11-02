@@ -617,7 +617,9 @@ SegmentSealedImpl::get_active_count(Timestamp ts) const {
     return this->get_row_count();
 }
 void
-SegmentSealedImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const {
+SegmentSealedImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk,
+                                        Timestamp timestamp,
+                                        int64_t active_count) const {
     // TODO change the
     AssertInfo(this->timestamps_.size() == get_row_count(), "Timestamp size not equal to row count");
     auto range = timestamp_index_.get_active_range(timestamp);
@@ -632,7 +634,10 @@ SegmentSealedImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, T
     // range == (0, 0). it means these data can not be used, directly set bitset_chunk to all 0s.
     // It can be thought of as an AND operation with another bitmask that is all 0s.
     if (range.first == range.second && range.first == 0) {
-        bitset_chunk.reset();
+        if (bitset_chunk.empty()) {
+            bitset_chunk.resize(active_count);
+            bitset_chunk.reset();
+        }
         return;
     }
     auto mask = TimestampIndex::GenerateBitset(timestamp, range, this->timestamps_.data(), this->timestamps_.size());

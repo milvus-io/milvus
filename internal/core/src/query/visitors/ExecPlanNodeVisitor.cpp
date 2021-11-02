@@ -103,7 +103,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
             ExecExprVisitor(*segment, active_count, timestamp_).call_child(*node.predicate_.value());
         bitset_holder = std::move(expr_ret);
     }
-    segment->mask_with_timestamps(bitset_holder, timestamp_);
+    segment->mask_with_timestamps(bitset_holder, timestamp_, active_count);
 
     if (!bitset_holder.empty()) {
         bitset_holder.flip();
@@ -138,7 +138,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         bitset_holder = std::move(expr_ret);
     }
 
-    segment->mask_with_timestamps(bitset_holder, timestamp_);
+    segment->mask_with_timestamps(bitset_holder, timestamp_, active_count);
 
     BitsetView view;
     if (!bitset_holder.empty()) {

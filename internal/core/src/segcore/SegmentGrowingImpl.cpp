@@ -536,7 +536,9 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentGrowingImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const {
+SegmentGrowingImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk,
+                                         Timestamp timestamp,
+                                         int64_t active_count) const {
     // DO NOTHING
 }
 
