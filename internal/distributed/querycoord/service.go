@@ -304,6 +304,7 @@ func (s *Server) CreateQueryChannel(ctx context.Context, req *querypb.CreateQuer
 	return s.queryCoord.CreateQueryChannel(ctx, req)
 }
 
+// GetSegmentInfo gets the information of the specified segment from QueryCoord.
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return s.queryCoord.GetSegmentInfo(ctx, req)
 }
