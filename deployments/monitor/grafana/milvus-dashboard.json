@@ -1640,7 +1640,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success of RootCoord Has partition operations",
+      "description": "Success count of has_partition requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
