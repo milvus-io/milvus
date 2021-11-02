@@ -216,41 +216,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return nil
 	})
 
-	c := &nodeConfig{
-		msFactory:    dsService.msFactory,
-		collectionID: vchanInfo.GetCollectionID(),
-		vChannelName: vchanInfo.GetChannelName(),
-		replica:      dsService.replica,
-		allocator:    dsService.idAllocator,
-
-		parallelConfig: newParallelConfig(),
-	}
-
-	var dmStreamNode Node
-	dmStreamNode, err = newDmInputNode(dsService.ctx, vchanInfo.GetSeekPosition(), c)
-	if err != nil {
-		return err
-	}
-
-	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
-	var insertBufferNode Node
-	insertBufferNode, err = newInsertBufferNode(
-		dsService.ctx,
-		dsService.flushCh,
-		dsService.flushManager,
-		dsService.flushingSegCache,
-		c,
-	)
-	if err != nil {
-		return err
-	}
-
-	var deleteNode Node
-	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, c)
-	if err != nil {
-		return err
-	}
-
 	// recover segment checkpoints
 	for _, us := range vchanInfo.GetUnflushedSegments() {
 		if us.CollectionID != dsService.collectionID ||
@@ -296,6 +261,41 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			fs.PartitionID, fs.GetInsertChannel(), fs.GetNumOfRows(), fs.Statslogs); err != nil {
 			return err
 		}
+	}
+
+	c := &nodeConfig{
+		msFactory:    dsService.msFactory,
+		collectionID: vchanInfo.GetCollectionID(),
+		vChannelName: vchanInfo.GetChannelName(),
+		replica:      dsService.replica,
+		allocator:    dsService.idAllocator,
+
+		parallelConfig: newParallelConfig(),
+	}
+
+	var dmStreamNode Node
+	dmStreamNode, err = newDmInputNode(dsService.ctx, vchanInfo.GetSeekPosition(), c)
+	if err != nil {
+		return err
+	}
+
+	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
+	var insertBufferNode Node
+	insertBufferNode, err = newInsertBufferNode(
+		dsService.ctx,
+		dsService.flushCh,
+		dsService.flushManager,
+		dsService.flushingSegCache,
+		c,
+	)
+	if err != nil {
+		return err
+	}
+
+	var deleteNode Node
+	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, c)
+	if err != nil {
+		return err
 	}
 
 	dsService.fg.AddNode(dmStreamNode)
