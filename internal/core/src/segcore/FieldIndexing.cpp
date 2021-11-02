@@ -9,14 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "segcore/FieldIndexing.h"
-#include <thread>
-#include <knowhere/index/vector_index/IndexIVF.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <string>
+#include <thread>
+
 #include "common/SystemProperty.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "segcore/FieldIndexing.h"
 
 namespace milvus::segcore {
+
 void
 VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
     AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT, "Data type of vector field is not VECTOR_FLOAT");
