@@ -320,7 +320,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	vchanNames := make([]string, t.ShardsNum)
 	chanNames := make([]string, t.ShardsNum)
 	for i := int32(0); i < t.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.dmlChannels.GetDmlMsgStreamName(), collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.insertChannels.GetDmlMsgStreamName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
@@ -672,7 +672,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		assert.Equal(t, shardsNum, int32(core.dmlChannels.GetNumChannels()))
+		assert.Equal(t, shardsNum, int32(core.insertChannels.GetNumChannels()))
 
 		pChan := core.MetaTable.ListCollectionPhysicalChannels()
 		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
@@ -1701,7 +1701,7 @@ func TestRootCoord(t *testing.T) {
 			ts1            = uint64(120)
 			ts2            = uint64(150)
 		)
-		numChan := core.chanTimeTick.GetChanNum()
+		numChan := core.chanTimeTick.GetInsertChanNum()
 		p1 := sessionutil.Session{
 			ServerID: 100,
 		}
@@ -1723,10 +1723,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		cn0 := core.dmlChannels.GetDmlMsgStreamName()
-		cn1 := core.dmlChannels.GetDmlMsgStreamName()
-		cn2 := core.dmlChannels.GetDmlMsgStreamName()
-		core.dmlChannels.AddProducerChannels(cn0, cn1, cn2)
+		cn0 := core.insertChannels.GetDmlMsgStreamName()
+		cn1 := core.insertChannels.GetDmlMsgStreamName()
+		cn2 := core.insertChannels.GetDmlMsgStreamName()
+		core.insertChannels.AddProducerChannels(cn0, cn1, cn2)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1769,7 +1769,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
 
 		// add 3 proxy channels
-		assert.Equal(t, 3, core.chanTimeTick.GetChanNum()-numChan)
+		assert.Equal(t, 3, core.chanTimeTick.GetInsertChanNum()-numChan)
 
 		_, err = core.etcdCli.Delete(ctx2, proxy1)
 		assert.Nil(t, err)

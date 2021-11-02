@@ -289,7 +289,7 @@ func (t *timetickSync) SendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
-	if err := t.core.dmlChannels.Broadcast(chanNames, &msgPack); err != nil {
+	if err := t.core.insertChannels.Broadcast(chanNames, &msgPack); err != nil {
 		return err
 	}
 
@@ -307,8 +307,8 @@ func (t *timetickSync) GetProxyNum() int {
 }
 
 // GetChanNum return the num of channel
-func (t *timetickSync) GetChanNum() int {
-	return t.core.dmlChannels.GetNumChannels()
+func (t *timetickSync) GetInsertChanNum() int {
+	return t.core.insertChannels.GetNumChannels()
 }
 
 func minTimeTick(tt ...typeutil.Timestamp) typeutil.Timestamp {

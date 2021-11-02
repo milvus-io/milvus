@@ -136,7 +136,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	vchanNames := make([]string, t.Req.ShardsNum)
 	chanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.dmlChannels.GetDmlMsgStreamName(), collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.insertChannels.GetDmlMsgStreamName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
@@ -199,7 +199,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 
 		// add dml channel before send dd msg
-		t.core.dmlChannels.AddProducerChannels(chanNames...)
+		t.core.insertChannels.AddProducerChannels(chanNames...)
 
 		ids, err := t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 		if err != nil {
@@ -213,7 +213,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		}
 		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
 		if err != nil {
-			t.core.dmlChannels.RemoveProducerChannels(chanNames...)
+			t.core.insertChannels.RemoveProducerChannels(chanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
@@ -308,7 +308,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.chanTimeTick.SendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
 
 		// remove dml channel after send dd msg
-		t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
+		t.core.insertChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
 		return nil
 	}
 

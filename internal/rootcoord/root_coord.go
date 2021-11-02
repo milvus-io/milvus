@@ -124,8 +124,8 @@ type Core struct {
 	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error
 	CallReleasePartitionService  func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error
 
-	//dml channels
-	dmlChannels *dmlChannels
+	// insert channels
+	insertChannels *dmlChannels
 
 	//Proxy manager
 	proxyManager *proxyManager
@@ -457,7 +457,7 @@ func (c *Core) setMsgStreams() error {
 		metrics.RootCoordDDChannelTimeTick.Set(float64(tsoutil.Mod24H(t)))
 
 		//c.dmlChannels.BroadcastAll(&msgPack)
-		pc := c.dmlChannels.ListChannels()
+		pc := c.insertChannels.ListChannels()
 		pt := make([]uint64, len(pc))
 		for i := 0; i < len(pt); i++ {
 			pt[i] = t
@@ -493,7 +493,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastMark(channelNames, &msgPack)
+		return c.insertChannels.BroadcastMark(channelNames, &msgPack)
 	}
 
 	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
@@ -509,7 +509,7 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.insertChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error {
@@ -525,7 +525,7 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.insertChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error {
@@ -541,7 +541,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.insertChannels.Broadcast(channelNames, &msgPack)
 	}
 
 	return nil
@@ -925,11 +925,11 @@ func (c *Core) Init() error {
 			return
 		}
 
-		c.dmlChannels = newDmlChannels(c, Params.DmlChannelName, Params.DmlChannelNum)
+		c.insertChannels = newDmlChannels(c, Params.DmlChannelName, Params.DmlChannelNum)
 
 		// recover physical channels for all collections
 		pc := c.MetaTable.ListCollectionPhysicalChannels()
-		c.dmlChannels.AddProducerChannels(pc...)
+		c.insertChannels.AddProducerChannels(pc...)
 		log.Debug("recover all physical channels", zap.Any("chanNames", pc))
 
 		c.chanTimeTick = newTimeTickSync(c)
