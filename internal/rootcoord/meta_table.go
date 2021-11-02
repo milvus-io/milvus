@@ -535,27 +535,27 @@ func (mt *MetaTable) ListAliases(collID typeutil.UniqueID) []string {
 }
 
 // ListCollectionVirtualChannels list virtual channels of all collections
-func (mt *MetaTable) ListCollectionVirtualChannels() []string {
+func (mt *MetaTable) ListCollectionVirtualChannels() map[typeutil.UniqueID][]string {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	vlist := []string{}
+	chanMap := make(map[typeutil.UniqueID][]string)
 
-	for _, c := range mt.collID2Meta {
-		vlist = append(vlist, c.VirtualChannelNames...)
+	for id, collInfo := range mt.collID2Meta {
+		chanMap[id] = collInfo.VirtualChannelNames
 	}
-	return vlist
+	return chanMap
 }
 
 // ListCollectionPhysicalChannels list physical channels of all collections
-func (mt *MetaTable) ListCollectionPhysicalChannels() []string {
+func (mt *MetaTable) ListCollectionPhysicalChannels() map[typeutil.UniqueID][]string {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	plist := []string{}
+	chanMap := make(map[typeutil.UniqueID][]string)
 
-	for _, c := range mt.collID2Meta {
-		plist = append(plist, c.PhysicalChannelNames...)
+	for id, collInfo := range mt.collID2Meta {
+		chanMap[id] = collInfo.PhysicalChannelNames
 	}
-	return plist
+	return chanMap
 }
 
 // AddPartition add partition
