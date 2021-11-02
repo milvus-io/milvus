@@ -835,7 +835,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
-			log.Debug("insertTask.go", zap.Any("MapInfo", mapInfo),
+			log.Debug("insertTask", zap.Any("MapInfo", mapInfo),
 				zap.Error(err))
 			return nil, err
 		}
