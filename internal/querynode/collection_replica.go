@@ -75,6 +75,7 @@ type ReplicaInterface interface {
 	getPartitionNum() int
 	// getSegmentIDs returns segment ids
 	getSegmentIDs(partitionID UniqueID) ([]UniqueID, error)
+	// getSegmentIDsByVChannel returns segment ids which virtual channel is vChannel
 	getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error)
 
 	// segment
