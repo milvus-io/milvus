@@ -2748,7 +2748,7 @@ class TestSearchDSL(object):
         method: search vector only
         expected: search status ok, the length of result
         """
-        entities, ids = init_data(connect, collection)
+        init_data(connect, collection)
         connect.load_collection(collection)
         res = connect.search(collection, **default_query)
         assert len(res) == nq
