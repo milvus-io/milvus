@@ -10,10 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <shared_mutex>
+
+#include <atomic>
 #include <mutex>
 #include <set>
-#include <atomic>
+#include <shared_mutex>
+
 namespace milvus::segcore {
 
 // determined the largest number `ack` where
@@ -37,6 +39,7 @@ example() {
     auto ack4 = acker.GetAck();  // get 20, since acker has { [0, 20) }
 }
 #endif
+
 class AckResponder {
  public:
     // specify that segment [seg_begin, seg_end) has been processed
