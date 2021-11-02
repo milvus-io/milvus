@@ -43,7 +43,8 @@ class TestDeleteParams(TestcaseBase):
         # delete half of data
         del_res = collection_w.delete(expr)[0]
         assert del_res.delete_count == half_nb
-        # This flush will not persist the deleted ids, just delay the time to ensure that queryNode consumes deleteMsg
+        # This flush will not persist the deleted ids, just delay the
+        # time to ensure that queryNode consumes deleteMsg
         collection_w.num_entities
 
         # query with deleted ids
