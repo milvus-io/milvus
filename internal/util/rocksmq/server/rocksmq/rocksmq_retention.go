@@ -33,7 +33,7 @@ var RocksmqRetentionSizeInMB int64
 
 // Const value that used to convert unit
 const (
-	MB     = 2 << 20
+	MB     = 1024 * 1024
 	MINUTE = 60
 )
 
