@@ -112,7 +112,7 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 			return nil
 		}()
 		if err != nil {
-			log.Error("call invalidate collection meta failed", zap.Int64("proxy id", k), zap.Error(err))
+			log.Error("Failed to call invalidate collection meta", zap.Int64("proxy id", k), zap.Error(err))
 		} else {
 			log.Debug("send invalidate collection meta cache to proxy node", zap.Int64("node id", k))
 		}
