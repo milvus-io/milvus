@@ -11,6 +11,7 @@ type IndexCoord interface {
 	Component
 	TimeTickProvider
 
+  // BuildIndex receives request from RootCoordinator to build an index.
 	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
 	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 	GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
