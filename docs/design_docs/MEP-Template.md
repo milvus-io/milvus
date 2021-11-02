@@ -34,7 +34,7 @@ Describe the new thing you want to do in appropriate detail. This may be fairly 
 
 ## Test Plan(required)
 
-Describe in few sentences how the MEP will be tested. We are mostly interested in system tests (since unit-tests are specific to implementation details). How will we know that the implementation works as expected? How will we know nothing broke?
+Describe in a few sentences how the MEP will be tested. We are mostly interested in system tests (since unit-tests are specific to implementation details). How will we know that the implementation works as expected? How will we know nothing broke?
 
 ## Rejected Alternatives(optional)
 
