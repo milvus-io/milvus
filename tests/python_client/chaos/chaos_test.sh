@@ -14,6 +14,10 @@ echo "platform: $platform"
 
 # define chaos testing object
 release=${1:-"milvus-chaos"}
+ns=${2:-"chaos-testing"}
+
+# switch namespace
+kubectl config set-context --current --namespace=${ns}
 pod="proxy"
 chaos_type="pod_failure"
 release="milvus-chaos"
@@ -22,9 +26,9 @@ ns="chaos-testing"
 # install milvus cluster for chaos testing
 pushd ./scripts
 echo "uninstall milvus if exist"
-bash uninstall_milvus.sh ${release}|| true
+bash uninstall_milvus.sh ${release} ${ns}|| true
 echo "install milvus"
-bash install_milvus.sh ${release}
+bash install_milvus.sh ${release} ${ns}
 
 # if chaos_type is pod_failure, update replicas
 if [ "$chaos_type" == "pod_failure" ];
