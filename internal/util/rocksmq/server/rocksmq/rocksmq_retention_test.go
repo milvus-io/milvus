@@ -15,8 +15,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -111,14 +109,9 @@ func TestRmqRetention(t *testing.T) {
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, len(newRes), 0)
-
 	//////////////////////////////////////////////////
-	lastRetTsKey := LastRetTsTitle + topicName
-	rmq.kv.Save(lastRetTsKey, "")
-	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
-
-	//////////////////////////////////////////////////
-	rmq.kv.Save(lastRetTsKey, "dummy")
+	// test valid value case
+	rmq.retentionInfo.topics.Store(topicName, "dummy")
 	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
 }
 
@@ -141,204 +134,6 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 	rmq.retentionInfo.kv.DB = nil
 	_, err = initRetentionInfo(rmq.retentionInfo.kv, rmq.retentionInfo.db)
 	assert.Error(t, err)
-}
-
-func TestRetentionInfo_LoadRetentionInfo(t *testing.T) {
-	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqPageSize, 100)
-	kvPath := retentionPath + "kv_" + genRandonName()
-	defer os.RemoveAll(kvPath)
-	idAllocator := InitIDAllocator(kvPath)
-
-	rocksdbPath := retentionPath + "db_" + genRandonName()
-	defer os.RemoveAll(rocksdbPath)
-	metaPath := retentionPath + "meta_" + genRandonName()
-	defer os.RemoveAll(metaPath)
-
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
-	assert.Nil(t, err)
-	defer rmq.Close()
-
-	topicName := "topic_a"
-	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
-	defer rmq.DestroyTopic(topicName)
-
-	rmq.retentionInfo.startRetentionInfo()
-
-	rmq.retentionInfo.ackedInfo.Delete(topicName)
-
-	msgNum := 100
-	pMsgs := make([]ProducerMessage, msgNum)
-	for i := 0; i < msgNum; i++ {
-		msg := "message_" + strconv.Itoa(i)
-		pMsg := ProducerMessage{Payload: []byte(msg)}
-		pMsgs[i] = pMsg
-	}
-	ids, err := rmq.Produce(topicName, pMsgs)
-	assert.Nil(t, err)
-	assert.Equal(t, len(pMsgs), len(ids))
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-
-	groupName := "test_group"
-	_ = rmq.DestroyConsumerGroup(topicName, groupName)
-	err = rmq.CreateConsumerGroup(topicName, groupName)
-
-	consumer := &Consumer{
-		Topic:     topicName,
-		GroupName: groupName,
-	}
-	rmq.RegisterConsumer(consumer)
-
-	assert.Nil(t, err)
-	cMsgs := make([]ConsumerMessage, 0)
-	for i := 0; i < msgNum; i++ {
-		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
-		cMsgs = append(cMsgs, cMsg[0])
-	}
-	assert.Equal(t, len(cMsgs), msgNum)
-
-	wg.Add(1)
-
-	ll, ok := topicMu.Load(topicName)
-	assert.Equal(t, ok, true)
-	lock, _ := ll.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-
-	_, err = initRetentionInfo(rmq.retentionInfo.kv, rmq.store)
-	assert.Nil(t, err)
-
-	dummyTopic := strings.Repeat(topicName, 100)
-	err = DeleteMessages(rmq.store, dummyTopic, 0, 0)
-	assert.Error(t, err)
-
-	err = DeleteMessages(rmq.store, topicName, 0, 0)
-	assert.NoError(t, err)
-
-	//////////////////////////////////////////////////
-	ackedTsPrefix, _ := constructKey(AckedTsTitle, topicName)
-	ackedTsKey0 := ackedTsPrefix + "/1"
-	err = rmq.retentionInfo.kv.Save(ackedTsKey0, "dummy")
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(ackedTsKey0)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	ackedTsKey1 := ackedTsPrefix + "/dummy"
-	err = rmq.retentionInfo.kv.Save(ackedTsKey1, "dummy")
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(ackedTsKey1)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	lastRetentionTsKey := LastRetTsTitle + topicName
-	err = rmq.retentionInfo.kv.Save(lastRetentionTsKey, strconv.FormatInt(1, 10))
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(lastRetentionTsKey)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	err = rmq.retentionInfo.kv.Save(lastRetentionTsKey, "dummy")
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(lastRetentionTsKey)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	ackedSizeKey := AckedSizeTitle + topicName
-	err = rmq.retentionInfo.kv.Save(ackedSizeKey, strconv.FormatInt(1, 10))
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(ackedSizeKey)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	err = rmq.retentionInfo.kv.Save(ackedSizeKey, "")
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(ackedSizeKey)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	err = rmq.retentionInfo.kv.Save(ackedSizeKey, "dummy")
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(ackedSizeKey)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	topicBeginIDKey := TopicBeginIDTitle + topicName
-	err = rmq.retentionInfo.kv.Save(topicBeginIDKey, "dummy")
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(topicBeginIDKey)
-	assert.Nil(t, err)
-
-	////////////////////////////////////////////////////
-	fixedPageSizeKey0, _ := constructKey(PageMsgSizeTitle, topicName)
-	pageMsgSizeKey0 := fixedPageSizeKey0 + "/" + "1"
-	err = rmq.retentionInfo.kv.Save(pageMsgSizeKey0, "dummy")
-	assert.Nil(t, err)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	err = rmq.retentionInfo.kv.Remove(pageMsgSizeKey0)
-	assert.Nil(t, err)
-
-	//////////////////////////////////////////////////
-	fixedPageSizeKey1, _ := constructKey(PageMsgSizeTitle, topicName)
-	pageMsgSizeKey1 := fixedPageSizeKey1 + "/" + "dummy"
-	rmq.retentionInfo.kv.Save(pageMsgSizeKey1, "dummy")
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	rmq.retentionInfo.kv.Remove(pageMsgSizeKey1)
-
-	//////////////////////////////////////////////////
-	pageMsgPrefix, _ := constructKey(PageMsgSizeTitle, topicName)
-	pageMsgKey := pageMsgPrefix + "/dummy"
-	rmq.kv.Save(pageMsgKey, "0")
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
-
-	//////////////////////////////////////////////////
-	rmq.retentionInfo.kv.DB = nil
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(topicName, &wg)
-	rmq.retentionInfo.kv.Remove(pageMsgSizeKey1)
-
-	//////////////////////////////////////////////////
-	longTopic := strings.Repeat("dummy", 100)
-	wg.Add(1)
-	rmq.retentionInfo.loadRetentionInfo(longTopic, &wg)
-
-	//////////////////////////////////////////////////
-	topicMu.Delete(topicName)
-	topicMu.Store(topicName, topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
-
-	//////////////////////////////////////////////////
-	topicMu.Delete(topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
-
-	//////////////////////////////////////////////////
-	rmq.retentionInfo.ackedInfo.Delete(topicName)
-	rmq.retentionInfo.newExpiredCleanUp(topicName)
 }
 
 func TestRmqRetention_Complex(t *testing.T) {
