@@ -319,7 +319,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	//notify query service to release collection
 	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
-		log.Error("CallReleaseCollectionService failed", zap.String("error", err.Error()))
+		log.Error("Failed to CallReleaseCollectionService", zap.String("error", err.Error()))
 		return err
 	}
 
