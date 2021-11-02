@@ -176,6 +176,7 @@ func (itr *DeltalogIterator) isDisposed() bool {
 
 */
 
+// MergeIterator merge iterators.
 type MergeIterator struct {
 	disposed   int32
 	pos        int
@@ -184,6 +185,7 @@ type MergeIterator struct {
 	nextRecord *Value
 }
 
+// NewMergeIterator return a new MergeIterator.
 func NewMergeIterator(iterators []Iterator) *MergeIterator {
 	return &MergeIterator{
 		iteraotrs:  iterators,
