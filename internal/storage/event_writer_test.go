@@ -16,6 +16,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 )
@@ -32,7 +33,7 @@ func TestEventTypeCode_String(t *testing.T) {
 
 func TestSizeofStruct(t *testing.T) {
 	var buf bytes.Buffer
-	err := binary.Write(&buf, binary.LittleEndian, baseEventHeader{})
+	err := binary.Write(&buf, common.Endian, baseEventHeader{})
 	assert.Nil(t, err)
 	s1 := binary.Size(baseEventHeader{})
 	s2 := binary.Size(&baseEventHeader{})
@@ -95,12 +96,12 @@ func TestReadMagicNumber(t *testing.T) {
 	assert.Error(t, err)
 
 	// not a magic number
-	_ = binary.Write(&buf, binary.LittleEndian, MagicNumber+1)
+	_ = binary.Write(&buf, common.Endian, MagicNumber+1)
 	_, err = readMagicNumber(&buf)
 	assert.Error(t, err)
 
 	// normal case
-	_ = binary.Write(&buf, binary.LittleEndian, MagicNumber)
+	_ = binary.Write(&buf, common.Endian, MagicNumber)
 	num, err := readMagicNumber(&buf)
 	assert.NoError(t, err)
 	assert.Equal(t, MagicNumber, num)

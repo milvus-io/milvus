@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"math"
 	"math/rand"
@@ -23,6 +22,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
@@ -597,11 +597,11 @@ func genCommonBlob(msgLength int, schema *schemapb.CollectionSchema) ([]*commonp
 			switch f.DataType {
 			case schemapb.DataType_Int32:
 				bs := make([]byte, 4)
-				binary.LittleEndian.PutUint32(bs, uint32(i))
+				common.Endian.PutUint32(bs, uint32(i))
 				rawData = append(rawData, bs...)
 			case schemapb.DataType_Int64:
 				bs := make([]byte, 8)
-				binary.LittleEndian.PutUint32(bs, uint32(i))
+				common.Endian.PutUint32(bs, uint32(i))
 				rawData = append(rawData, bs...)
 			case schemapb.DataType_FloatVector:
 				dim := simpleVecField.dim // if no dim specified, use simpleVecField's dim
@@ -617,7 +617,7 @@ func genCommonBlob(msgLength int, schema *schemapb.CollectionSchema) ([]*commonp
 				for j := 0; j < dim; j++ {
 					f := float32(i*j) * 0.1
 					buf := make([]byte, 4)
-					binary.LittleEndian.PutUint32(buf, math.Float32bits(f))
+					common.Endian.PutUint32(buf, math.Float32bits(f))
 					rawData = append(rawData, buf...)
 				}
 			default:
@@ -1002,7 +1002,7 @@ func genSimplePlaceHolderGroup() ([]byte, error) {
 		var rawData []byte
 		for k, ele := range vec {
 			buf := make([]byte, 4)
-			binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(k*2)))
+			common.Endian.PutUint32(buf, math.Float32bits(ele+float32(k*2)))
 			rawData = append(rawData, buf...)
 		}
 		placeholderValue.Values = append(placeholderValue.Values, rawData)

@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"encoding/binary"
 	"math"
 	"sync"
 
@@ -223,7 +222,7 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []int64) map[int64]
 	segments := dn.replica.filterSegments(dn.channelName, partID)
 	for _, pk := range pks {
 		for _, segment := range segments {
-			binary.BigEndian.PutUint64(buf, uint64(pk))
+			common.Endian.PutUint64(buf, uint64(pk))
 			exist := segment.pkFilter.Test(buf)
 			if exist {
 				result[pk] = append(result[pk], segment.segmentID)

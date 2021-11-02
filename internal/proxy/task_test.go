@@ -187,7 +187,7 @@ func constructPlaceholderGroup(
 		for j := 0; j < dim; j++ {
 			var buffer bytes.Buffer
 			f := rand.Float32()
-			err := binary.Write(&buffer, binary.LittleEndian, f)
+			err := binary.Write(&buffer, common.Endian, f)
 			if err != nil {
 				panic(err)
 			}

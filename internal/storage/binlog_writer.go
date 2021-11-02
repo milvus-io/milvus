@@ -16,6 +16,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -94,7 +95,7 @@ func (writer *baseBinlogWriter) Close() error {
 
 	var offset int32 = 0
 	writer.buffer = new(bytes.Buffer)
-	if err := binary.Write(writer.buffer, binary.LittleEndian, int32(MagicNumber)); err != nil {
+	if err := binary.Write(writer.buffer, common.Endian, int32(MagicNumber)); err != nil {
 		return err
 	}
 	offset += int32(binary.Size(MagicNumber))

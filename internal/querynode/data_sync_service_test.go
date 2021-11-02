@@ -13,12 +13,12 @@ package querynode
 
 import (
 	"context"
-	"encoding/binary"
 	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -39,11 +39,11 @@ func TestDataSyncService_Start(t *testing.T) {
 	var rawData []byte
 	for _, ele := range vec {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		common.Endian.PutUint32(buf, math.Float32bits(ele))
 		rawData = append(rawData, buf...)
 	}
 	bs := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bs, 1)
+	common.Endian.PutUint32(bs, 1)
 	rawData = append(rawData, bs...)
 	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {

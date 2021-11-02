@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -384,7 +385,7 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 				}
 				floatResult := make([]float32, dim)
 				buf := bytes.NewReader(content)
-				err = binary.Read(buf, binary.LittleEndian, &floatResult)
+				err = binary.Read(buf, common.Endian, &floatResult)
 				if err != nil {
 					return err
 				}
@@ -542,9 +543,10 @@ func (s *Segment) checkIndexReady(fieldID int64) bool {
 }
 
 func (s *Segment) updateBloomFilter(pks []int64) {
+	log.Debug("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  updateBloom Filter", zap.Any("pks", pks))
 	buf := make([]byte, 8)
 	for _, pk := range pks {
-		binary.BigEndian.PutUint64(buf, uint64(pk))
+		common.Endian.PutUint64(buf, uint64(pk))
 		s.pkFilter.Add(buf)
 	}
 }

@@ -496,7 +496,7 @@ func (it *insertTask) transferColumnBasedRequestToRowBasedData() error {
 	it.RowData = make([]*commonpb.Blob, 0, rowNum)
 	l := len(dTypes)
 	// TODO(dragondriver): big endian or little endian?
-	endian := binary.LittleEndian
+	endian := common.Endian
 	printed := false
 	for i := 0; i < rowNum; i++ {
 		blob := &commonpb.Blob{

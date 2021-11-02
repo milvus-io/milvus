@@ -19,6 +19,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
@@ -1242,7 +1243,7 @@ func TestReadFixPartError(t *testing.T) {
 	assert.NotNil(t, err)
 
 	event := newDescriptorEventData()
-	err = binary.Write(buf, binary.LittleEndian, event.DescriptorEventDataFixPart)
+	err = binary.Write(buf, common.Endian, event.DescriptorEventDataFixPart)
 	assert.Nil(t, err)
 	_, err = readDescriptorEventData(buf)
 	assert.NotNil(t, err)
@@ -1284,7 +1285,7 @@ func TestEventReaderError(t *testing.T) {
 		StartTimestamp: 1000,
 		EndTimestamp:   2000,
 	}
-	err = binary.Write(buf, binary.LittleEndian, insertData)
+	err = binary.Write(buf, common.Endian, insertData)
 	assert.Nil(t, err)
 
 	r, err = newEventReader(schemapb.DataType_Int64, buf)

@@ -36,6 +36,7 @@ import (
 	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -313,7 +314,7 @@ func GenRowData() (rawData []byte) {
 	var fvector = [DIM]float32{1, 2}
 	for _, ele := range fvector {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		common.Endian.PutUint32(buf, math.Float32bits(ele))
 		rawData = append(rawData, buf...)
 	}
 
@@ -326,7 +327,7 @@ func GenRowData() (rawData []byte) {
 	// Bool
 	var fieldBool = true
 	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.LittleEndian, fieldBool); err != nil {
+	if err := binary.Write(buf, common.Endian, fieldBool); err != nil {
 		panic(err)
 	}
 
@@ -335,7 +336,7 @@ func GenRowData() (rawData []byte) {
 	// int8
 	var dataInt8 int8 = 100
 	bint8 := new(bytes.Buffer)
-	if err := binary.Write(bint8, binary.LittleEndian, dataInt8); err != nil {
+	if err := binary.Write(bint8, common.Endian, dataInt8); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint8.Bytes()...)
@@ -343,7 +344,7 @@ func GenRowData() (rawData []byte) {
 	// int16
 	var dataInt16 int16 = 200
 	bint16 := new(bytes.Buffer)
-	if err := binary.Write(bint16, binary.LittleEndian, dataInt16); err != nil {
+	if err := binary.Write(bint16, common.Endian, dataInt16); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint16.Bytes()...)
@@ -351,7 +352,7 @@ func GenRowData() (rawData []byte) {
 	// int32
 	var dataInt32 int32 = 300
 	bint32 := new(bytes.Buffer)
-	if err := binary.Write(bint32, binary.LittleEndian, dataInt32); err != nil {
+	if err := binary.Write(bint32, common.Endian, dataInt32); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint32.Bytes()...)
@@ -359,7 +360,7 @@ func GenRowData() (rawData []byte) {
 	// int64
 	var dataInt64 int64 = 400
 	bint64 := new(bytes.Buffer)
-	if err := binary.Write(bint64, binary.LittleEndian, dataInt64); err != nil {
+	if err := binary.Write(bint64, common.Endian, dataInt64); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint64.Bytes()...)
@@ -367,7 +368,7 @@ func GenRowData() (rawData []byte) {
 	// float32
 	var datafloat float32 = 1.1
 	bfloat32 := new(bytes.Buffer)
-	if err := binary.Write(bfloat32, binary.LittleEndian, datafloat); err != nil {
+	if err := binary.Write(bfloat32, common.Endian, datafloat); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat32.Bytes()...)
@@ -375,7 +376,7 @@ func GenRowData() (rawData []byte) {
 	// float64
 	var datafloat64 = 2.2
 	bfloat64 := new(bytes.Buffer)
-	if err := binary.Write(bfloat64, binary.LittleEndian, datafloat64); err != nil {
+	if err := binary.Write(bfloat64, common.Endian, datafloat64); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat64.Bytes()...)

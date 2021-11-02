@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
@@ -1156,7 +1157,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.NotNil(t, err)
 
 	buffer := new(bytes.Buffer)
-	err = binary.Write(buffer, binary.LittleEndian, int32(MagicNumber))
+	err = binary.Write(buffer, common.Endian, int32(MagicNumber))
 	assert.Nil(t, err)
 	data = buffer.Bytes()
 
@@ -1164,7 +1165,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.Nil(t, reader)
 	assert.NotNil(t, err)
 
-	err = binary.Write(buffer, binary.LittleEndian, int32(555))
+	err = binary.Write(buffer, common.Endian, int32(555))
 	assert.Nil(t, err)
 	data = buffer.Bytes()
 

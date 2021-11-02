@@ -16,6 +16,8 @@
 
 package common
 
+import "encoding/binary"
+
 // system filed id:
 // 0: unique row id
 // 1: timestamp
@@ -48,3 +50,6 @@ const (
 	// InvalidFieldID indicates that the field does not exist . It will be set when the field is not found.
 	InvalidFieldID = int64(-1)
 )
+
+// Common implementation of ByteOrder for whole milvus
+var Endian = binary.LittleEndian
