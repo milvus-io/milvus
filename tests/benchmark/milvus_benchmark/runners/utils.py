@@ -138,6 +138,7 @@ def metric_type_trans(metric_type):
 
 
 def get_dataset(hdf5_file_path):
+    """ Determine whether hdf5 file exists, and return the content of hdf5 file """
     if not os.path.exists(hdf5_file_path):
         raise Exception("%s not existed" % hdf5_file_path)
     dataset = h5py.File(hdf5_file_path)
