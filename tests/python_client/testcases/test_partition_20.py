@@ -51,7 +51,8 @@ class TestPartitionParams(TestcaseBase):
         # create partition
         self.partition_wrap.init_partition(collection_w.collection, partition_name,
                                            check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "Partition name should not be empty"})
+                                           check_items={ct.err_code: 1,
+                                                        ct.err_msg: "Partition name should not be empty"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_empty_description(self):
