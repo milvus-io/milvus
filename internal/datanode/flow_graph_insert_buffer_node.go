@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/trace"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -630,7 +631,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 //  The receiver can be any type in int8, int16, int32, int64, float32, float64 and bool
 //  readBinary uses LittleEndian ByteOrder.
 func readBinary(reader io.Reader, receiver interface{}, dataType schemapb.DataType) {
-	err := binary.Read(reader, binary.LittleEndian, receiver)
+	err := binary.Read(reader, common.Endian, receiver)
 	if err != nil {
 		log.Error("binary.Read failed", zap.Any("data type", dataType), zap.Error(err))
 	}

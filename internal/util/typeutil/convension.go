@@ -12,24 +12,25 @@
 package typeutil
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 	"reflect"
+
+	"github.com/milvus-io/milvus/internal/common"
 )
 
 // Float32ToBytes converts a float to byte slice.
 func Float32ToBytes(float float32) []byte {
 	bits := math.Float32bits(float)
 	bytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bytes, bits)
+	common.Endian.PutUint32(bytes, bits)
 
 	return bytes
 }
 
 // BytesToFloat32 converts a byte slice to float32.
 func BytesToFloat32(bytes []byte) float32 {
-	bits := binary.LittleEndian.Uint32(bytes)
+	bits := common.Endian.Uint32(bytes)
 
 	return math.Float32frombits(bits)
 }
@@ -40,13 +41,13 @@ func BytesToInt64(b []byte) (int64, error) {
 		return 0, fmt.Errorf("Failed to convert []byte to int64: invalid data, must 8 bytes, but %d", len(b))
 	}
 
-	return int64(binary.BigEndian.Uint64(b)), nil
+	return int64(common.Endian.Uint64(b)), nil
 }
 
 // Int64ToBytes converts uint64 to a byte slice.
 func Int64ToBytes(v int64) []byte {
 	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, uint64(v))
+	common.Endian.PutUint64(b, uint64(v))
 	return b
 }
 
@@ -56,13 +57,13 @@ func BytesToUint64(b []byte) (uint64, error) {
 		return 0, fmt.Errorf("Failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
 	}
 
-	return binary.BigEndian.Uint64(b), nil
+	return common.Endian.Uint64(b), nil
 }
 
 // Uint64ToBytes converts uint64 to a byte slice.
 func Uint64ToBytes(v uint64) []byte {
 	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
+	common.Endian.PutUint64(b, v)
 	return b
 }
 

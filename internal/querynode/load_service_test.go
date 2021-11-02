@@ -13,13 +13,13 @@ package querynode
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"math/rand"
 	"path"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/common"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -66,11 +66,11 @@ import (
 //		rowData := make([]byte, 0)
 //		for i := 0; i < DIM; i++ {
 //			vec := make([]byte, 4)
-//			binary.LittleEndian.PutUint32(vec, math.Float32bits(float32(n*i)))
+//			common.Endian.PutUint32(vec, math.Float32bits(float32(n*i)))
 //			rowData = append(rowData, vec...)
 //		}
 //		age := make([]byte, 4)
-//		binary.LittleEndian.PutUint32(age, 1)
+//		common.Endian.PutUint32(age, 1)
 //		rowData = append(rowData, age...)
 //		blob := &commonpb.Blob{
 //			Value: rowData,
@@ -161,7 +161,7 @@ import (
 //	var searchRowByteData []byte
 //	for i := range searchRowData {
 //		vec := make([]byte, 4)
-//		binary.LittleEndian.PutUint32(vec, math.Float32bits(searchRowData[i]))
+//		common.Endian.PutUint32(vec, math.Float32bits(searchRowData[i]))
 //		searchRowByteData = append(searchRowByteData, vec...)
 //	}
 //	placeholderValue := milvuspb.PlaceholderValue{
@@ -404,7 +404,7 @@ import (
 //		rowData = append(rowData, indexRowData[offset:offset+(DIM/8)]...)
 //		offset += DIM / 8
 //		age := make([]byte, 4)
-//		binary.LittleEndian.PutUint32(age, 1)
+//		common.Endian.PutUint32(age, 1)
 //		rowData = append(rowData, age...)
 //		blob := &commonpb.Blob{
 //			Value: rowData,
@@ -859,11 +859,11 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	var rawData []byte
 	for _, ele := range vec {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		common.Endian.PutUint32(buf, math.Float32bits(ele))
 		rawData = append(rawData, buf...)
 	}
 	bs := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bs, 1)
+	common.Endian.PutUint32(bs, 1)
 	rawData = append(rawData, bs...)
 
 	// messages generate
@@ -990,7 +990,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 //	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 //	for _, ele := range vec {
 //		buf := make([]byte, 4)
-//		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+//		common.Endian.PutUint32(buf, math.Float32bits(ele))
 //		searchRawData = append(searchRawData, buf...)
 //	}
 //	placeholderValue := milvuspb.PlaceholderValue{

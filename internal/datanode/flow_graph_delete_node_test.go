@@ -18,12 +18,12 @@ package datanode
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/milvus-io/milvus/internal/common"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -121,13 +121,13 @@ func genMockReplica(segIDs []int64, pks []int64, chanName string) *mockReplica {
 	buf := make([]byte, 8)
 	filter0 := bloom.NewWithEstimates(1000000, 0.01)
 	for i := 0; i < 3; i++ {
-		binary.BigEndian.PutUint64(buf, uint64(pks[i]))
+		common.Endian.PutUint64(buf, uint64(pks[i]))
 		filter0.Add(buf)
 	}
 
 	filter1 := bloom.NewWithEstimates(1000000, 0.01)
 	for i := 3; i < 5; i++ {
-		binary.BigEndian.PutUint64(buf, uint64(pks[i]))
+		common.Endian.PutUint64(buf, uint64(pks[i]))
 		filter1.Add(buf)
 	}
 

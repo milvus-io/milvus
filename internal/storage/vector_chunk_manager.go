@@ -17,6 +17,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 )
 
@@ -73,7 +74,7 @@ func (vcm *VectorChunkManager) downloadVectorFile(key string) ([]byte, error) {
 		floatVector, ok := singleData.(*FloatVectorFieldData)
 		if ok {
 			buf := new(bytes.Buffer)
-			err := binary.Write(buf, binary.LittleEndian, floatVector.Data)
+			err := binary.Write(buf, common.Endian, floatVector.Data)
 			if err != nil {
 				return nil, err
 			}

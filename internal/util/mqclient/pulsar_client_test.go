@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
 )
@@ -30,14 +31,14 @@ import (
 func IntToBytes(n int) []byte {
 	tmp := int32(n)
 	bytesBuffer := bytes.NewBuffer([]byte{})
-	binary.Write(bytesBuffer, binary.BigEndian, tmp)
+	binary.Write(bytesBuffer, common.Endian, tmp)
 	return bytesBuffer.Bytes()
 }
 
 func BytesToInt(b []byte) int {
 	bytesBuffer := bytes.NewBuffer(b)
 	var tmp int32
-	binary.Read(bytesBuffer, binary.BigEndian, &tmp)
+	binary.Read(bytesBuffer, common.Endian, &tmp)
 	return int(tmp)
 }
 
