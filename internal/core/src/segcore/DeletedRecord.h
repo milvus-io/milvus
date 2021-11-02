@@ -11,11 +11,12 @@
 
 #pragma once
 
+#include <memory>
+#include <utility>
+
 #include "AckResponder.h"
 #include "common/Schema.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
-#include <utility>
-#include <memory>
 #include "segcore/Record.h"
 
 namespace milvus::segcore {
