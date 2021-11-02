@@ -295,6 +295,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	return s.queryCoord.LoadPartitions(ctx, req)
 }
 
+// ReleasePartitions releases the data of the specified partition in QueryCoord.
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return s.queryCoord.ReleasePartitions(ctx, req)
 }
