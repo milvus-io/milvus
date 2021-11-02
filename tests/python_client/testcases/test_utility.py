@@ -174,7 +174,9 @@ class TestUtilityParams(TestcaseBase):
         # c_name = get_invalid_collection_name
         # ut = ApiUtilityWrapper()
         # if isinstance(c_name, str) and c_name:
-        #     ex, _ = ut.wait_for_index_building_complete(c_name, check_items={ct.err_code: 1, ct.err_msg: "Invalid collection name"})
+        #     ex, _ = ut.wait_for_index_building_complete(c_name,
+        #                                                 check_items={ct.err_code: 1,
+        #                                                              ct.err_msg: "Invalid collection name"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def _test_wait_index_invalid_index_name(self, get_invalid_index_name):
