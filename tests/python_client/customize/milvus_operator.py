@@ -108,7 +108,13 @@ class MilvusOperator(object):
         cus_res.patch(release_name, d_configs)
 
     def wait_for_healthy(self, release_name, namespace='default', timeout=600):
-
+        """
+        Method: wait a milvus instance until healthy or timeout
+        Params:
+            release_name: release name of milvus
+            namespace: namespace that the milvus is running in
+            timeout: default: 600 seconds
+        """
         cus_res = CusResource(kind=self.plural, group=self.group,
                               version=self.version, namespace=namespace)
         starttime = time.time()
