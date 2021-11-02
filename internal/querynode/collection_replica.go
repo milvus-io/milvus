@@ -73,6 +73,7 @@ type ReplicaInterface interface {
 	hasPartition(partitionID UniqueID) bool
 	// getPartitionNum returns num of partitions
 	getPartitionNum() int
+	// getSegmentIDs returns segment ids
 	getSegmentIDs(partitionID UniqueID) ([]UniqueID, error)
 	getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error)
 
