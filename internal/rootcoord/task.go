@@ -650,7 +650,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 
 	//notify query service to release partition
 	if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partID}); err != nil {
-		log.Error("CallReleaseCollectionService failed", zap.String("error", err.Error()))
+		log.Error("Failed to CallReleaseCollectionService", zap.String("error", err.Error()))
 		return err
 	}
 
