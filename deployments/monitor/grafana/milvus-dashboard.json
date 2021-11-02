@@ -1582,7 +1582,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Has partition operations",
+      "description": "Total count of has_partition requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
