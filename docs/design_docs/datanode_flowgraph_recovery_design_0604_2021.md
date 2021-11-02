@@ -33,7 +33,7 @@ Whether save successfully:
 - If succeeded, flowgraph updates all segments' positions to replica
 - If not
   - For a grpc failure( this failure will appear after many times retry internally), crush itself.
-  - For a normal failure, retry save 10 times, if fail still, crush itself.
+  - For a normal failure, retry save 10 times, if still fails, crush itself.
 
 ### B. Recovery from a set of checkpoints
 
