@@ -136,3 +136,19 @@ func ToPhysicalChannel(vchannel string) string {
 	}
 	return vchannel[:idx]
 }
+
+func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
+	chanNameLen := len(chanName)
+	tokenFromLen := len(tokenFrom)
+	if chanNameLen < tokenFromLen {
+		return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
+	}
+
+	var i int
+	for i = 0; i < (chanNameLen - tokenFromLen); i++ {
+		if chanName[i:i+tokenFromLen] == tokenFrom {
+			return chanName[0:i] + tokenTo + chanName[i+tokenFromLen:], nil
+		}
+	}
+	return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
+}
