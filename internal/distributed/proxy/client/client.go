@@ -201,6 +201,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
+// GetComponentStates get the component state.
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
