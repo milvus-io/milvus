@@ -1,5 +1,6 @@
 import pytest
 import os
+import time
 from time import sleep
 
 from pymilvus import connections
@@ -27,6 +28,17 @@ def assert_statistic(checkers, expectations={}):
             log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
             expect(succ_rate > 0.90 or total > 2,
                    f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
+
+def record_results(checkers):
+    res = ""
+    for k in checkers.keys():
+        # expect succ if no expectations
+        succ_rate = checkers[k].succ_rate()
+        total = checkers[k].total()
+        res += f"{str(k)} succ rate {succ_rate}, total: {total}\n"
+    return res
+
+
 
 
 class TestChaosBase:
@@ -131,12 +143,12 @@ class TestChaos(TestChaosBase):
         if self.parser_testcase_config(chaos_yaml) is False:
             log.error("Fail to get the testcase info in testcases.yaml")
             assert False
-        # init report 
+        # init report
         meta_name = chaos_config.get('metadata', None).get('name', None)
         dir_name = "./reports"
         file_name = f"./reports/{meta_name}.log"
         if not os.path.exists(dir_name):
-            os.makedirs(dir_name)       
+            os.makedirs(dir_name)
         # wait 20s
         sleep(constants.WAIT_PER_OP * 2)
 
@@ -144,8 +156,10 @@ class TestChaos(TestChaosBase):
         log.info("******1st assert before chaos: ")
         assert_statistic(self.health_checkers)
         with open(file_name, "a+") as f:
-            f.write("1st assert before chaos: ")
-            f.write(f"{self.health_checkers}\n")
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"{meta_name}-{ts}\n")
+            f.write("1st assert before chaos:\n")
+            f.write(record_results(self.health_checkers))
         # apply chaos object
         chaos_res = CusResource(kind=chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
@@ -175,8 +189,8 @@ class TestChaos(TestChaosBase):
                                        Op.query: self.expect_query
                                        })
         with open(file_name, "a+") as f:
-            f.write("2nd assert after chaos injected:")
-            f.write(f"{self.health_checkers}\n")
+            f.write("2nd assert after chaos injected:\n")
+            f.write(record_results(self.health_checkers))
         # delete chaos
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
@@ -198,8 +212,8 @@ class TestChaos(TestChaosBase):
         log.info("******3rd assert after chaos deleted: ")
         assert_statistic(self.health_checkers)
         with open(file_name, "a+") as f:
-            f.write("3rd assert after chaos deleted:")
-            f.write(f"{self.health_checkers}\n")
+            f.write("3rd assert after chaos deleted:\n")
+            f.write(record_results(self.health_checkers))
         # assert all expectations
         assert_expectations()
 
