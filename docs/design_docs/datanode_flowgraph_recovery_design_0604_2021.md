@@ -60,7 +60,7 @@ message WatchDmChannelsRequest {
 
 ![recovery](graphs/flowgraph_recovery_design.png)
 
-Supposing we have segment `s1, s2, s3`, corresponding position `p1, p2, p3`
+Supposing we have segments `s1, s2, s3`, corresponding position `p1, p2, p3`
 
 - Sort positions in reverse order `p3, p2, p1`
 - Get segments dup range time: `s3 ( p3 > mp_px > p1)`, `s2 (p2 > mp_px > p1)`, `s1(zero)`
