@@ -46,6 +46,10 @@ type ParamTable struct {
 	DeleteBinlogRootPath    string
 	Alias                   string // Different datanode in one machine
 
+	// Channel Name
+	DmlChannelName   string
+	DeltaChannelName string
+
 	// Pulsar address
 	PulsarAddress string
 
@@ -129,6 +133,9 @@ func (p *ParamTable) Init() {
 	p.initMinioSecretAccessKey()
 	p.initMinioUseSSL()
 	p.initMinioBucketName()
+
+	p.initDmlChannelName()
+	p.initDeltaChannelName()
 
 	p.initRoleName()
 }
@@ -288,4 +295,22 @@ func (p *ParamTable) initMinioBucketName() {
 
 func (p *ParamTable) initRoleName() {
 	p.RoleName = "datanode"
+}
+
+func (p *ParamTable) initDmlChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.rootCoordDml")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.DmlChannelName = strings.Join(s, "-")
+}
+
+func (p *ParamTable) initDeltaChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.rootCoordDelta")
+	if err != nil {
+		config = "rootcoord-delta"
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.DeltaChannelName = strings.Join(s, "-")
 }
