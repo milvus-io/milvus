@@ -152,6 +152,8 @@ ReduceSearchResultsAndFillData(CSearchPlan c_plan, CSearchResult* c_search_resul
         std::vector<SearchResult*> search_results;
         for (int i = 0; i < num_segments; ++i) {
             search_results.push_back((SearchResult*)c_search_results[i]);
+            LOG_SEGCORE_DEBUG_ << "No." << i << ": search result addr " << c_search_results[i] << ", segment addr "
+                               << search_results[i]->segment_;
         }
         auto topk = search_results[0]->topk_;
         auto num_queries = search_results[0]->num_queries_;
@@ -162,15 +164,18 @@ ReduceSearchResultsAndFillData(CSearchPlan c_plan, CSearchResult* c_search_resul
             auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
             segment->FillPrimaryKeys(plan, *search_result);
         }
+        LOG_SEGCORE_DEBUG_ << "Fill primary key done";
 
         GetResultData(search_records, search_results, num_queries, topk);
         ResetSearchResult(search_records, search_results);
+        LOG_SEGCORE_DEBUG_ << "Search result reduce done";
 
         // fill in other entities
         for (auto& search_result : search_results) {
             auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
             segment->FillTargetEntry(plan, *search_result);
         }
+        LOG_SEGCORE_DEBUG_ << "Fill target entry done";
 
         auto status = CStatus();
         status.error_code = Success;
