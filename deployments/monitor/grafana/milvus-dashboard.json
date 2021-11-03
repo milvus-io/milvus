@@ -1908,7 +1908,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of rootcoord has_partition",
+      "description": "per-minute increasing rate of has_partition requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
