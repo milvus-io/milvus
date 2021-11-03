@@ -16,6 +16,15 @@ class TestCompactionParams(TestcaseBase):
         """
         pass
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_compact_empty_collection(self):
+        """
+        target: test compact an empty collection
+        method: compact an empty collection
+        expected: No exception
+        """
+        pass
+
 
 @pytest.mark.skip(reason="Waiting for development")
 class TestCompactionOperation(TestcaseBase):
