@@ -11,6 +11,7 @@ import json
 
 
 def get_token(url):
+    """ get the request token and return the value """
     rep = requests.get(url)
     data = json.loads(rep.text)
     if 'token' in data:
