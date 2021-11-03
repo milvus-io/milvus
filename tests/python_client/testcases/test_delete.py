@@ -310,7 +310,6 @@ class TestDeleteOperation(TestcaseBase):
         assert collection_w.num_entities == tmp_nb - 1
         assert collection_w.has_index()
 
-    @pytest.mark.xfail(reason="Issue #10919")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_query_ids_both_sealed_and_channel(self):
         """
