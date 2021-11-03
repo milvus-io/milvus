@@ -310,6 +310,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	return s.queryCoord.GetSegmentInfo(ctx, req)
 }
 
+// GetMetrics gets the metrics information of QueryCoord.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.queryCoord.GetMetrics(ctx, req)
 }
