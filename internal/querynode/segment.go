@@ -66,7 +66,7 @@ func newVectorFieldInfo(fieldBinlog *datapb.FieldBinlog) *VectorFieldInfo {
 	}
 }
 
-//--------------------------------------------------------------------------------------
+// Segment is a wrapper of the underlying C-structure segment.
 type Segment struct {
 	segPtrMu   sync.RWMutex // guards segmentPtr
 	segmentPtr C.CSegmentInterface
@@ -101,7 +101,7 @@ type Segment struct {
 	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
 }
 
-//-------------------------------------------------------------------------------------- common interfaces
+// ID returns the identity number.
 func (s *Segment) ID() UniqueID {
 	return s.segmentID
 }
