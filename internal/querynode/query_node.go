@@ -136,7 +136,7 @@ func (node *QueryNode) Register() error {
 	return nil
 }
 
-func (node *QueryNode) InitSegcore() {
+func (node *QueryNode) initSegcore() {
 	C.SegcoreInit()
 
 	// override segcore chunk size
@@ -186,7 +186,7 @@ func (node *QueryNode) Init() error {
 			node.etcdKV)
 		node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV, node.historical.replica)
 
-		node.InitSegcore()
+		node.initSegcore()
 
 		if node.rootCoord == nil {
 			log.Error("null root coordinator detected")
