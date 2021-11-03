@@ -68,6 +68,7 @@ type Server struct {
 	closer io.Closer
 }
 
+// NewServer create a Proxy server.
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 
 	var err error
