@@ -102,6 +102,8 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         ExecExprVisitor::RetType expr_ret =
             ExecExprVisitor(*segment, active_count, timestamp_).call_child(*node.predicate_.value());
         bitset_holder = std::move(expr_ret);
+    } else {
+        bitset_holder.resize(active_count, true);
     }
     segment->mask_with_timestamps(bitset_holder, timestamp_);
 

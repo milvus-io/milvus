@@ -239,6 +239,11 @@ TEST(CApiTest, SearchTest) {
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
+    int64_t ts_offset = 1000;
+    for (int i = 0; i < N; i++) {
+        timestamps[i] = ts_offset + i;
+    }
+
     int64_t offset;
     PreInsert(segment, N, &offset);
 
@@ -279,12 +284,17 @@ TEST(CApiTest, SearchTest) {
     timestamps.push_back(1);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
+    auto res = Search(segment, plan, placeholderGroup, N + ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
+
+    CSearchResult search_result2;
+    auto res2 = Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
+    ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(search_result);
+    DeleteSearchResult(search_result2);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2416,6 +2426,99 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_bigIndex);
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, SealedSegment_search_without_predicates) {
+    constexpr auto TOPK = 5;
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    auto collection = NewCollection(schema_string.c_str());
+    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto segment = NewSegment(collection, 0, Sealed);
+
+    auto N = ROW_COUNT;
+    uint64_t ts_offset = 1000;
+    auto dataset = DataGen(schema, N, ts_offset);
+    auto vec_col = dataset.get_col<float>(0);
+    auto counter_col = dataset.get_col<int64_t>(1);
+    auto query_ptr = vec_col.data() + 42000 * DIM;
+
+    const char* dsl_string = R"(
+    {
+         "bool": {
+             "vector": {
+                 "fakevec": {
+                     "metric_type": "L2",
+                     "params": {
+                         "nprobe": 10
+                     },
+                     "query": "$0",
+                     "topk": 5,
+                     "round_decimal": -1
+                 }
+             }
+         }
+    })";
+
+    auto c_vec_field_data = CLoadFieldDataInfo{
+        100,
+        vec_col.data(),
+        N,
+    };
+    auto status = LoadFieldData(segment, c_vec_field_data);
+    assert(status.error_code == Success);
+
+    auto c_counter_field_data = CLoadFieldDataInfo{
+        101,
+        counter_col.data(),
+        N,
+    };
+    status = LoadFieldData(segment, c_counter_field_data);
+    assert(status.error_code == Success);
+
+    auto c_id_field_data = CLoadFieldDataInfo{
+        0,
+        counter_col.data(),
+        N,
+    };
+    status = LoadFieldData(segment, c_id_field_data);
+    assert(status.error_code == Success);
+
+    auto c_ts_field_data = CLoadFieldDataInfo{
+        1,
+        counter_col.data(),
+        N,
+    };
+    status = LoadFieldData(segment, c_ts_field_data);
+    assert(status.error_code == Success);
+
+    int num_queries = 10;
+    auto blob = generate_query_data(num_queries);
+
+    void* plan = nullptr;
+    status = CreateSearchPlan(collection, dsl_string, &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    ASSERT_EQ(status.error_code, Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+    CSearchResult search_result;
+    auto res = Search(segment, plan, placeholderGroup, N + ts_offset, &search_result);
+    std::cout << res.error_msg << std::endl;
+    ASSERT_EQ(res.error_code, Success);
+
+    CSearchResult search_result2;
+    auto res2 = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    ASSERT_EQ(res2.error_code, Success);
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteSearchResult(search_result);
+    DeleteSearchResult(search_result2);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
