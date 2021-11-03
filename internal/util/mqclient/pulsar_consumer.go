@@ -68,6 +68,8 @@ func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
 	return pc.msgChannel
 }
 
+// Seek seek consume position to the pointed messageID,
+// the pointed messageID will be consumed after the seek in pulsar
 func (pc *pulsarConsumer) Seek(id MessageID) error {
 	messageID := id.(*pulsarID).messageID
 	err := pc.c.Seek(messageID)
