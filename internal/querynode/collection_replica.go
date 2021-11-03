@@ -80,6 +80,7 @@ type ReplicaInterface interface {
 
 	// segment
 	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error
+	// setSegment adds a segment to collectionReplica
 	setSegment(segment *Segment) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
