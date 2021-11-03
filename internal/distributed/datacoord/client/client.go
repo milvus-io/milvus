@@ -129,6 +129,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 	return client, nil
 }
 
+// Init initializes the client
 func (c *Client) Init() error {
 	Params.Init()
 	return nil
