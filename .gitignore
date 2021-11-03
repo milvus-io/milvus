@@ -80,3 +80,6 @@ cpp_coverage/
 
 # virtualenv
 venv/
+
+# docker compose volumes
+deployments/docker/*/volumes
