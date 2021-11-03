@@ -151,6 +151,7 @@ func (node *QueryNode) InitSegcore() {
 	C.free(unsafe.Pointer(cSimdType))
 }
 
+// Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
 	var initError error = nil
 	node.initOnce.Do(func() {
