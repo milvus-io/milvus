@@ -78,6 +78,6 @@ func removePath(rmqPath string) {
 	metaPath := rmqPath + "_meta_kv"
 	err = os.RemoveAll(metaPath)
 	if err != nil {
-		log.Error("os removeAll failed.", zap.Any("path", kvPath))
+		log.Error("Failed to call os.removeAll.", zap.Any("path", kvPath))
 	}
 }
