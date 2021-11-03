@@ -44,6 +44,7 @@ func (node *Proxy) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }
 
+// GetComponentStates get state of Proxy.
 func (node *Proxy) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	stats := &internalpb.ComponentStates{
 		Status: &commonpb.Status{
