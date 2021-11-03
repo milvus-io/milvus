@@ -27,7 +27,7 @@ Describe the new thing you want to do in appropriate detail. This may be fairly 
 
 ## Compatibility, Deprecation, and Migration Plan(optional)
 - What impact (if any) will there be on existing users?
-- If we are changing behavior how will we phase out the older behavior?
+- If we are changing behaviors how will we phase out the older behavior?
 - If we need special migration tools, describe them here.
 - When will we remove the existing behavior?
 
