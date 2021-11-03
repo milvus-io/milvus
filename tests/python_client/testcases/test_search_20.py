@@ -1633,6 +1633,59 @@ class TestCollectionSearch(TestcaseBase):
             res = res.result()
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
+    @pytest.mark.tag(CaseLabel.L2)
+    def test_search_without_expression(self, auto_id):
+        """
+        target: test search without expression
+        method: 1. create connections,collection
+                2. first insert, and return with timestamp1
+                3. second insert, and return with timestamp2
+                4. search before timestamp1 and timestamp2
+        expected: 1 data inserted at a timestamp could not be searched before it
+                  2 data inserted at a timestamp could be searched after it
+        """
+        # 1. create connection, collection and insert
+        nb = 10
+        collection_w, _, _, insert_ids_1, time_stamp_1 = \
+            self.init_collection_general(prefix, True, nb, auto_id=auto_id, dim=default_dim)[0:5]
+        # 2. insert for the second time
+        log.info("test_search_without_expression: inserting for the second time")
+        _, entities, _, insert_ids_2, time_stamp_2 = cf.insert_data(collection_w, nb, auto_id=auto_id,
+                                                                    dim=default_dim, insert_offset=nb)[0:5]
+        # 3. extract vectors inserted for the second time
+        entities_list = np.array(entities[0]).tolist()
+        vectors = [entities_list[i][-1] for i in range(default_nq)]
+        # 4. search with insert timestamp1
+        log.info("test_search_without_expression: searching collection %s with time_stamp_1 '%d'"
+                 % (collection_w.name, time_stamp_1))
+        search_res = collection_w.search(vectors, default_search_field,
+                                         default_search_params, default_limit,
+                                         travel_timestamp=time_stamp_1,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "ids": insert_ids_1,
+                                                      "limit": default_limit})[0]
+        log.info("test_search_without_expression: checking that data inserted "
+                 "after time_stamp_2 is not searched at time_stamp_1")
+        for i in range(len(search_res)):
+            assert insert_ids_2[i] not in search_res[i].ids
+        # 5. search with insert timestamp2
+        time.sleep(gracefulTime)
+        log.info("test_search_without_expression: searching collection %s with time_stamp_2 '%d'"
+                 % (collection_w.name, time_stamp_2))
+        log.info(time_stamp_2)
+        search_res = collection_w.search(vectors, default_search_field,
+                                         default_search_params, default_limit,
+                                         travel_timestamp=time_stamp_2,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "ids": insert_ids_1 + insert_ids_2,
+                                                      "limit": default_limit})[0]
+        log.info("test_search_without_expression: checking that data inserted "
+                 "after time_stamp_2 is searched at time_stamp_2")
+        for i in range(len(search_res)):
+            assert insert_ids_2[i] in search_res[i].ids
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
     def test_search_with_expression(self, dim, expression, _async):
