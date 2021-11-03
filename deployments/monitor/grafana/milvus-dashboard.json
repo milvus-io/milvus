@@ -2007,7 +2007,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Create index operations",
+      "description": "Total count of create_index requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
