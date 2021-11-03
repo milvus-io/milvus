@@ -11,15 +11,6 @@
   <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count" />
 </div>
 
-<div class="column" align="middle">
-  <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
-    <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
-  </a>
-  <a href="https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard">
-    <img src="https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95" />
-  </a>
-</div>
-
 ## What is Milvus?
 
 Milvus is an open-source vector database built to power embedding similarity search and AI applications. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
