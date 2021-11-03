@@ -14,11 +14,11 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
-#include <stdlib.h>
 #include <stdint.h>
+#include <stdlib.h>
 
-#include "segcore/collection_c.h"
 #include "common/type_c.h"
+#include "segcore/collection_c.h"
 
 typedef void* CLoadIndexInfo;
 typedef void* CBinarySet;
