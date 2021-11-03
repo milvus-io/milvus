@@ -49,7 +49,6 @@ func newDmlChannels(c *Core, chanNamePrefix string, chanNum int64) *dmlChannels 
 			log.Error("Failed to add msgstream", zap.String("name", name), zap.Error(err))
 			panic("Failed to add msgstream")
 		}
-		ms.AsProducer([]string{name})
 		d.pool.Store(name, &ms)
 	}
 	log.Debug("init dml channels", zap.Int64("num", chanNum))
@@ -122,9 +121,11 @@ func (d *dmlChannels) BroadcastMark(chanNames []string, pack *msgstream.MsgPack)
 // AddProducerChannels add named channels as producer
 func (d *dmlChannels) AddProducerChannels(names ...string) {
 	for _, name := range names {
-		if _, ok := d.pool.Load(name); ok {
+		if v, ok := d.pool.Load(name); ok {
 			var cnt int64
 			if _, ok := d.refcnt.Load(name); !ok {
+				ms := *(v.(*msgstream.MsgStream))
+				ms.AsProducer([]string{name})
 				cnt = 1
 			} else {
 				v, _ := d.refcnt.Load(name)
@@ -147,6 +148,9 @@ func (d *dmlChannels) RemoveProducerChannels(names ...string) {
 			if cnt > 1 {
 				d.refcnt.Store(name, cnt-1)
 			} else {
+				v1, _ := d.pool.Load(name)
+				ms := *(v1.(*msgstream.MsgStream))
+				ms.Close()
 				d.refcnt.Delete(name)
 			}
 		}
