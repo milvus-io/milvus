@@ -115,7 +115,8 @@ message GetInsertBinlogPathsResponse {
 
 ```
 
-7. After getting the `Segment`'s `Binlog` paths, `RootCoord` would send a `Grpc` request to `IndexCoord`, ask `IndexCoord` to build index on this `Segment`, the `proto` is defined as follow:
+7. After getting the `Segment`'s `Binlog` paths, `RootCoord` would send a `Grpc` request to `IndexCoord`, 
+   ask `IndexCoord` to build index on this `Segment`, the `proto` is defined as the follow:
 
 ```proto
 service IndexCoord {
