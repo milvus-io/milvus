@@ -80,6 +80,7 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 go: 1.15
 cmake: >=3.18
 gcc: 7.5
+protobuf: >=3.7
 ```
 
 克隆 Milvus 项目并编译。
