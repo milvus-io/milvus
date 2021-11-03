@@ -24,7 +24,7 @@
 6. Take `create_collection` as an example to illustrate the process
    - When `create collection` is written to etcd, 2 additional keys are updated, `dd_msg` and `dd_type`
    - `dd_msg` is the serialization of the `dd_msg`
-   - `dd_type` is the message type of `dd_msg`, such as `create_collection`, `create_partition`, `drop_collection,` etc. It's used to deserializes `dd_msg`.
+   - `dd_type` is the message type of `dd_msg`, such as `create_collection`, `create_partition`, `drop_collection,` etc. It's used to deserialize `dd_msg`.
    - Update the meta of `create_collection`, `dd_msg` and `dd_type` at the same time in a transactional manner.
    - When `dd_msg` has been sent to `dd msgstream`, delete `dd_msg` and `dd_type` from etcd.
    - When the `RC` starts, first check whether there are `dd_msg` and `dd_type` in etcd. If yes, then deserialize `dd_msg` according to `dd_type`, and then send it to the `dd msgstream`. Otherwise, no processing will be done
