@@ -200,6 +200,7 @@ func (node *QueryNode) Init() error {
 	return initError
 }
 
+// Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
 	var err error
 	m := map[string]interface{}{
@@ -232,6 +233,7 @@ func (node *QueryNode) Start() error {
 	return nil
 }
 
+// Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	node.queryNodeLoopCancel()
@@ -254,6 +256,7 @@ func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }
 
+// SetRootCoord assigns parameter rc to its member rootCoord.
 func (node *QueryNode) SetRootCoord(rc types.RootCoord) error {
 	if rc == nil {
 		return errors.New("null root coordinator interface")
@@ -262,6 +265,7 @@ func (node *QueryNode) SetRootCoord(rc types.RootCoord) error {
 	return nil
 }
 
+// SetIndexCoord assigns parameter index to its member indexCoord.
 func (node *QueryNode) SetIndexCoord(index types.IndexCoord) error {
 	if index == nil {
 		return errors.New("null index coordinator interface")
