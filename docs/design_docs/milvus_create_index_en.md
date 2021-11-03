@@ -143,15 +143,15 @@ message BuildIndexResponse {
 
 ```
 
-8. The execution flow of `BuildIndex` on `IndexCoord` is shown in the flowwing figure
+8. The execution flow of `BuildIndex` on `IndexCoord` is shown in the following figure
 
 ![index_coord](./graphs/milvus_create_index_index_coord.png)
 
-9. `IndexCoord` would wrap the `BuildIndex` request into `IndexAddTask`, then alloc a global unique ID as `IndexBuildID`, and write this `Segment`'s `index mate` into `IndexCoord`'s `metaTable`. When finish these operation, `IndexCoord` would send response to `RootCoord`, the response includes the `IndexBuildID`.
+9. `IndexCoord` would wrap the `BuildIndex` request into `IndexAddTask`, then alloc a global unique ID as `IndexBuildID`, and write this `Segment`'s `index mate` into `IndexCoord`'s `metaTable`. When finish these operations, `IndexCoord` would send response to `RootCoord`, the response includes the `IndexBuildID`.
 
 10. When `RootCoood` receives the `BuildIndexResponse`, it would extract the `IndexBuildID` from the response, update `RootCoord`'s `metaTable`, then send responses to `Proxy`.
 
-11. There is a backgroud service, `assignTaskLoop`, in `IndexCoord`. `assignTaskLoop` would call `GetUnassignedTask` periodically, the default interval is 3s. `GetUnassignedTask` would list these segments whos `index meta` has been updated, but index has not been created yet.
+11. There is a background service, `assignTaskLoop`, in `IndexCoord`. `assignTaskLoop` would call `GetUnassignedTask` periodically, the default interval is 3s. `GetUnassignedTask` would list these segments whos `index meta` has been updated, but index has not been created yet.
 
 12. The previous step has listed the segments whose index has not been created, for each those segments, `IndexCoord` would call `PeekClient` to get an available `IndexNode`, and send `CreateIndex` request to this `IndexNode`. The `proto` is defined as follow.
 
