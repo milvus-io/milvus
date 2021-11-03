@@ -9,7 +9,7 @@ def operations_parser(operations):
         raise Exception("No operations in suite defined")
     for run_type, run_params in operations.items():
         logger.debug(run_type)
-        return (run_type, run_params)
+        return run_type, run_params
 
 
 def collection_parser(collection_name):
