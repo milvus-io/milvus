@@ -24,7 +24,7 @@ def reboot_pod(chaos_yaml):
                             namespace=constants.CHAOS_NAMESPACE)
     chaos_res.create(chaos_config)
     log.debug("chaos injected")
-    sleep(1)
+    sleep(7)
     # delete chaos
     meta_name = chaos_config.get('metadata', None).get('name', None)
     chaos_res.delete(meta_name)
