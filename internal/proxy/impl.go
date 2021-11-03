@@ -1475,7 +1475,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		}, nil
 	}
 
-	log.Debug("Search",
+	log.Debug("Search enqueued",
 		zap.String("role", Params.RoleName),
 		zap.Int64("msgID", qt.Base.MsgID),
 		zap.Uint64("timestamp", qt.Base.Timestamp),

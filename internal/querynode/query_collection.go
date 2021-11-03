@@ -850,6 +850,146 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 	return finalResult, nil
 }
 
+func getPartialFieldData(fields []*schemapb.FieldData, begin, end int64) []*schemapb.FieldData {
+	ret := make([]*schemapb.FieldData, len(fields))
+	for idx := range fields {
+		ret[idx] = &schemapb.FieldData{
+			Type:      fields[idx].Type,
+			FieldName: fields[idx].FieldName,
+			Field:     nil,
+			FieldId:   fields[idx].FieldId,
+		}
+		switch fields[idx].Type {
+		case schemapb.DataType_Bool:
+			ret[idx].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: fields[idx].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_BoolData).BoolData.Data[begin:end],
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Int8:
+			ret[idx].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: fields[idx].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_IntData).IntData.Data[begin:end],
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Int16:
+			ret[idx].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: fields[idx].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_IntData).IntData.Data[begin:end],
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Int32:
+			ret[idx].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: fields[idx].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_IntData).IntData.Data[begin:end],
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Int64:
+			ret[idx].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: fields[idx].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_IntData).IntData.Data[begin:end],
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Float:
+			ret[idx].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: fields[idx].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_FloatData).FloatData.Data[begin:end],
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Double:
+			ret[idx].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: fields[idx].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_DoubleData).DoubleData.Data[begin:end],
+						},
+					},
+				},
+			}
+		case schemapb.DataType_String:
+			ret[idx].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: fields[idx].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_StringData).StringData.Data[begin:end],
+						},
+					},
+				},
+			}
+		case schemapb.DataType_BinaryVector:
+			vecField := fields[idx].Field.(*schemapb.FieldData_Vectors).Vectors
+			ret[idx].Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: vecField.Dim,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: vecField.Data.(*schemapb.VectorField_BinaryVector).BinaryVector[begin*vecField.Dim/8 : end*vecField.Dim/8],
+					},
+				},
+			}
+		case schemapb.DataType_FloatVector:
+			vecField := fields[idx].Field.(*schemapb.FieldData_Vectors).Vectors
+			ret[idx].Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: vecField.Dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: vecField.Data.(*schemapb.VectorField_FloatVector).FloatVector.Data[begin*vecField.Dim : end*vecField.Dim],
+						},
+					},
+				},
+			}
+		}
+	}
+	return ret
+}
+
+func divideSearchResults(result *schemapb.SearchResultData, nqs []int64) []*schemapb.SearchResultData {
+	ret := make([]*schemapb.SearchResultData, len(nqs))
+	all := int64(0)
+	for idx, nq := range nqs {
+		ret[idx] = &schemapb.SearchResultData{
+			NumQueries: nq,
+			TopK:       result.TopK,
+			FieldsData: getPartialFieldData(result.FieldsData, all*result.TopK, (all+nq)*result.TopK),
+			Scores:     result.Scores[all*result.TopK : (all+nq)*result.TopK],
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data[all*result.TopK : (all+nq)*result.TopK],
+					},
+				},
+			},
+			Topks: nil,
+		}
+		all += nq
+	}
+	return ret
+}
+
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (q *queryCollection) search(msg queryMsg) error {
@@ -973,6 +1113,10 @@ func (q *queryCollection) search(msg queryMsg) error {
 					SealedSegmentIDsSearched: sealedSegmentSearched,
 					ChannelIDsSearched:       collection.getVChannels(),
 					GlobalSealedSegmentIDs:   globalSealedSegments,
+					Merged:                   searchMsg.SearchRequest.Merged,
+					Nqs:                      searchMsg.SearchRequest.Nqs,
+					MsgIds:                   searchMsg.SearchRequest.MsgIds,
+					SlicedBlobs:              make([][]byte, len(searchMsg.SearchRequest.MsgIds)),
 				},
 			}
 			log.Debug("QueryNode Empty SearchResultMsg",
@@ -1035,13 +1179,27 @@ func (q *queryCollection) search(msg queryMsg) error {
 		// TODO: Currently add a translate layer from hits to SearchResultData
 		// TODO: hits marshal and unmarshal is likely bottleneck
 
+		var byteBlobs []byte
+		var slicedBytesBlobs [][]byte
 		transformed, err := translateHits(schema, searchMsg.OutputFieldsId, hits)
 		if err != nil {
 			return err
 		}
-		byteBlobs, err := proto.Marshal(transformed)
-		if err != nil {
-			return err
+
+		if searchMsg.Merged {
+			slicedTransformed := divideSearchResults(transformed, searchMsg.Nqs)
+			for idx := range slicedTransformed {
+				blobs, err := proto.Marshal(slicedTransformed[idx])
+				if err != nil {
+					return err
+				}
+				slicedBytesBlobs = append(slicedBytesBlobs, blobs)
+			}
+		} else {
+			byteBlobs, err = proto.Marshal(transformed)
+			if err != nil {
+				return err
+			}
 		}
 
 		resultChannelInt := 0
@@ -1059,14 +1217,22 @@ func (q *queryCollection) search(msg queryMsg) error {
 				MetricType:               plan.getMetricType(),
 				NumQueries:               queryNum,
 				TopK:                     topK,
-				SlicedBlob:               byteBlobs,
 				SlicedOffset:             1,
 				SlicedNumCount:           1,
 				SealedSegmentIDsSearched: sealedSegmentSearched,
 				ChannelIDsSearched:       collection.getVChannels(),
 				GlobalSealedSegmentIDs:   globalSealedSegments,
+				Merged:                   searchMsg.SearchRequest.Merged,
+				Nqs:                      searchMsg.SearchRequest.Nqs,
+				MsgIds:                   searchMsg.SearchRequest.MsgIds,
 			},
 		}
+		if searchMsg.Merged {
+			searchResultMsg.SearchResults.SlicedBlobs = slicedBytesBlobs
+		} else {
+			searchResultMsg.SearchResults.SlicedBlob = byteBlobs
+		}
+
 		log.Debug("QueryNode SearchResultMsg",
 			zap.Any("collectionID", collection.id),
 			zap.Any("msgID", searchMsg.ID()),

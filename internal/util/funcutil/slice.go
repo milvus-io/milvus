@@ -13,6 +13,8 @@ package funcutil
 
 import "reflect"
 
+type EqualFuncType = func(s1, s2 interface{}) bool
+
 // SliceContain returns true if slice s contains item.
 func SliceContain(s, item interface{}) bool {
 	ss := reflect.ValueOf(s)
@@ -51,7 +53,7 @@ func SliceSetEqual(s1, s2 interface{}) bool {
 }
 
 // SortedSliceEqual is used to compare two Sorted Slice
-func SortedSliceEqual(s1, s2 interface{}) bool {
+func SortedSliceEqual(s1, s2 interface{}, equalFuncs ...EqualFuncType) bool {
 	ss1 := reflect.ValueOf(s1)
 	ss2 := reflect.ValueOf(s2)
 	if ss1.Kind() != reflect.Slice {
@@ -64,7 +66,13 @@ func SortedSliceEqual(s1, s2 interface{}) bool {
 		return false
 	}
 	for i := 0; i < ss1.Len(); i++ {
-		if ss2.Index(i).Interface() != ss1.Index(i).Interface() {
+		if len(equalFuncs) > 0 {
+			for idx := range equalFuncs {
+				if !equalFuncs[idx](ss2.Index(i).Interface(), ss1.Index(i).Interface()) {
+					return false
+				}
+			}
+		} else if ss2.Index(i).Interface() != ss1.Index(i).Interface() {
 			return false
 		}
 	}

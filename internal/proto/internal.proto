@@ -157,6 +157,9 @@ message SearchRequest {
   repeated int64 output_fields_id = 10;
   uint64 travel_timestamp = 11;
   uint64 guarantee_timestamp = 12;
+  bool merged = 13;
+  repeated int64 nqs = 14;
+  repeated int64 msg_ids = 15;
 }
 
 message SearchResults {
@@ -173,6 +176,10 @@ message SearchResults {
   bytes sliced_blob = 10;
   int64 sliced_num_count = 11;
   int64 sliced_offset = 12;
+  bool merged = 13;
+  repeated int64 nqs = 14;
+  repeated int64 msg_ids = 15;
+  repeated bytes sliced_blobs = 16;
 }
 
 message RetrieveRequest {

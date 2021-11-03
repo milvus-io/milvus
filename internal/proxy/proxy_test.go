@@ -1704,6 +1704,314 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, 0, len(resp.CollectionNames))
 	})
 
+	{
+		mergePrefix := "test_merge_search_"
+		mergeCollectionName := mergePrefix + funcutil.GenRandomStr()
+		mergeRowNum := 20
+		mergeNprobe := 10
+		mergeTopk := 1
+		mergeNq := mergeRowNum
+		mergeExpr := fmt.Sprintf("%s != %d", int64Field, 666)
+
+		// an int64 field (pk) & a float vector field
+		constructMergeCollectionSchema := func() *schemapb.CollectionSchema {
+			pk := &schemapb.FieldSchema{
+				FieldID:      0,
+				Name:         int64Field,
+				IsPrimaryKey: true,
+				Description:  "",
+				DataType:     schemapb.DataType_Int64,
+				TypeParams:   nil,
+				IndexParams:  nil,
+				AutoID:       false,
+			}
+			fVec := &schemapb.FieldSchema{
+				FieldID:      0,
+				Name:         floatVecField,
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "dim",
+						Value: strconv.Itoa(dim),
+					},
+				},
+				IndexParams: nil,
+				AutoID:      false,
+			}
+			return &schemapb.CollectionSchema{
+				Name:        mergeCollectionName,
+				Description: "",
+				AutoID:      false,
+				Fields: []*schemapb.FieldSchema{
+					pk,
+					fVec,
+				},
+			}
+		}
+		mergeSchema := constructMergeCollectionSchema()
+
+		constructMergeCreateCollectionRequest := func() *milvuspb.CreateCollectionRequest {
+			bs, err := proto.Marshal(mergeSchema)
+			assert.NoError(t, err)
+			return &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: mergeCollectionName,
+				Schema:         bs,
+				ShardsNum:      shardsNum,
+			}
+		}
+		mergeCreateCollectionReq := constructMergeCreateCollectionRequest()
+
+		pks := generateInt64Array(mergeRowNum)
+		floatVectors := generateFloatVectors(mergeRowNum, dim)
+
+		constructMergeInsertRequest := func() *milvuspb.InsertRequest {
+			pkColumn := newScalarFieldData(schemapb.DataType_Int64, int64Field, mergeRowNum)
+			pkColumn.Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_LongData).LongData.Data = pks
+			fVecColumn := newFloatVectorFieldData(floatVecField, mergeRowNum, dim)
+			fVecColumn.Field.(*schemapb.FieldData_Vectors).Vectors.Data.(*schemapb.VectorField_FloatVector).FloatVector.Data = floatVectors
+			hashKeys := generateHashKeys(mergeRowNum)
+			return &milvuspb.InsertRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: mergeCollectionName,
+				PartitionName:  "",
+				FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
+				HashKeys:       hashKeys,
+				NumRows:        uint32(mergeRowNum),
+			}
+		}
+
+		constructMergePlaceholderGroup := func(nqIdx int) *milvuspb.PlaceholderGroup {
+			values := make([][]byte, 0, mergeNq)
+			bs := make([]byte, 0, dim*4)
+			for j := 0; j < dim; j++ {
+				var buffer bytes.Buffer
+				f := floatVectors[nqIdx*dim+j]
+				err := binary.Write(&buffer, binary.LittleEndian, f)
+				assert.NoError(t, err)
+				bs = append(bs, buffer.Bytes()...)
+			}
+			values = append(values, bs)
+
+			return &milvuspb.PlaceholderGroup{
+				Placeholders: []*milvuspb.PlaceholderValue{
+					{
+						Tag:    "$0",
+						Type:   milvuspb.PlaceholderType_FloatVector,
+						Values: values,
+					},
+				},
+			}
+		}
+
+		constructMergeSearchRequest := func(nqIdx int) *milvuspb.SearchRequest {
+			params := make(map[string]string)
+			params["nprobe"] = strconv.Itoa(mergeNprobe)
+			b, err := json.Marshal(params)
+			assert.NoError(t, err)
+			plg := constructMergePlaceholderGroup(nqIdx)
+			plgBs, err := proto.Marshal(plg)
+			assert.NoError(t, err)
+
+			return &milvuspb.SearchRequest{
+				Base:             nil,
+				DbName:           dbName,
+				CollectionName:   mergeCollectionName,
+				PartitionNames:   nil,
+				Dsl:              mergeExpr,
+				PlaceholderGroup: plgBs,
+				DslType:          commonpb.DslType_BoolExprV1,
+				OutputFields:     nil,
+				SearchParams: []*commonpb.KeyValuePair{
+					{
+						Key:   MetricTypeKey,
+						Value: distance.L2,
+					},
+					{
+						Key:   SearchParamsKey,
+						Value: string(b),
+					},
+					{
+						Key:   AnnsFieldKey,
+						Value: floatVecField,
+					},
+					{
+						Key:   TopKKey,
+						Value: strconv.Itoa(mergeTopk),
+					},
+					{
+						Key:   RoundDecimalKey,
+						Value: strconv.Itoa(roundDecimal),
+					},
+				},
+				TravelTimestamp:    0,
+				GuaranteeTimestamp: 0,
+			}
+		}
+
+		wg.Add(1)
+		t.Run("create collection", func(t *testing.T) {
+			defer wg.Done()
+			req := mergeCreateCollectionReq
+			resp, err := proxy.CreateCollection(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		})
+
+		wg.Add(1)
+		t.Run("insert", func(t *testing.T) {
+			defer wg.Done()
+			req := constructMergeInsertRequest()
+
+			resp, err := proxy.Insert(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, mergeRowNum, len(resp.SuccIndex))
+			assert.Equal(t, 0, len(resp.ErrIndex))
+			assert.Equal(t, int64(mergeRowNum), resp.InsertCnt)
+		})
+
+		loaded := true
+		wg.Add(1)
+		t.Run("load collection", func(t *testing.T) {
+			defer wg.Done()
+			resp, err := proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: mergeCollectionName,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+			f := func() bool {
+				resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+					Base:            nil,
+					DbName:          dbName,
+					TimeStamp:       0,
+					Type:            milvuspb.ShowType_InMemory,
+					CollectionNames: []string{mergeCollectionName},
+				})
+				assert.NoError(t, err)
+				assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+				for idx, name := range resp.CollectionNames {
+					if name == mergeCollectionName && resp.InMemoryPercentages[idx] == 100 {
+						return true
+					}
+				}
+
+				return false
+			}
+
+			// waiting for collection to be loaded
+			counter := 0
+			for !f() {
+				if counter > 1000 {
+					loaded = false
+					break
+				}
+				// avoid too frequent rpc call
+				time.Sleep(100 * time.Millisecond)
+				counter++
+			}
+		})
+		assert.True(t, loaded)
+
+		if loaded {
+			// test feature: merge search requests with same parameters
+			wg.Add(1)
+			t.Run("merge search", func(t *testing.T) {
+				defer wg.Done()
+
+				var mergeWg sync.WaitGroup
+				for idx := 0; idx < mergeNq; idx++ {
+					mergeWg.Add(1)
+					idx := idx
+					go func() {
+						defer mergeWg.Done()
+
+						req := constructMergeSearchRequest(idx)
+						resp, err := proxy.Search(ctx, req)
+						assert.NoError(t, err)
+
+						assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+						log.Debug("check status of search response done",
+							zap.Int("idx", idx))
+
+						assert.Equal(t, len(resp.Results.Ids.GetIntId().Data), mergeTopk)
+						log.Debug("check hit number of search response done",
+							zap.Int("idx", idx))
+
+						assert.Equal(t, resp.Results.Ids.GetIntId().Data[0], pks[idx])
+						log.Debug("check hit record of search response done",
+							zap.Int("idx", idx))
+					}()
+				}
+				mergeWg.Wait()
+			})
+		}
+
+		wg.Add(1)
+		t.Run("release collection", func(t *testing.T) {
+			defer wg.Done()
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, mergeCollectionName)
+			assert.NoError(t, err)
+
+			resp, err := proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: mergeCollectionName,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+			// release dql message stream
+			resp, err = proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{
+				Base:         nil,
+				DbID:         0,
+				CollectionID: collectionID,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		})
+
+		wg.Add(1)
+		t.Run("drop collection", func(t *testing.T) {
+			defer wg.Done()
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, mergeCollectionName)
+			assert.NoError(t, err)
+
+			resp, err := proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+				DbName:         dbName,
+				CollectionName: mergeCollectionName,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+			// invalidate meta cache
+			resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: mergeCollectionName,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+			// release dql stream
+			resp, err = proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{
+				Base:         nil,
+				DbID:         0,
+				CollectionID: collectionID,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		})
+	}
+
 	// proxy unhealthy
 	//
 	//notStateCode := "not state code"
@@ -2385,4 +2693,7 @@ func TestProxy(t *testing.T) {
 
 	wg.Wait()
 	cancel()
+}
+
+func TestNewProxy(t *testing.T) {
 }
