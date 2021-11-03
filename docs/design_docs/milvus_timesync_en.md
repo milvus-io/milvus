@@ -96,7 +96,7 @@ So the second problem has turned into this: after reading a message from `MsgStr
 For example, when reading a message with timestamp `110` produced by `Proxy2`, but the message with timestamp `80` produced by `Proxy1`, is still in the `MsgStream`. How can this situation be handled?
 
 The following graph shows the core logic of `Time Synchronization System` in `Milvus 2.0`; it should solve the second problem.
-- Each `Proxy` will periodically reports its latest timestamp of every `MsgStream` to `RootCoord`; the default interval is `200ms`
+- Each `Proxy` will periodically report its latest timestamp of every `MsgStream` to `RootCoord`; the default interval is `200ms`
 - For each `Msgstream`, `Rootcoord` finds the minimum timestamp of all `Proxy` on this `Msgstream`, and inserts this minimum timestamp into the `Msgstream`
 - When the consumer reads the timestamp inserted by the `RootCoord` on the `MsgStream`, it indicates that all messages with smaller timestamp have been consumed, so all actions that depend on this timestamp can be executed safely
 - The message inserted by `RootCoord` into `MsgStream` is of type `TimeTick`
