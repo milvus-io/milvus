@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+// Client is the grpc client of QueryCoord.
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
