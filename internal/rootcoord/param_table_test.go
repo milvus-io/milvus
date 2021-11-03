@@ -45,6 +45,9 @@ func TestParamTable(t *testing.T) {
 	assert.Equal(t, Params.DmlChannelName, "by-dev-rootcoord-dml")
 	t.Logf("dml channel = %s", Params.DmlChannelName)
 
+	assert.Equal(t, Params.DeltaChannelName, "by-dev-rootcoord-delta")
+	t.Logf("delta channel = %s", Params.DeltaChannelName)
+
 	assert.NotEqual(t, Params.MaxPartitionNum, 0)
 	t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum)
 

@@ -40,6 +40,7 @@ type ParamTable struct {
 	TimeTickChannel      string
 	StatisticsChannel    string
 	DmlChannelName       string
+	DeltaChannelName     string
 
 	DmlChannelNum               int64
 	MaxPartitionNum             int64
@@ -81,6 +82,7 @@ func (p *ParamTable) Init() {
 	p.initTimeTickChannel()
 	p.initStatisticsChannelName()
 	p.initDmlChannelName()
+	p.initDeltaChannelName()
 
 	p.initDmlChannelNum()
 	p.initMaxPartitionNum()
@@ -176,6 +178,15 @@ func (p *ParamTable) initDmlChannelName() {
 	}
 	s := []string{p.ClusterChannelPrefix, config}
 	p.DmlChannelName = strings.Join(s, "-")
+}
+
+func (p *ParamTable) initDeltaChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.rootCoordDelta")
+	if err != nil {
+		config = "rootcoord-delta"
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.DeltaChannelName = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initDmlChannelNum() {

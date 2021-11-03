@@ -135,9 +135,16 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	vchanNames := make([]string, t.Req.ShardsNum)
 	chanNames := make([]string, t.Req.ShardsNum)
+	deltaChanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
 		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.dmlChannels.GetDmlMsgStreamName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
+
+		deltaChanNames[i] = t.core.deltaChannels.GetDmlMsgStreamName()
+		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.DmlChannelName, Params.DeltaChannelName)
+		if err1 != nil || deltaChanName != deltaChanNames[i] {
+			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
+		}
 	}
 
 	collInfo := etcdpb.CollectionInfo{
@@ -201,6 +208,9 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		// add dml channel before send dd msg
 		t.core.dmlChannels.AddProducerChannels(chanNames...)
 
+		// also add delta channels
+		t.core.deltaChannels.AddProducerChannels(deltaChanNames...)
+
 		ids, err := t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 		if err != nil {
 			return fmt.Errorf("send dd create collection req failed, error = %w", err)
@@ -214,6 +224,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
 		if err != nil {
 			t.core.dmlChannels.RemoveProducerChannels(chanNames...)
+			t.core.deltaChannels.RemoveProducerChannels(deltaChanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
@@ -309,6 +320,16 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 		// remove dml channel after send dd msg
 		t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
+
+		// remove delta channels
+		deltaChanNames := make([]string, len(collMeta.PhysicalChannelNames))
+		for i, chanName := range collMeta.PhysicalChannelNames {
+			deltaChanNames[i], err = ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName)
+			if err != nil {
+				return err
+			}
+		}
+		t.core.deltaChannels.RemoveProducerChannels(deltaChanNames...)
 		return nil
 	}
 

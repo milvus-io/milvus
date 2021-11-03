@@ -530,6 +530,7 @@ func TestRootCoord(t *testing.T) {
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 	Params.DmlChannelName = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
+	Params.DeltaChannelName = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
 
 	err = core.Register()
 	assert.Nil(t, err)
@@ -1731,6 +1732,11 @@ func TestRootCoord(t *testing.T) {
 		cn1 := core.dmlChannels.GetDmlMsgStreamName()
 		cn2 := core.dmlChannels.GetDmlMsgStreamName()
 		core.dmlChannels.AddProducerChannels(cn0, cn1, cn2)
+
+		dn0 := core.deltaChannels.GetDmlMsgStreamName()
+		dn1 := core.deltaChannels.GetDmlMsgStreamName()
+		dn2 := core.deltaChannels.GetDmlMsgStreamName()
+		core.deltaChannels.AddProducerChannels(dn0, dn1, dn2)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
