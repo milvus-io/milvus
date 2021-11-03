@@ -79,6 +79,7 @@ type ReplicaInterface interface {
 	getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error)
 
 	// segment
+	// addSegment add a new segment to collectionReplica
 	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error
 	setSegment(segment *Segment) error
 	// removeSegment removes a segment from collectionReplica
