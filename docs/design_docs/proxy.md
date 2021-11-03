@@ -81,7 +81,7 @@ packs according to write time or event time, and maintains a timeline for users 
 
 To support this watermark mechanism, Proxy should report the timestamp statistics of physical channel to Root
 Coordinator periodically. When Proxy knows all operations of a specific were done before a `ts`, then Proxy will report
-the `ts` and inform Root Coordinator that udpates the timestmap statistics.
+the `ts` and inform Root Coordinator that udpates the timestamp statistics.
 
 Proxy holds a cache about meta information of collections. The meta information includes `CollectionID`, `Schema`,
 `PartitionID`, etc. Components in Milvus communicate with each other using `CollectionID` and `PartitionID`, so the
