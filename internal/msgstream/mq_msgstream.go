@@ -875,7 +875,14 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
 
-		runLoop := true
+		// rmq seek behavior (position, ...)
+		// pulsar seek behavior [position, ...)
+		// skip one tt for pulsar
+		_, ok := consumer.(*mqclient.RmqConsumer)
+		runLoop := false
+		if !ok {
+			runLoop = true
+		}
 		for runLoop {
 			select {
 			case <-ms.ctx.Done():
