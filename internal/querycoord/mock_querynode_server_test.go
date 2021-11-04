@@ -45,6 +45,7 @@ type queryNodeServerMock struct {
 	addQueryChannels    func() (*commonpb.Status, error)
 	removeQueryChannels func() (*commonpb.Status, error)
 	watchDmChannels     func() (*commonpb.Status, error)
+	watchDeltaChannels  func() (*commonpb.Status, error)
 	loadSegment         func() (*commonpb.Status, error)
 	releaseCollection   func() (*commonpb.Status, error)
 	releasePartition    func() (*commonpb.Status, error)
@@ -61,6 +62,7 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 		addQueryChannels:    returnSuccessResult,
 		removeQueryChannels: returnSuccessResult,
 		watchDmChannels:     returnSuccessResult,
+		watchDeltaChannels:  returnSuccessResult,
 		loadSegment:         returnSuccessResult,
 		releaseCollection:   returnSuccessResult,
 		releasePartition:    returnSuccessResult,
@@ -164,6 +166,10 @@ func (qs *queryNodeServerMock) RemoveQueryChannel(ctx context.Context, req *quer
 
 func (qs *queryNodeServerMock) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	return qs.watchDmChannels()
+}
+
+func (qs *queryNodeServerMock) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
+	return qs.watchDeltaChannels()
 }
 
 func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {

@@ -355,6 +355,27 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchDmChannels)
 	})
 
+	t.Run("Test watchDeltaChannelTask", func(t *testing.T) {
+		watchTask := &watchDeltaChannelTask{
+			WatchDeltaChannelsRequest: &querypb.WatchDeltaChannelsRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_WatchDeltaChannels,
+				},
+			},
+		}
+		blobs, err := watchTask.marshal()
+		assert.Nil(t, err)
+		err = kv.Save("testMarshalWatchDeltaChannel", string(blobs))
+		assert.Nil(t, err)
+		defer kv.RemoveWithPrefix("testMarshalWatchDeltaChannel")
+		value, err := kv.Load("testMarshalWatchDeltaChannel")
+		assert.Nil(t, err)
+
+		task, err := taskScheduler.unmarshalTask(1007, value)
+		assert.Nil(t, err)
+		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchDeltaChannels)
+	})
+
 	t.Run("Test watchQueryChannelTask", func(t *testing.T) {
 		watchTask := &watchQueryChannelTask{
 			AddQueryChannelRequest: &querypb.AddQueryChannelRequest{
@@ -371,7 +392,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalWatchQueryChannel")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(1007, value)
+		task, err := taskScheduler.unmarshalTask(1008, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchQueryChannels)
 	})
@@ -393,7 +414,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalLoadBalanceTask")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(1008, value)
+		task, err := taskScheduler.unmarshalTask(1009, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.msgType(), commonpb.MsgType_LoadBalanceSegments)
 	})
@@ -415,7 +436,7 @@ func TestUnMarshalTask(t *testing.T) {
 		value, err := kv.Load("testMarshalHandoffTask")
 		assert.Nil(t, err)
 
-		task, err := taskScheduler.unmarshalTask(1008, value)
+		task, err := taskScheduler.unmarshalTask(1010, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.msgType(), commonpb.MsgType_HandoffSegments)
 	})

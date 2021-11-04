@@ -62,6 +62,9 @@ type ParamTable struct {
 	CreatedTime time.Time
 	UpdatedTime time.Time
 
+	DmlChannelPrefix   string
+	DeltaChannelPrefix string
+
 	// --- Pulsar ---
 	PulsarAddress string
 
@@ -120,6 +123,9 @@ func (p *ParamTable) Init() {
 
 	//---- Handoff ---
 	p.initAutoHandoff()
+
+	p.initDmlChannelName()
+	p.initDeltaChannelName()
 }
 
 func (p *ParamTable) initQueryCoordAddress() {
@@ -272,4 +278,22 @@ func (p *ParamTable) initAutoHandoff() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (p *ParamTable) initDmlChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.rootCoordDml")
+	if err != nil {
+		config = "rootcoord-dml"
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.DmlChannelPrefix = strings.Join(s, "-")
+}
+
+func (p *ParamTable) initDeltaChannelName() {
+	config, err := p.Load("msgChannel.chanNamePrefix.rootCoordDelta")
+	if err != nil {
+		config = "rootcoord-delta"
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.DeltaChannelPrefix = strings.Join(s, "-")
 }
