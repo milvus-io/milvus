@@ -85,6 +85,7 @@ type ReplicaInterface interface {
 	setSegment(segment *Segment) error
 	// removeSegment removes a segment from collectionReplica
 	removeSegment(segmentID UniqueID) error
+	// getSegmentByID returns the segment which id is segmentID
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
 	getSegmentNum() int
