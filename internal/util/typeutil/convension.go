@@ -12,6 +12,7 @@
 package typeutil
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"reflect"
@@ -57,13 +58,16 @@ func BytesToUint64(b []byte) (uint64, error) {
 		return 0, fmt.Errorf("Failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
 	}
 
-	return common.Endian.Uint64(b), nil
+	// do not use little or common endian for compatibility issues(the msgid used in rocksmq is using this)
+	return binary.BigEndian.Uint64(b), nil
 }
 
 // Uint64ToBytes converts uint64 to a byte slice.
 func Uint64ToBytes(v uint64) []byte {
 	b := make([]byte, 8)
-	common.Endian.PutUint64(b, v)
+
+	// do not use little or common endian for compatibility issues(the msgid used in rocksmq is using this)
+	binary.BigEndian.PutUint64(b, v)
 	return b
 }
 
