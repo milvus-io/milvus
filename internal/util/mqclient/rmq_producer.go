@@ -27,6 +27,7 @@ func (rp *rmqProducer) Topic() string {
 	return rp.p.Topic()
 }
 
+// Send send the producer messages to rocksmq
 func (rp *rmqProducer) Send(ctx context.Context, message *ProducerMessage) (MessageID, error) {
 	pm := &rocksmq.ProducerMessage{Payload: message.Payload}
 	id, err := rp.p.Send(pm)
