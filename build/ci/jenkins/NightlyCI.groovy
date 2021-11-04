@@ -3,7 +3,18 @@
 // When scheduling a job that gets automatically triggered by changes,
 // you need to include a [cronjob] tag within the commit message.
 String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
+// String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
+String cron_string = ""
+
+// Trigger nightly ci for 2.0.0-rc8 branch temporarily
+switch(BRANCH_NAME) {
+  case "master":
+    cron_string = "50 22 * * *"
+    break
+  case "2.0.0-rc8":
+    cron_string = "50 23 * * *"
+    break
+}
 
 int total_timeout_minutes = 660
 
