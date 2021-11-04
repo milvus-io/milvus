@@ -194,7 +194,7 @@ func (rmq *rocksmq) Close() {
 		if topic != "" {
 			err := rmq.DestroyTopic(topic)
 			if err != nil {
-				log.Warn("Rocksmq DestroyTopic failed!", zap.Any("topic", topic), zap.Any("error", err))
+				log.Warn("Failed to destroy topic in rocksmq!", zap.Any("topic", topic), zap.Any("error", err))
 			}
 		}
 		return true
