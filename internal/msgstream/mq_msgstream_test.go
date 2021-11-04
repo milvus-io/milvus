@@ -27,6 +27,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
@@ -322,7 +323,7 @@ func TestMqMsgStream_Chan(t *testing.T) {
 	}
 }
 
-func TestMqMsgStream_Seek(t *testing.T) {
+func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 	f := &fixture{t: t}
 	parameters := f.setup()
 	defer f.teardown()
@@ -1055,6 +1056,98 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 
 }
 
+func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	consumerChannels := []string{c}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack := &MsgPack{}
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+
+	for i := 0; i < 10; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+	var seekPosition *internalpb.MsgPosition
+	for i := 0; i < 10; i++ {
+		result := outputStream.Consume()
+		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+		seekPosition = result.EndPositions[0]
+	}
+	outputStream.Close()
+
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumer(consumerChannels, consumerSubName)
+
+	messageID, _ := pulsar.DeserializeMessageID(seekPosition.MsgID)
+	// try to seek to not written position
+	patchMessageID(&messageID, 11)
+
+	p := []*internalpb.MsgPosition{
+		{
+			ChannelName: seekPosition.ChannelName,
+			Timestamp:   seekPosition.Timestamp,
+			MsgGroup:    seekPosition.MsgGroup,
+			MsgID:       messageID.Serialize(),
+		},
+	}
+
+	go func() {
+		time.Sleep(1 * time.Second)
+		outputStream2.Close()
+	}()
+
+	err = outputStream2.Seek(p)
+	assert.Error(t, err)
+}
+
+func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	consumerChannels := []string{c}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack := &MsgPack{}
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+
+	for i := 0; i < 10; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumerWithPosition(consumerChannels, consumerSubName, mqclient.SubscriptionPositionLatest)
+	outputStream2.Start()
+
+	msgPack.Msgs = nil
+	// produce another 10 tsMs
+	for i := 10; i < 20; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+	err = inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+
+	for i := 10; i < 20; i++ {
+		result := outputStream2.Consume()
+		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+	}
+	outputStream2.Close()
+}
+
 /****************************************Rmq test******************************************/
 
 func initRmq(name string) *etcdkv.EtcdKV {
@@ -1641,4 +1734,25 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	assert.EqualValues(t, 1000, pack.Msgs[0].BeginTs())
 
 	Close(rocksdbName, inputStream, outputStream, etcdKV)
+}
+
+func patchMessageID(mid *pulsar.MessageID, entryID int64) {
+	// use direct unsafe conversion
+	/* #nosec G103 */
+	r := (*iface)(unsafe.Pointer(mid))
+	id := (*messageID)(r.Data)
+	id.entryID = entryID
+}
+
+// unsafe access pointer, same as pulsar.messageID
+type messageID struct {
+	ledgerID     int64
+	entryID      int64
+	batchID      int32
+	partitionIdx int32
+}
+
+// interface struct mapping
+type iface struct {
+	Type, Data unsafe.Pointer
 }

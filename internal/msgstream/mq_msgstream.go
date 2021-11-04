@@ -511,6 +511,7 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 }
 
 // Seek reset the subscription associated with this consumer to a specific position
+// User has to ensure mq_msgstream is not closed before seek, and the seek position is already written.
 func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	for _, mp := range msgPositions {
 		consumer, ok := ms.consumers[mp.ChannelName]
@@ -521,19 +522,20 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("MsgStream begin to seek", zap.Any("MessageID", messageID))
+		log.Debug("MsgStream begin to seek", zap.Any("MessageID", mp.MsgID))
 		err = consumer.Seek(messageID)
 		if err != nil {
+			log.Debug("Failed to seek", zap.Error(err))
 			return err
 		}
 		log.Debug("MsgStream seek finished", zap.Any("MessageID", messageID))
-		if _, ok := consumer.(*mqclient.RmqConsumer); !ok {
-			log.Debug("MsgStream begin to read one message after seek")
+		if _, ok := consumer.(*mqclient.PulsarConsumer); ok {
+			log.Debug("MsgStream start to pop one message after seek")
 			msg, ok := <-consumer.Chan()
 			if !ok {
 				return errors.New("consumer closed")
 			}
-			log.Debug("MsgStream finish reading one message after seek")
+			log.Debug("MsgStream finish to pop one message after seek")
 			consumer.Ack(msg)
 			if !bytes.Equal(msg.ID().Serialize(), messageID.Serialize()) {
 				err = fmt.Errorf("seek msg not correct")
