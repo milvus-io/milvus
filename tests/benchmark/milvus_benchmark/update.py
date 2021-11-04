@@ -55,6 +55,26 @@ def get_master_tags(tags_list):
     return _list
 
 
+def get_config_digest(url, token):
+    headers = {'Content-type': "application/json",
+               "charset": "UTF-8",
+               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+               "Authorization": "Bearer %s" % token}
+    try:
+        rep = requests.get(url, headers=headers)
+        data = json.loads(rep.text)
+
+        digest = ''
+        if 'config' in data and 'digest' in data["config"]:
+            digest = data["config"]["digest"]
+        else:
+            print("Can not get the digest")
+        return digest
+    except:
+        print("Can not get the digest")
+        return ""
+
+
 def parse_server_tag(server_tag):
     """ paser server tag from server config"""
     # tag format: "8c"/"8c16m"/"8c16m1g"
