@@ -278,13 +278,13 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 
 	err := rmq.kv.Remove(beginKey)
 	if err != nil {
-		log.Debug("RocksMQ: remove " + beginKey + " failed.")
+		log.Debug("RocksMQ: failed to remove key <" + beginKey + ">.")
 		return err
 	}
 
 	err = rmq.kv.Remove(endKey)
 	if err != nil {
-		log.Debug("RocksMQ: remove " + endKey + " failed.")
+		log.Debug("RocksMQ: failed to remove key <" + endKey + ">.")
 		return err
 	}
 
