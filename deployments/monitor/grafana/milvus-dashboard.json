@@ -2297,7 +2297,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful RootCoord Describe index operations",
+      "description": "Success count of describe_index requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
