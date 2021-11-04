@@ -45,7 +45,7 @@ pulsar:
 rocksmq:
   path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
   retentionTimeInMinutes: 4320
-  retentionSizeInMB: 0
+  retentionSizeInMB: 0 # The size of the message saved in rocksmq
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
