@@ -86,6 +86,7 @@ type ReplicaInterface interface {
 	// removeSegment removes a segment from collectionReplica
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
+	// hasSegment returns true if collectionReplica has the segment, false otherwise
 	hasSegment(segmentID UniqueID) bool
 	getSegmentNum() int
 	getSegmentStatistics() []*internalpb.SegmentStats
