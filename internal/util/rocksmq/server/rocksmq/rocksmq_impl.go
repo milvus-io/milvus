@@ -648,6 +648,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	return consumerMessage, nil
 }
 
+// seek is used for internal call without the topicMu
 func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) error {
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
