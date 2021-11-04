@@ -252,6 +252,7 @@ enum MsgType : int {
   RemoveQueryChannels = 511,
   SealedSegmentsChangeInfo = 512,
   SegmentInfo = 600,
+  SystemInfo = 601,
   TimeTick = 1200,
   QueryNodeStats = 1201,
   LoadIndex = 1202,

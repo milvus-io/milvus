@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
@@ -48,8 +49,11 @@ func ConstructRequestByMetricType(metricType string) (*milvuspb.GetMetricsReques
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct request by metric type %s: %s", metricType, err.Error())
 	}
+	//TODO:: switch metricType to different msgType and return err when metricType is not supported
 	return &milvuspb.GetMetricsRequest{
-		Base:    nil,
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_SystemInfo,
+		},
 		Request: string(binary),
 	}, nil
 }
