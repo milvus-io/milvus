@@ -2239,7 +2239,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Describe index operations",
+      "description": "Total count of describe_index requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
