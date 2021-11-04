@@ -195,6 +195,9 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
 	require.NoError(t, err)
 
+	// trigger log ts
+	iBNode.ttLogger.counter.Store(999)
+
 	flushChan <- flushMsg{
 		msgID:        1,
 		timestamp:    2000,

@@ -28,12 +28,14 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -65,6 +67,31 @@ type insertBufferNode struct {
 
 	timeTickStream          msgstream.MsgStream
 	segmentStatisticsStream msgstream.MsgStream
+	ttLogger                timeTickLogger
+}
+
+type timeTickLogger struct {
+	start   atomic.Uint64
+	counter atomic.Int32
+}
+
+func (l *timeTickLogger) LogTs(ts Timestamp) {
+	if l.counter.Load() == 0 {
+		l.start.Store(ts)
+	}
+	l.counter.Inc()
+	if l.counter.Load() == 1000 {
+		min := l.start.Load()
+		l.start.Store(ts)
+		l.counter.Store(0)
+		go l.printLogs(min, ts)
+	}
+}
+
+func (l *timeTickLogger) printLogs(start, end Timestamp) {
+	t1, _ := tsoutil.ParseTS(start)
+	t2, _ := tsoutil.ParseTS(end)
+	log.Debug("IBN timetick log", zap.Time("from", t1), zap.Time("to", t2), zap.Duration("elapsed", t2.Sub(t1)), zap.Uint64("start", start), zap.Uint64("end", end))
 }
 
 type segmentCheckPoint struct {
@@ -639,6 +666,7 @@ func readBinary(reader io.Reader, receiver interface{}, dataType schemapb.DataTy
 
 // writeHardTimeTick writes timetick once insertBufferNode operates.
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
+	ibNode.ttLogger.LogTs(ts)
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := msgstream.DataNodeTtMsg{
 		BaseMsg: msgstream.BaseMsg{
