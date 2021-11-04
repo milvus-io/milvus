@@ -25,14 +25,14 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 	defer cancel()
 
 	genServiceTimeNode := func() *serviceTimeNode {
-		streaming, err := genSimpleStreaming(ctx)
-		assert.NoError(t, err)
+		tSafe := newTSafeReplica()
+		tSafe.addTSafe(defaultVChannel)
 
 		fac, err := genFactory()
 		assert.NoError(t, err)
 
 		node := newServiceTimeNode(ctx,
-			streaming.tSafeReplica,
+			tSafe,
 			loadTypeCollection,
 			defaultCollectionID,
 			defaultPartitionID,

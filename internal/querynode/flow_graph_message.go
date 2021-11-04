@@ -28,12 +28,21 @@ type insertMsg struct {
 	timeRange      TimeRange
 }
 
+type deleteMsg struct {
+	deleteMessages []*msgstream.DeleteMsg
+	timeRange      TimeRange
+}
+
 type serviceTimeMsg struct {
 	timeRange TimeRange
 }
 
 func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
+}
+
+func (dMsg *deleteMsg) TimeTick() Timestamp {
+	return dMsg.timeRange.timestampMax
 }
 
 func (stMsg *serviceTimeMsg) TimeTick() Timestamp {

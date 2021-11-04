@@ -25,13 +25,13 @@ import (
 )
 
 func getFilterDMNode(ctx context.Context) (*filterDmNode, error) {
-	streaming, err := genSimpleStreaming(ctx)
+	streaming, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
 	}
 
-	streaming.replica.addExcludedSegments(defaultCollectionID, nil)
-	return newFilteredDmNode(streaming.replica, loadTypeCollection, defaultCollectionID, defaultPartitionID), nil
+	streaming.addExcludedSegments(defaultCollectionID, nil)
+	return newFilteredDmNode(streaming, loadTypeCollection, defaultCollectionID, defaultPartitionID), nil
 }
 
 func TestFlowGraphFilterDmNode_filterDmNode(t *testing.T) {
@@ -183,7 +183,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	t.Run("test delete no collection", func(t *testing.T) {
 		msg, err := genSimpleDeleteMsg()
 		assert.NoError(t, err)
-		msg.CollectionID = UniqueID(1000)
+		msg.CollectionID = UniqueID(1003)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		res := fg.filterInvalidDeleteMessage(msg)

@@ -58,8 +58,9 @@ const (
 	defaultNProb          = 10
 	defaultMetricType     = "JACCARD"
 
-	defaultKVRootPath = "query-node-unittest"
-	defaultVChannel   = "query-node-unittest-channel-0"
+	defaultKVRootPath         = "query-node-unittest"
+	defaultVChannel           = "query-node-unittest-channel-0"
+	defaultHistoricalVChannel = "query-node-unittest-historical-channel-0"
 	//defaultQueryChannel       = "query-node-unittest-query-channel-0"
 	//defaultQueryResultChannel = "query-node-unittest-query-result-channel-0"
 	defaultSubName = "query-node-unittest-sub-name-0"
@@ -881,7 +882,7 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	return r, err
 }
 
-func genSimpleHistorical(ctx context.Context) (*historical, error) {
+func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
 	fac, err := genFactory()
 	if err != nil {
 		return nil, err
@@ -890,7 +891,11 @@ func genSimpleHistorical(ctx context.Context) (*historical, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := newHistorical(ctx, newMockRootCoord(), newMockIndexCoord(), fac, kv)
+	replica, err := genSimpleReplica()
+	if err != nil {
+		return nil, err
+	}
+	h := newHistorical(ctx, replica, newMockRootCoord(), newMockIndexCoord(), fac, kv, tSafeReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -910,12 +915,14 @@ func genSimpleHistorical(ctx context.Context) (*historical, error) {
 		return nil, err
 	}
 	col.addVChannels([]Channel{
+		// defaultHistoricalVChannel,
 		defaultVChannel,
 	})
+	// h.tSafeReplica.addTSafe(defaultHistoricalVChannel)
 	return h, nil
 }
 
-func genSimpleStreaming(ctx context.Context) (*streaming, error) {
+func genSimpleStreaming(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*streaming, error) {
 	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
@@ -924,11 +931,11 @@ func genSimpleStreaming(ctx context.Context) (*streaming, error) {
 	if err != nil {
 		return nil, err
 	}
-	historicalReplica, err := genSimpleReplica()
+	replica, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
 	}
-	s := newStreaming(ctx, fac, kv, historicalReplica)
+	s := newStreaming(ctx, replica, fac, kv, tSafeReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -1304,15 +1311,18 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 
 	node.etcdKV = etcdKV
 
-	streaming, err := genSimpleStreaming(ctx)
+	node.tSafeReplica = newTSafeReplica()
+
+	streaming, err := genSimpleStreaming(ctx, node.tSafeReplica)
 	if err != nil {
 		return nil, err
 	}
 
-	historical, err := genSimpleHistorical(ctx)
+	historical, err := genSimpleHistorical(ctx, node.tSafeReplica)
 	if err != nil {
 		return nil, err
 	}
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streaming.replica, historical.replica, node.tSafeReplica, node.msFactory)
 
 	node.streaming = streaming
 	node.historical = historical

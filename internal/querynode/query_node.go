@@ -79,6 +79,12 @@ type QueryNode struct {
 	historical *historical
 	streaming  *streaming
 
+	// tSafeReplica
+	tSafeReplica TSafeReplicaInterface
+
+	// dataSyncService
+	dataSyncService *dataSyncService
+
 	// internal services
 	queryService *queryService
 
@@ -179,13 +185,27 @@ func (node *QueryNode) Init() error {
 			zap.Any("EtcdEndpoints", Params.EtcdEndpoints),
 			zap.Any("MetaRootPath", Params.MetaRootPath),
 		)
+		node.tSafeReplica = newTSafeReplica()
+
+		streamingReplica := newCollectionReplica(node.etcdKV)
+		historicalReplica := newCollectionReplica(node.etcdKV)
 
 		node.historical = newHistorical(node.queryNodeLoopCtx,
+			historicalReplica,
 			node.rootCoord,
 			node.indexCoord,
 			node.msFactory,
-			node.etcdKV)
-		node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV, node.historical.replica)
+			node.etcdKV,
+			node.tSafeReplica,
+		)
+		node.streaming = newStreaming(node.queryNodeLoopCtx,
+			streamingReplica,
+			node.msFactory,
+			node.etcdKV,
+			node.tSafeReplica,
+		)
+
+		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.msFactory)
 
 		node.InitSegcore()
 
@@ -240,6 +260,9 @@ func (node *QueryNode) Stop() error {
 	node.queryNodeLoopCancel()
 
 	// close services
+	if node.dataSyncService != nil {
+		node.dataSyncService.close()
+	}
 	if node.historical != nil {
 		node.historical.close()
 	}

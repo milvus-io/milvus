@@ -220,15 +220,15 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// create tSafe
 	for _, channel := range vChannels {
-		w.node.streaming.tSafeReplica.addTSafe(channel)
+		w.node.tSafeReplica.addTSafe(channel)
 	}
 
 	// add flow graph
 	if loadPartition {
-		w.node.streaming.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, vChannels)
+		w.node.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, vChannels)
 		log.Debug("Query node add partition flow graphs", zap.Any("channels", vChannels))
 	} else {
-		w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, vChannels)
+		w.node.dataSyncService.addCollectionFlowGraph(collectionID, vChannels)
 		log.Debug("Query node add collection flow graphs", zap.Any("channels", vChannels))
 	}
 
@@ -247,12 +247,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	// channels as consumer
 	var nodeFGs map[Channel]*queryNodeFlowGraph
 	if loadPartition {
-		nodeFGs, err = w.node.streaming.dataSyncService.getPartitionFlowGraphs(partitionID, vChannels)
+		nodeFGs, err = w.node.dataSyncService.getPartitionFlowGraphs(partitionID, vChannels)
 		if err != nil {
 			return err
 		}
 	} else {
-		nodeFGs, err = w.node.streaming.dataSyncService.getCollectionFlowGraphs(collectionID, vChannels)
+		nodeFGs, err = w.node.dataSyncService.getCollectionFlowGraphs(collectionID, vChannels)
 		if err != nil {
 			return err
 		}
@@ -296,12 +296,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// start flow graphs
 	if loadPartition {
-		err = w.node.streaming.dataSyncService.startPartitionFlowGraph(partitionID, vChannels)
+		err = w.node.dataSyncService.startPartitionFlowGraph(partitionID, vChannels)
 		if err != nil {
 			return err
 		}
 	} else {
-		err = w.node.streaming.dataSyncService.startCollectionFlowGraph(collectionID, vChannels)
+		err = w.node.dataSyncService.startCollectionFlowGraph(collectionID, vChannels)
 		if err != nil {
 			return err
 		}
@@ -447,7 +447,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	)
 
 	// remove collection flow graph
-	r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
+	r.node.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
 
 	// remove partition flow graphs which partitions belong to the target collection
 	partitionIDs, err := r.node.streaming.replica.getPartitionIDs(r.req.CollectionID)
@@ -456,7 +456,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, partitionID := range partitionIDs {
-		r.node.streaming.dataSyncService.removePartitionFlowGraph(partitionID)
+		r.node.dataSyncService.removePartitionFlowGraph(partitionID)
 	}
 
 	// remove all tSafes of the target collection
@@ -466,7 +466,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 			zap.Any("vChannel", channel),
 		)
 		// no tSafe in tSafeReplica, don't return error
-		err = r.node.streaming.tSafeReplica.removeTSafe(channel)
+		err = r.node.tSafeReplica.removeTSafe(channel)
 		if err != nil {
 			log.Warn(err.Error())
 		}
@@ -554,8 +554,8 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	// release partitions
 	vChannels := sCol.getVChannels()
 	for _, id := range r.req.PartitionIDs {
-		if _, err = r.node.streaming.dataSyncService.getPartitionFlowGraphs(id, vChannels); err == nil {
-			r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
+		if _, err = r.node.dataSyncService.getPartitionFlowGraphs(id, vChannels); err == nil {
+			r.node.dataSyncService.removePartitionFlowGraph(id)
 			// remove all tSafes of the target partition
 			for _, channel := range vChannels {
 				log.Debug("Releasing tSafe in releasePartitionTask...",
@@ -564,7 +564,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 					zap.Any("vChannel", channel),
 				)
 				// no tSafe in tSafeReplica, don't return error
-				err = r.node.streaming.tSafeReplica.removeTSafe(channel)
+				err = r.node.tSafeReplica.removeTSafe(channel)
 				if err != nil {
 					log.Warn(err.Error())
 				}

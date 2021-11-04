@@ -40,12 +40,13 @@ import (
 )
 
 func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*queryCollection, error) {
-	historical, err := genSimpleHistorical(ctx)
+	tSafe := newTSafeReplica()
+	historical, err := genSimpleHistorical(ctx, tSafe)
 	if err != nil {
 		return nil, err
 	}
 
-	streaming, err := genSimpleStreaming(ctx)
+	streaming, err := genSimpleStreaming(ctx, tSafe)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +128,10 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	schema := genTestCollectionSchema(0, false, 2)
-	historical := newHistorical(context.Background(), nil, nil, factory, etcdKV)
+	historicalReplica := newCollectionReplica(etcdKV)
+	tsReplica := newTSafeReplica()
+	streamingReplica := newCollectionReplica(etcdKV)
+	historical := newHistorical(context.Background(), historicalReplica, nil, nil, factory, etcdKV, tsReplica)
 
 	//add a segment to historical data
 	err = historical.replica.addCollection(0, schema)
@@ -153,7 +157,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	//create a streaming
-	streaming := newStreaming(ctx, factory, etcdKV, historical.replica)
+	streaming := newStreaming(ctx, streamingReplica, factory, etcdKV, tsReplica)
 	err = streaming.replica.addCollection(0, schema)
 	assert.Nil(t, err)
 	err = streaming.replica.addPartition(0, 1)

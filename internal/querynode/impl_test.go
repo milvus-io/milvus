@@ -241,7 +241,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 
 	req := &queryPb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchQueryChannels,
+			MsgType: commonpb.MsgType_WatchDmChannels,
 			MsgID:   rand.Int63(),
 		},
 		NodeID:       0,

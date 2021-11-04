@@ -147,10 +147,15 @@ func (q *queryCollection) registerCollectionTSafe() error {
 	if err != nil {
 		return err
 	}
+	// historicalCollection, err := q.historical.replica.getCollectionByID(q.collectionID)
+	// if err != nil {
+	// 	return err
+	// }
 
 	log.Debug("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("dml channels", collection.getVChannels()),
+		// zap.Any("delta channels", collection.getVChannels()),
 	)
 	for _, channel := range collection.getVChannels() {
 		err = q.addTSafeWatcher(channel)
@@ -158,6 +163,12 @@ func (q *queryCollection) registerCollectionTSafe() error {
 			return err
 		}
 	}
+	// for _, channel := range historicalCollection.getVChannels() {
+	// 	err := q.addTSafeWatcher(channel)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
 	return nil
 }
 
@@ -1216,7 +1227,7 @@ func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcor
 	// merge results and remove duplicates
 	for _, rr := range retrieveResults {
 		// skip empty result, it will break merge result
-		if rr == nil || rr.Offset == nil || len(rr.Offset) == 0 {
+		if rr == nil || len(rr.Offset) == 0 {
 			continue
 		}
 
@@ -1234,7 +1245,7 @@ func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcor
 		}
 
 		if len(ret.FieldsData) != len(rr.FieldsData) {
-			return nil, fmt.Errorf("mismatch FieldData in querynode RetrieveResults, expect %d get %d", len(ret.FieldsData), len(rr.FieldsData))
+			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
 		}
 
 		dstIds := ret.Ids.GetIntId()
