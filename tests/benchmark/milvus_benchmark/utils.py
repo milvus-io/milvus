@@ -148,6 +148,15 @@ def get_server_tag(deploy_params):
     return server_tag
 
 
+def dict_update(source, target):
+    for key, value in source.items():
+        if isinstance(value, dict) and key in target:
+            dict_update(source[key], target[key])
+        else:
+            target[key] = value
+    return target
+
+
 def search_param_analysis(vector_query, filter_query):
     """ Search parameter adjustment, applicable pymilvus version >= 2.0.0rc7.dev24 """
 
