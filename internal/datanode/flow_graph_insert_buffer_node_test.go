@@ -202,7 +202,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		collectionID: UniqueID(1),
 	}
 
-	inMsg := GenFlowGraphInsertMsg(insertChannelName)
+	inMsg := genFlowGraphInsertMsg(insertChannelName)
 	var fgMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{fgMsg})
 }
@@ -406,7 +406,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	// Auto flush number of rows set to 2
 
-	inMsg := GenFlowGraphInsertMsg("datanode-03-test-autoflush")
+	inMsg := genFlowGraphInsertMsg("datanode-03-test-autoflush")
 	inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(2)
 	var iMsg flowgraph.Msg = &inMsg
 
@@ -523,7 +523,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		flushPacks = flushPacks[:0]
 		fpMut.Unlock()
 
-		inMsg := GenFlowGraphInsertMsg("datanode-03-test-autoflush")
+		inMsg := genFlowGraphInsertMsg("datanode-03-test-autoflush")
 		inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(2)
 
 		for i := range inMsg.insertMessages {
@@ -728,7 +728,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
 	require.NoError(t, err)
 
-	inMsg := GenFlowGraphInsertMsg(insertChannelName)
+	inMsg := genFlowGraphInsertMsg(insertChannelName)
 	for _, msg := range inMsg.insertMessages {
 		msg.EndTimestamp = 101 // ts valid
 		err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})
