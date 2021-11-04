@@ -412,7 +412,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 		getSavePathByKey := func(key string) string {
 
-			return path.Join(Params.IndexRootPath, strconv.Itoa(int(it.req.IndexBuildID)), strconv.Itoa(int(it.req.Version)),
+			return path.Join(Params.IndexStorageRootPath, strconv.Itoa(int(it.req.IndexBuildID)), strconv.Itoa(int(it.req.Version)),
 				strconv.Itoa(int(partitionID)), strconv.Itoa(int(segmentID)), key)
 		}
 		saveBlob := func(path string, value []byte) error {

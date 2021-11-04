@@ -33,10 +33,10 @@ type ParamTable struct {
 	Address string
 	Port    int
 
-	EtcdEndpoints []string
-	KvRootPath    string
-	MetaRootPath  string
-	IndexRootPath string
+	EtcdEndpoints        []string
+	KvRootPath           string
+	MetaRootPath         string
+	IndexStorageRootPath string
 
 	MinIOAddress         string
 	MinIOAccessKeyID     string
@@ -69,7 +69,7 @@ func (pt *ParamTable) Init() {
 	pt.initMinIOSecretAccessKey()
 	pt.initMinIOUseSSL()
 	pt.initMinioBucketName()
-	pt.initIndexRootPath()
+	pt.initIndexStorageRootPath()
 	pt.initRoleName()
 }
 
@@ -162,13 +162,13 @@ func (pt *ParamTable) initMinioBucketName() {
 	pt.MinioBucketName = bucketName
 }
 
-// initIndexRootPath initializes the root path of index files.
-func (pt *ParamTable) initIndexRootPath() {
+// initIndexStorageRootPath initializes the root path of index files.
+func (pt *ParamTable) initIndexStorageRootPath() {
 	rootPath, err := pt.Load("minio.rootPath")
 	if err != nil {
 		panic(err)
 	}
-	pt.IndexRootPath = path.Join(rootPath, "index_files")
+	pt.IndexStorageRootPath = path.Join(rootPath, "index_files")
 }
 
 func (pt *ParamTable) initRoleName() {

@@ -628,7 +628,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 			log.Debug("IndexCoord recycleUnusedIndexFiles", zap.Int("Need recycle tasks num", len(metas)))
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
-					unusedIndexFilePathPrefix := Params.IndexRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID))
+					unusedIndexFilePathPrefix := Params.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID))
 					log.Debug("IndexCoord recycleUnusedIndexFiles",
 						zap.Int64("Recycle the index files for deleted index with indexBuildID", meta.indexMeta.IndexBuildID))
 					if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
@@ -642,7 +642,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 					log.Debug("IndexCoord recycleUnusedIndexFiles",
 						zap.Int64("Recycle the low version index files of the index with indexBuildID", meta.indexMeta.IndexBuildID))
 					for j := 1; j < int(meta.indexMeta.Version); j++ {
-						unusedIndexFilePathPrefix := Params.IndexRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
+						unusedIndexFilePathPrefix := Params.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
 						if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
 							log.Error("IndexCoord recycleUnusedIndexFiles Remove index files failed",
 								zap.Bool("MarkDeleted", false), zap.Error(err))
