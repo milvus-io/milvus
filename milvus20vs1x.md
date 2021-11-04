@@ -62,7 +62,7 @@
 	<tr>
 		<th>Release status</th>
 		<td>Long-term support (LTS)</td>
-		<td>Release candidate. A stable version will be released in October.</td>
+		<td>Release candidate. A stable version will be released in November.</td>
 	</tr>
 </tbody>
 </table>
