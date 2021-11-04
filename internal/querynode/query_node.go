@@ -136,6 +136,7 @@ func (node *QueryNode) Register() error {
 	return nil
 }
 
+// InitSegcore set init params of segCore, such as chunckRows, SIMD type...
 func (node *QueryNode) InitSegcore() {
 	C.SegcoreInit()
 
