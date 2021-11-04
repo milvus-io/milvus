@@ -66,14 +66,20 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
 
     std::unordered_set<int64_t> pk_set;
     int64_t skip_dup_cnt = 0;
+    char buf[1024];
     for (int64_t qi = 0; qi < nq; qi++) {
         std::vector<SearchResultPair> result_pairs;
         int64_t base_offset = qi * topk;
         for (int j = 0; j < num_segments; ++j) {
             auto search_result = search_results[j];
             AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
+            AssertInfo(search_result->primary_keys_.size() == nq * topk, "incorrect search result primary key size");
+            AssertInfo(search_result->result_distances_.size() == nq * topk, "incorrect search result distance size");
+            auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
+            AssertInfo(segment->magic_num == 0xabcdef, "invalid search result to reduce");
+            auto primary_key = search_result->primary_keys_[base_offset];
             auto distance = search_result->result_distances_[base_offset];
-            result_pairs.push_back(SearchResultPair(distance, search_result, base_offset, j));
+            result_pairs.push_back(SearchResultPair(primary_key, distance, search_result, base_offset, j));
         }
         int64_t curr_offset = base_offset;
 
@@ -89,21 +95,37 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
 #else
         pk_set.clear();
         while (curr_offset - base_offset < topk) {
-            result_pairs[0].reset_distance();
+            result_pairs[0].reset();
             std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
-            auto& result_pair = result_pairs[0];
-            auto index = result_pair.index_;
-            int64_t curr_pk = result_pair.search_result_->primary_keys_[result_pair.offset_];
+            auto& pilot = result_pairs[0];
+            auto index = pilot.index_;
+            if (num_segments > 1) {
+                auto& pilot2 = result_pairs[1];
+                snprintf(buf, sizeof(buf),
+                         "pilot.offset_ out of bound, num_of_segments = %ld, curr_offset = %ld,"
+                         "(%ld, %ld, %ld), (%ld, %ld, %ld, %f), (%ld, %ld, %ld, %f)",
+                         num_segments, curr_offset, nq, topk, base_offset, pilot.index_, pilot.offset_,
+                         pilot.primary_key_, pilot.distance_, pilot2.index_, pilot2.offset_, pilot2.primary_key_,
+                         pilot2.distance_);
+            } else {
+                snprintf(buf, sizeof(buf),
+                         "pilot.offset_ out of bound, num_of_segments = %ld,"
+                         "curr_offset = %ld, (%ld, %ld, %ld), (%ld, %ld, %ld, %f)",
+                         num_segments, curr_offset, nq, topk, base_offset, pilot.index_, pilot.offset_,
+                         pilot.primary_key_, pilot.distance_);
+            }
+            AssertInfo(pilot.offset_ - base_offset < topk, buf);
+            int64_t curr_pk = pilot.primary_key_;
             // remove duplicates
             if (curr_pk == INVALID_ID || pk_set.count(curr_pk) == 0) {
-                result_pair.search_result_->result_offsets_.push_back(curr_offset++);
-                search_records[index].push_back(result_pair.offset_++);
+                pilot.search_result_->result_offsets_.push_back(curr_offset++);
+                search_records[index].push_back(pilot.offset_++);
                 if (curr_pk != INVALID_ID) {
                     pk_set.insert(curr_pk);
                 }
             } else {
                 // skip entity with same primary key
-                result_pair.offset_++;
+                pilot.offset_++;
                 skip_dup_cnt++;
             }
         }
@@ -121,6 +143,8 @@ ResetSearchResult(std::vector<std::vector<int64_t>>& search_records, std::vector
     for (int i = 0; i < num_segments; i++) {
         auto search_result = search_results[i];
         AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
+        auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
+        AssertInfo(segment->magic_num == 0xabcdef, "invalid search result to reset");
         if (search_result->result_offsets_.size() == 0) {
             continue;
         }
@@ -160,17 +184,22 @@ ReduceSearchResultsAndFillData(CSearchPlan c_plan, CSearchResult* c_search_resul
         // get primary keys for duplicates removal
         for (auto& search_result : search_results) {
             auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
+            AssertInfo(segment->magic_num == 0xabcdef, "invalid segment to fill primary key");
             segment->FillPrimaryKeys(plan, *search_result);
         }
+        // std::cout << "Fill primary key done" << std::endl;
 
         GetResultData(search_records, search_results, num_queries, topk);
         ResetSearchResult(search_records, search_results);
+        // std::cout << "Search result reduce done" << std::endl;
 
         // fill in other entities
         for (auto& search_result : search_results) {
             auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
+            AssertInfo(segment->magic_num == 0xabcdef, "invalid segment to fill target entry");
             segment->FillTargetEntry(plan, *search_result);
         }
+        // std::cout << "Fill target entry done" << std::endl;
 
         auto status = CStatus();
         status.error_code = Success;

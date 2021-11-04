@@ -60,7 +60,8 @@ class SegmentInterface {
 
     virtual ~SegmentInterface() = default;
 
- protected:
+ public:
+    int64_t magic_num = 0xabcdef;
 };
 
 // internal API for DSL calculation
