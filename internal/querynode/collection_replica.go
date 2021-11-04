@@ -89,6 +89,7 @@ type ReplicaInterface interface {
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	// hasSegment returns true if collectionReplica has the segment, false otherwise
 	hasSegment(segmentID UniqueID) bool
+	// getSegmentNum returns num of segments in collectionReplica
 	getSegmentNum() int
 	getSegmentStatistics() []*internalpb.SegmentStats
 
