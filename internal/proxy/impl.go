@@ -102,6 +102,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	}, nil
 }
 
+// ReleaseDQLMessageStream release the query message stream of specific collection.
 func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	log.Debug("ReleaseDQLMessageStream",
 		zap.Any("role", Params.RoleName),
