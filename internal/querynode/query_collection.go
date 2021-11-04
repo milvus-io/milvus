@@ -1216,7 +1216,7 @@ func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcor
 	// merge results and remove duplicates
 	for _, rr := range retrieveResults {
 		// skip empty result, it will break merge result
-		if rr == nil || len(rr.Offset) == 0 {
+		if rr == nil || rr.Offset == nil || len(rr.Offset) == 0 {
 			continue
 		}
 
@@ -1234,7 +1234,7 @@ func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcor
 		}
 
 		if len(ret.FieldsData) != len(rr.FieldsData) {
-			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
+			return nil, fmt.Errorf("mismatch FieldData in querynode RetrieveResults, expect %d get %d", len(ret.FieldsData), len(rr.FieldsData))
 		}
 
 		dstIds := ret.Ids.GetIntId()
