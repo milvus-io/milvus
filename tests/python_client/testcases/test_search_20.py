@@ -103,6 +103,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("None is valid for output_fields")
         yield request.param
 
+    @pytest.fixture(scope="function", params=ct.get_invalid_ints)
+    def get_invalid_travel_timestamp(self, request):
+        if request.param == 9999999999:
+            pytest.skip("9999999999 is valid for travel timestamp")
+        yield request.param
+
     """
     ******************************************************************
     #  The followings are invalid cases
@@ -691,6 +697,25 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": f"Field {output_fields[-1]} not exist"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_param_invalid_travel_timestamp(self, get_invalid_travel_timestamp):
+        """
+        target: test search with invalid travel timestamp
+        method: search with invalid travel timestamp
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, 10)[0]
+        # 2. search with invalid travel timestamp
+        log.info("test_search_param_invalid_travel_timestamp: searching with invalid travel timestamp")
+        invalid_travel_time = get_invalid_travel_timestamp
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            travel_timestamp=invalid_travel_time,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "`travel_timestamp` value %s is illegal" % invalid_travel_time})
 
 
 class TestCollectionSearch(TestcaseBase):
