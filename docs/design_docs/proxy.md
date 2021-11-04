@@ -81,7 +81,7 @@ packs according to write time or event time, and maintains a timeline for users 
 
 To support this watermark mechanism, Proxy should report the timestamp statistics of physical channel to Root
 Coordinator periodically. When Proxy knows all operations of a specific were done before a `ts`, then Proxy will report
-the `ts` and inform Root Coordinator that udpates the timestamp statistics.
+the `ts` and inform Root Coordinator that updates the timestamp statistics.
 
 Proxy holds a cache about meta information of collections. The meta information includes `CollectionID`, `Schema`,
 `PartitionID`, etc. Components in Milvus communicate with each other using `CollectionID` and `PartitionID`, so the
@@ -137,7 +137,7 @@ proxy needs to ask the Query Coordinator for the names of DqRequestChannel and D
 DqRequestChannel and DqResultChannel do not need to be persisted and can be freely allocated by Query Coordinator. In
 the actual implementation, the DqRequestChannel of each collection can be exclusive, and the DqResultChannel can be
 exclusive or shared by all collections on the proxy. When the proxy applies for the DqRequestChannel and DqResultChannel
-information of the collection from the Query Coordinato, it can attach the proxy's own ID: ProxyID.
+information of the collection from the Query Coordinator, it can attach the proxy's own ID: ProxyID.
 
 With DqRequestChannel of the collection, the proxy will create an msgstream object to generate data into
 DqRequestChannel. With the DqResultChannel of the collection, the proxy will create an msgstream object, and Proxy will
