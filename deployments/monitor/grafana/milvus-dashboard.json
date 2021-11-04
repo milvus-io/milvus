@@ -2123,7 +2123,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Drop index operations",
+      "description": "Total count of drop_index requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2181,7 +2181,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success of RootCoord Drop index operations",
+      "description": "Success count of drop_index requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
