@@ -20,6 +20,7 @@ import (
 	"context"
 	"io/ioutil"
 	"os"
+	"path"
 	"strconv"
 	"testing"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var Params paramtable.BaseTable
@@ -49,321 +51,394 @@ func newMinIOKVClient(ctx context.Context, bucketName string) (*miniokv.MinIOKV,
 	return client, err
 }
 
-func TestMinIOKV_Load(t *testing.T) {
+func TestMinIOKV(t *testing.T) {
 	Params.Init()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-	defer MinIOKV.RemoveWithPrefix("")
-
-	err = MinIOKV.Save("abc", "123")
-	assert.Nil(t, err)
-	err = MinIOKV.Save("abcd", "1234")
-	assert.Nil(t, err)
-
-	val, err := MinIOKV.Load("abc")
-	assert.Nil(t, err)
-	assert.Equal(t, val, "123")
-
-	keys, vals, err := MinIOKV.LoadWithPrefix("abc")
-	assert.Nil(t, err)
-	assert.Equal(t, len(keys), len(vals))
-	assert.Equal(t, len(keys), 2)
-
-	assert.Equal(t, vals[0], "123")
-	assert.Equal(t, vals[1], "1234")
-
-	err = MinIOKV.Save("key_1", "123")
-	assert.Nil(t, err)
-	err = MinIOKV.Save("key_2", "456")
-	assert.Nil(t, err)
-	err = MinIOKV.Save("key_3", "789")
-	assert.Nil(t, err)
-
-	keys = []string{"key_1", "key_100"}
-
-	vals, err = MinIOKV.MultiLoad(keys)
-	assert.NotNil(t, err)
-	assert.Equal(t, len(vals), len(keys))
-	assert.Equal(t, vals[0], "123")
-	assert.Empty(t, vals[1])
-
-	keys = []string{"key_1", "key_2"}
-
-	vals, err = MinIOKV.MultiLoad(keys)
-	assert.Nil(t, err)
-	assert.Equal(t, len(vals), len(keys))
-	assert.Equal(t, vals[0], "123")
-	assert.Equal(t, vals[1], "456")
-
-}
-
-func TestMinIOKV_MultiSave(t *testing.T) {
-	Params.Init()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-
-	defer MinIOKV.RemoveWithPrefix("")
-
-	err = MinIOKV.Save("key_1", "111")
-	assert.Nil(t, err)
-
-	kvs := map[string]string{
-		"key_1": "123",
-		"key_2": "456",
-	}
-
-	err = MinIOKV.MultiSave(kvs)
-	assert.Nil(t, err)
-
-	val, err := MinIOKV.Load("key_1")
-	assert.Nil(t, err)
-	assert.Equal(t, val, "123")
-}
-
-func TestMinIOKV_Remove(t *testing.T) {
-	Params.Init()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-	defer MinIOKV.RemoveWithPrefix("")
-
-	err = MinIOKV.Save("key_1", "123")
-	assert.Nil(t, err)
-	err = MinIOKV.Save("key_2", "456")
-	assert.Nil(t, err)
-
-	val, err := MinIOKV.Load("key_1")
-	assert.Nil(t, err)
-	assert.Equal(t, val, "123")
-	// delete "key_1"
-	err = MinIOKV.Remove("key_1")
-	assert.Nil(t, err)
-	val, err = MinIOKV.Load("key_1")
-	assert.Error(t, err)
-	assert.Empty(t, val)
-
-	val, err = MinIOKV.Load("key_2")
-	assert.Nil(t, err)
-	assert.Equal(t, val, "456")
-
-	keys, vals, err := MinIOKV.LoadWithPrefix("key")
-	assert.Nil(t, err)
-	assert.Equal(t, len(keys), len(vals))
-	assert.Equal(t, len(keys), 1)
-
-	assert.Equal(t, vals[0], "456")
-
-	// MultiRemove
-	err = MinIOKV.Save("key_1", "111")
-	assert.Nil(t, err)
-
-	kvs := map[string]string{
-		"key_1": "123",
-		"key_2": "456",
-		"key_3": "789",
-		"key_4": "012",
-	}
-
-	err = MinIOKV.MultiSave(kvs)
-	assert.Nil(t, err)
-	val, err = MinIOKV.Load("key_1")
-	assert.Nil(t, err)
-	assert.Equal(t, val, "123")
-	val, err = MinIOKV.Load("key_3")
-	assert.Nil(t, err)
-	assert.Equal(t, val, "789")
-
-	keys = []string{"key_1", "key_2", "key_3"}
-	err = MinIOKV.MultiRemove(keys)
-	assert.Nil(t, err)
-
-	val, err = MinIOKV.Load("key_1")
-	assert.Error(t, err)
-	assert.Empty(t, val)
-}
-
-func TestMinIOKV_LoadPartial(t *testing.T) {
-	Params.Init()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	minIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-
-	defer minIOKV.RemoveWithPrefix("")
-
-	key := "TestMinIOKV_LoadPartial_key"
-	value := "TestMinIOKV_LoadPartial_value"
-
-	err = minIOKV.Save(key, value)
-	assert.NoError(t, err)
-
-	var start, end int64
-	var partial []byte
-
-	start, end = 1, 2
-	partial, err = minIOKV.LoadPartial(key, start, end)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, partial, []byte(value[start:end]))
-
-	start, end = 0, int64(len(value))
-	partial, err = minIOKV.LoadPartial(key, start, end)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, partial, []byte(value[start:end]))
-
-	// error case
-	start, end = 5, 3
-	_, err = minIOKV.LoadPartial(key, start, end)
-	assert.Error(t, err)
-
-	start, end = 1, 1
-	_, err = minIOKV.LoadPartial(key, start, end)
-	assert.Error(t, err)
-
-	start, end = -1, 1
-	_, err = minIOKV.LoadPartial(key, start, end)
-	assert.Error(t, err)
-
-	start, end = 1, -1
-	_, err = minIOKV.LoadPartial(key, start, end)
-	assert.Error(t, err)
-
-	err = minIOKV.Remove(key)
-	assert.NoError(t, err)
-	start, end = 1, 2
-	_, err = minIOKV.LoadPartial(key, start, end)
-	assert.Error(t, err)
-}
-
-func TestMinIOKV_FGetObject(t *testing.T) {
-	Params.Init()
-	path := "/tmp/milvus/data"
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-	defer MinIOKV.RemoveWithPrefix("")
-
-	name1 := "31280791048324/4325023534/53443534/key_1"
-	value1 := "123"
-	err = MinIOKV.Save(name1, value1)
-	assert.Nil(t, err)
-	name2 := "312895849354/31205934503459/18948129301/key_2"
-	value2 := "333"
-	err = MinIOKV.Save(name2, value2)
-	assert.Nil(t, err)
-
-	err = MinIOKV.FGetObject(name1, path)
-	assert.Nil(t, err)
-
-	err = MinIOKV.FGetObject(name2, path)
-	assert.Nil(t, err)
-
-	err = MinIOKV.FGetObject("fail", path)
-	assert.NotNil(t, err)
-
-	file1, err := os.Open(path + name1)
-	assert.Nil(t, err)
-	content1, err := ioutil.ReadAll(file1)
-	assert.Nil(t, err)
-	assert.Equal(t, value1, string(content1))
-	defer file1.Close()
-	defer os.Remove(path + name1)
-
-	file2, err := os.Open(path + name2)
-	assert.Nil(t, err)
-	content2, err := ioutil.ReadAll(file2)
-	assert.Nil(t, err)
-	assert.Equal(t, value2, string(content2))
-	defer file1.Close()
-	defer os.Remove(path + name2)
-}
-
-func TestMinIOKV_FGetObjects(t *testing.T) {
-	Params.Init()
-	path := "/tmp/milvus/data"
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-	defer MinIOKV.RemoveWithPrefix("")
-
-	name1 := "31280791048324/4325023534/53443534/key_1"
-	value1 := "123"
-	err = MinIOKV.Save(name1, value1)
-	assert.Nil(t, err)
-	name2 := "312895849354/31205934503459/18948129301/key_2"
-	value2 := "333"
-	err = MinIOKV.Save(name2, value2)
-	assert.Nil(t, err)
-
-	err = MinIOKV.FGetObjects([]string{name1, name2}, path)
-	assert.Nil(t, err)
-
-	err = MinIOKV.FGetObjects([]string{"fail1", "fail2"}, path)
-	assert.NotNil(t, err)
-
-	file1, err := os.Open(path + name1)
-	assert.Nil(t, err)
-	content1, err := ioutil.ReadAll(file1)
-	assert.Nil(t, err)
-	assert.Equal(t, value1, string(content1))
-	defer file1.Close()
-	defer os.Remove(path + name1)
-
-	file2, err := os.Open(path + name2)
-	assert.Nil(t, err)
-	content2, err := ioutil.ReadAll(file2)
-	assert.Nil(t, err)
-	assert.Equal(t, value2, string(content2))
-	defer file1.Close()
-	defer os.Remove(path + name2)
-}
-
-func TestMinIOKV_GetSize(t *testing.T) {
-	Params.Init()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	minIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-	defer minIOKV.RemoveWithPrefix("")
-
-	key := "TestMinIOKV_GetSize_key"
-	value := "TestMinIOKV_GetSize_value"
-
-	err = minIOKV.Save(key, value)
-	assert.NoError(t, err)
-
-	size, err := minIOKV.GetSize(key)
-	assert.NoError(t, err)
-	assert.Equal(t, size, int64(len(value)))
-
-	key2 := "TestMemoryKV_GetSize_key2"
-
-	size, err = minIOKV.GetSize(key2)
-	assert.Error(t, err)
-	assert.Equal(t, int64(0), size)
+	testBucket, err := Params.Load("minio.bucketName")
+	require.NoError(t, err)
+
+	configRoot, err := Params.Load("minio.rootPath")
+	require.NoError(t, err)
+
+	testMinIOKVRoot := path.Join(configRoot, "milvus-minio-ut-root")
+
+	t.Run("test load", func(t *testing.T) {
+		testLoadRoot := path.Join(testMinIOKVRoot, "test_load")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testKV, err := newMinIOKVClient(ctx, testBucket)
+		require.NoError(t, err)
+		defer testKV.RemoveWithPrefix(testLoadRoot)
+
+		prepareTests := []struct {
+			key   string
+			value string
+		}{
+			{"abc", "123"},
+			{"abcd", "1234"},
+			{"key_1", "111"},
+			{"key_2", "222"},
+			{"key_3", "333"},
+		}
+
+		for _, test := range prepareTests {
+			err = testKV.Save(path.Join(testLoadRoot, test.key), test.value)
+			require.NoError(t, err)
+		}
+
+		loadTests := []struct {
+			isvalid       bool
+			loadKey       string
+			expectedValue string
+
+			description string
+		}{
+			{true, "abc", "123", "load valid key abc"},
+			{true, "abcd", "1234", "load valid key abcd"},
+			{true, "key_1", "111", "load valid key key_1"},
+			{true, "key_2", "222", "load valid key key_2"},
+			{true, "key_3", "333", "load valid key key_3"},
+			{false, "key_not_exist", "", "load invalid key key_not_exist"},
+			{false, "/", "", "load leading slash"},
+		}
+
+		for _, test := range loadTests {
+			t.Run(test.description, func(t *testing.T) {
+				if test.isvalid {
+					got, err := testKV.Load(path.Join(testLoadRoot, test.loadKey))
+					assert.NoError(t, err)
+					assert.Equal(t, test.expectedValue, got)
+				} else {
+					if test.loadKey == "/" {
+						got, err := testKV.Load(test.loadKey)
+						assert.Error(t, err)
+						assert.Empty(t, got)
+						return
+					}
+					got, err := testKV.Load(path.Join(testLoadRoot, test.loadKey))
+					assert.Error(t, err)
+					assert.Empty(t, got)
+				}
+			})
+		}
+
+		loadWithPrefixTests := []struct {
+			isvalid       bool
+			prefix        string
+			expectedValue []string
+
+			description string
+		}{
+			{true, "abc", []string{"123", "1234"}, "load with valid prefix abc"},
+			{true, "key_", []string{"111", "222", "333"}, "load with valid prefix key_"},
+			{true, "prefix", []string{}, "load with valid but not exist prefix prefix"},
+		}
+
+		for _, test := range loadWithPrefixTests {
+			t.Run(test.description, func(t *testing.T) {
+				gotk, gotv, err := testKV.LoadWithPrefix(path.Join(testLoadRoot, test.prefix))
+				assert.NoError(t, err)
+				assert.Equal(t, len(test.expectedValue), len(gotk))
+				assert.Equal(t, len(test.expectedValue), len(gotv))
+				assert.ElementsMatch(t, test.expectedValue, gotv)
+			})
+		}
+
+		multiLoadTests := []struct {
+			isvalid   bool
+			multiKeys []string
+
+			expectedValue []string
+			description   string
+		}{
+			{false, []string{"key_1", "key_not_exist"}, []string{"111", ""}, "multiload 1 exist 1 not"},
+			{true, []string{"abc", "key_3"}, []string{"123", "333"}, "multiload 2 exist"},
+		}
+
+		for _, test := range multiLoadTests {
+			t.Run(test.description, func(t *testing.T) {
+				for i := range test.multiKeys {
+					test.multiKeys[i] = path.Join(testLoadRoot, test.multiKeys[i])
+				}
+				if test.isvalid {
+					got, err := testKV.MultiLoad(test.multiKeys)
+					assert.NoError(t, err)
+					assert.Equal(t, test.expectedValue, got)
+				} else {
+					got, err := testKV.MultiLoad(test.multiKeys)
+					assert.Error(t, err)
+					assert.Equal(t, test.expectedValue, got)
+				}
+			})
+		}
+	})
+
+	t.Run("test MultiSave", func(t *testing.T) {
+		testMultiSaveRoot := path.Join(testMinIOKVRoot, "test_multisave")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testKV, err := newMinIOKVClient(ctx, testBucket)
+		assert.Nil(t, err)
+		defer testKV.RemoveWithPrefix(testMultiSaveRoot)
+
+		err = testKV.Save(path.Join(testMultiSaveRoot, "key_1"), "111")
+		assert.Nil(t, err)
+
+		kvs := map[string]string{
+			path.Join(testMultiSaveRoot, "key_1"): "123",
+			path.Join(testMultiSaveRoot, "key_2"): "456",
+		}
+
+		err = testKV.MultiSave(kvs)
+		assert.Nil(t, err)
+
+		val, err := testKV.Load(path.Join(testMultiSaveRoot, "key_1"))
+		assert.Nil(t, err)
+		assert.Equal(t, "123", val)
+	})
+
+	t.Run("test Remove", func(t *testing.T) {
+		testRemoveRoot := path.Join(testMinIOKVRoot, "test_remove")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testKV, err := newMinIOKVClient(ctx, testBucket)
+		assert.Nil(t, err)
+		defer testKV.RemoveWithPrefix(testRemoveRoot)
+
+		prepareTests := []struct {
+			k string
+			v string
+		}{
+			{"key_1", "123"},
+			{"key_2", "456"},
+			{"mkey_1", "111"},
+			{"mkey_2", "222"},
+			{"mkey_3", "333"},
+		}
+
+		for _, test := range prepareTests {
+			k := path.Join(testRemoveRoot, test.k)
+			err = testKV.Save(k, test.v)
+			require.NoError(t, err)
+		}
+
+		removeTests := []struct {
+			removeKey         string
+			valueBeforeRemove string
+
+			description string
+		}{
+			{"key_1", "123", "remove key_1"},
+			{"key_2", "456", "remove key_2"},
+		}
+
+		for _, test := range removeTests {
+			t.Run(test.description, func(t *testing.T) {
+				k := path.Join(testRemoveRoot, test.removeKey)
+				v, err := testKV.Load(k)
+				require.NoError(t, err)
+				require.Equal(t, test.valueBeforeRemove, v)
+
+				err = testKV.Remove(k)
+				assert.NoError(t, err)
+
+				v, err = testKV.Load(k)
+				require.Error(t, err)
+				require.Empty(t, v)
+			})
+		}
+
+		multiRemoveTest := []string{
+			path.Join(testRemoveRoot, "mkey_1"),
+			path.Join(testRemoveRoot, "mkey_2"),
+			path.Join(testRemoveRoot, "mkey_3"),
+		}
+
+		lv, err := testKV.MultiLoad(multiRemoveTest)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"111", "222", "333"}, lv)
+
+		err = testKV.MultiRemove(multiRemoveTest)
+		assert.NoError(t, err)
+
+		for _, k := range multiRemoveTest {
+			v, err := testKV.Load(k)
+			assert.Error(t, err)
+			assert.Empty(t, v)
+		}
+	})
+
+	t.Run("test LoadPartial", func(t *testing.T) {
+		testLoadPartialRoot := path.Join(testMinIOKVRoot, "load_partial")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testKV, err := newMinIOKVClient(ctx, testBucket)
+		require.NoError(t, err)
+		defer testKV.RemoveWithPrefix(testLoadPartialRoot)
+
+		key := path.Join(testLoadPartialRoot, "TestMinIOKV_LoadPartial_key")
+		value := "TestMinIOKV_LoadPartial_value"
+
+		err = testKV.Save(key, value)
+		assert.NoError(t, err)
+
+		var start, end int64
+		var partial []byte
+
+		start, end = 1, 2
+		partial, err = testKV.LoadPartial(key, start, end)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, partial, []byte(value[start:end]))
+
+		start, end = 0, int64(len(value))
+		partial, err = testKV.LoadPartial(key, start, end)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, partial, []byte(value[start:end]))
+
+		// error case
+		start, end = 5, 3
+		_, err = testKV.LoadPartial(key, start, end)
+		assert.Error(t, err)
+
+		start, end = 1, 1
+		_, err = testKV.LoadPartial(key, start, end)
+		assert.Error(t, err)
+
+		start, end = -1, 1
+		_, err = testKV.LoadPartial(key, start, end)
+		assert.Error(t, err)
+
+		start, end = 1, -1
+		_, err = testKV.LoadPartial(key, start, end)
+		assert.Error(t, err)
+
+		err = testKV.Remove(key)
+		assert.NoError(t, err)
+		start, end = 1, 2
+		_, err = testKV.LoadPartial(key, start, end)
+		assert.Error(t, err)
+	})
+
+	t.Run("test FGetObject", func(t *testing.T) {
+		testPath := "/tmp/milvus/data"
+		testFGetObjectRoot := path.Join(testMinIOKVRoot, "fget_object")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testKV, err := newMinIOKVClient(ctx, testBucket)
+		require.Nil(t, err)
+		defer testKV.RemoveWithPrefix(testFGetObjectRoot)
+
+		name1 := path.Join(testFGetObjectRoot, "31280791048324/4325023534/53443534/key_1")
+		value1 := "123"
+		err = testKV.Save(name1, value1)
+		assert.Nil(t, err)
+
+		name2 := path.Join(testFGetObjectRoot, "312895849354/31205934503459/18948129301/key_2")
+		value2 := "333"
+		err = testKV.Save(name2, value2)
+		assert.Nil(t, err)
+
+		err = testKV.FGetObject(name1, testPath)
+		assert.Nil(t, err)
+
+		err = testKV.FGetObject(name2, testPath)
+		assert.Nil(t, err)
+
+		err = testKV.FGetObject("fail", testPath)
+		assert.NotNil(t, err)
+
+		file1, err := os.Open(testPath + name1)
+		assert.Nil(t, err)
+		content1, err := ioutil.ReadAll(file1)
+		assert.Nil(t, err)
+		assert.Equal(t, value1, string(content1))
+		defer file1.Close()
+		defer os.Remove(testPath + name1)
+
+		file2, err := os.Open(testPath + name2)
+		assert.Nil(t, err)
+		content2, err := ioutil.ReadAll(file2)
+		assert.Nil(t, err)
+		assert.Equal(t, value2, string(content2))
+		defer file1.Close()
+		defer os.Remove(testPath + name2)
+	})
+
+	t.Run("test FGetObjects", func(t *testing.T) {
+		testPath := "/tmp/milvus/data"
+		testFGetObjectsRoot := path.Join(testMinIOKVRoot, "fget_objects")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		bucketName := "fantastic-tech-test"
+		testKV, err := newMinIOKVClient(ctx, bucketName)
+		require.NoError(t, err)
+		defer testKV.RemoveWithPrefix(testFGetObjectsRoot)
+
+		name1 := path.Join(testFGetObjectsRoot, "31280791048324/4325023534/53443534/key_1")
+		value1 := "123"
+		err = testKV.Save(name1, value1)
+		assert.Nil(t, err)
+
+		name2 := path.Join(testFGetObjectsRoot, "312895849354/31205934503459/18948129301/key_2")
+		value2 := "333"
+		err = testKV.Save(name2, value2)
+		assert.Nil(t, err)
+
+		err = testKV.FGetObjects([]string{name1, name2}, testPath)
+		assert.Nil(t, err)
+
+		err = testKV.FGetObjects([]string{"fail1", "fail2"}, testPath)
+		assert.NotNil(t, err)
+
+		file1, err := os.Open(testPath + name1)
+		assert.Nil(t, err)
+		content1, err := ioutil.ReadAll(file1)
+		assert.Nil(t, err)
+		assert.Equal(t, value1, string(content1))
+		defer file1.Close()
+		defer os.Remove(testPath + name1)
+
+		file2, err := os.Open(testPath + name2)
+		assert.Nil(t, err)
+		content2, err := ioutil.ReadAll(file2)
+		assert.Nil(t, err)
+		assert.Equal(t, value2, string(content2))
+		defer file1.Close()
+		defer os.Remove(testPath + name2)
+	})
+
+	t.Run("test GetSize", func(t *testing.T) {
+		testGetSizeRoot := path.Join(testMinIOKVRoot, "get_size")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testKV, err := newMinIOKVClient(ctx, testBucket)
+		require.NoError(t, err)
+		defer testKV.RemoveWithPrefix(testGetSizeRoot)
+
+		key := path.Join(testGetSizeRoot, "TestMinIOKV_GetSize_key")
+		value := "TestMinIOKV_GetSize_value"
+
+		err = testKV.Save(key, value)
+		assert.NoError(t, err)
+
+		size, err := testKV.GetSize(key)
+		assert.NoError(t, err)
+		assert.Equal(t, size, int64(len(value)))
+
+		key2 := path.Join(testGetSizeRoot, "TestMemoryKV_GetSize_key2")
+
+		size, err = testKV.GetSize(key2)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), size)
+	})
 }
