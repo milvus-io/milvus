@@ -15,7 +15,7 @@ In this section, we introduce the RPCs of milvus service. A brief description of
 | CreatePartition         | create a partition                                                                            |
 | DropPartition           | drop a partition                                                                              |
 | HasPartition            | check whether a partition exists                                                              |
-| LoadPartition           | load collection to memory for future search                                                   |
+| LoadPartition           | load partition to memory for future search                                                   |
 | ReleasePartitions       | release partitions from memory                                                                |
 | GetPartitionStatistics  | show a partition's statistics                                                                 |
 | ShowPartitions          | list a collection's all partitions                                                            |
