@@ -205,6 +205,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	return ret, err
 }
 
+// Start starts QueryCoord's client service. But it does nothing here.
 func (c *Client) Start() error {
 	return nil
 }
