@@ -80,6 +80,7 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRe
 	}, nil
 }
 
+// InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
 func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	log.Debug("InvalidateCollectionMetaCache",
 		zap.String("role", Params.RoleName),
