@@ -191,10 +191,10 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 
 // removeCollection removes the collection from collectionReplica
 func (colReplica *collectionReplica) removeCollection(collectionID UniqueID) error {
-	colReplica.mu.Lock()
 	colReplica.queryMu.Lock()
-	defer colReplica.queryMu.Unlock()
+	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
+	defer colReplica.queryMu.Unlock()
 	return colReplica.removeCollectionPrivate(collectionID)
 }
 
@@ -341,10 +341,10 @@ func (colReplica *collectionReplica) addPartitionPrivate(collectionID UniqueID, 
 
 // removePartition removes the partition from collectionReplica
 func (colReplica *collectionReplica) removePartition(partitionID UniqueID) error {
-	colReplica.mu.Lock()
 	colReplica.queryMu.Lock()
-	defer colReplica.queryMu.Unlock()
+	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
+	defer colReplica.queryMu.Unlock()
 	return colReplica.removePartitionPrivate(partitionID)
 }
 

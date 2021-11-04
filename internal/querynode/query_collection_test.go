@@ -17,14 +17,17 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -703,5 +706,84 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 
 		err = qc.adjustByChangeInfo(segmentChangeInfos)
 		assert.Nil(t, err)
+	})
+}
+
+func TestQueryCollection_search_while_release(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	t.Run("test search while release collection", func(t *testing.T) {
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		assert.NoError(t, err)
+
+		queryChannel := genQueryChannel()
+		queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+		queryCollection.queryResultMsgStream.Start()
+
+		msg, err := genSimpleSearchMsg()
+		assert.NoError(t, err)
+
+		// To prevent data race in search trackCtx
+		searchMu := &sync.Mutex{}
+
+		runSearchWhileReleaseCollection := func(wg *sync.WaitGroup) {
+			go func() {
+				_ = queryCollection.streaming.replica.removeCollection(defaultCollectionID)
+				wg.Done()
+			}()
+
+			go func() {
+				searchMu.Lock()
+				_ = queryCollection.search(msg)
+				searchMu.Unlock()
+				wg.Done()
+			}()
+		}
+
+		wg := &sync.WaitGroup{}
+		for i := 0; i < 10; i++ {
+			log.Debug("runSearchWhileReleaseCollection", zap.Any("time", i))
+			wg.Add(2)
+			go runSearchWhileReleaseCollection(wg)
+		}
+		wg.Wait()
+	})
+
+	t.Run("test search while release partition", func(t *testing.T) {
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		assert.NoError(t, err)
+
+		queryChannel := genQueryChannel()
+		queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+		queryCollection.queryResultMsgStream.Start()
+
+		msg, err := genSimpleSearchMsg()
+		assert.NoError(t, err)
+
+		// To prevent data race in search trackCtx
+		searchMu := &sync.Mutex{}
+
+		runSearchWhileReleasePartition := func(wg *sync.WaitGroup) {
+			go func() {
+				_ = queryCollection.streaming.replica.removePartition(defaultPartitionID)
+				wg.Done()
+			}()
+
+			go func() {
+				searchMu.Lock()
+				_ = queryCollection.search(msg)
+				searchMu.Unlock()
+				wg.Done()
+			}()
+		}
+
+		wg := &sync.WaitGroup{}
+		for i := 0; i < 10; i++ {
+			log.Debug("runSearchWhileReleasePartition", zap.Any("time", i))
+			wg.Add(2)
+			go runSearchWhileReleasePartition(wg)
+		}
+		wg.Wait()
 	})
 }
