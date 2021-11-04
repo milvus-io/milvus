@@ -26,7 +26,7 @@ spec:
         memory: 12Gi
         ephemeral-storage: "100Gi"
       requests:
-        cpu: "3"
+        cpu: "2"
         memory: 10Gi
         ephemeral-storage: "100Gi"
     volumeMounts:
@@ -67,6 +67,9 @@ spec:
       limits:
         cpu: "2"
         memory: "6Gi"
+      requests:
+        cpu: "1"
+        memory: "4Gi"
     ports:
     - containerPort: 2379
       name: client
