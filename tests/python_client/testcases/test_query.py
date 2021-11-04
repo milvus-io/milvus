@@ -90,6 +90,25 @@ class TestQueryParams(TestcaseBase):
                                    check_items={exp_res: res[:1]})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dim", [8, 128])
+    def test_query_with_dup_primary_key(self, dim):
+        """
+        target: test query with duplicate primary key
+        method: 1.insert same data twice
+                2.search
+        expected: query results are de-duplicated
+        """
+        nb = ct.default_nb
+        collection_w, insert_data, _, _ = self.init_collection_general(prefix, True, nb, dim=dim)[0:4]
+        # insert data again
+        collection_w.insert(insert_data[0])
+        # query
+        res, _ = collection_w.query(default_term_expr)
+        # assert that query results are de-duplicated
+        res = [m["int64"] for m in res]
+        assert sorted(list(set(res))) == sorted(res)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_auto_id_not_existed_primary_values(self):
         """
         target: test query on auto_id true collection
