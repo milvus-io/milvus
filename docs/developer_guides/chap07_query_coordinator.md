@@ -359,7 +359,7 @@ type GetSegmentInfoResponse struct {
 
 #### 7.5 Collection Replica
 
-$collectionReplica$ contains a in-memory local copy of persistent collections. In common cases, the system has multiple query nodes. Data of a collection will be distributed across all the available query nodes, and each query node's $collectionReplica$ will maintain its own share (only part of the collection).
+$collectionReplica$ contains an in-memory local copy of persistent collections. In common cases, the system has multiple query nodes. Data of a collection will be distributed across all the available query nodes, and each query node's $collectionReplica$ will maintain its own share (only part of the collection).
 Every replica tracks a value called tSafe which is the maximum timestamp that the replica is up-to-date.
 
 - _Collection_
