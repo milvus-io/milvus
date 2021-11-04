@@ -79,6 +79,7 @@ func (rc *rmqClient) StringToMsgID(id string) (MessageID, error) {
 	return &rmqID{messageID: rID}, nil
 }
 
+// BytesToMsgID converts a byte array to messageID
 func (rc *rmqClient) BytesToMsgID(id []byte) (MessageID, error) {
 	rID, err := DeserializeRmqID(id)
 	if err != nil {
