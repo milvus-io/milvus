@@ -388,6 +388,8 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	}()
 }
 
+// startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
+// tt msg stands for the currently consumed timestamp for each channel
 func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	ttMsgStream, err := s.msFactory.NewMsgStream(ctx)
 	if err != nil {
