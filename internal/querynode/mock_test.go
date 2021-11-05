@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // ---------- unittest util functions ----------
@@ -1291,6 +1292,10 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 		return nil, err
 	}
 	node := NewQueryNode(ctx, fac)
+	session := &sessionutil.Session{
+		ServerID: 1,
+	}
+	node.session = session
 
 	etcdKV, err := genEtcdKV()
 	if err != nil {
