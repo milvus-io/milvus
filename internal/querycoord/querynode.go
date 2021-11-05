@@ -29,12 +29,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 // Node provides many interfaces to access querynode via grpc
 type Node interface {
 	start() error
 	stop()
+	getNodeInfo() (Node, error)
 	clearNodeInfo() error
 
 	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
@@ -80,6 +82,11 @@ type queryNode struct {
 	watchedQueryChannels map[UniqueID]*querypb.QueryChannelInfo
 	state                nodeState
 	stateLock            sync.RWMutex
+
+	totalMem     uint64
+	memUsage     uint64
+	memUsageRate float64
+	cpuUsage     float64
 }
 
 func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
@@ -512,15 +519,18 @@ func (qn *queryNode) releasePartitions(ctx context.Context, in *querypb.ReleaseP
 
 func (qn *queryNode) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	if !qn.isOnline() {
-		return nil, nil
+		return nil, fmt.Errorf("getSegmentInfo: queryNode %d is offline", qn.id)
 	}
 
 	res, err := qn.client.GetSegmentInfo(ctx, in)
-	if err == nil && res.Status.ErrorCode == commonpb.ErrorCode_Success {
-		return res, nil
+	if err != nil {
+		return nil, err
+	}
+	if res.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, errors.New(res.Status.Reason)
 	}
 
-	return nil, nil
+	return res, nil
 }
 
 func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.ComponentInfo {
@@ -590,6 +600,46 @@ func (qn *queryNode) releaseSegments(ctx context.Context, in *querypb.ReleaseSeg
 	}
 
 	return nil
+}
+
+func (qn *queryNode) getNodeInfo() (Node, error) {
+	qn.RLock()
+	defer qn.RUnlock()
+
+	if !qn.isOnline() {
+		return nil, errors.New("getNodeInfo: queryNode is offline")
+	}
+
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := qn.client.GetMetrics(qn.ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, errors.New(resp.Status.Reason)
+	}
+	infos := metricsinfo.QueryNodeInfos{}
+	err = metricsinfo.UnmarshalComponentInfos(resp.Response, &infos)
+	if err != nil {
+		return nil, err
+	}
+	qn.cpuUsage = infos.HardwareInfos.CPUCoreUsage
+	qn.totalMem = infos.HardwareInfos.Memory
+	qn.memUsage = infos.HardwareInfos.MemoryUsage
+	qn.memUsageRate = float64(qn.memUsage) / float64(qn.totalMem)
+	return &queryNode{
+		id:      qn.id,
+		address: qn.address,
+		state:   qn.state,
+
+		totalMem:     qn.totalMem,
+		memUsage:     qn.memUsage,
+		memUsageRate: qn.memUsageRate,
+		cpuUsage:     qn.cpuUsage,
+	}, nil
 }
 
 //****************************************************//

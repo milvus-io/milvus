@@ -186,12 +186,7 @@ func TestWatchNodeLoop(t *testing.T) {
 		assert.Nil(t, err)
 
 		nodeID := queryNode1.queryNodeID
-		for {
-			_, err = queryCoord.cluster.getNodeByID(nodeID)
-			if err == nil {
-				break
-			}
-		}
+		waitQueryNodeOnline(queryCoord.cluster, nodeID)
 
 		queryCoord.Stop()
 		queryNode1.stop()
@@ -208,15 +203,16 @@ func TestWatchNodeLoop(t *testing.T) {
 		assert.Nil(t, err)
 
 		nodeID := queryNode1.queryNodeID
+		waitQueryNodeOnline(queryCoord.cluster, nodeID)
+		nodes, err := queryCoord.cluster.onlineNodes()
+		assert.Nil(t, err)
+
 		queryNode1.stop()
 		err = removeNodeSession(nodeID)
 		assert.Nil(t, err)
-		for {
-			_, err = queryCoord.cluster.getNodeByID(nodeID)
-			if err != nil {
-				break
-			}
-		}
+
+		waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+
 		queryCoord.Stop()
 		err = removeAllSession()
 		assert.Nil(t, err)

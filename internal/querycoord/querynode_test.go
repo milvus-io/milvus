@@ -22,6 +22,8 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -53,15 +55,11 @@ func removeAllSession() error {
 }
 
 func waitAllQueryNodeOffline(cluster Cluster, nodes map[int64]Node) bool {
-	reDoCount := 40
 	for {
-		if reDoCount <= 0 {
-			return false
-		}
 		allOffline := true
 		for nodeID := range nodes {
-			_, err := cluster.getNodeByID(nodeID)
-			if err == nil {
+			nodeExist := cluster.hasNode(nodeID)
+			if nodeExist {
 				allOffline = false
 				break
 			}
@@ -71,7 +69,6 @@ func waitAllQueryNodeOffline(cluster Cluster, nodes map[int64]Node) bool {
 		}
 		log.Debug("wait all queryNode offline")
 		time.Sleep(100 * time.Millisecond)
-		reDoCount--
 	}
 }
 
@@ -127,8 +124,7 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	err = removeNodeSession(queryNode2.queryNodeID)
 	assert.Nil(t, err)
 
-	allNodeOffline := waitAllQueryNodeOffline(queryCoord.cluster, nodes)
-	assert.Equal(t, allNodeOffline, true)
+	waitAllQueryNodeOffline(queryCoord.cluster, nodes)
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
@@ -173,8 +169,7 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	err = removeNodeSession(queryNode3.queryNodeID)
 	assert.Nil(t, err)
 
-	allNodeOffline := waitAllQueryNodeOffline(queryCoord.cluster, nodes)
-	assert.Equal(t, allNodeOffline, true)
+	waitAllQueryNodeOffline(queryCoord.cluster, nodes)
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
@@ -275,4 +270,89 @@ func TestSealedSegmentChangeAfterQueryNodeStop(t *testing.T) {
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func TestGrpcRequestWithNodeOffline(t *testing.T) {
+	refreshParams()
+	baseCtx, cancel := context.WithCancel(context.Background())
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	assert.Nil(t, err)
+	nodeServer, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	address := nodeServer.queryNodeIP
+	nodeID := nodeServer.queryNodeID
+	node, err := newQueryNodeTest(baseCtx, address, nodeID, kv)
+	assert.Equal(t, false, node.isOnline())
+
+	t.Run("Test WatchDmChannels", func(t *testing.T) {
+		req := &querypb.WatchDmChannelsRequest{}
+		err = node.watchDmChannels(baseCtx, req)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test AddQueryChannel", func(t *testing.T) {
+		req := &querypb.AddQueryChannelRequest{}
+		err = node.addQueryChannel(baseCtx, req)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test RemoveQueryChannel", func(t *testing.T) {
+		req := &querypb.RemoveQueryChannelRequest{}
+		err = node.removeQueryChannel(baseCtx, req)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleaseCollection", func(t *testing.T) {
+		req := &querypb.ReleaseCollectionRequest{}
+		err = node.releaseCollection(baseCtx, req)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleasePartition", func(t *testing.T) {
+		req := &querypb.ReleasePartitionsRequest{}
+		err = node.releasePartitions(baseCtx, req)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test getSegmentInfo", func(t *testing.T) {
+		req := &querypb.GetSegmentInfoRequest{}
+		res, err := node.getSegmentInfo(baseCtx, req)
+		assert.NotNil(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("Test getComponentInfo", func(t *testing.T) {
+		res := node.getComponentInfo(baseCtx)
+		assert.Equal(t, internalpb.StateCode_Abnormal, res.StateCode)
+	})
+
+	t.Run("Test getMetrics", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		res, err := node.getMetrics(baseCtx, req)
+		assert.NotNil(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("Test LoadSegment", func(t *testing.T) {
+		req := &querypb.LoadSegmentsRequest{}
+		err = node.loadSegments(baseCtx, req)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test ReleaseSegments", func(t *testing.T) {
+		req := &querypb.ReleaseSegmentsRequest{}
+		err = node.releaseSegments(baseCtx, req)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test getNodeInfo", func(t *testing.T) {
+		node, err = node.getNodeInfo()
+		assert.NotNil(t, err)
+		assert.Nil(t, node)
+	})
+
+	cancel()
+	err = removeAllSession()
+	assert.Nil(t, err)
+
 }

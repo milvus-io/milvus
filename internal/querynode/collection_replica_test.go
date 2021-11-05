@@ -223,6 +223,29 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestCollectionReplica_getSegmentInfosByColID(t *testing.T) {
+	node := newQueryNodeMock()
+	collectionID := UniqueID(0)
+	initTestMeta(t, node, collectionID, 0)
+
+	err := node.historical.replica.addSegment(UniqueID(1), defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	assert.NoError(t, err)
+	err = node.historical.replica.addSegment(UniqueID(2), defaultPartitionID, collectionID, "", segmentTypeSealed, true)
+	assert.NoError(t, err)
+	err = node.historical.replica.addSegment(UniqueID(3), defaultPartitionID, collectionID, "", segmentTypeSealed, true)
+	assert.NoError(t, err)
+	segment, err := node.historical.replica.getSegmentByID(UniqueID(3))
+	assert.NoError(t, err)
+	segment.segmentType = segmentTypeIndexing
+
+	targetSeg, err := node.historical.replica.getSegmentInfosByColID(collectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(targetSeg))
+
+	err = node.Stop()
+	assert.NoError(t, err)
+}
+
 func TestCollectionReplica_hasSegment(t *testing.T) {
 	node := newQueryNodeMock()
 	collectionID := UniqueID(0)

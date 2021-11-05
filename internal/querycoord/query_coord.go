@@ -311,8 +311,8 @@ func (qc *QueryCoord) watchNodeLoop() {
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("get a del event after queryNode down", zap.Int64("nodeID", serverID))
-				_, err := qc.cluster.getNodeByID(serverID)
-				if err != nil {
+				nodeExist := qc.cluster.hasNode(serverID)
+				if !nodeExist {
 					log.Error("queryNode not exist", zap.Int64("nodeID", serverID))
 					continue
 				}
