@@ -35,6 +35,7 @@ func (rp *rmqProducer) Send(ctx context.Context, message *ProducerMessage) (Mess
 	return &rmqID{messageID: id}, err
 }
 
+// Close does nothing currently
 func (rp *rmqProducer) Close() {
-
+	// TODO(yukun): may need to destroy topic
 }
