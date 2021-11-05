@@ -87,8 +87,8 @@ func TestParamTable(t *testing.T) {
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
 	})
 
-	t.Run("IndexRootPath", func(t *testing.T) {
-		t.Logf("IndexRootPath: %v", Params.IndexRootPath)
+	t.Run("IndexStorageRootPath", func(t *testing.T) {
+		t.Logf("IndexStorageRootPath: %v", Params.IndexStorageRootPath)
 	})
 }
 
