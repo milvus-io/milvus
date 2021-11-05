@@ -10,6 +10,7 @@ def operations_parser(operations):
     for run_type, run_params in operations.items():
         logger.debug(run_type)
         return run_type, run_params
+    return False, False
 
 
 def collection_parser(collection_name):
