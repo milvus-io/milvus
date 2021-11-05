@@ -22,11 +22,9 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan, SearchResult&
     AssertInfo(results.internal_seg_offsets_.size() == size,
                "Size of result distances is not equal to size of segment offsets");
     Assert(results.primary_keys_.size() == 0);
-
     results.primary_keys_.resize(size);
 
     auto element_sizeof = sizeof(int64_t);
-
     aligned_vector<char> blob(size * element_sizeof);
     if (plan->schema_.get_is_auto_id()) {
         bulk_subscript(SystemFieldType::RowId, results.internal_seg_offsets_.data(), size, blob.data());
@@ -38,9 +36,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan, SearchResult&
         bulk_subscript(key_offset, results.internal_seg_offsets_.data(), size, blob.data());
     }
 
-    for (int64_t i = 0; i < size; ++i) {
-        results.primary_keys_[i] = *(int64_t*)(blob.data() + element_sizeof * i);
-    }
+    memcpy(results.primary_keys_.data(), blob.data(), element_sizeof * size);
 }
 
 void
