@@ -337,7 +337,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid limit (topK)
-        log.info("test_search_param_invalid_limit: searching with "
+        log.info("test_search_param_invalid_limit_value: searching with "
                  "invalid limit (topK) = %s" % limit)
         err_msg = "limit %d is too large!" % limit
         if limit == 0:
@@ -692,7 +692,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True)[0]
         # 2. search
-        log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
+        log.info("test_search_output_field_invalid_wildcard: Searching collection %s" % collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp, output_fields=output_fields,
