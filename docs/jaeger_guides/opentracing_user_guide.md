@@ -18,7 +18,7 @@ See also:
 
 We mainly use jaeger as an implementation of opentracing.
 
-Two request: **Insert Request** and **Search Request** in milvus system is traced at this stage.
+Two requests: **Insert Request** and **Search Request** in milvus system are traced at this stage.
 
 ## Jaeger Home page
 
