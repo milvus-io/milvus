@@ -85,7 +85,8 @@ func (t *timestampOracle) loadTimestamp() (time.Time, error) {
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
 // otherwise, update it.
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
+	//we use big endian here for compatibility issues
+	data := typeutil.Uint64ToBytesBigEndian(uint64(ts.UnixNano()))
 	err := t.txnKV.Save(t.key, string(data))
 	if err != nil {
 		return errors.WithStack(err)

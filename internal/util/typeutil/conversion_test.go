@@ -65,6 +65,22 @@ func TestConversion(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
+	t.Run("TestConvertUint64BigEndian", func(t *testing.T) {
+		comp := func(u uint64) {
+			ub := Uint64ToBytesBigEndian(u)
+			u1, err := BigEndianBytesToUint64(ub)
+			assert.Nil(t, err)
+			assert.Equal(t, u, u1)
+		}
+		comp(uint64(314))
+		comp(uint64(0))
+		comp(uint64(75123348654273))
+		comp(uint64(math.MaxUint64))
+
+		_, err := BytesToUint64([]byte("ab"))
+		assert.NotNil(t, err)
+	})
+
 	t.Run("TestSliceRemoveDuplicate", func(t *testing.T) {
 		ret := SliceRemoveDuplicate(1)
 		assert.Equal(t, 0, len(ret))
