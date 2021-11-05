@@ -24,7 +24,7 @@ So what's DataNode's starting procedure?
 
 ## Objectives
 
-### 1. Serveice Registration
+### 1. Service Registration
 
 DataNode registers itself to etcd after grpc server started, in *INITIALIZING* state.
 
