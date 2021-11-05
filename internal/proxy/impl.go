@@ -232,6 +232,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	return dct.result, nil
 }
 
+// HasCollection check if the specific collection exists in Milvus.
 func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.BoolResponse{
