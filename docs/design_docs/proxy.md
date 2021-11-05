@@ -139,8 +139,8 @@ the actual implementation, the DqRequestChannel of each collection can be exclus
 exclusive or shared by all collections on the proxy. When the proxy applies for the DqRequestChannel and DqResultChannel
 information of the collection from the Query Coordinator, it can attach the proxy's own ID: ProxyID.
 
-With DqRequestChannel of the collection, the proxy will create an msgstream object to generate data into
-DqRequestChannel. With the DqResultChannel of the collection, the proxy will create an msgstream object, and Proxy will
+With DqRequestChannel of the collection, the proxy will create a msgstream object to generate data into
+DqRequestChannel. With the DqResultChannel of the collection, the proxy will create a msgstream object, and Proxy will
 consume the data in the DqResultChannel. When these msgstream objects are closed, messages cannot be written to or
 consumed from them.
 
@@ -162,7 +162,7 @@ One consideration for uniformly assigning SegmentIDs by Data Coordinator is that
 coordinating the total number of each segment not to be too large, and the location is near a water level, so that the
 size of the segment is limited to a certain range.
 
-Other interactions between Proxy and Data Coordiantor are mainly reflected in the proxy querying Data Coordinator for
+Other interactions between Proxy and Data Coordinator are mainly reflected in the proxy querying Data Coordinator for
 the status and statistical information of the segment of the collection. LoadCollection is an example. The
 synchronization semantics of the current LoadCollection needs to know the number of rows currently persisted, so the
 Proxy needs to ask the Data Coordinator for the total number of rows currently persisted.
@@ -171,7 +171,7 @@ Proxy needs to ask the Data Coordinator for the total number of rows currently p
 
 For LoadCollection, LoadPartition, ReleaseCollection, ReleasePartition requests, the Proxy directly forwards these
 requests to Query Coordinator for execution after checking and preprocessing these requests. When the Proxy receives
-feedback from Query Coordiantor, it returns the feedback results to the clients.
+feedback from Query Coordinator, it returns the feedback results to the clients.
 
 The semantics of the Load operation is to load Collection or Partition from persistent storage into the memory of Query
 Nodes, or import streaming data into QueryNode so that it can be queried. If the load operation is not performed, the
@@ -187,7 +187,7 @@ ReleaseDqlMessageStream command to Root Coordinator, and Root Coordinator is res
 ReleaseDqlMessageStream command to all Proxies, so that all related stream used to send search request and receive
 search result in Proxy will be closed.
 
-The other interaction between Proxy and Query Coordinator is that Proxy needs to query Query Coordinator for statistics
+The other interaction between Proxy and Query Coordinator is that Proxy needs to query from Query Coordinator for statistics
 about Collection, Partition, and Segment. Taking ShowCollections as an example, if the ShowCollections parameter
 specifies that the query is for Collections that have been loaded into memory, the ShowCollection request will be
 forwarded to QueryCoordinator, and QueryCoordinator will return a list of all the recorded Collections loaded into
