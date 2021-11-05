@@ -5,4 +5,7 @@ metadata:
   labels:
     app: milvus
 spec:
-  dependencies: {}
+  dependencies: { }
+  config: { }
+  components: { }
+  
