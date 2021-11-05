@@ -84,7 +84,7 @@ def get_len_vectors_per_file(data_type, dimension):
 
 
 def get_vectors_from_binary(nq, dimension, data_type):
-    # use the first file, nq should be less than VECTORS_PER_FILE
+    # use the first file, nq should be less than VECTORS_PER_FILE 10001
     if nq > MAX_NQ:
         raise Exception("Over size nq")
     if data_type == "local":
@@ -138,6 +138,7 @@ def metric_type_trans(metric_type):
 
 
 def get_dataset(hdf5_file_path):
+    """ Determine whether hdf5 file exists, and return the content of hdf5 file """
     if not os.path.exists(hdf5_file_path):
         raise Exception("%s not existed" % hdf5_file_path)
     dataset = h5py.File(hdf5_file_path)

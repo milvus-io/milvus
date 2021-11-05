@@ -8,15 +8,6 @@
   <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count" />
 </div>
 
-<div class="column" align="middle">
-  <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
-    <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
-  </a>
-  <a href="https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard">
-    <img src="https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95" />
-  </a>
-</div>
-
 # 欢迎来到 Milvus
 
 ## Milvus 是什么
@@ -80,6 +71,7 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 go: 1.15
 cmake: >=3.18
 gcc: 7.5
+protobuf: >=3.7
 ```
 
 克隆 Milvus 项目并编译。
@@ -96,7 +88,7 @@ $ ./scripts/install_deps.sh
 $ make milvus
 ```
 
-获取更多内容，请阅读 [开发者文档](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md)
+获取更多内容，请阅读 [开发者文档](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md)。
 
 > **注意** 主分支用于 Milvus v2.0 代码开发。Milvus v1.0 于 2021 年 3 月 9 日发布，是 Milvus 的首个长期支持（LTS）版本。如需使用 Milvus 1.0，请切换至 [1.0 分支](https://github.com/milvus-io/milvus/tree/1.0)。
 

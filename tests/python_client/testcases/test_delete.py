@@ -310,7 +310,6 @@ class TestDeleteOperation(TestcaseBase):
         assert collection_w.num_entities == tmp_nb - 1
         assert collection_w.has_index()
 
-    @pytest.mark.xfail(reason="Issue #10919")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_query_ids_both_sealed_and_channel(self):
         """
@@ -623,7 +622,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="Issue #10673")
     def test_delete_sealed_segment_with_twice_flush(self):
         """
         target: test delete data from sealed segment and flush delta log

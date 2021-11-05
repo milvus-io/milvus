@@ -15,7 +15,7 @@ The following figure shows the design of the indexCoord component:
 
 ## 8.1 Use etcd as a reliable service
 
-Based on etcd service discovery, IndexCoord components, like other Milvus components, rely on etcd to implement
+Based on etcd service discovery, IndexCoord component, like other Milvus components, rely on etcd to implement
 service discovery. IndexCoord relies on the lease mechanism of etcd to sense the online and offline news of IndexNode.
 
 In addition to service discovery, Milvus also uses etcd as a reliable meta storage, and writes all
@@ -40,8 +40,8 @@ IndexCoord has another background process that periodically queries the index ta
 When the index task is marked as deleted, and the index status is complete, the corresponding index task is actually
 deleted from the MetaTable.
 
-When IndexCoord receives a query index status request from other components, first check whether the corresponding
-index task is marked for deletion in the MetaTable. If marked for deletion, the return index does not exist, otherwise,
+When IndexCoord receives a query index status request from other components, it will first check whether the corresponding
+index task is marked for deletion in the MetaTable. If marked for deletion, it returns index does not exist, otherwise,
 it returns the index information.
 
 ## 8.3 Feature Design
@@ -73,7 +73,7 @@ When the IndexCoord service starts, it first obtains the node information of all
 current IndexNodes from etcd, and then adds the node information to the NodeManager. After that, the online and offline
 information of IndexNode node is obtained from watchNodeLoop. Then it will traverse the entire MetaTable, get the load
 information corresponding to each IndexNode node, and update the priority queue in the NodeManager. When an index building 
-task need to be allocated, the IndexNode with the lowest load will be selected according to the
+task needs to be allocated, the IndexNode with the lowest load will be selected according to the
 priority queue to execute the task.
 
 ### 8.3.3 MetaTable

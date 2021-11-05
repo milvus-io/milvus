@@ -22,6 +22,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -229,7 +230,7 @@ func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
 	buf := make([]byte, 8)
 	res := make([]int64, 0)
 	for _, pk := range pks {
-		binary.BigEndian.PutUint64(buf, uint64(pk))
+		common.Endian.PutUint64(buf, uint64(pk))
 		exist := segment.pkFilter.Test(buf)
 		if exist {
 			res = append(res, pk)
@@ -393,7 +394,7 @@ func (iNode *insertNode) getPrimaryKeys(msg *msgstream.InsertMsg) []int64 {
 	pks := make([]int64, len(blobReaders))
 
 	for i, reader := range blobReaders {
-		err := binary.Read(reader, binary.LittleEndian, &pks[i])
+		err := binary.Read(reader, common.Endian, &pks[i])
 		if err != nil {
 			log.Warn("binary read blob value failed", zap.Error(err))
 		}

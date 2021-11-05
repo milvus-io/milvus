@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
@@ -226,9 +227,8 @@ type dmTaskQueue struct {
 }
 
 func (queue *dmTaskQueue) Enqueue(t task) error {
-	queue.lock.Lock()
-	defer queue.lock.Unlock()
-
+	queue.statsLock.Lock()
+	defer queue.statsLock.Unlock()
 	err := queue.baseTaskQueue.Enqueue(t)
 	if err != nil {
 		return err
@@ -243,6 +243,9 @@ func (queue *dmTaskQueue) PopActiveTask(tID UniqueID) task {
 	defer queue.atLock.Unlock()
 	t, ok := queue.activeTasks[tID]
 	if ok {
+		queue.statsLock.Lock()
+		defer queue.statsLock.Unlock()
+
 		delete(queue.activeTasks, tID)
 		log.Debug("Proxy dmTaskQueue popPChanStats", zap.Any("tID", t.ID()))
 		queue.popPChanStats(t)
@@ -260,7 +263,6 @@ func (queue *dmTaskQueue) addPChanStats(t task) error {
 				zap.Any("stats", stats), zap.Error(err))
 			return err
 		}
-		queue.statsLock.Lock()
 		for cName, stat := range stats {
 			info, ok := queue.pChanStatisticsInfos[cName]
 			if !ok {
@@ -281,7 +283,6 @@ func (queue *dmTaskQueue) addPChanStats(t task) error {
 				queue.pChanStatisticsInfos[cName].tsSet[info.minTs] = struct{}{}
 			}
 		}
-		queue.statsLock.Unlock()
 	} else {
 		return fmt.Errorf("proxy addUnissuedTask reflect to dmlTask failed, tID:%v", t.ID())
 	}
@@ -294,7 +295,6 @@ func (queue *dmTaskQueue) popPChanStats(t task) error {
 		if err != nil {
 			return err
 		}
-		queue.statsLock.Lock()
 		for _, cName := range channels {
 			info, ok := queue.pChanStatisticsInfos[cName]
 			if ok {
@@ -312,7 +312,6 @@ func (queue *dmTaskQueue) popPChanStats(t task) error {
 				}
 			}
 		}
-		queue.statsLock.Unlock()
 	} else {
 		return fmt.Errorf("Proxy dmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
 	}
@@ -640,7 +639,8 @@ func (sched *taskScheduler) collectResultLoop() {
 	defer sched.wg.Done()
 
 	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
-	queryResultMsgStream.AsConsumer(Params.SearchResultChannelNames, Params.ProxySubName)
+	// proxy didn't need to walk through all the search results in channel, because it no longer has client connections.
+	queryResultMsgStream.AsConsumerWithPosition(Params.SearchResultChannelNames, Params.ProxySubName, mqclient.SubscriptionPositionLatest)
 	log.Debug("Proxy", zap.Strings("SearchResultChannelNames", Params.SearchResultChannelNames),
 		zap.Any("ProxySubName", Params.ProxySubName))
 

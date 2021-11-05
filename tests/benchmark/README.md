@@ -263,7 +263,7 @@ The query expression:
 }
 ```
 
-After the execution of the above query is complete, we will get its charts:
+After the execution of the above query, we will get its charts:
 
  <img src="assets/dash.png" />
 

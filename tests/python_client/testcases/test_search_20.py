@@ -37,6 +37,8 @@ entity = gen_entities(1, is_normal=True)
 entities = gen_entities(default_nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
+
+
 # default_binary_query, _ = gen_search_vectors_params(binary_field_name, binary_entities, default_top_k, nq)
 
 
@@ -101,6 +103,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("empty is valid for output_fields")
         if request.param is None:
             pytest.skip("None is valid for output_fields")
+        yield request.param
+
+    @pytest.fixture(scope="function", params=ct.get_invalid_ints)
+    def get_invalid_travel_timestamp(self, request):
+        if request.param == 9999999999:
+            pytest.skip("9999999999 is valid for travel timestamp")
         yield request.param
 
     """
@@ -692,6 +700,44 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": f"Field {output_fields[-1]} not exist"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_param_invalid_travel_timestamp(self, get_invalid_travel_timestamp):
+        """
+        target: test search with invalid travel timestamp
+        method: search with invalid travel timestamp
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, 10)[0]
+        # 2. search with invalid travel timestamp
+        log.info("test_search_param_invalid_travel_timestamp: searching with invalid travel timestamp")
+        invalid_travel_time = get_invalid_travel_timestamp
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            travel_timestamp=invalid_travel_time,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "`travel_timestamp` value %s is illegal" % invalid_travel_time})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("round_decimal", [7, -2, 999, 1.0, None, [1], "string", {}])
+    def test_search_invalid_round_decimal(self, round_decimal):
+        """
+        target: test search with invalid round decimal
+        method: search with invalid round decimal
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, nb=10)[0]
+        # 2. search
+        log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, round_decimal=round_decimal,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"`round_decimal` value {round_decimal} is illegal"})
+
 
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
@@ -740,7 +786,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp,
-                            travel_timestamp=time_stamp-1,
+                            travel_timestamp=time_stamp - 1,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": [],
@@ -1148,7 +1194,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp, _async=_async,
-                            travel_timestamp=time_stamp+1,
+                            travel_timestamp=time_stamp + 1,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -1175,6 +1221,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="debug")
     def test_search_max_dim(self, auto_id, _async):
         """
         target: test search with max configuration
@@ -1632,6 +1679,59 @@ class TestCollectionSearch(TestcaseBase):
             res = res.result()
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
+    @pytest.mark.tag(CaseLabel.L2)
+    def test_search_without_expression(self, auto_id):
+        """
+        target: test search without expression
+        method: 1. create connections,collection
+                2. first insert, and return with timestamp1
+                3. second insert, and return with timestamp2
+                4. search before timestamp1 and timestamp2
+        expected: 1 data inserted at a timestamp could not be searched before it
+                  2 data inserted at a timestamp could be searched after it
+        """
+        # 1. create connection, collection and insert
+        nb = 10
+        collection_w, _, _, insert_ids_1, time_stamp_1 = \
+            self.init_collection_general(prefix, True, nb, auto_id=auto_id, dim=default_dim)[0:5]
+        # 2. insert for the second time
+        log.info("test_search_without_expression: inserting for the second time")
+        _, entities, _, insert_ids_2, time_stamp_2 = cf.insert_data(collection_w, nb, auto_id=auto_id,
+                                                                    dim=default_dim, insert_offset=nb)[0:5]
+        # 3. extract vectors inserted for the second time
+        entities_list = np.array(entities[0]).tolist()
+        vectors = [entities_list[i][-1] for i in range(default_nq)]
+        # 4. search with insert timestamp1
+        log.info("test_search_without_expression: searching collection %s with time_stamp_1 '%d'"
+                 % (collection_w.name, time_stamp_1))
+        search_res = collection_w.search(vectors, default_search_field,
+                                         default_search_params, default_limit,
+                                         travel_timestamp=time_stamp_1,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "ids": insert_ids_1,
+                                                      "limit": default_limit})[0]
+        log.info("test_search_without_expression: checking that data inserted "
+                 "after time_stamp_2 is not searched at time_stamp_1")
+        for i in range(len(search_res)):
+            assert insert_ids_2[i] not in search_res[i].ids
+        # 5. search with insert timestamp2
+        time.sleep(gracefulTime)
+        log.info("test_search_without_expression: searching collection %s with time_stamp_2 '%d'"
+                 % (collection_w.name, time_stamp_2))
+        log.info(time_stamp_2)
+        search_res = collection_w.search(vectors, default_search_field,
+                                         default_search_params, default_limit,
+                                         travel_timestamp=time_stamp_2,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "ids": insert_ids_1 + insert_ids_2,
+                                                      "limit": default_limit})[0]
+        log.info("test_search_without_expression: checking that data inserted "
+                 "after time_stamp_2 is searched at time_stamp_2")
+        for i in range(len(search_res)):
+            assert insert_ids_2[i] in search_res[i].ids
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
     def test_search_with_expression(self, dim, expression, _async):
@@ -1997,6 +2097,37 @@ class TestCollectionSearch(TestcaseBase):
         for t in threads:
             t.join()
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("round_decimal", [0, 1, 2, 3, 4, 5, 6])
+    def test_search_round_decimal(self, round_decimal):
+        """
+        target: test search with invalid round decimal
+        method: search with invalid round decimal
+        expected: raise exception and report the error
+        """
+        import math
+        tmp_nb = 500
+        tmp_nq = 1
+        tmp_limit = 5
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, nb=tmp_nb)[0]
+        # 2. search
+        log.info("test_search_round_decimal: Searching collection %s" % collection_w.name)
+        res, _ = collection_w.search(vectors[:tmp_nq], default_search_field,
+                                     default_search_params, tmp_limit)
+
+        res_round, _ = collection_w.search(vectors[:tmp_nq], default_search_field,
+                                           default_search_params, tmp_limit, round_decimal=round_decimal)
+
+        abs_tol = pow(10, 1 - round_decimal)
+        # log.debug(f'abs_tol: {abs_tol}')
+        for i in range(tmp_limit):
+            dis_expect = round(res[0][i].distance, round_decimal)
+            dis_actual = res_round[0][i].distance
+            # log.debug(f'actual: {dis_actual}, expect: {dis_expect}')
+            # abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
+            assert math.isclose(dis_actual, dis_expect, rel_tol=0, abs_tol=abs_tol)
+
 
 """
 ******************************************************************
@@ -2137,7 +2268,7 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         """
-        top_k = 16385 # max top k is 16384
+        top_k = 16385  # max top k is 16384
         nq = get_nq
         entities, ids = init_data(connect, collection)
         query, _ = gen_search_vectors_params(field_name, entities, top_k, nq)
@@ -2257,7 +2388,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: search collection with the given vectors and tags, check the result
         expected: the length of the result is top_k
         """
@@ -2292,7 +2423,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_flat(self, connect, collection, get_simple_index, get_top_k, get_nq):
         """
-        target: test basic search function, all the search params is correct, change top-k value
+        target: test basic search function, all the search params are correct, change top-k value
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         """
@@ -2309,7 +2440,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         """
@@ -2335,7 +2466,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_index_empty_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: add vectors into collection, search with the given vectors, check the result
         expected: the length of the result is top_k, search collection with partition tag return empty
         """
@@ -2368,7 +2499,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: search collection with the given vectors and tags, check the result
         expected: the length of the result is top_k
         """
@@ -2386,7 +2517,8 @@ class TestSearchBase:
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
-        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type="IP", search_params=search_param)
+        query, _ = gen_search_vectors_params(field_name, entities, top_k, nq, metric_type="IP",
+                                             search_params=search_param)
         connect.load_collection(collection)
         res = connect.search(collection, **query)
         assert check_id_result(res[0], ids[0])
@@ -2538,7 +2670,8 @@ class TestSearchBase:
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
         distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
-        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="JACCARD")
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities,
+                                                default_top_k, nq, metric_type="JACCARD")
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, **query)
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
@@ -2569,7 +2702,8 @@ class TestSearchBase:
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = hamming(query_int_vectors[0], int_vectors[0])
         distance_1 = hamming(query_int_vectors[0], int_vectors[1])
-        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="HAMMING")
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities,
+                                                default_top_k, nq, metric_type="HAMMING")
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, **query)
         assert abs(res[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
@@ -2662,7 +2796,8 @@ class TestSearchBase:
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = tanimoto(query_int_vectors[0], int_vectors[0])
         distance_1 = tanimoto(query_int_vectors[0], int_vectors[1])
-        query, vecs = gen_search_vectors_params(binary_field_name, query_entities, default_top_k, nq, metric_type="TANIMOTO")
+        query, vecs = gen_search_vectors_params(binary_field_name, query_entities,
+                                                default_top_k, nq, metric_type="TANIMOTO")
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, **query)
         assert abs(res[0][0].distance - min(distance_0, distance_1)) <= epsilon
@@ -2744,7 +2879,7 @@ class TestSearchDSL(object):
         method: search vector only
         expected: search status ok, the length of result
         """
-        entities, ids = init_data(connect, collection)
+        init_data(connect, collection)
         connect.load_collection(collection)
         res = connect.search(collection, **default_query)
         assert len(res) == nq

@@ -124,8 +124,11 @@ type Core struct {
 	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error
 	CallReleasePartitionService  func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error
 
-	//dml channels
+	// dml channels used for insert
 	dmlChannels *dmlChannels
+
+	// delta channels used for delete
+	deltaChannels *dmlChannels
 
 	//Proxy manager
 	proxyManager *proxyManager
@@ -925,12 +928,29 @@ func (c *Core) Init() error {
 			return
 		}
 
+		// initialize dml channels used for insert
 		c.dmlChannels = newDmlChannels(c, Params.DmlChannelName, Params.DmlChannelNum)
 
+		// initialize delta channels used for delete, share Params.DmlChannelNum with dmlChannels
+		c.deltaChannels = newDmlChannels(c, Params.DeltaChannelName, Params.DmlChannelNum)
+
 		// recover physical channels for all collections
-		pc := c.MetaTable.ListCollectionPhysicalChannels()
-		c.dmlChannels.AddProducerChannels(pc...)
-		log.Debug("recover all physical channels", zap.Any("chanNames", pc))
+		chanMap := c.MetaTable.ListCollectionPhysicalChannels()
+		for collID, chanNames := range chanMap {
+			c.dmlChannels.AddProducerChannels(chanNames...)
+			log.Debug("recover physical channels", zap.Int64("collID", collID), zap.Any("physical channels", chanNames))
+
+			// TODO: convert physical channel name to delta channel name
+			for _, chanName := range chanNames {
+				deltaChanName, err := ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName)
+				if err != nil {
+					log.Error("failed to convert dml channel name to delta channel name", zap.String("chanName", chanName))
+					return
+				}
+				c.deltaChannels.AddProducerChannels(deltaChanName)
+				log.Debug("recover delta channels", zap.Int64("collID", collID), zap.String("deltaChanName", deltaChanName))
+			}
+		}
 
 		c.chanTimeTick = newTimeTickSync(c)
 		c.chanTimeTick.AddProxy(c.session)

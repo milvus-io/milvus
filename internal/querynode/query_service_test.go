@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"context"
-	"encoding/binary"
 	"math"
 	"math/rand"
 	"testing"
@@ -22,6 +21,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -78,12 +78,12 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 	var searchRawData2 []byte
 	for i, ele := range vec {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
+		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
 		searchRawData1 = append(searchRawData1, buf...)
 	}
 	for i, ele := range vec {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
+		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
 		searchRawData2 = append(searchRawData2, buf...)
 	}
 

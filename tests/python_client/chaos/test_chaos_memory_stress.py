@@ -57,37 +57,28 @@ class TestChaosData:
                 6. release and reload collection, verify search and query is available
         expected: after chaos deleted, load, search and query qre both available
         """
-        c_name = cf.gen_unique_str('chaos_memory')
-        collection_w = construct_from_data(c_name)
+        c_name = 'chaos_memory_nx6DNW4q'
+        collection_w = ApiCollectionWrapper()
+        collection_w.init_collection(c_name)
         log.debug(collection_w.schema)
+        log.debug(collection_w._shards_num)
 
         # apply memory stress
-        apply_memory_stress(chaos_yaml)
+        # apply_memory_stress(chaos_yaml)
 
         # wait memory stress
-        sleep(constants.WAIT_PER_OP * 2)
+        # sleep(constants.WAIT_PER_OP * 2)
 
         # query
         collection_w.release()
         collection_w.load()
         term_expr = f'{ct.default_int64_field_name} in [0, 1, 999, 99]'
-        t0 = datetime.datetime.now()
-        query_res, _ = collection_w.query(term_expr)
-        tt = datetime.datetime.now() - t0
-        log.info(f"assert query: {tt}")
-        assert len(query_res) == 4
-
-        sleep(constants.WAIT_PER_OP * 5)
-
-        # query
-        collection_w.release()
-        collection_w.load()
-        term_expr = f'{ct.default_int64_field_name} in [0, 1, 999, 99]'
-        t0 = datetime.datetime.now()
-        query_res, _ = collection_w.query(term_expr)
-        tt = datetime.datetime.now() - t0
-        log.info(f"assert query: {tt}")
-        assert len(query_res) == 4
+        for i in range(4):
+            t0_query = datetime.datetime.now()
+            query_res, _ = collection_w.query(term_expr)
+            tt_query = datetime.datetime.now() - t0_query
+            log.info(f"{i} query cost: {tt_query}")
+            assert len(query_res) == 4
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
@@ -155,7 +146,7 @@ class TestChaosData:
         collection_w.init_collection(name=c_name,
                                      schema=cf.gen_default_collection_schema(dim=dim), shards_num=1)
 
-        # insert 256000 512 dim entities 512Mi
+        # insert 256000 512 dim entities, size 512Mi
         for i in range(2):
             t0_insert = datetime.datetime.now()
             df = cf.gen_default_dataframe_data(nb=nb // 2, dim=dim)
@@ -172,7 +163,6 @@ class TestChaosData:
         log.info(f'flush {nb * 10} entities cost: {tt_flush}')
 
         # create index
-        # index
         t0_index = datetime.datetime.now()
         index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
                                              index_params=index_params)

@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"sync"
@@ -108,7 +107,7 @@ type SegmentReplica struct {
 func (s *Segment) updatePKRange(pks []int64) {
 	buf := make([]byte, 8)
 	for _, pk := range pks {
-		binary.BigEndian.PutUint64(buf, uint64(pk))
+		common.Endian.PutUint64(buf, uint64(pk))
 		s.pkFilter.Add(buf)
 		if pk > s.maxPK {
 			s.maxPK = pk

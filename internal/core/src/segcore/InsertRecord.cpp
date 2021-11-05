@@ -44,17 +44,14 @@ InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk)
                 this->append_field_data<int32_t>(size_per_chunk);
                 break;
             }
-
             case DataType::INT64: {
                 this->append_field_data<int64_t>(size_per_chunk);
                 break;
             }
-
             case DataType::FLOAT: {
                 this->append_field_data<float>(size_per_chunk);
                 break;
             }
-
             case DataType::DOUBLE: {
                 this->append_field_data<double>(size_per_chunk);
                 break;
@@ -65,4 +62,5 @@ InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk)
         }
     }
 }
+
 }  // namespace milvus::segcore

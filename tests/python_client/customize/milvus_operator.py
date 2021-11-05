@@ -108,7 +108,13 @@ class MilvusOperator(object):
         cus_res.patch(release_name, d_configs)
 
     def wait_for_healthy(self, release_name, namespace='default', timeout=600):
-
+        """
+        Method: wait a milvus instance until healthy or timeout
+        Params:
+            release_name: release name of milvus
+            namespace: namespace that the milvus is running in
+            timeout: default: 600 seconds
+        """
         cus_res = CusResource(kind=self.plural, group=self.group,
                               version=self.version, namespace=namespace)
         starttime = time.time()
@@ -136,35 +142,3 @@ class MilvusOperator(object):
             endpoint = res_object['status']['endpoint']
 
         return endpoint
-
-
-if __name__ == '__main__':
-    namespace = 'chaos-testing'
-    image = "master-20211027-c51155a"
-    name = f'milvus-{image.split("-")[2]}'
-    cus_configs = {'spec.components.image': f'milvusdb/milvus-dev:{name}',
-                   'metadata.namespace': namespace,
-                   'metadata.name': name,
-                   'apiVersion': 'milvus.io/v1alpha1',
-                   'kind': 'MilvusCluster',
-                   'spec.components.queryNode.replicas': 1,
-                   'spec.components.proxy.serviceType': 'LoadBalancer'
-                   }
-
-    milvusOp = MilvusOperator()
-    milvus_instance = milvusOp.install(cus_configs, template=None)
-    result = milvusOp.wait_for_healthy(name, namespace=namespace)
-    endpoint = milvusOp.endpoint(name, namespace=namespace)
-    print(endpoint)
-    log.info(f"install milvus healthy: {result}")
-
-    # n_configs = {'spec.components.queryNode.replicas': 1,
-    #              'spec.components.proxy.serviceType': 'LoadBalancer'
-    #              }
-    # milvusOp.upgrade(name, n_configs, namespace=namespace)
-    # result = milvusOp.wait_for_healthy(name, namespace=namespace)
-    # log.info(f"upgrade milvus healthy: {result}")
-    # endpoint = milvusOp.endpoint(name, namespace=namespace)
-    # print(endpoint)
-
-    # milvusOp.uninstall(name, namespace=namespace)

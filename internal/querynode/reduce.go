@@ -26,10 +26,12 @@ import (
 	"unsafe"
 )
 
+// SearchResult contains a pointer to the search result in C++ memory
 type SearchResult struct {
 	cSearchResult C.CSearchResult
 }
 
+// MarshaledHits contains a pointer to the marshaled hits in C++ memory
 type MarshaledHits struct {
 	cMarshaledHits C.CMarshaledHits
 }

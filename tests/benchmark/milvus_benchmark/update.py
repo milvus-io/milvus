@@ -11,6 +11,7 @@ import json
 
 
 def get_token(url):
+    """ get the request token and return the value """
     rep = requests.get(url)
     data = json.loads(rep.text)
     if 'token' in data:
@@ -19,6 +20,59 @@ def get_token(url):
         token = ''
         print("Can not get token.")
     return token
+
+
+def get_tags(url, token):
+    headers = {'Content-type': "application/json",
+               "charset": "UTF-8",
+               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+               "Authorization": "Bearer %s" % token}
+    try:
+        rep = requests.get(url, headers=headers)
+        data = json.loads(rep.text)
+
+        tags = []
+        if 'tags' in data:
+            tags = data["tags"]
+        else:
+            print("Can not get the tag list")
+        return tags
+    except:
+        print("Can not get the tag list")
+        return []
+
+
+def get_master_tags(tags_list):
+    _list = []
+
+    if not isinstance(tags_list, list):
+        print("tags_list is not a list.")
+        return _list
+
+    for tag in tags_list:
+        if "master" in tag and tag != "master-latest":
+            _list.append(tag)
+    return _list
+
+
+def get_config_digest(url, token):
+    headers = {'Content-type': "application/json",
+               "charset": "UTF-8",
+               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+               "Authorization": "Bearer %s" % token}
+    try:
+        rep = requests.get(url, headers=headers)
+        data = json.loads(rep.text)
+
+        digest = ''
+        if 'config' in data and 'digest' in data["config"]:
+            digest = data["config"]["digest"]
+        else:
+            print("Can not get the digest")
+        return digest
+    except:
+        print("Can not get the digest")
+        return ""
 
 
 def parse_server_tag(server_tag):

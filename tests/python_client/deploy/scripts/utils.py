@@ -64,6 +64,7 @@ def get_collections():
 
 def create_collections_and_insert_data():
     import random
+    import time
     dim = 128
     default_fields = [
         FieldSchema(name="count", dtype=DataType.INT64, is_primary=True),
@@ -87,7 +88,11 @@ def create_collections_and_insert_data():
             ]
         )
         print(f"collection name: {col_name}")
+        print("Get collection entities")
+        start_time = time.time()
         print(f"collection entities: {collection.num_entities}")
+        end_time = time.time()
+        print("Get collection entities time = %.4fs" % (end_time - start_time))
     print(f"\nList collections...")
     print(list_collections())
 
@@ -140,8 +145,7 @@ def load_and_search():
                 print(hit, hit.entity.get("random_value"))
             ids = hits.ids
             print(ids)
-
-            print("###########")
         print("search latency = %.4fs" % (end_time - start_time))
+        print("###########")
         c.release()
     print("search data ends")

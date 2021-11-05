@@ -30,10 +30,12 @@ type Value interface {
 // StringValue type alias for string to implement Value
 type StringValue string
 
+// Serialize serialize the StringValue to byte array.
 func (s StringValue) Serialize() []byte {
 	return []byte(s)
 }
 
+// String return the value of StringValue.
 func (s StringValue) String() string {
 	return string(s)
 }
@@ -41,10 +43,12 @@ func (s StringValue) String() string {
 // BytesValue type alias for byte slice to implement value
 type BytesValue []byte
 
+// Serialize return the byte array.
 func (s BytesValue) Serialize() []byte {
 	return s
 }
 
+// String return the string of byte array.
 func (s BytesValue) String() string {
 	return string(s)
 }

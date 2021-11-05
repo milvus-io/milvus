@@ -95,6 +95,7 @@ func (c *Client) resetConnection() {
 	c.grpc = nil
 }
 
+// NewClient creates a client for DataNode.
 func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
@@ -112,6 +113,7 @@ func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (
 	return client, nil
 }
 
+// Init initializes the client.
 func (c *Client) Init() error {
 	Params.Init()
 	return nil
@@ -182,10 +184,14 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	return ret, err
 }
 
+// Start starts the client.
+// Currently, it does nothing.
 func (c *Client) Start() error {
 	return nil
 }
 
+// Stop stops the client.
+// Currently, it closes the grpc connection with the DataNode.
 func (c *Client) Stop() error {
 	c.cancel()
 	c.grpcMtx.Lock()
@@ -196,7 +202,7 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-// Register dummy
+// Register does nothing.
 func (c *Client) Register() error {
 	return nil
 }

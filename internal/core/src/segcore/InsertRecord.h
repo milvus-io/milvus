@@ -10,14 +10,17 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Schema.h"
-#include "segcore/ConcurrentVector.h"
-#include "segcore/AckResponder.h"
-#include "segcore/Record.h"
+
 #include <memory>
 #include <vector>
 
+#include "common/Schema.h"
+#include "segcore/AckResponder.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/Record.h"
+
 namespace milvus::segcore {
+
 struct InsertRecord {
     std::atomic<int64_t> reserved = 0;
     AckResponder ack_responder_;
@@ -72,4 +75,5 @@ struct InsertRecord {
  private:
     std::vector<std::unique_ptr<VectorBase>> fields_data_;
 };
+
 }  // namespace milvus::segcore

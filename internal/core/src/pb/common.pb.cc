@@ -284,7 +284,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ssued\020\001\022\016\n\nInProgress\020\002\022\014\n\010Finished\020\003\022\n\n"
   "\006Failed\020\004*f\n\014SegmentState\022\024\n\020SegmentStat"
   "eNone\020\000\022\014\n\010NotExist\020\001\022\013\n\007Growing\020\002\022\n\n\006Se"
-  "aled\020\003\022\013\n\007Flushed\020\004\022\014\n\010Flushing\020\005*\323\010\n\007Ms"
+  "aled\020\003\022\013\n\007Flushed\020\004\022\014\n\010Flushing\020\005*\375\010\n\007Ms"
   "gType\022\r\n\tUndefined\020\000\022\024\n\020CreateCollection"
   "\020d\022\022\n\016DropCollection\020e\022\021\n\rHasCollection\020"
   "f\022\026\n\022DescribeCollection\020g\022\023\n\017ShowCollect"
@@ -307,15 +307,16 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "eve\020\372\003\022\023\n\016RetrieveResult\020\373\003\022\024\n\017WatchDmCh"
   "annels\020\374\003\022\025\n\020RemoveDmChannels\020\375\003\022\027\n\022Watc"
   "hQueryChannels\020\376\003\022\030\n\023RemoveQueryChannels"
-  "\020\377\003\022\035\n\030SealedSegmentsChangeInfo\020\200\004\022\020\n\013Se"
-  "gmentInfo\020\330\004\022\r\n\010TimeTick\020\260\t\022\023\n\016QueryNode"
-  "Stats\020\261\t\022\016\n\tLoadIndex\020\262\t\022\016\n\tRequestID\020\263\t"
-  "\022\017\n\nRequestTSO\020\264\t\022\024\n\017AllocateSegment\020\265\t\022"
-  "\026\n\021SegmentStatistics\020\266\t\022\025\n\020SegmentFlushD"
-  "one\020\267\t\022\017\n\nDataNodeTt\020\270\t*\"\n\007DslType\022\007\n\003Ds"
-  "l\020\000\022\016\n\nBoolExprV1\020\001B5Z3github.com/milvus"
-  "-io/milvus/internal/proto/commonpbb\006prot"
-  "o3"
+  "\020\377\003\022\035\n\030SealedSegmentsChangeInfo\020\200\004\022\027\n\022Wa"
+  "tchDeltaChannels\020\201\004\022\020\n\013SegmentInfo\020\330\004\022\017\n"
+  "\nSystemInfo\020\331\004\022\r\n\010TimeTick\020\260\t\022\023\n\016QueryNo"
+  "deStats\020\261\t\022\016\n\tLoadIndex\020\262\t\022\016\n\tRequestID\020"
+  "\263\t\022\017\n\nRequestTSO\020\264\t\022\024\n\017AllocateSegment\020\265"
+  "\t\022\026\n\021SegmentStatistics\020\266\t\022\025\n\020SegmentFlus"
+  "hDone\020\267\t\022\017\n\nDataNodeTt\020\270\t*\"\n\007DslType\022\007\n\003"
+  "Dsl\020\000\022\016\n\nBoolExprV1\020\001B5Z3github.com/milv"
+  "us-io/milvus/internal/proto/commonpbb\006pr"
+  "oto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -332,7 +333,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2482,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2524,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 8, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 8, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -467,7 +468,9 @@ bool MsgType_IsValid(int value) {
     case 510:
     case 511:
     case 512:
+    case 513:
     case 600:
+    case 601:
     case 1200:
     case 1201:
     case 1202:

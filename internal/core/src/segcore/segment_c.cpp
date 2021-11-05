@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cstdint>
 
+#include "log/Log.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Collection.h"
@@ -52,14 +53,14 @@ NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type) {
 void
 DeleteSegment(CSegmentInterface c_segment) {
     // TODO: use dynamic cast, and return c status
+    LOG_SEGCORE_DEBUG_ << "delete segment " << c_segment;
     auto s = (milvus::segcore::SegmentInterface*)c_segment;
-
-    // std::cout << "delete segment " << std::endl;
     delete s;
 }
 
 void
 DeleteSearchResult(CSearchResult search_result) {
+    LOG_SEGCORE_DEBUG_ << "delete search result " << search_result;
     auto res = (milvus::SearchResult*)search_result;
     delete res;
 }

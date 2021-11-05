@@ -65,19 +65,31 @@ type ReplicaInterface interface {
 	// partition
 	// addPartition adds a new partition to collection
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
+	// removePartition removes the partition from collectionReplica
 	removePartition(partitionID UniqueID) error
+	// getPartitionByID returns the partition which id is partitionID
 	getPartitionByID(partitionID UniqueID) (*Partition, error)
+	// hasPartition returns true if collectionReplica has the partition, false otherwise
 	hasPartition(partitionID UniqueID) bool
+	// getPartitionNum returns num of partitions
 	getPartitionNum() int
+	// getSegmentIDs returns segment ids
 	getSegmentIDs(partitionID UniqueID) ([]UniqueID, error)
+	// getSegmentIDsByVChannel returns segment ids which virtual channel is vChannel
 	getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error)
 
 	// segment
+	// addSegment add a new segment to collectionReplica
 	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error
+	// setSegment adds a segment to collectionReplica
 	setSegment(segment *Segment) error
+	// removeSegment removes a segment from collectionReplica
 	removeSegment(segmentID UniqueID) error
+	// getSegmentByID returns the segment which id is segmentID
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
+	// hasSegment returns true if collectionReplica has the segment, false otherwise
 	hasSegment(segmentID UniqueID) bool
+	// getSegmentNum returns num of segments in collectionReplica
 	getSegmentNum() int
 	getSegmentStatistics() []*internalpb.SegmentStats
 
@@ -179,10 +191,10 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 
 // removeCollection removes the collection from collectionReplica
 func (colReplica *collectionReplica) removeCollection(collectionID UniqueID) error {
-	colReplica.mu.Lock()
 	colReplica.queryMu.Lock()
-	defer colReplica.queryMu.Unlock()
+	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
+	defer colReplica.queryMu.Unlock()
 	return colReplica.removeCollectionPrivate(collectionID)
 }
 
@@ -329,10 +341,10 @@ func (colReplica *collectionReplica) addPartitionPrivate(collectionID UniqueID, 
 
 // removePartition removes the partition from collectionReplica
 func (colReplica *collectionReplica) removePartition(partitionID UniqueID) error {
-	colReplica.mu.Lock()
 	colReplica.queryMu.Lock()
-	defer colReplica.queryMu.Unlock()
+	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
+	defer colReplica.queryMu.Unlock()
 	return colReplica.removePartitionPrivate(partitionID)
 }
 

@@ -12,9 +12,9 @@
 package typeutil
 
 import (
-	"encoding/binary"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/spaolacci/murmur3"
 )
 
@@ -32,7 +32,7 @@ func Hash32Uint64(v uint64) (uint32, error) {
 	// need unsafe package to get element byte size
 	/* #nosec G103 */
 	b := make([]byte, unsafe.Sizeof(v))
-	binary.LittleEndian.PutUint64(b, v)
+	common.Endian.PutUint64(b, v)
 	return Hash32Bytes(b)
 }
 

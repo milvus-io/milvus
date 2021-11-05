@@ -143,7 +143,9 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 		for _, test := range invalidInTests {
 			te.Run(test.description, func(t0 *testing.T) {
-				ibn := &insertBufferNode{}
+				ibn := &insertBufferNode{
+					ttMerger: newMergedTimeTickerSender(func(Timestamp) error { return nil }),
+				}
 				rt := ibn.Operate(test.in)
 				assert.Empty(t0, rt)
 			})
@@ -195,6 +197,9 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
 	require.NoError(t, err)
 
+	// trigger log ts
+	iBNode.ttLogger.counter.Store(999)
+
 	flushChan <- flushMsg{
 		msgID:        1,
 		timestamp:    2000,
@@ -202,7 +207,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		collectionID: UniqueID(1),
 	}
 
-	inMsg := GenFlowGraphInsertMsg(insertChannelName)
+	inMsg := genFlowGraphInsertMsg(insertChannelName)
 	var fgMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{fgMsg})
 }
@@ -406,7 +411,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	// Auto flush number of rows set to 2
 
-	inMsg := GenFlowGraphInsertMsg("datanode-03-test-autoflush")
+	inMsg := genFlowGraphInsertMsg("datanode-03-test-autoflush")
 	inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(2)
 	var iMsg flowgraph.Msg = &inMsg
 
@@ -523,7 +528,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		flushPacks = flushPacks[:0]
 		fpMut.Unlock()
 
-		inMsg := GenFlowGraphInsertMsg("datanode-03-test-autoflush")
+		inMsg := genFlowGraphInsertMsg("datanode-03-test-autoflush")
 		inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(2)
 
 		for i := range inMsg.insertMessages {
@@ -728,7 +733,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
 	require.NoError(t, err)
 
-	inMsg := GenFlowGraphInsertMsg(insertChannelName)
+	inMsg := genFlowGraphInsertMsg(insertChannelName)
 	for _, msg := range inMsg.insertMessages {
 		msg.EndTimestamp = 101 // ts valid
 		err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})

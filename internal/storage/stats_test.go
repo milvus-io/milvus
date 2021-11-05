@@ -12,7 +12,6 @@
 package storage
 
 import (
-	"encoding/binary"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -35,7 +34,7 @@ func TestStatsWriter_StatsInt64(t *testing.T) {
 	assert.Equal(t, stats.Min, int64(1))
 	buffer := make([]byte, 8)
 	for _, id := range data {
-		binary.LittleEndian.PutUint64(buffer, uint64(id))
+		common.Endian.PutUint64(buffer, uint64(id))
 		assert.True(t, stats.BF.Test(buffer))
 	}
 

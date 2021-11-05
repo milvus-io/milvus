@@ -129,6 +129,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 	return client, nil
 }
 
+// Init initializes the client
 func (c *Client) Init() error {
 	Params.Init()
 	return nil
@@ -202,6 +203,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	return ret, err
 }
 
+// Start enables the client
 func (c *Client) Start() error {
 	return nil
 }
@@ -511,6 +513,7 @@ func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	return ret.(*datapb.GetFlushedSegmentsResponse), err
 }
 
+// GetMetrics gets all metrics of datacoord
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()

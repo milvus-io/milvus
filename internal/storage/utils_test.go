@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
@@ -64,7 +65,7 @@ func (kv *mockWrongHeaderDataKV) LoadPartial(key string, start, end int64) ([]by
 	header.NextPosition = -1
 
 	buffer := bytes.Buffer{}
-	_ = binary.Write(&buffer, binary.LittleEndian, header)
+	_ = binary.Write(&buffer, common.Endian, header)
 
 	return buffer.Bytes(), nil
 }
@@ -247,7 +248,7 @@ func (kv *mockFailedToGetDescDataKV) LoadPartial(key string, start, end int64) (
 	}
 
 	buf := bytes.Buffer{}
-	_ = binary.Write(&buf, binary.LittleEndian, header)
+	_ = binary.Write(&buf, common.Endian, header)
 	return buf.Bytes(), nil
 }
 
@@ -278,7 +279,7 @@ func (kv *mockLessDescDataKV) LoadPartial(key string, start, end int64) ([]byte,
 	header.EventLength = 20
 
 	buffer := bytes.Buffer{}
-	_ = binary.Write(&buffer, binary.LittleEndian, header)
+	_ = binary.Write(&buffer, common.Endian, header)
 
 	// no event data
 	return buffer.Bytes(), nil
@@ -288,7 +289,7 @@ func (kv *mockLessDescDataKV) LoadPartial(key string, start, end int64) ([]byte,
 		desc.ExtraLength = 2
 		desc.ExtraBytes = []byte{1, 2}
 		buffer := bytes.Buffer{}
-		_ = binary.Write(&buffer, binary.LittleEndian, desc)
+		_ = binary.Write(&buffer, common.Endian, desc)
 		// extra not in json format
 		return buffer.Bytes(), nil
 	*/

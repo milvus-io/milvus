@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package msgstream
 
@@ -506,6 +511,7 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 }
 
 // Seek reset the subscription associated with this consumer to a specific position
+// User has to ensure mq_msgstream is not closed before seek, and the seek position is already written.
 func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	for _, mp := range msgPositions {
 		consumer, ok := ms.consumers[mp.ChannelName]
@@ -516,19 +522,20 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("MsgStream begin to seek", zap.Any("MessageID", messageID))
+		log.Debug("MsgStream begin to seek", zap.Any("MessageID", mp.MsgID))
 		err = consumer.Seek(messageID)
 		if err != nil {
+			log.Debug("Failed to seek", zap.Error(err))
 			return err
 		}
 		log.Debug("MsgStream seek finished", zap.Any("MessageID", messageID))
-		if _, ok := consumer.(*mqclient.RmqConsumer); !ok {
-			log.Debug("MsgStream begin to read one message after seek")
+		if _, ok := consumer.(*mqclient.PulsarConsumer); ok {
+			log.Debug("MsgStream start to pop one message after seek")
 			msg, ok := <-consumer.Chan()
 			if !ok {
 				return errors.New("consumer closed")
 			}
-			log.Debug("MsgStream finish reading one message after seek")
+			log.Debug("MsgStream finish to pop one message after seek")
 			consumer.Ack(msg)
 			if !bytes.Equal(msg.ID().Serialize(), messageID.Serialize()) {
 				err = fmt.Errorf("seek msg not correct")
@@ -875,7 +882,14 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
 
-		runLoop := true
+		// rmq seek behavior (position, ...)
+		// pulsar seek behavior [position, ...)
+		// skip one tt for pulsar
+		_, ok := consumer.(*mqclient.RmqConsumer)
+		runLoop := false
+		if !ok {
+			runLoop = true
+		}
 		for runLoop {
 			select {
 			case <-ms.ctx.Done():

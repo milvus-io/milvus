@@ -43,9 +43,9 @@ pulsar:
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
 
 rocksmq:
-  path: /var/lib/milvus/rdb_data
+  path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
   retentionTimeInMinutes: 4320
-  retentionSizeInMB: 0
+  retentionSizeInMB: 0 # The size of the message saved in rocksmq
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
@@ -152,6 +152,7 @@ msgChannel:
     rootCoordTimeTick: "rootcoord-timetick"
     rootCoordStatistics: "rootcoord-statistics"
     rootCoordDml: "rootcoord-dml"
+    rootCoordDelta: "rootcoord-delta"
     search: "search"
     searchResult: "searchResult"
     proxyTimeTick: "proxyTimeTick"
@@ -163,6 +164,8 @@ msgChannel:
     dataCoordStatistic: "datacoord-statistics-channel"
     dataCoordTimeTick: "datacoord-timetick-channel"
     dataCoordSegmentInfo: "segment-info-channel"
+  # skip replay query channel under failure recovery
+  skipQueryChannelRecovery: "false"
 
   # Sub name generation rule: ${subNamePrefix}-${NodeID}
   subNamePrefix:

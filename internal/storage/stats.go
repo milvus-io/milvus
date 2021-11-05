@@ -12,10 +12,10 @@
 package storage
 
 import (
-	"encoding/binary"
 	"encoding/json"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/milvus-io/milvus/internal/common"
 )
 
 const (
@@ -57,7 +57,7 @@ func (sw *StatsWriter) StatsInt64(fieldID int64, isPrimaryKey bool, msgs []int64
 		stats.BF = bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive)
 		b := make([]byte, 8)
 		for _, msg := range msgs {
-			binary.LittleEndian.PutUint64(b, uint64(msg))
+			common.Endian.PutUint64(b, uint64(msg))
 			stats.BF.Add(b)
 		}
 	}

@@ -19,26 +19,27 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
-type pulsarConsumer struct {
+type PulsarConsumer struct {
 	c          pulsar.Consumer
 	msgChannel chan ConsumerMessage
 	hasSeek    bool
+	AtLatest   bool
 	closeCh    chan struct{}
 	once       sync.Once
 }
 
-func (pc *pulsarConsumer) Subscription() string {
+func (pc *PulsarConsumer) Subscription() string {
 	return pc.c.Subscription()
 }
 
-func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
+func (pc *PulsarConsumer) Chan() <-chan ConsumerMessage {
 	if pc.msgChannel == nil {
 		pc.once.Do(func() {
 			pc.msgChannel = make(chan ConsumerMessage, 256)
 			// this part handles msgstream expectation when the consumer is not seeked
 			// pulsar's default behavior is setting postition to the earliest pointer when client of the same subscription pointer is not acked
 			// yet, our message stream is to setting to the very start point of the topic
-			if !pc.hasSeek {
+			if !pc.hasSeek && !pc.AtLatest {
 				// the concrete value of the MessageID is pulsar.messageID{-1,-1,-1,-1}
 				// but Seek function logic does not allow partitionID -1, See line 618-620 of github.com/apache/pulsar-client-go@v0.5.0 pulsar/consumer_impl.go
 				mid := pulsar.EarliestMessageID()
@@ -68,7 +69,9 @@ func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
 	return pc.msgChannel
 }
 
-func (pc *pulsarConsumer) Seek(id MessageID) error {
+// Seek seek consume position to the pointed messageID,
+// the pointed messageID will be consumed after the seek in pulsar
+func (pc *PulsarConsumer) Seek(id MessageID) error {
 	messageID := id.(*pulsarID).messageID
 	err := pc.c.Seek(messageID)
 	if err == nil {
@@ -77,12 +80,12 @@ func (pc *pulsarConsumer) Seek(id MessageID) error {
 	return err
 }
 
-func (pc *pulsarConsumer) Ack(message ConsumerMessage) {
+func (pc *PulsarConsumer) Ack(message ConsumerMessage) {
 	pm := message.(*pulsarMessage)
 	pc.c.Ack(pm.msg)
 }
 
-func (pc *pulsarConsumer) Close() {
+func (pc *PulsarConsumer) Close() {
 	pc.c.Close()
 	close(pc.closeCh)
 }

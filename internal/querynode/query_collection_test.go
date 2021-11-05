@@ -17,14 +17,17 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -174,12 +177,12 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	var searchRawData2 []byte
 	for i, ele := range vec {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
+		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
 		searchRawData1 = append(searchRawData1, buf...)
 	}
 	for i, ele := range vec {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
+		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
 		searchRawData2 = append(searchRawData2, buf...)
 	}
 
@@ -331,49 +334,49 @@ func TestQueryCollection_TranslateHits(t *testing.T) {
 		case schemapb.DataType_Bool:
 			var buf bytes.Buffer
 			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, binary.LittleEndian, true)
+				err := binary.Write(&buf, common.Endian, true)
 				assert.NoError(t, err)
 			}
 			rawData = append(rawData, buf.Bytes())
 		case schemapb.DataType_Int8:
 			var buf bytes.Buffer
 			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, binary.LittleEndian, int8(i))
+				err := binary.Write(&buf, common.Endian, int8(i))
 				assert.NoError(t, err)
 			}
 			rawData = append(rawData, buf.Bytes())
 		case schemapb.DataType_Int16:
 			var buf bytes.Buffer
 			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, binary.LittleEndian, int16(i))
+				err := binary.Write(&buf, common.Endian, int16(i))
 				assert.NoError(t, err)
 			}
 			rawData = append(rawData, buf.Bytes())
 		case schemapb.DataType_Int32:
 			var buf bytes.Buffer
 			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, binary.LittleEndian, int32(i))
+				err := binary.Write(&buf, common.Endian, int32(i))
 				assert.NoError(t, err)
 			}
 			rawData = append(rawData, buf.Bytes())
 		case schemapb.DataType_Int64:
 			var buf bytes.Buffer
 			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, binary.LittleEndian, int64(i))
+				err := binary.Write(&buf, common.Endian, int64(i))
 				assert.NoError(t, err)
 			}
 			rawData = append(rawData, buf.Bytes())
 		case schemapb.DataType_Float:
 			var buf bytes.Buffer
 			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, binary.LittleEndian, float32(i))
+				err := binary.Write(&buf, common.Endian, float32(i))
 				assert.NoError(t, err)
 			}
 			rawData = append(rawData, buf.Bytes())
 		case schemapb.DataType_Double:
 			var buf bytes.Buffer
 			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, binary.LittleEndian, float64(i))
+				err := binary.Write(&buf, common.Endian, float64(i))
 				assert.NoError(t, err)
 			}
 			rawData = append(rawData, buf.Bytes())
@@ -703,5 +706,84 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 
 		err = qc.adjustByChangeInfo(segmentChangeInfos)
 		assert.Nil(t, err)
+	})
+}
+
+func TestQueryCollection_search_while_release(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	t.Run("test search while release collection", func(t *testing.T) {
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		assert.NoError(t, err)
+
+		queryChannel := genQueryChannel()
+		queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+		queryCollection.queryResultMsgStream.Start()
+
+		msg, err := genSimpleSearchMsg()
+		assert.NoError(t, err)
+
+		// To prevent data race in search trackCtx
+		searchMu := &sync.Mutex{}
+
+		runSearchWhileReleaseCollection := func(wg *sync.WaitGroup) {
+			go func() {
+				_ = queryCollection.streaming.replica.removeCollection(defaultCollectionID)
+				wg.Done()
+			}()
+
+			go func() {
+				searchMu.Lock()
+				_ = queryCollection.search(msg)
+				searchMu.Unlock()
+				wg.Done()
+			}()
+		}
+
+		wg := &sync.WaitGroup{}
+		for i := 0; i < 10; i++ {
+			log.Debug("runSearchWhileReleaseCollection", zap.Any("time", i))
+			wg.Add(2)
+			go runSearchWhileReleaseCollection(wg)
+		}
+		wg.Wait()
+	})
+
+	t.Run("test search while release partition", func(t *testing.T) {
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		assert.NoError(t, err)
+
+		queryChannel := genQueryChannel()
+		queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+		queryCollection.queryResultMsgStream.Start()
+
+		msg, err := genSimpleSearchMsg()
+		assert.NoError(t, err)
+
+		// To prevent data race in search trackCtx
+		searchMu := &sync.Mutex{}
+
+		runSearchWhileReleasePartition := func(wg *sync.WaitGroup) {
+			go func() {
+				_ = queryCollection.streaming.replica.removePartition(defaultPartitionID)
+				wg.Done()
+			}()
+
+			go func() {
+				searchMu.Lock()
+				_ = queryCollection.search(msg)
+				searchMu.Unlock()
+				wg.Done()
+			}()
+		}
+
+		wg := &sync.WaitGroup{}
+		for i := 0; i < 10; i++ {
+			log.Debug("runSearchWhileReleasePartition", zap.Any("time", i))
+			wg.Add(2)
+			go runSearchWhileReleasePartition(wg)
+		}
+		wg.Wait()
 	})
 }

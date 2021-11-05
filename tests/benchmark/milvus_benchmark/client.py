@@ -59,7 +59,6 @@ def time_wrapper(func):
             if rps is not False:
                 return result, _rps
         return result
-
     return wrapper
 
 

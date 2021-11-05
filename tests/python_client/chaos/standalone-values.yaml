@@ -1,0 +1,13 @@
+cluster:
+  enabled: false
+image:
+  all:
+    repository: milvusdb/milvus-dev
+    tag: master-latest
+    pullPolicy: IfNotPresent
+etcd:
+  replicaCount: 1
+minio:
+  mode: standalone
+pulsar:
+  enabled: false

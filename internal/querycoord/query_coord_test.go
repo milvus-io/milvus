@@ -41,6 +41,8 @@ func refreshParams() {
 	Params.StatsChannelName = Params.StatsChannelName + suffix
 	Params.TimeTickChannelName = Params.TimeTickChannelName + suffix
 	Params.MetaRootPath = Params.MetaRootPath + suffix
+	Params.DmlChannelPrefix = "Dml"
+	Params.DeltaChannelPrefix = "delta"
 }
 
 func TestMain(m *testing.M) {

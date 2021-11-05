@@ -1,19 +1,25 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package msgstream
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -21,9 +27,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -315,7 +323,7 @@ func TestMqMsgStream_Chan(t *testing.T) {
 	}
 }
 
-func TestMqMsgStream_Seek(t *testing.T) {
+func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 	f := &fixture{t: t}
 	parameters := f.setup()
 	defer f.teardown()
@@ -354,9 +362,7 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	err := inputStream.Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(outputStream, len(msgPack.Msgs))
 	inputStream.Close()
@@ -377,9 +383,8 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	err := inputStream.Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	receiveMsg(outputStream, len(msgPack.Msgs))
 	inputStream.Close()
 	outputStream.Close()
@@ -400,9 +405,8 @@ func TestStream_PulsarMsgStream_Search(t *testing.T) {
 	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	err := inputStream.Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	receiveMsg(outputStream, len(msgPack.Msgs))
 	inputStream.Close()
 	outputStream.Close()
@@ -422,9 +426,8 @@ func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
 	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	err := inputStream.Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	receiveMsg(outputStream, len(msgPack.Msgs))
 	inputStream.Close()
 	outputStream.Close()
@@ -444,9 +447,8 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	err := inputStream.Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	receiveMsg(outputStream, len(msgPack.Msgs))
 	inputStream.Close()
 	outputStream.Close()
@@ -467,9 +469,8 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	err := inputStream.Broadcast(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
+
 	receiveMsg(outputStream, len(consumerChannels)*len(msgPack.Msgs))
 	inputStream.Close()
 	outputStream.Close()
@@ -489,9 +490,8 @@ func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
 	inputStream := getPulsarInputStream(pulsarAddress, producerChannels, repackFunc)
 	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 	err := inputStream.Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	receiveMsg(outputStream, len(msgPack.Msgs))
 	inputStream.Close()
 	outputStream.Close()
@@ -546,9 +546,8 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 	var output MsgStream = outputStream
 
 	err := (*inputStream).Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	receiveMsg(output, len(msgPack.Msgs)*2)
 	(*inputStream).Close()
 	(*outputStream).Close()
@@ -600,9 +599,8 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	var output MsgStream = outputStream
 
 	err := (*inputStream).Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	receiveMsg(output, len(msgPack.Msgs)*1)
 	(*inputStream).Close()
 	(*outputStream).Close()
@@ -634,9 +632,8 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	var output MsgStream = outputStream
 
 	err := (*inputStream).Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	receiveMsg(output, len(msgPack.Msgs))
 	(*inputStream).Close()
 	(*outputStream).Close()
@@ -662,17 +659,14 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	outputStream := getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	err := inputStream.Broadcast(&msgPack0)
-	if err != nil {
-		log.Fatalf("broadcast error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
+
 	err = inputStream.Produce(&msgPack1)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	err = inputStream.Broadcast(&msgPack2)
-	if err != nil {
-		log.Fatalf("broadcast error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
+
 	receiveMsg(outputStream, len(msgPack1.Msgs))
 	inputStream.Close()
 	outputStream.Close()
@@ -821,17 +815,14 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	outputStream := getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	err := inputStream.Broadcast(&msgPack0)
-	if err != nil {
-		log.Fatalf("broadcast error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
+
 	err = inputStream.Produce(&msgPack1)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	err = inputStream.Broadcast(&msgPack2)
-	if err != nil {
-		log.Fatalf("broadcast error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
+
 	receiveMsg(outputStream, len(msgPack1.Msgs))
 	inputStream.Close()
 	outputStream.Close()
@@ -1065,6 +1056,98 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 
 }
 
+func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	consumerChannels := []string{c}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack := &MsgPack{}
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+
+	for i := 0; i < 10; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+	var seekPosition *internalpb.MsgPosition
+	for i := 0; i < 10; i++ {
+		result := outputStream.Consume()
+		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+		seekPosition = result.EndPositions[0]
+	}
+	outputStream.Close()
+
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumer(consumerChannels, consumerSubName)
+
+	messageID, _ := pulsar.DeserializeMessageID(seekPosition.MsgID)
+	// try to seek to not written position
+	patchMessageID(&messageID, 11)
+
+	p := []*internalpb.MsgPosition{
+		{
+			ChannelName: seekPosition.ChannelName,
+			Timestamp:   seekPosition.Timestamp,
+			MsgGroup:    seekPosition.MsgGroup,
+			MsgID:       messageID.Serialize(),
+		},
+	}
+
+	go func() {
+		time.Sleep(1 * time.Second)
+		outputStream2.Close()
+	}()
+
+	err = outputStream2.Seek(p)
+	assert.Error(t, err)
+}
+
+func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	consumerChannels := []string{c}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack := &MsgPack{}
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+
+	for i := 0; i < 10; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumerWithPosition(consumerChannels, consumerSubName, mqclient.SubscriptionPositionLatest)
+	outputStream2.Start()
+
+	msgPack.Msgs = nil
+	// produce another 10 tsMs
+	for i := 10; i < 20; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+	err = inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+
+	for i := 10; i < 20; i++ {
+		result := outputStream2.Consume()
+		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+	}
+	outputStream2.Close()
+}
+
 /****************************************Rmq test******************************************/
 
 func initRmq(name string) *etcdkv.EtcdKV {
@@ -1159,9 +1242,7 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerGroupName)
 	err := inputStream.Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(outputStream, len(msgPack.Msgs))
 	Close(rocksdbName, inputStream, outputStream, etcdKV)
@@ -1187,17 +1268,13 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	inputStream, outputStream := initRmqTtStream(producerChannels, consumerChannels, consumerSubName)
 
 	err := inputStream.Broadcast(&msgPack0)
-	if err != nil {
-		log.Fatalf("broadcast error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
+
 	err = inputStream.Produce(&msgPack1)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
 	err = inputStream.Broadcast(&msgPack2)
-	if err != nil {
-		log.Fatalf("broadcast error = %v", err)
-	}
+	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(outputStream, len(msgPack1.Msgs))
 	Close(rocksdbName, inputStream, outputStream, etcdKV)
@@ -1618,4 +1695,64 @@ func printMsgPack(msgPack *MsgPack) {
 		}
 	}
 	log.Println("================")
+}
+
+func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
+
+	producerChannels := []string{"insert1"}
+	consumerChannels := []string{"insert1"}
+	consumerSubName := "subInsert"
+
+	rocksdbName := "/tmp/rocksmq_asconsumer_withpos"
+	etcdKV := initRmq(rocksdbName)
+	factory := ProtoUDFactory{}
+
+	rmqClient, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+
+	otherInputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+	otherInputStream.AsProducer([]string{"root_timetick"})
+	otherInputStream.Start()
+	otherInputStream.Produce(getTimeTickMsgPack(999))
+
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
+	inputStream.Start()
+
+	for i := 0; i < 100; i++ {
+		inputStream.Produce(getTimeTickMsgPack(int64(i)))
+	}
+
+	rmqClient2, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumerWithPosition(consumerChannels, consumerSubName, mqclient.SubscriptionPositionLatest)
+	outputStream.Start()
+
+	inputStream.Produce(getTimeTickMsgPack(1000))
+	pack := outputStream.Consume()
+	assert.NotNil(t, pack)
+	assert.Equal(t, 1, len(pack.Msgs))
+	assert.EqualValues(t, 1000, pack.Msgs[0].BeginTs())
+
+	Close(rocksdbName, inputStream, outputStream, etcdKV)
+}
+
+func patchMessageID(mid *pulsar.MessageID, entryID int64) {
+	// use direct unsafe conversion
+	/* #nosec G103 */
+	r := (*iface)(unsafe.Pointer(mid))
+	id := (*messageID)(r.Data)
+	id.entryID = entryID
+}
+
+// unsafe access pointer, same as pulsar.messageID
+type messageID struct {
+	ledgerID     int64
+	entryID      int64
+	batchID      int32
+	partitionIdx int32
+}
+
+// interface struct mapping
+type iface struct {
+	Type, Data unsafe.Pointer
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -95,32 +96,32 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 
 	tests := []*testInfo{
 		{false, false, &mockMsgStreamFactory{false, true},
-			0, "",
+			0, "by-dev-rootcoord-dml_test",
 			0, 0, "", 0,
 			0, 0, "", 0,
 			"SetParamsReturnError"},
 		{true, false, &mockMsgStreamFactory{true, true},
-			0, "",
+			0, "by-dev-rootcoord-dml_test",
 			1, 0, "", 0,
 			1, 1, "", 0,
 			"CollID 0 mismach with seginfo collID 1"},
 		{true, false, &mockMsgStreamFactory{true, true},
-			1, "c1",
-			1, 0, "c2", 0,
-			1, 1, "c3", 0,
+			1, "by-dev-rootcoord-dml_1",
+			1, 0, "by-dev-rootcoord-dml_2", 0,
+			1, 1, "by-dev-rootcoord-dml_3", 0,
 			"chanName c1 mismach with seginfo chanName c2"},
 		{true, false, &mockMsgStreamFactory{true, true},
-			1, "c1",
-			1, 0, "c1", 0,
-			1, 1, "c2", 0,
+			1, "by-dev-rootcoord-dml_1",
+			1, 0, "by-dev-rootcoord-dml_1", 0,
+			1, 1, "by-dev-rootcoord-dml_2", 0,
 			"add normal segments"},
 		{false, false, &mockMsgStreamFactory{true, false},
-			0, "",
+			0, "by-dev-rootcoord-dml",
 			0, 0, "", 0,
 			0, 0, "", 0,
 			"error when newinsertbufernode"},
 		{false, true, &mockMsgStreamFactory{true, false},
-			0, "",
+			0, "by-dev-rootcoord-dml",
 			0, 0, "", 0,
 			0, 0, "", 0,
 			"replica nil"},
@@ -302,7 +303,7 @@ func genBytes() (rawData []byte) {
 	var fvector = [DIM]float32{1, 2}
 	for _, ele := range fvector {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		common.Endian.PutUint32(buf, math.Float32bits(ele))
 		rawData = append(rawData, buf...)
 	}
 
@@ -315,7 +316,7 @@ func genBytes() (rawData []byte) {
 	// Bool
 	var fieldBool = true
 	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.LittleEndian, fieldBool); err != nil {
+	if err := binary.Write(buf, common.Endian, fieldBool); err != nil {
 		panic(err)
 	}
 
@@ -324,7 +325,7 @@ func genBytes() (rawData []byte) {
 	// int8
 	var dataInt8 int8 = 100
 	bint8 := new(bytes.Buffer)
-	if err := binary.Write(bint8, binary.LittleEndian, dataInt8); err != nil {
+	if err := binary.Write(bint8, common.Endian, dataInt8); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint8.Bytes()...)
@@ -339,22 +340,22 @@ func TestBytesReader(t *testing.T) {
 	rawDataReader := bytes.NewReader(rawData)
 
 	var fvector []float32 = make([]float32, 2)
-	err := binary.Read(rawDataReader, binary.LittleEndian, &fvector)
+	err := binary.Read(rawDataReader, common.Endian, &fvector)
 	assert.Nil(t, err)
 	assert.ElementsMatch(t, fvector, []float32{1, 2})
 
 	var bvector []byte = make([]byte, 4)
-	err = binary.Read(rawDataReader, binary.LittleEndian, &bvector)
+	err = binary.Read(rawDataReader, common.Endian, &bvector)
 	assert.Nil(t, err)
 	assert.ElementsMatch(t, bvector, []byte{255, 255, 255, 0})
 
 	var fieldBool bool
-	err = binary.Read(rawDataReader, binary.LittleEndian, &fieldBool)
+	err = binary.Read(rawDataReader, common.Endian, &fieldBool)
 	assert.Nil(t, err)
 	assert.Equal(t, true, fieldBool)
 
 	var dataInt8 int8
-	err = binary.Read(rawDataReader, binary.LittleEndian, &dataInt8)
+	err = binary.Read(rawDataReader, common.Endian, &dataInt8)
 	assert.Nil(t, err)
 	assert.Equal(t, int8(100), dataInt8)
 }

@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -24,6 +23,7 @@ import (
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -677,7 +677,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int32(int16(binary.LittleEndian.Uint16(dataBlob)))
+					data := int32(int16(common.Endian.Uint16(dataBlob)))
 					colData = append(colData, data)
 				}
 			}
@@ -700,7 +700,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int32(binary.LittleEndian.Uint32(dataBlob))
+					data := int32(common.Endian.Uint32(dataBlob))
 					colData = append(colData, data)
 				}
 			}
@@ -723,7 +723,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int64(binary.LittleEndian.Uint64(dataBlob))
+					data := int64(common.Endian.Uint64(dataBlob))
 					colData = append(colData, data)
 				}
 			}
@@ -746,7 +746,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := math.Float32frombits(binary.LittleEndian.Uint32(dataBlob))
+					data := math.Float32frombits(common.Endian.Uint32(dataBlob))
 					colData = append(colData, data)
 				}
 			}
@@ -769,7 +769,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := math.Float64frombits(binary.LittleEndian.Uint64(dataBlob))
+					data := math.Float64frombits(common.Endian.Uint64(dataBlob))
 					colData = append(colData, data)
 				}
 			}

@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
 )
@@ -30,14 +31,14 @@ import (
 func IntToBytes(n int) []byte {
 	tmp := int32(n)
 	bytesBuffer := bytes.NewBuffer([]byte{})
-	binary.Write(bytesBuffer, binary.BigEndian, tmp)
+	binary.Write(bytesBuffer, common.Endian, tmp)
 	return bytesBuffer.Bytes()
 }
 
 func BytesToInt(b []byte) int {
 	bytesBuffer := bytes.NewBuffer(b)
 	var tmp int32
-	binary.Read(bytesBuffer, binary.BigEndian, &tmp)
+	binary.Read(bytesBuffer, common.Endian, &tmp)
 	return int(tmp)
 }
 
@@ -373,6 +374,58 @@ func TestPulsarClient_Consume2(t *testing.T) {
 	assert.Equal(t, 0, total3)
 
 	log.Info("main done")
+}
+
+func TestPulsarClient_Seek(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	defer pc.Close()
+	assert.NoError(t, err)
+	assert.NotNil(t, pc)
+	rand.Seed(time.Now().UnixNano())
+
+	ctx := context.Background()
+	topic := fmt.Sprintf("test-topic-%d", rand.Int())
+	subName := fmt.Sprintf("test-subname-%d", rand.Int())
+
+	producer, err := pc.CreateProducer(ProducerOptions{Topic: topic})
+	assert.Nil(t, err)
+	assert.NotNil(t, producer)
+
+	log.Info("Produce start")
+	var id MessageID
+	arr := []int{1, 2, 3}
+	for _, v := range arr {
+		msg := &ProducerMessage{
+			Payload:    IntToBytes(v),
+			Properties: map[string]string{},
+		}
+		id, err = producer.Send(ctx, msg)
+		assert.Nil(t, err)
+	}
+
+	log.Info("Produced")
+
+	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		Type:                        pulsar.KeyShared,
+		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+	defer consumer.Close()
+	seekID := id.(*pulsarID).messageID
+	consumer.Seek(seekID)
+
+	msgChan := consumer.Chan()
+
+	select {
+	case msg := <-msgChan:
+		assert.Equal(t, 3, BytesToInt(msg.Payload()))
+	case <-time.After(2 * time.Second):
+		log.Info("after 2 seconds")
+	}
 }
 
 func TestPulsarClient_EarliestMessageID(t *testing.T) {

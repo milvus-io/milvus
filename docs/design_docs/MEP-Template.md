@@ -27,14 +27,14 @@ Describe the new thing you want to do in appropriate detail. This may be fairly 
 
 ## Compatibility, Deprecation, and Migration Plan(optional)
 - What impact (if any) will there be on existing users?
-- If we are changing behavior how will we phase out the older behavior?
+- If we are changing behaviors how will we phase out the older behavior?
 - If we need special migration tools, describe them here.
 - When will we remove the existing behavior?
 
 
 ## Test Plan(required)
 
-Describe in few sentences how the MEP will be tested. We are mostly interested in system tests (since unit-tests are specific to implementation details). How will we know that the implementation works as expected? How will we know nothing broke?
+Describe in a few sentences how the MEP will be tested. We are mostly interested in system tests (since unit-tests are specific to implementation details). How will we know that the implementation works as expected? How will we know nothing broke?
 
 ## Rejected Alternatives(optional)
 

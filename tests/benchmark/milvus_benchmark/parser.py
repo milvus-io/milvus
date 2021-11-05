@@ -9,7 +9,7 @@ def operations_parser(operations):
         raise Exception("No operations in suite defined")
     for run_type, run_params in operations.items():
         logger.debug(run_type)
-        return (run_type, run_params)
+        return run_type, run_params
 
 
 def collection_parser(collection_name):
@@ -36,7 +36,7 @@ def collection_parser(collection_name):
         collection_size = int(collection_size) * 1000000000
     dimension = int(tmp[2])
     metric_type = str(tmp[3])
-    return (data_type, collection_size, dimension, metric_type)
+    return data_type, collection_size, dimension, metric_type
 
 
 def parse_ann_collection_name(collection_name):

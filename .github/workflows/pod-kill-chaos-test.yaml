@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pod: [datacoord, datanode, indexcoord, indexnode, proxy, pulsar, querycoord, querynode, rootcoord, etcd, minio]
+        pod: [standalone, datacoord, datanode, indexcoord, indexnode, proxy, pulsar, querycoord, querynode, rootcoord, etcd, minio]
     
     steps:
 
@@ -65,7 +65,8 @@ jobs:
           bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
-          helm install --wait --timeout 360s milvus-chaos milvus/milvus -f cluster-values.yaml  -n=chaos-testing
+          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 360s milvus-chaos milvus/milvus -f cluster-values.yaml  -n=chaos-testing; fi
+          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 360s milvus-chaos milvus/milvus --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
           kubectl get pods -n chaos-testing
           sleep 20s
           kubectl get pods -n chaos-testing
@@ -83,9 +84,9 @@ jobs:
         run: |
           # replace chaos object
           sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/pod_kill\/'/g" constants.py
-          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_podkill.yaml\'/g" constants.py
+          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_kill.yaml\'/g" constants.py
           cat constants.py
-          pytest -s -v test_chaos.py --host 127.0.0.1 || echo "chaos test failed"
+          timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 || echo "chaos test failed"
 
       - name: Milvus E2E Test
         timeout-minutes: 5
@@ -107,8 +108,10 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
+          kubectl config set-context --current --namespace=chaos-testing
           bash scripts/uninstall_milvus.sh
-          helm install --wait --timeout 360s milvus-chaos milvus/milvus -f cluster-values.yaml  -n=chaos-testing
+          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 360s milvus-chaos milvus/milvus -f cluster-values.yaml  -n=chaos-testing; fi
+          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 360s milvus-chaos milvus/milvus --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
           kubectl get pods -n chaos-testing
           sleep 20s
           kubectl get pods -n chaos-testing
@@ -126,7 +129,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
-          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 || echo "data consist test failed"
+          timeout 4m pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 || echo "data consist test failed"
 
       - name: Milvus E2E Test
         timeout-minutes: 5

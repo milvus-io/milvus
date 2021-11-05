@@ -92,6 +92,7 @@ class BaseRunner(object):
 
     # TODO: need to improve
     def insert(self, milvus, collection_name, data_type, dimension, size, ni):
+        """ insert data to collection before testing """
         total_time = 0.0
         rps = 0.0
         ni_time = 0.0

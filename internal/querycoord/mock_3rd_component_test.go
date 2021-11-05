@@ -361,7 +361,7 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 		data.collections = append(data.collections, collectionID)
 		collectionName := funcutil.RandomString(8)
 		for i := int32(0); i < common.DefaultShardsNum; i++ {
-			vChannel := fmt.Sprintf("%s_%d_%d_v", collectionName, collectionID, i)
+			vChannel := fmt.Sprintf("Dml_%s_%d_%d_v", collectionName, collectionID, i)
 			channelInfo := &datapb.VchannelInfo{
 				CollectionID: collectionID,
 				ChannelName:  vChannel,

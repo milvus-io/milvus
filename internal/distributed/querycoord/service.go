@@ -280,30 +280,37 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	return s.queryCoord.ReleaseCollection(ctx, req)
 }
 
+// ShowPartitions shows the partitions in the QueryCoord.
 func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	return s.queryCoord.ShowPartitions(ctx, req)
 }
 
+// GetPartitionStates gets the states of the specified partition.
 func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
 	return s.queryCoord.GetPartitionStates(ctx, req)
 }
 
+// LoadPartitions loads the data of the specified partition in QueryCoord.
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	return s.queryCoord.LoadPartitions(ctx, req)
 }
 
+// ReleasePartitions releases the data of the specified partition in QueryCoord.
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return s.queryCoord.ReleasePartitions(ctx, req)
 }
 
+// CreateQueryChannel creates the channels for querying in QueryCoord.
 func (s *Server) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
 	return s.queryCoord.CreateQueryChannel(ctx, req)
 }
 
+// GetSegmentInfo gets the information of the specified segment from QueryCoord.
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return s.queryCoord.GetSegmentInfo(ctx, req)
 }
 
+// GetMetrics gets the metrics information of QueryCoord.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.queryCoord.GetMetrics(ctx, req)
 }

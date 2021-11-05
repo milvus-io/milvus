@@ -38,14 +38,14 @@ type rootCoordAllocator struct {
 	types.RootCoord
 }
 
-// newRootCoordAllocator get an allocator from RootCoord
+// newRootCoordAllocator gets an allocator from RootCoord
 func newRootCoordAllocator(rootCoordClient types.RootCoord) allocator {
 	return &rootCoordAllocator{
 		RootCoord: rootCoordClient,
 	}
 }
 
-// allocTimestamp allocate a Timestamp
+// allocTimestamp allocates a Timestamp
 // invoking RootCoord `AllocTimestamp`
 func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
 	resp, err := alloc.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
@@ -63,7 +63,7 @@ func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp,
 	return resp.Timestamp, nil
 }
 
-// allocID allocate an `UniqueID` from RootCoord, invoking AllocID grpc
+// allocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
 func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	resp, err := alloc.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{

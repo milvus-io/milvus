@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -725,7 +724,7 @@ func TestSegmentReplica_UpdatePKRange(t *testing.T) {
 		assert.LessOrEqual(t, seg.minPK, c)
 		assert.GreaterOrEqual(t, seg.maxPK, c)
 
-		binary.BigEndian.PutUint64(buf, uint64(c))
+		common.Endian.PutUint64(buf, uint64(c))
 		assert.True(t, seg.pkFilter.Test(buf))
 	}
 }
@@ -767,7 +766,7 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 		assert.LessOrEqual(t, segNormal.minPK, c)
 		assert.GreaterOrEqual(t, segNormal.maxPK, c)
 
-		binary.BigEndian.PutUint64(buf, uint64(c))
+		common.Endian.PutUint64(buf, uint64(c))
 		assert.True(t, segNew.pkFilter.Test(buf))
 		assert.True(t, segNormal.pkFilter.Test(buf))
 

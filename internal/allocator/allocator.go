@@ -146,6 +146,7 @@ type Allocator struct {
 	Role          string
 }
 
+// Start starts the loop of checking whether to synchronize with the global allocator.
 func (ta *Allocator) Start() error {
 	ta.TChan.Init()
 	ta.wg.Add(1)
@@ -153,6 +154,7 @@ func (ta *Allocator) Start() error {
 	return nil
 }
 
+// Init mainly initialize internal members.
 func (ta *Allocator) Init() {
 	ta.ForceSyncChan = make(chan Request, maxConcurrentRequests)
 	ta.Reqs = make(chan Request, maxConcurrentRequests)
@@ -281,6 +283,7 @@ func (ta *Allocator) revokeRequest(err error) {
 	}
 }
 
+// Close mainly stop the internal coroutine and recover resources.
 func (ta *Allocator) Close() {
 	ta.CancelFunc()
 	ta.wg.Wait()
@@ -289,6 +292,7 @@ func (ta *Allocator) Close() {
 	ta.revokeRequest(errors.New(errMsg))
 }
 
+// CleanCache is used to force synchronize with global allocator.
 func (ta *Allocator) CleanCache() {
 	req := &SyncRequest{
 		BaseRequest: BaseRequest{

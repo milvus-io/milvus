@@ -111,7 +111,6 @@ func (pt *ParamTable) Init() {
 	pt.initDefaultIndexName()
 
 	pt.initPulsarMaxMessageSize()
-	pt.initRoleName()
 
 	pt.initMaxTaskNum()
 

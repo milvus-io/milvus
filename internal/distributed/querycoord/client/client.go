@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+// Client is the grpc client of QueryCoord.
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -128,6 +129,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 	return client, nil
 }
 
+// Init initializes QueryCoord's grpc client.
 func (c *Client) Init() error {
 	Params.Init()
 	return nil
@@ -203,10 +205,12 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	return ret, err
 }
 
+// Start starts QueryCoord's client service. But it does nothing here.
 func (c *Client) Start() error {
 	return nil
 }
 
+// Stop stops QueryCoord's grpc client server.
 func (c *Client) Stop() error {
 	c.cancel()
 	c.grpcClientMtx.Lock()
@@ -222,6 +226,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
+// GetComponentStates gets the component states of QueryCoord.
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()

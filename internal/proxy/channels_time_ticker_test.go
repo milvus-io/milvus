@@ -95,34 +95,6 @@ func TestChannelsTimeTickerImpl_close(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func TestChannelsTimeTickerImpl_addPChan(t *testing.T) {
-	interval := time.Millisecond * 10
-	pchanNum := rand.Uint64()%10 + 1
-	pchans := make([]pChan, 0, pchanNum)
-	for i := 0; uint64(i) < pchanNum; i++ {
-		pchans = append(pchans, funcutil.GenRandomStr())
-	}
-	tso := newMockTsoAllocator()
-	ctx := context.Background()
-
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
-	err := ticker.start()
-	assert.Equal(t, nil, err)
-
-	newPChanNum := rand.Uint64()%10 + 1
-	for i := 0; uint64(i) < newPChanNum; i++ {
-		err = ticker.addPChan(funcutil.GenRandomStr())
-		assert.Equal(t, nil, err)
-	}
-
-	defer func() {
-		err := ticker.close()
-		assert.Equal(t, nil, err)
-	}()
-
-	time.Sleep(100 * time.Millisecond)
-}
-
 func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 	interval := time.Millisecond * 10
 	pchanNum := rand.Uint64()%10 + 1
@@ -195,7 +167,7 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 			case <-b:
 				return
 			case <-timer.C:
-				stats, err := ticker.getMinTsStatistics()
+				stats, _, err := ticker.getMinTsStatistics()
 				assert.Equal(t, nil, err)
 				for pchan, ts := range stats {
 					log.Debug("TestChannelsTimeTickerImpl_getLastTick",

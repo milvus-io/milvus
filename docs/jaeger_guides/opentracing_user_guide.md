@@ -18,7 +18,7 @@ See also:
 
 We mainly use jaeger as an implementation of opentracing.
 
-Two request: **Insert Request** and **Search Request** in milvus system is traced at this stage.
+Two requests: **Insert Request** and **Search Request** in milvus system are traced at this stage.
 
 ## Jaeger Home page
 
@@ -26,7 +26,7 @@ Two request: **Insert Request** and **Search Request** in milvus system is trace
 
 ### Lookup by Trace ID
 
-The use of the search box requires configuration of the log collection system. For example, if the log collection system collects the log, if it is an error log, find the Trace ID. Search in jaeger to quickly locate the error. So as to quickly solve the problem
+The use of the search box requires configuration of the log collection system. For example, if the log collection system collects an error log, find the Trace ID. Search in jaeger to quickly locate the error. So as to quickly solve the problem.
 
 ### Search
 
@@ -36,7 +36,7 @@ Filter with service name.
 
 ### Operation
 
-Operation in Service, eg request name, function name.
+Operation in Service, eg. request name, function name.
 
 ### Tags
 
@@ -46,7 +46,7 @@ Set tag to facilitate search. Tag is defined in code.
 
 Filter with time.
 
-### Min Duraton Max Duration
+### Min Duration & Max Duration
 
 The minimum and maximum request duration, you can use this condition to find the time-consuming and short-term requests.
 

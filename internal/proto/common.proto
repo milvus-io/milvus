@@ -134,9 +134,11 @@ enum MsgType {
     WatchQueryChannels = 510;
     RemoveQueryChannels = 511;
     SealedSegmentsChangeInfo = 512;
+    WatchDeltaChannels = 513;
 
     /* DATA SERVICE */
     SegmentInfo = 600;
+    SystemInfo = 601;
 
     /* SYSTEM CONTROL */
     TimeTick = 1200;
