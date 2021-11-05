@@ -59,8 +59,6 @@ class SegmentInterface {
     Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 
     virtual ~SegmentInterface() = default;
-
- protected:
 };
 
 // internal API for DSL calculation

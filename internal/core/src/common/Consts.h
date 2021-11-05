@@ -13,5 +13,6 @@
 
 #include <stdint.h>
 
-const int64_t INVALID_SEG_OFFSET = -1;
 const int64_t INVALID_ID = -1;
+const int64_t INVALID_OFFSET = -1;
+const int64_t INVALID_SEG_OFFSET = -1;
