@@ -385,14 +385,17 @@ func (node *Proxy) SetRootCoordClient(cli types.RootCoord) {
 	node.rootCoord = cli
 }
 
+// SetIndexCoordClient set IndexCoord client for proxy.
 func (node *Proxy) SetIndexCoordClient(cli types.IndexCoord) {
 	node.indexCoord = cli
 }
 
+// SetDataCoordClient set DataCoord client for proxy.
 func (node *Proxy) SetDataCoordClient(cli types.DataCoord) {
 	node.dataCoord = cli
 }
 
+// SetQueryCoordClient set QueryCoord client for proxy.
 func (node *Proxy) SetQueryCoordClient(cli types.QueryCoord) {
 	node.queryCoord = cli
 }
