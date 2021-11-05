@@ -99,6 +99,7 @@ type ReplicaInterface interface {
 	getSegmentStatistics() []*internalpb.SegmentStats
 
 	// excluded segments
+	//  removeExcludedSegments will remove excludedSegments from collectionReplica
 	removeExcludedSegments(collectionID UniqueID)
 	addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo)
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
