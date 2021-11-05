@@ -323,6 +323,8 @@ message LoadBalanceRequest {
   common.MsgBase base = 1;
   repeated int64 source_nodeIDs = 2;
   TriggerCondition balance_reason = 3;
+  repeated int64 dst_nodeIDs = 4;
+  repeated int64 sealed_segmentIDs = 5;
 }
 
 //---------------- common query proto -----------------
