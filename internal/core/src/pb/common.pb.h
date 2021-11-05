@@ -251,6 +251,7 @@ enum MsgType : int {
   WatchQueryChannels = 510,
   RemoveQueryChannels = 511,
   SealedSegmentsChangeInfo = 512,
+  WatchDeltaChannels = 513,
   SegmentInfo = 600,
   SystemInfo = 601,
   TimeTick = 1200,

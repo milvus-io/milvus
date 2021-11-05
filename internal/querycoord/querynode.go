@@ -46,6 +46,7 @@ type Node interface {
 	releasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) error
 
 	watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error
+	watchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest) error
 	//removeDmChannel(collectionID UniqueID, channels []string) error
 
 	hasWatchedQueryChannel(collectionID UniqueID) bool
@@ -410,6 +411,21 @@ func (qn *queryNode) watchDmChannels(ctx context.Context, in *querypb.WatchDmCha
 		return err
 	}
 	err = qn.addDmChannel(in.CollectionID, channels)
+	return err
+}
+
+func (qn *queryNode) watchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest) error {
+	if !qn.isOnline() {
+		return errors.New("WatchDmChannels: queryNode is offline")
+	}
+
+	status, err := qn.client.WatchDeltaChannels(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
 	return err
 }
 

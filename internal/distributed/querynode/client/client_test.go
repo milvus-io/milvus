@@ -57,6 +57,10 @@ func (m *MockQueryNodeClient) WatchDmChannels(ctx context.Context, in *querypb.W
 	return &commonpb.Status{}, m.err
 }
 
+func (m *MockQueryNodeClient) WatchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.err
+}
+
 func (m *MockQueryNodeClient) LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.err
 }
@@ -148,6 +152,9 @@ func Test_NewClient(t *testing.T) {
 
 		r12, err := client.GetMetrics(ctx, nil)
 		retCheck(retNotNil, r12, err)
+
+		r13, err := client.WatchDeltaChannels(ctx, nil)
+		retCheck(retNotNil, r13, err)
 	}
 
 	client.getGrpcClient = func() (querypb.QueryNodeClient, error) {

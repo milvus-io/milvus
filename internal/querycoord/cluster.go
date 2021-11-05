@@ -47,6 +47,7 @@ type Cluster interface {
 	getNumSegments(nodeID int64) (int, error)
 
 	watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error
+	watchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error
 	//TODO:: removeDmChannel
 	getNumDmChannels(nodeID int64) (int, error)
 
@@ -262,7 +263,6 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 		}
 
 		collectionID := in.CollectionID
-		//c.clusterMeta.addCollection(collectionID, in.Schema)
 		err = c.clusterMeta.addDmChannel(collectionID, nodeID, channels)
 		if err != nil {
 			log.Debug("WatchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
@@ -272,6 +272,21 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 		return nil
 	}
 	return errors.New("WatchDmChannels: Can't find query node by nodeID ")
+}
+
+func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error {
+	c.Lock()
+	defer c.Unlock()
+
+	if node, ok := c.nodes[nodeID]; ok {
+		err := node.watchDeltaChannels(ctx, in)
+		if err != nil {
+			log.Debug("WatchDeltaChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
+			return err
+		}
+		return nil
+	}
+	return errors.New("WatchDeltaChannels: Can't find query node by nodeID ")
 }
 
 func (c *queryNodeCluster) hasWatchedQueryChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {

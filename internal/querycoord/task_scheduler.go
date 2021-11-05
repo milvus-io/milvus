@@ -358,6 +358,21 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			excludeNodeIDs:         []int64{},
 		}
 		newTask = watchDmChannelTask
+	case commonpb.MsgType_WatchDeltaChannels:
+		//TODO::trigger condition may be different
+		loadReq := querypb.WatchDeltaChannelsRequest{}
+		err = proto.Unmarshal([]byte(t), &loadReq)
+		if err != nil {
+			return nil, err
+		}
+		watchDeltaChannelTask := &watchDeltaChannelTask{
+			baseTask:                  baseTask,
+			WatchDeltaChannelsRequest: &loadReq,
+			cluster:                   scheduler.cluster,
+			meta:                      scheduler.meta,
+			excludeNodeIDs:            []int64{},
+		}
+		newTask = watchDeltaChannelTask
 	case commonpb.MsgType_WatchQueryChannels:
 		//TODO::trigger condition may be different
 		loadReq := querypb.AddQueryChannelRequest{}
@@ -463,6 +478,8 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 				protoSize = proto.Size(childTask.(*loadSegmentTask).LoadSegmentsRequest)
 			case commonpb.MsgType_WatchDmChannels:
 				protoSize = proto.Size(childTask.(*watchDmChannelTask).WatchDmChannelsRequest)
+			case commonpb.MsgType_WatchDeltaChannels:
+				protoSize = proto.Size(childTask.(*watchDeltaChannelTask).WatchDeltaChannelsRequest)
 			case commonpb.MsgType_WatchQueryChannels:
 				protoSize = proto.Size(childTask.(*watchQueryChannelTask).AddQueryChannelRequest)
 			default:
@@ -816,6 +833,8 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 			redoFunc1()
 		case commonpb.MsgType_WatchDmChannels:
 			redoFunc1()
+		case commonpb.MsgType_WatchDeltaChannels:
+			redoFunc2(err)
 		case commonpb.MsgType_WatchQueryChannels:
 			redoFunc2(err)
 		case commonpb.MsgType_ReleaseSegments:

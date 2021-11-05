@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
@@ -351,6 +352,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	watchDmChannelReqs := make([]*querypb.WatchDmChannelsRequest, 0)
 	channelsToWatch := make([]string, 0)
 	segmentsToLoad := make([]UniqueID, 0)
+	watchDeltaChannelReqs := make([]*querypb.WatchDeltaChannelsRequest, 0)
 	for _, partitionID := range toLoadPartitionIDs {
 		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
 			Base:         lct.Base,
@@ -386,6 +388,27 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 
 			segmentsToLoad = append(segmentsToLoad, segmentID)
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+		}
+
+		// init delta channels for sealed segments.
+		if len(loadSegmentReqs) != 0 && len(watchDeltaChannelReqs) != len(recoveryInfo.Channels) {
+			for _, info := range recoveryInfo.Channels {
+				deltaChannel, err := rootcoord.ConvertChannelName(info.ChannelName, Params.DmlChannelPrefix, Params.DeltaChannelPrefix)
+				if err != nil {
+					return err
+				}
+				deltaInfo := proto.Clone(info).(*datapb.VchannelInfo)
+				deltaInfo.ChannelName = deltaChannel
+				msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
+				msgBase.MsgType = commonpb.MsgType_WatchDeltaChannels
+				watchDeltaRequest := &querypb.WatchDeltaChannelsRequest{
+					Base:         msgBase,
+					CollectionID: collectionID,
+					Infos:        []*datapb.VchannelInfo{deltaInfo},
+				}
+				watchDeltaChannelReqs = append(watchDeltaChannelReqs, watchDeltaRequest)
+			}
+
 		}
 
 		for _, info := range recoveryInfo.Channels {
@@ -427,9 +450,10 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 			}
 		}
+
 	}
 
-	err = assignInternalTask(ctx, collectionID, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, false)
+	err = assignInternalTask(ctx, collectionID, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, watchDeltaChannelReqs, false)
 	if err != nil {
 		log.Warn("loadCollectionTask: assign child task failed", zap.Int64("collectionID", collectionID))
 		lct.setResultInfo(err)
@@ -679,6 +703,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 	loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
 	channelsToWatch := make([]string, 0)
 	watchDmReqs := make([]*querypb.WatchDmChannelsRequest, 0)
+	watchDeltaReqs := make([]*querypb.WatchDeltaChannelsRequest, 0)
 	for _, partitionID := range partitionIDs {
 		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
 			Base:         lpt.Base,
@@ -715,7 +740,28 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 		}
 
+		// init delta channels for sealed segments.
+		if len(loadSegmentReqs) != 0 && len(watchDeltaReqs) != len(recoveryInfo.Channels) {
+			for _, info := range recoveryInfo.Channels {
+				deltaChannel, err := rootcoord.ConvertChannelName(info.ChannelName, Params.DmlChannelPrefix, Params.DeltaChannelPrefix)
+				if err != nil {
+					return err
+				}
+				deltaInfo := proto.Clone(info).(*datapb.VchannelInfo)
+				deltaInfo.ChannelName = deltaChannel
+				msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
+				msgBase.MsgType = commonpb.MsgType_WatchDeltaChannels
+				watchDeltaRequest := &querypb.WatchDeltaChannelsRequest{
+					Base:         msgBase,
+					CollectionID: collectionID,
+					Infos:        []*datapb.VchannelInfo{deltaInfo},
+				}
+				watchDeltaReqs = append(watchDeltaReqs, watchDeltaRequest)
+			}
+		}
+
 		for _, info := range recoveryInfo.Channels {
+			// watch dml channels
 			channel := info.ChannelName
 			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchDmChannels
@@ -729,9 +775,10 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			channelsToWatch = append(channelsToWatch, channel)
 			watchDmReqs = append(watchDmReqs, watchDmRequest)
 			log.Debug("loadPartitionTask: set watchDmChannelsRequests", zap.Any("request", watchDmRequest), zap.Int64("collectionID", collectionID))
+
 		}
 	}
-	err := assignInternalTask(ctx, collectionID, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmReqs, false)
+	err := assignInternalTask(ctx, collectionID, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmReqs, watchDeltaReqs, false)
 	if err != nil {
 		log.Warn("loadPartitionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 		lpt.setResultInfo(err)
@@ -1074,6 +1121,7 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 			reScheduledTask = append(reScheduledTask, watchQueryChannelTask)
 			log.Debug("loadSegmentTask: add a watchQueryChannelTask to RescheduleTasks", zap.Any("task", watchQueryChannelTask))
 		}
+
 	}
 
 	return reScheduledTask, nil
@@ -1300,6 +1348,76 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 	return reScheduledTask, nil
 }
 
+type watchDeltaChannelTask struct {
+	*baseTask
+	*querypb.WatchDeltaChannelsRequest
+	meta           Meta
+	cluster        Cluster
+	excludeNodeIDs []int64
+}
+
+func (wdt *watchDeltaChannelTask) msgBase() *commonpb.MsgBase {
+	return wdt.Base
+}
+
+func (wdt *watchDeltaChannelTask) marshal() ([]byte, error) {
+	return proto.Marshal(wdt.WatchDeltaChannelsRequest)
+}
+
+func (wdt *watchDeltaChannelTask) msgType() commonpb.MsgType {
+	return wdt.Base.MsgType
+}
+
+func (wdt *watchDeltaChannelTask) timestamp() Timestamp {
+	return wdt.Base.Timestamp
+}
+
+func (wdt *watchDeltaChannelTask) updateTaskProcess() {
+	parentTask := wdt.getParentTask()
+	if parentTask == nil {
+		log.Warn("watchDeltaChannel: parentTask should not be nil")
+		return
+	}
+	parentTask.updateTaskProcess()
+}
+
+func (wdt *watchDeltaChannelTask) preExecute(context.Context) error {
+	channelInfos := wdt.Infos
+	channels := make([]string, 0)
+	for _, info := range channelInfos {
+		channels = append(channels, info.ChannelName)
+	}
+	wdt.setResultInfo(nil)
+	log.Debug("start do watchDeltaChannelTask",
+		zap.Strings("deltaChannels", channels),
+		zap.Int64("loaded nodeID", wdt.NodeID),
+		zap.Int64("taskID", wdt.getTaskID()))
+	return nil
+}
+
+func (wdt *watchDeltaChannelTask) execute(ctx context.Context) error {
+	defer func() {
+		wdt.retryCount--
+	}()
+
+	err := wdt.cluster.watchDeltaChannels(wdt.ctx, wdt.NodeID, wdt.WatchDeltaChannelsRequest)
+	if err != nil {
+		log.Warn("watchDeltaChannelTask: watchDeltaChannel occur error", zap.Int64("taskID", wdt.getTaskID()), zap.Error(err))
+		wdt.setResultInfo(err)
+		return err
+	}
+
+	log.Debug("watchDeltaChannelsTask Execute done",
+		zap.Int64("taskID", wdt.getTaskID()))
+	return nil
+}
+
+func (wdt *watchDeltaChannelTask) postExecute(context.Context) error {
+	log.Debug("watchDeltaChannelTask postExecute done",
+		zap.Int64("taskID", wdt.getTaskID()))
+	return nil
+}
+
 type watchQueryChannelTask struct {
 	*baseTask
 	*querypb.AddQueryChannelRequest
@@ -1462,6 +1580,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 
 			findBinlog := false
 			var loadSegmentReq *querypb.LoadSegmentsRequest
+			var watchDeltaChannelReqs []*querypb.WatchDeltaChannelsRequest
 			for _, segmentBinlogs := range recoveryInfo.Binlogs {
 				if segmentBinlogs.SegmentID == segmentID {
 					findBinlog = true
@@ -1483,13 +1602,32 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 					}
 				}
 			}
+			// init delta channels for sealed segments.
+			if loadSegmentReq != nil && len(watchDeltaChannelReqs) != len(recoveryInfo.Channels) {
+				for _, info := range recoveryInfo.Channels {
+					deltaChannel, err := rootcoord.ConvertChannelName(info.ChannelName, Params.DmlChannelPrefix, Params.DeltaChannelPrefix)
+					if err != nil {
+						return err
+					}
+					deltaInfo := proto.Clone(info).(*datapb.VchannelInfo)
+					deltaInfo.ChannelName = deltaChannel
+					msgBase := proto.Clone(ht.Base).(*commonpb.MsgBase)
+					msgBase.MsgType = commonpb.MsgType_WatchDeltaChannels
+					watchDeltaChannelsRequest := &querypb.WatchDeltaChannelsRequest{
+						Base:         msgBase,
+						CollectionID: collectionID,
+						Infos:        []*datapb.VchannelInfo{deltaInfo},
+					}
+					watchDeltaChannelReqs = append(watchDeltaChannelReqs, watchDeltaChannelsRequest)
+				}
+			}
 
 			if !findBinlog {
 				err = fmt.Errorf("segmnet has not been flushed, segmentID is %d", segmentID)
 				ht.setResultInfo(err)
 				return err
 			}
-			err = assignInternalTask(ctx, collectionID, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{loadSegmentReq}, nil, true)
+			err = assignInternalTask(ctx, collectionID, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{loadSegmentReq}, nil, watchDeltaChannelReqs, true)
 			if err != nil {
 				log.Error("handoffTask: assign child task failed", zap.Any("segmentInfo", segmentInfo))
 				ht.setResultInfo(err)
@@ -1591,6 +1729,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 				loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
 				channelsToWatch := make([]string, 0)
 				watchDmChannelReqs := make([]*querypb.WatchDmChannelsRequest, 0)
+				watchDeltaChannelReqs := make([]*querypb.WatchDeltaChannelsRequest, 0)
 
 				dmChannels, err := lbt.meta.getDmChannelsByNodeID(collectionID, nodeID)
 				if err != nil {
@@ -1638,6 +1777,23 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 					}
 
+					// init delta channels for sealed segments.
+					if len(loadSegmentReqs) != 0 && len(watchDeltaChannelReqs) != len(recoveryInfo.Channels) {
+						for _, info := range recoveryInfo.Channels {
+							deltaChannel := info.ChannelName
+							deltaInfo := proto.Clone(info).(*datapb.VchannelInfo)
+							deltaInfo.ChannelName = deltaChannel
+							msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
+							msgBase.MsgType = commonpb.MsgType_WatchDeltaChannels
+							watchDeltaChannelsRequest := &querypb.WatchDeltaChannelsRequest{
+								Base:         msgBase,
+								CollectionID: collectionID,
+								Infos:        []*datapb.VchannelInfo{info},
+							}
+							watchDeltaChannelReqs = append(watchDeltaChannelReqs, watchDeltaChannelsRequest)
+						}
+					}
+
 					for _, channelInfo := range recoveryInfo.Channels {
 						for _, channel := range dmChannels {
 							if channelInfo.ChannelName == channel {
@@ -1682,7 +1838,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						}
 					}
 				}
-				err = assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, true)
+				err = assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, watchDeltaChannelReqs, true)
 				if err != nil {
 					log.Warn("loadBalanceTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 					lbt.setResultInfo(err)
@@ -1900,6 +2056,7 @@ func assignInternalTask(ctx context.Context,
 	cluster Cluster,
 	loadSegmentRequests []*querypb.LoadSegmentsRequest,
 	watchDmChannelRequests []*querypb.WatchDmChannelsRequest,
+	watchDeltaChannelRequests []*querypb.WatchDeltaChannelsRequest,
 	wait bool) error {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
@@ -1974,6 +2131,24 @@ func assignInternalTask(ctx context.Context,
 			parentTask.addChildTask(loadSegmentTask)
 			log.Debug("assignInternalTask: add a loadSegmentTask childTask", zap.Any("task", loadSegmentTask))
 		}
+
+		for _, req := range watchDeltaChannelRequests {
+			ctx = opentracing.ContextWithSpan(context.Background(), sp)
+			watchDeltaRequest := proto.Clone(req).(*querypb.WatchDeltaChannelsRequest)
+			watchDeltaRequest.NodeID = nodeID
+			baseTask := newBaseTask(ctx, parentTask.getTriggerCondition())
+			baseTask.setParentTask(parentTask)
+			watchDeltaTask := &watchDeltaChannelTask{
+				baseTask:                  baseTask,
+				WatchDeltaChannelsRequest: watchDeltaRequest,
+				meta:                      meta,
+				cluster:                   cluster,
+				excludeNodeIDs:            []int64{},
+			}
+			parentTask.addChildTask(watchDeltaTask)
+			log.Debug("assignInternalTask: add a watchDeltaChannelTask childTask", zap.Any("task", watchDeltaTask))
+		}
+
 	}
 
 	for index, nodeID := range watchRequest2Nodes {

@@ -123,6 +123,10 @@ func (client *queryNodeClientMock) WatchDmChannels(ctx context.Context, req *que
 	return client.grpcClient.WatchDmChannels(ctx, req)
 }
 
+func (client *queryNodeClientMock) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
+	return client.grpcClient.WatchDeltaChannels(ctx, req)
+}
+
 func (client *queryNodeClientMock) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	return client.grpcClient.LoadSegments(ctx, req)
 }
