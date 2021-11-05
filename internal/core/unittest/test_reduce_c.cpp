@@ -15,8 +15,8 @@
 #include "segcore/ReduceStructure.h"
 
 TEST(SearchResultPair, Greater) {
-    auto pair1 = SearchResultPair(0, 1.0, nullptr, 0, 0);
-    auto pair2 = SearchResultPair(1, 2.0, nullptr, 0, 0);
+    auto pair1 = SearchResultPair(0, 1.0, nullptr, 0, 0, 10);
+    auto pair2 = SearchResultPair(1, 2.0, nullptr, 1, 0, 10);
     ASSERT_EQ(pair1 > pair2, false);
 
     pair1.primary_key_ = INVALID_ID;
