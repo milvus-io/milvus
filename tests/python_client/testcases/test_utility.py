@@ -703,12 +703,6 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.index_building_progress(c_name)
         assert (0 < res['indexed_rows'] <= nb)
         assert res['total_rows'] == nb
-        # for _ in range(2):
-        #     assert "indexed_rows" in res
-        #     assert res["indexed_rows"] <= nb
-        #     assert res["indexed_rows"] >= 0
-        #     assert "total_rows" in res
-        #     assert res["total_rows"] == nb
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_index_collection_not_existed(self):
