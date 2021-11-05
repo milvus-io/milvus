@@ -146,6 +146,7 @@ func (ri *retentionInfo) retention() error {
 	}
 }
 
+// Stop close channel and stop retention
 func (ri *retentionInfo) Stop() {
 	ri.closeOnce.Do(func() {
 		close(ri.closeCh)
