@@ -23,6 +23,7 @@ type rmqProducer struct {
 	p rocksmq.Producer
 }
 
+// Topic returns the topic of rmq producer
 func (rp *rmqProducer) Topic() string {
 	return rp.p.Topic()
 }
