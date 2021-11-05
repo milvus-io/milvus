@@ -704,7 +704,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
-	key := groupName + "/" + topicName + "/current_id"
+	key := constructCurrentID(topicName, groupName)
 	if !rmq.checkKeyExist(key) {
 		log.Debug("RocksMQ: channel " + key + " not exists")
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)

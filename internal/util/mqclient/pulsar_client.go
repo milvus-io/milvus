@@ -68,10 +68,10 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 
-	pConsumer := &pulsarConsumer{c: consumer, closeCh: make(chan struct{})}
+	pConsumer := &PulsarConsumer{c: consumer, closeCh: make(chan struct{})}
 	// prevent seek to earliest patch applied when using latest position options
 	if options.SubscriptionInitialPosition == SubscriptionPositionLatest {
-		pConsumer.hasSeek = true
+		pConsumer.AtLatest = true
 	}
 
 	return pConsumer, nil
