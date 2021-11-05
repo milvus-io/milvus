@@ -185,7 +185,7 @@ func (rmq *rocksmq) Close() {
 		for _, consumer := range v.([]*Consumer) {
 			err := rmq.DestroyConsumerGroup(consumer.Topic, consumer.GroupName)
 			if err != nil {
-				log.Warn("Rocksmq DestroyConsumerGroup failed!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName), zap.Any("error", err))
+				log.Warn("Failed to destroy consumer group in rocksmq!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName), zap.Any("error", err))
 			}
 			topic = consumer.Topic
 		}
