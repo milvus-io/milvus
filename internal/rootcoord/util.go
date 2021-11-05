@@ -137,6 +137,7 @@ func ToPhysicalChannel(vchannel string) string {
 	return vchannel[:idx]
 }
 
+// ConvertChannelName assembles channel name according to parameters.
 func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
 	chanNameLen := len(chanName)
 	tokenFromLen := len(tokenFrom)
