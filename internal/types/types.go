@@ -59,6 +59,8 @@ type DataNode interface {
 
 	// GetMetrics gets the metrics about DataNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error)
 }
 
 // DataNodeComponent is used by grpc server of DataNode
@@ -220,6 +222,9 @@ type DataCoord interface {
 
 	// GetMetrics gets the metrics about DataCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error)
+	ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error)
+	GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error)
 }
 
 // IndexNode is the interface `indexnode` package implements

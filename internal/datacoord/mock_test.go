@@ -193,6 +193,13 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}, nil
 }
 
+func (c *mockDataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	if c.ch != nil {
+		c.ch <- struct{}{}
+	}
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "not implemented"}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = internalpb.StateCode_Abnormal
 	return nil
@@ -438,4 +445,142 @@ func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.Get
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 	}, nil
+}
+
+type mockCompactionHandler struct {
+	methods map[string]interface{}
+}
+
+func (h *mockCompactionHandler) start() {
+	if f, ok := h.methods["start"]; ok {
+		if ff, ok := f.(func()); ok {
+			ff()
+			return
+		}
+	}
+	panic("not implemented")
+}
+
+func (h *mockCompactionHandler) stop() {
+	if f, ok := h.methods["stop"]; ok {
+		if ff, ok := f.(func()); ok {
+			ff()
+			return
+		}
+	}
+	panic("not implemented")
+}
+
+// execCompactionPlan start to execute plan and return immediately
+func (h *mockCompactionHandler) execCompactionPlan(plan *datapb.CompactionPlan) error {
+	if f, ok := h.methods["execCompactionPlan"]; ok {
+		if ff, ok := f.(func(plan *datapb.CompactionPlan) error); ok {
+			return ff(plan)
+		}
+	}
+	panic("not implemented")
+}
+
+// completeCompaction record the result of a compaction
+func (h *mockCompactionHandler) completeCompaction(result *datapb.CompactionResult) error {
+	if f, ok := h.methods["completeCompaction"]; ok {
+		if ff, ok := f.(func(result *datapb.CompactionResult) error); ok {
+			return ff(result)
+		}
+	}
+	panic("not implemented")
+}
+
+// getCompaction return compaction task. If planId does not exist, return nil.
+func (h *mockCompactionHandler) getCompaction(planID int64) *compactionTask {
+	if f, ok := h.methods["getCompaction"]; ok {
+		if ff, ok := f.(func(planID int64) *compactionTask); ok {
+			return ff(planID)
+		}
+	}
+	panic("not implemented")
+}
+
+// expireCompaction set the compaction state to expired
+func (h *mockCompactionHandler) expireCompaction(ts Timestamp) error {
+	if f, ok := h.methods["expireCompaction"]; ok {
+		if ff, ok := f.(func(ts Timestamp) error); ok {
+			return ff(ts)
+		}
+	}
+	panic("not implemented")
+}
+
+// isFull return true if the task pool is full
+func (h *mockCompactionHandler) isFull() bool {
+	if f, ok := h.methods["isFull"]; ok {
+		if ff, ok := f.(func() bool); ok {
+			return ff()
+		}
+	}
+	panic("not implemented")
+}
+
+// get compaction by signal id and return the number of executing/completed/timeout plans
+func (h *mockCompactionHandler) getCompactionBySignalID(signalID int64) (executing int, completed int, timeout int) {
+	if f, ok := h.methods["getCompactionBySignalID"]; ok {
+		if ff, ok := f.(func(signalID int64) (executing int, completed int, timeout int)); ok {
+			return ff(signalID)
+		}
+	}
+	panic("not implemented")
+}
+
+type mockCompactionTrigger struct {
+	methods map[string]interface{}
+}
+
+// triggerCompaction trigger a compaction if any compaction condition satisfy.
+func (t *mockCompactionTrigger) triggerCompaction(tt *timetravel) error {
+	if f, ok := t.methods["triggerCompaction"]; ok {
+		if ff, ok := f.(func(tt *timetravel) error); ok {
+			return ff(tt)
+		}
+	}
+	panic("not implemented")
+}
+
+// triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
+func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID int64, partitionID int64, segmentID int64, channel string, tt *timetravel) error {
+	if f, ok := t.methods["triggerSingleCompaction"]; ok {
+		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string, tt *timetravel) error); ok {
+			return ff(collectionID, partitionID, segmentID, channel, tt)
+		}
+	}
+	panic("not implemented")
+}
+
+// forceTriggerCompaction force to start a compaction
+func (t *mockCompactionTrigger) forceTriggerCompaction(collectionID int64, tt *timetravel) (UniqueID, error) {
+	if f, ok := t.methods["forceTriggerCompaction"]; ok {
+		if ff, ok := f.(func(collectionID int64, tt *timetravel) (UniqueID, error)); ok {
+			return ff(collectionID, tt)
+		}
+	}
+	panic("not implemented")
+}
+
+func (t *mockCompactionTrigger) start() {
+	if f, ok := t.methods["start"]; ok {
+		if ff, ok := f.(func()); ok {
+			ff()
+			return
+		}
+	}
+	panic("not implemented")
+}
+
+func (t *mockCompactionTrigger) stop() {
+	if f, ok := t.methods["stop"]; ok {
+		if ff, ok := f.(func()); ok {
+			ff()
+			return
+		}
+	}
+	panic("not implemented")
 }

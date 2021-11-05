@@ -54,6 +54,10 @@ func (m *MockDataNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMet
 	return &milvuspb.GetMetricsResponse{}, m.err
 }
 
+func (m *MockDataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.err
+}
+
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
 
@@ -100,6 +104,9 @@ func Test_NewClient(t *testing.T) {
 
 		r5, err := client.GetMetrics(ctx, nil)
 		retCheck(retNotNil, r5, err)
+
+		r6, err := client.Compaction(ctx, nil)
+		retCheck(retNotNil, r6, err)
 	}
 
 	client.getGrpcClient = func() (datapb.DataNodeClient, error) {

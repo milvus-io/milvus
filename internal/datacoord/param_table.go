@@ -66,6 +66,8 @@ type ParamTable struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	EnableCompaction bool
 }
 
 // Params is a package scoped variable of type ParamTable.
@@ -108,6 +110,8 @@ func (p *ParamTable) Init() {
 
 	p.initFlushStreamPosSubPath()
 	p.initStatsStreamPosSubPath()
+
+	p.initEnableCompaction()
 }
 
 // InitOnce ensures param table is a singleton
@@ -270,4 +274,8 @@ func (p *ParamTable) initChannelWatchPrefix() {
 	// WARN: this value should not be put to milvus.yaml. It's a default value for channel watch path.
 	// This will be removed after we reconstruct our config module.
 	p.ChannelWatchSubPath = "channelwatch"
+}
+
+func (p *ParamTable) initEnableCompaction() {
+	p.EnableCompaction = p.ParseBool("datacoord.enableCompaction", false)
 }

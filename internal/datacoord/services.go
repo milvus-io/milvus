@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
 
@@ -343,6 +344,19 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if req.Flushed {
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
 		s.flushCh <- req.SegmentID
+
+		if Params.EnableCompaction {
+			cctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+			defer cancel()
+
+			tt, err := getTimetravel(cctx, s.allocator)
+			if err == nil {
+				if err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
+					segmentID, segment.GetInsertChannel(), tt); err != nil {
+					log.Warn("failed to trigger single compaction", zap.Int64("segmentID", segmentID))
+				}
+			}
+		}
 	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
@@ -389,7 +403,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)
+	segmentIDs := s.meta.GetSegmentsIDOfPartition(collectionID, partitionID)
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2StatsBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2DeltaBinlogs := make(map[UniqueID][]*datapb.DeltaLogInfo)
@@ -505,16 +519,17 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	}
 	var segmentIDs []UniqueID
 	if partitionID < 0 {
-		segmentIDs = s.meta.GetSegmentsOfCollection(collectionID)
+		segmentIDs = s.meta.GetSegmentsIDOfCollection(collectionID)
 	} else {
-		segmentIDs = s.meta.GetSegmentsOfPartition(collectionID, partitionID)
+		segmentIDs = s.meta.GetSegmentsIDOfPartition(collectionID, partitionID)
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
 		s := s.meta.GetSegment(id)
-		if s == nil || s.GetState() != commonpb.SegmentState_Flushed {
+		if s != nil && s.GetState() != commonpb.SegmentState_Flushed {
 			continue
 		}
+		// if this segment == nil, we assume this segment has been compacted and flushed
 		ret = append(ret, id)
 	}
 	resp.Segments = ret
@@ -597,4 +612,103 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		},
 		Response: "",
 	}, nil
+}
+
+func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
+	log.Debug("receive complete compaction request", zap.Int64("planID", req.PlanID), zap.Int64("segmentID", req.GetSegmentID()))
+
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+
+	if s.isClosed() {
+		log.Warn("failed to complete compaction", zap.Int64("planID", req.PlanID),
+			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
+
+		resp.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		return resp, nil
+	}
+
+	if !Params.EnableCompaction {
+		resp.Reason = "compaction disabled"
+		return resp, nil
+	}
+
+	if err := s.compactionHandler.completeCompaction(req); err != nil {
+		log.Error("failed to complete compaction", zap.Int64("planID", req.PlanID), zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, nil
+	}
+
+	log.Debug("success to complete compaction", zap.Int64("planID", req.PlanID))
+	resp.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
+func (s *Server) ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error) {
+	log.Debug("receive manual compaction", zap.Int64("collectionID", req.GetCollectionID()))
+
+	resp := &datapb.ManualCompactionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+
+	if s.isClosed() {
+		log.Warn("failed to execute manual compaction", zap.Int64("collectionID", req.GetCollectionID()),
+			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		return resp, nil
+	}
+
+	if !Params.EnableCompaction {
+		resp.Status.Reason = "compaction disabled"
+		return resp, nil
+	}
+
+	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID, &timetravel{req.Timetravel})
+	if err != nil {
+		log.Error("failed to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+
+	log.Debug("success to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("compactionID", id))
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	resp.CompactionID = id
+	return resp, nil
+}
+
+func (s *Server) GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error) {
+	log.Debug("receive get compaction state request", zap.Int64("compactionID", req.GetCompactionID()))
+	resp := &datapb.GetCompactionStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+
+	if s.isClosed() {
+		log.Warn("failed to get compaction state", zap.Int64("compactionID", req.GetCompactionID()),
+			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		return resp, nil
+	}
+
+	if !Params.EnableCompaction {
+		resp.Status.Reason = "compaction disabled"
+		return resp, nil
+	}
+
+	executing, completed, timeout := s.compactionHandler.getCompactionBySignalID(req.GetCompactionID())
+	if executing != 0 {
+		resp.State = datapb.CompactionState_Executing
+	} else {
+		resp.State = datapb.CompactionState_Completed
+	}
+
+	resp.ExecutingPlanNo = int64(executing)
+	resp.CompletedPlanNo = int64(completed)
+	resp.TimeoutPlanNo = int64(timeout)
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
 }

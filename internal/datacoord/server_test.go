@@ -1304,6 +1304,162 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 }
 
+func TestGetCompactionState(t *testing.T) {
+	Params.EnableCompaction = true
+	t.Run("test get compaction state with new compactionhandler", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateHealthy
+
+		svr.compactionHandler = &mockCompactionHandler{
+			methods: map[string]interface{}{
+				"getCompactionBySignalID": func(signalID int64) (executing, completed, timeout int) {
+					return 0, 1, 0
+				},
+			},
+		}
+
+		resp, err := svr.GetCompactionState(context.Background(), &datapb.GetCompactionStateRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, datapb.CompactionState_Completed, resp.GetState())
+	})
+	t.Run("test get compaction state in running", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateHealthy
+
+		svr.compactionHandler = &mockCompactionHandler{
+			methods: map[string]interface{}{
+				"getCompactionBySignalID": func(signalID int64) (executing, completed, timeout int) {
+					return 3, 2, 1
+				},
+			},
+		}
+
+		resp, err := svr.GetCompactionState(context.Background(), &datapb.GetCompactionStateRequest{CompactionID: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, datapb.CompactionState_Executing, resp.GetState())
+		assert.EqualValues(t, 3, resp.GetExecutingPlanNo())
+		assert.EqualValues(t, 2, resp.GetCompletedPlanNo())
+		assert.EqualValues(t, 1, resp.GetTimeoutPlanNo())
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateStopped
+
+		resp, err := svr.GetCompactionState(context.Background(), &datapb.GetCompactionStateRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.GetStatus().GetReason())
+	})
+}
+
+func TestCompleteCompaction(t *testing.T) {
+	Params.EnableCompaction = true
+	t.Run("test complete compaction successfully", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateHealthy
+
+		svr.compactionHandler = &mockCompactionHandler{
+			methods: map[string]interface{}{
+				"completeCompaction": func(result *datapb.CompactionResult) error {
+					return nil
+				},
+			},
+		}
+		status, err := svr.CompleteCompaction(context.TODO(), &datapb.CompactionResult{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
+
+	t.Run("test complete compaction failure", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateHealthy
+		svr.compactionHandler = &mockCompactionHandler{
+			methods: map[string]interface{}{
+				"completeCompaction": func(result *datapb.CompactionResult) error {
+					return errors.New("mock error")
+				},
+			},
+		}
+		status, err := svr.CompleteCompaction(context.TODO(), &datapb.CompactionResult{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateStopped
+
+		resp, err := svr.CompleteCompaction(context.Background(), &datapb.CompactionResult{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.GetReason())
+	})
+}
+
+func TestManualCompaction(t *testing.T) {
+	Params.EnableCompaction = true
+	t.Run("test manual compaction successfully", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateHealthy
+		svr.compactionTrigger = &mockCompactionTrigger{
+			methods: map[string]interface{}{
+				"forceTriggerCompaction": func(collectionID int64, tt *timetravel) (UniqueID, error) {
+					return 1, nil
+				},
+			},
+		}
+
+		resp, err := svr.ManualCompaction(context.TODO(), &datapb.ManualCompactionRequest{
+			CollectionID: 1,
+			Timetravel:   1,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("test manual compaction failure", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateHealthy
+		svr.compactionTrigger = &mockCompactionTrigger{
+			methods: map[string]interface{}{
+				"forceTriggerCompaction": func(collectionID int64, tt *timetravel) (UniqueID, error) {
+					return 0, errors.New("mock error")
+				},
+			},
+		}
+
+		resp, err := svr.ManualCompaction(context.TODO(), &datapb.ManualCompactionRequest{
+			CollectionID: 1,
+			Timetravel:   1,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+
+	t.Run("test manual compaction with closed server", func(t *testing.T) {
+		svr := &Server{}
+		svr.isServing = ServerStateStopped
+		svr.compactionTrigger = &mockCompactionTrigger{
+			methods: map[string]interface{}{
+				"forceTriggerCompaction": func(collectionID int64, tt *timetravel) (UniqueID, error) {
+					return 1, nil
+				},
+			},
+		}
+
+		resp, err := svr.ManualCompaction(context.TODO(), &datapb.ManualCompactionRequest{
+			CollectionID: 1,
+			Timetravel:   1,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.Status.Reason)
+	})
+}
+
 func TestOptions(t *testing.T) {
 	t.Run("SetRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)

@@ -102,8 +102,12 @@ type Server struct {
 	segmentManager  Manager
 	allocator       allocator
 	cluster         *Cluster
+	sessionManager  *SessionManager
 	channelManager  *ChannelManager
 	rootCoordClient types.RootCoord
+
+	compactionTrigger trigger
+	compactionHandler compactionPlanContext
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -235,6 +239,10 @@ func (s *Server) Start() error {
 	}
 
 	s.allocator = newRootCoordAllocator(s.rootCoordClient)
+	if Params.EnableCompaction {
+		s.createCompactionHandler()
+		s.createCompactionTrigger()
+	}
 
 	s.startSegmentManager()
 	if err = s.initServiceDiscovery(); err != nil {
@@ -260,9 +268,27 @@ func (s *Server) initCluster() error {
 	if err != nil {
 		return err
 	}
-	sessionManager := NewSessionManager(withSessionCreator(s.dataNodeCreator))
-	s.cluster = NewCluster(sessionManager, s.channelManager)
+	s.sessionManager = NewSessionManager(withSessionCreator(s.dataNodeCreator))
+	s.cluster = NewCluster(s.sessionManager, s.channelManager)
 	return nil
+}
+
+func (s *Server) createCompactionHandler() {
+	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator, s.flushCh)
+	s.compactionHandler.start()
+}
+
+func (s *Server) stopCompactionHandler() {
+	s.compactionHandler.stop()
+}
+
+func (s *Server) createCompactionTrigger() {
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator)
+	s.compactionTrigger.start()
+}
+
+func (s *Server) stopCompactionTrigger() {
+	s.compactionTrigger.stop()
 }
 
 func (s *Server) initServiceDiscovery() error {
@@ -624,6 +650,11 @@ func (s *Server) Stop() error {
 	log.Debug("dataCoord server shutdown")
 	s.cluster.Close()
 	s.stopServerLoop()
+
+	if Params.EnableCompaction {
+		s.stopCompactionTrigger()
+		s.stopCompactionHandler()
+	}
 	return nil
 }
 

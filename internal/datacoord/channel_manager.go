@@ -293,3 +293,27 @@ func (c *ChannelManager) Match(nodeID int64, channel string) bool {
 	}
 	return false
 }
+
+// FindWatcher finds the datanode watching the provided channel
+func (c *ChannelManager) FindWatcher(channel string) (int64, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	infos := c.store.GetNodesChannels()
+	for _, info := range infos {
+		for _, channelInfo := range info.Channels {
+			if channelInfo.Name == channel {
+				return info.NodeID, nil
+			}
+		}
+	}
+
+	// channel in buffer
+	bufferInfo := c.store.GetBufferChannelInfo()
+	for _, channelInfo := range bufferInfo.Channels {
+		if channelInfo.Name == channel {
+			return bufferID, errChannelInBuffer
+		}
+	}
+	return 0, errChannelNotWatched
+}

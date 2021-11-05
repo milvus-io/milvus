@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // Response response interface for verification
@@ -113,4 +114,16 @@ func (c *LongTermChecker) Check() {
 func (c *LongTermChecker) Stop() {
 	c.t.Stop()
 	close(c.ch)
+}
+
+func getTimetravel(ctx context.Context, allocator allocator) (*timetravel, error) {
+	ts, err := allocator.allocTimestamp(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	pts, _ := tsoutil.ParseTS(ts)
+	ttpts := pts.Add(-timetravelRange)
+	tt := tsoutil.ComposeTS(ttpts.UnixNano()/int64(time.Millisecond), 0)
+	return &timetravel{tt}, nil
 }
