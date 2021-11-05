@@ -16,7 +16,8 @@ import (
 	"time"
 )
 
-const MaxTimestamp = math.MaxUint64
+// MaxTimestamp is the max timestamp.
+const MaxTimestamp = Timestamp(math.MaxUint64)
 
 // ZeroTime is a zero time.
 var ZeroTime = time.Time{}
