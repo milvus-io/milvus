@@ -55,16 +55,16 @@ DeleteMarshaledHits(CMarshaledHits c_marshaled_hits) {
     delete hits;
 }
 
-void
-PrintSearchResult(char* buf, const milvus::SearchResult* result, int64_t seg_idx, int64_t from, int64_t to) {
-    const int64_t MAXLEN = 32;
-    snprintf(buf + strlen(buf), MAXLEN, "{ seg No.%ld ", seg_idx);
-    for (int64_t i = from; i < to; i++) {
-        snprintf(buf + strlen(buf), MAXLEN, "(%ld, %ld, %f), ", i, result->primary_keys_[i],
-                 result->result_distances_[i]);
-    }
-    snprintf(buf + strlen(buf), MAXLEN, "} ");
-}
+//void
+//PrintSearchResult(char* buf, const milvus::SearchResult* result, int64_t seg_idx, int64_t from, int64_t to) {
+//    const int64_t MAXLEN = 32;
+//    snprintf(buf + strlen(buf), MAXLEN, "{ seg No.%ld ", seg_idx);
+//    for (int64_t i = from; i < to; i++) {
+//        snprintf(buf + strlen(buf), MAXLEN, "(%ld, %ld, %f), ", i, result->primary_keys_[i],
+//                 result->result_distances_[i]);
+//    }
+//    snprintf(buf + strlen(buf), MAXLEN, "} ");
+//}
 
 void
 ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t topk) {
@@ -78,11 +78,9 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
 
     // reduce search results
     for (int64_t qi = 0; qi < nq; qi++) {
-        char buf[4096] = {'\0'};
         std::vector<SearchResultPair> result_pairs;
         int64_t base_offset = qi * topk;
         for (int j = 0; j < num_segments; ++j) {
-            char tmp[4096] = {'\0'};
             auto search_result = search_results[j];
             AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
             AssertInfo(search_result->primary_keys_.size() == nq * topk, "incorrect search result primary key size");
@@ -91,8 +89,6 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
             auto distance = search_result->result_distances_[base_offset];
             result_pairs.push_back(
                 SearchResultPair(primary_key, distance, search_result, j, base_offset, base_offset + topk));
-            PrintSearchResult(tmp, search_result, j, base_offset, base_offset + topk);
-            std::cout << tmp << std::endl;
         }
         int64_t curr_offset = base_offset;
 
@@ -111,23 +107,6 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
             std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
             auto& pilot = result_pairs[0];
             auto index = pilot.index_;
-            if (num_segments > 1) {
-                auto& pilot2 = result_pairs[1];
-                snprintf(buf, sizeof(buf),
-                         "pilot.offset_ out of bound, num_of_segments = %ld, curr_offset = %ld,"
-                         "(%ld, %ld, %ld), (%ld, %ld, %ld, %f), (%ld, %ld, %ld, %f) ",
-                         num_segments, curr_offset, nq, topk, base_offset, pilot.index_, pilot.offset_,
-                         pilot.primary_key_, pilot.distance_, pilot2.index_, pilot2.offset_, pilot2.primary_key_,
-                         pilot2.distance_);
-            } else {
-                snprintf(buf, sizeof(buf),
-                         "pilot.offset_ out of bound, num_of_segments = %ld,"
-                         "curr_offset = %ld, (%ld, %ld, %ld), (%ld, %ld, %ld, %f) ",
-                         num_segments, curr_offset, nq, topk, base_offset, pilot.index_, pilot.offset_,
-                         pilot.primary_key_, pilot.distance_);
-            }
-            PrintSearchResult(buf, pilot.search_result_, pilot.index_, base_offset, base_offset + topk);
-            AssertInfo(pilot.offset_ - base_offset <= topk, buf);
             int64_t curr_pk = pilot.primary_key_;
             // remove duplicates
             if (curr_pk == INVALID_ID || pk_set.count(curr_pk) == 0) {
