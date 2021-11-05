@@ -52,8 +52,8 @@ func Int64ToBytes(v int64) []byte {
 	return b
 }
 
-// BytesToUint64 converts a byte slice to uint64.
-func BytesToUint64(b []byte) (uint64, error) {
+// BigEndianBytesToUint64 converts a byte slice (big endian) to uint64.
+func BigEndianBytesToUint64(b []byte) (uint64, error) {
 	if len(b) != 8 {
 		return 0, fmt.Errorf("Failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
 	}
@@ -62,12 +62,25 @@ func BytesToUint64(b []byte) (uint64, error) {
 	return binary.BigEndian.Uint64(b), nil
 }
 
+// Uint64ToBytesBigEndian converts uint64 to a byte slice(big endian).
+func Uint64ToBytesBigEndian(v uint64) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, v)
+	return b
+}
+
+// BytesToUint64 converts a byte slice to uint64.
+func BytesToUint64(b []byte) (uint64, error) {
+	if len(b) != 8 {
+		return 0, fmt.Errorf("Failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
+	}
+	return common.Endian.Uint64(b), nil
+}
+
 // Uint64ToBytes converts uint64 to a byte slice.
 func Uint64ToBytes(v uint64) []byte {
 	b := make([]byte, 8)
-
-	// do not use little or common endian for compatibility issues(the msgid used in rocksmq is using this)
-	binary.BigEndian.PutUint64(b, v)
+	common.Endian.PutUint64(b, v)
 	return b
 }
 
