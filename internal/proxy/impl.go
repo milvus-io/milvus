@@ -179,6 +179,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 	return cct.result, nil
 }
 
+// DropCollection drop a collection.
 func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
