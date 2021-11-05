@@ -31,6 +31,7 @@ type SearchResult struct {
 	cSearchResult C.CSearchResult
 }
 
+// MarshaledHits contains a pointer to the marshaled hits in C++ memory
 type MarshaledHits struct {
 	cMarshaledHits C.CMarshaledHits
 }
