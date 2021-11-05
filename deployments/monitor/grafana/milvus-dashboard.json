@@ -2462,7 +2462,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of drop index",
+      "description": "per-minute increasing rate of drop_index requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
