@@ -22,6 +22,7 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -53,12 +54,8 @@ func TestReloadClusterFromKV(t *testing.T) {
 		cluster.reloadFromKV()
 
 		nodeID := queryNode.queryNodeID
-		for {
-			_, err = cluster.getNodeByID(nodeID)
-			if err == nil {
-				break
-			}
-		}
+		waitQueryNodeOnline(cluster, nodeID)
+
 		queryNode.stop()
 		err = removeNodeSession(queryNode.queryNodeID)
 		assert.Nil(t, err)
@@ -128,6 +125,22 @@ func TestGrpcRequest(t *testing.T) {
 		session:     clusterSession,
 	}
 
+	t.Run("Test GetNodeInfoByIDWithNodeNotExist", func(t *testing.T) {
+		_, err := cluster.getNodeInfoByID(defaultQueryNodeID)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test GetSegmentInfoByNodeWithNodeNotExist", func(t *testing.T) {
+		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			CollectionID: defaultCollectionID,
+		}
+		_, err = cluster.getSegmentInfoByNode(baseCtx, defaultQueryNodeID, getSegmentInfoReq)
+		assert.NotNil(t, err)
+	})
+
 	node, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 	nodeSession := node.session
@@ -149,6 +162,7 @@ func TestGrpcRequest(t *testing.T) {
 		loadSegmentReq := &querypb.LoadSegmentsRequest{
 			DstNodeID: nodeID,
 			Infos:     []*querypb.SegmentLoadInfo{segmentLoadInfo},
+			Schema:    genCollectionSchema(defaultCollectionID, false),
 		}
 		err := cluster.loadSegments(baseCtx, nodeID, loadSegmentReq)
 		assert.Nil(t, err)
@@ -191,7 +205,81 @@ func TestGrpcRequest(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	node.stop()
+	t.Run("Test GetSegmentInfo", func(t *testing.T) {
+		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			CollectionID: defaultCollectionID,
+		}
+		_, err = cluster.getSegmentInfo(baseCtx, getSegmentInfoReq)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test GetSegmentInfoByNode", func(t *testing.T) {
+		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			CollectionID: defaultCollectionID,
+		}
+		_, err = cluster.getSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
+		assert.Nil(t, err)
+	})
+
+	node.getSegmentInfos = returnFailedGetSegmentInfoResult
+
+	t.Run("Test GetSegmentInfoFailed", func(t *testing.T) {
+		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			CollectionID: defaultCollectionID,
+		}
+		_, err = cluster.getSegmentInfo(baseCtx, getSegmentInfoReq)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Test GetSegmentInfoByNodeFailed", func(t *testing.T) {
+		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			CollectionID: defaultCollectionID,
+		}
+		_, err = cluster.getSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
+		assert.NotNil(t, err)
+	})
+
+	node.getSegmentInfos = returnSuccessGetSegmentInfoResult
+
+	t.Run("Test GetNodeInfoByID", func(t *testing.T) {
+		res, err := cluster.getNodeInfoByID(nodeID)
+		assert.Nil(t, err)
+		assert.NotNil(t, res)
+	})
+
+	node.getMetrics = returnFailedGetMetricsResult
+
+	t.Run("Test GetNodeInfoByIDFailed", func(t *testing.T) {
+		_, err := cluster.getNodeInfoByID(nodeID)
+		assert.NotNil(t, err)
+	})
+
+	node.getMetrics = returnSuccessGetMetricsResult
+
+	cluster.stopNode(nodeID)
+	t.Run("Test GetSegmentInfoByNodeAfterNodeStop", func(t *testing.T) {
+		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			CollectionID: defaultCollectionID,
+		}
+		_, err = cluster.getSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
+		assert.NotNil(t, err)
+	})
+
 	err = removeAllSession()
 	assert.Nil(t, err)
 }
