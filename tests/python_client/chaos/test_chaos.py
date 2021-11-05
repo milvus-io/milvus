@@ -29,6 +29,7 @@ def assert_statistic(checkers, expectations={}):
             expect(succ_rate > 0.90 or total > 2,
                    f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
 
+
 def record_results(checkers):
     res = ""
     for k in checkers.keys():
@@ -37,8 +38,6 @@ def record_results(checkers):
         total = checkers[k].total()
         res += f"{str(k)} succ rate {succ_rate}, total: {total}\n"
     return res
-
-
 
 
 class TestChaosBase:
