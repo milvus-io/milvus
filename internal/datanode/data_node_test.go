@@ -132,7 +132,7 @@ func TestDataNode(t *testing.T) {
 		node2 := newIDLEDataNodeMock(ctx)
 		err = node2.Start()
 		assert.Nil(t, err)
-		dmChannelName := "fake-dm-channel-test-NewDataSyncService"
+		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-NewDataSyncService"
 
 		vchan := &datapb.VchannelInfo{
 			CollectionID:      1,
@@ -160,7 +160,7 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test FlushSegments", func(t *testing.T) {
-		dmChannelName := "fake-dm-channel-test-FlushSegments"
+		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
 
 		node1 := newIDLEDataNodeMock(context.TODO())
 		err = node1.Init()
@@ -368,9 +368,9 @@ func TestDataNode(t *testing.T) {
 			collID        UniqueID
 			dmChannelName string
 		}{
-			{1, "fake-dm-backgroundgc-1"},
-			{2, "fake-dm-backgroundgc-2"},
-			{3, "fake-dm-backgroundgc-3"},
+			{1, "fake-by-dev-rootcoord-dml-backgroundgc-1"},
+			{2, "fake-by-dev-rootcoord-dml-backgroundgc-2"},
+			{3, "fake-by-dev-rootcoord-dml-backgroundgc-3"},
 			{4, ""},
 			{1, ""},
 		}
@@ -394,7 +394,7 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test ReleaseDataSyncService", func(t *testing.T) {
-		dmChannelName := "fake-dm-channel-test-NewDataSyncService"
+		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-NewDataSyncService"
 
 		vchan := &datapb.VchannelInfo{
 			CollectionID:      1,
@@ -485,12 +485,12 @@ func TestWatchChannel(t *testing.T) {
 	t.Run("test watch channel", func(t *testing.T) {
 		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		require.NoError(t, err)
-		oldInvalidCh := "datanode-etcd-test-channel-invalid"
+		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
 		path := fmt.Sprintf("%s/%d/%s", Params.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))
 		assert.NoError(t, err)
 
-		ch := fmt.Sprintf("datanode-etcd-test-channel_%d", rand.Int31())
+		ch := fmt.Sprintf("datanode-etcd-test-by-dev-rootcoord-dml-channel_%d", rand.Int31())
 		path = fmt.Sprintf("%s/%d/%s", Params.ChannelWatchSubPath, node.NodeID, ch)
 		c := make(chan struct{})
 		go func() {

@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
+
+type mockFactory struct {
+	msgstream.Factory
+}
 
 func TestFlowGraph_DDNode_newDDNode(te *testing.T) {
 	tests := []struct {
@@ -65,12 +70,15 @@ func TestFlowGraph_DDNode_newDDNode(te *testing.T) {
 			}
 
 			ddNode := newDDNode(
+				context.Background(),
 				make(chan UniqueID),
 				test.inCollID,
 				&datapb.VchannelInfo{
 					FlushedSegments:   fi,
 					UnflushedSegments: []*datapb.SegmentInfo{di},
+					ChannelName:       "by-dev-rootcoord-dml-test",
 				},
+				msgstream.NewPmsFactory(),
 			)
 
 			flushedSegIDs := make([]int64, 0)
@@ -131,9 +139,13 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 
 		for _, test := range tests {
 			te.Run(test.description, func(t *testing.T) {
+				factory := msgstream.NewPmsFactory()
+				deltaStream, err := factory.NewMsgStream(context.Background())
+				assert.Nil(t, err)
 				ddn := ddNode{
-					clearSignal:  test.ddnClearSignal,
-					collectionID: test.ddnCollID,
+					clearSignal:    test.ddnClearSignal,
+					collectionID:   test.ddnCollID,
+					deltaMsgStream: deltaStream,
 				}
 
 				var dropCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
@@ -186,10 +198,14 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		for _, test := range tests {
 			te.Run(test.description, func(t *testing.T) {
 				fs := &datapb.SegmentInfo{ID: test.ddnFlushedSegment}
+				factory := msgstream.NewPmsFactory()
+				deltaStream, err := factory.NewMsgStream(context.Background())
+				assert.Nil(t, err)
 				// Prepare ddNode states
 				ddn := ddNode{
 					flushedSegments: []*datapb.SegmentInfo{fs},
 					collectionID:    test.ddnCollID,
+					deltaMsgStream:  deltaStream,
 				}
 				FilterThreshold = test.threshold
 
@@ -228,9 +244,13 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 
 		for _, test := range tests {
 			te.Run(test.description, func(t *testing.T) {
+				factory := msgstream.NewPmsFactory()
+				deltaStream, err := factory.NewMsgStream(context.Background())
+				assert.Nil(t, err)
 				// Prepare ddNode states
 				ddn := ddNode{
-					collectionID: test.ddnCollID,
+					collectionID:   test.ddnCollID,
+					deltaMsgStream: deltaStream,
 				}
 
 				// Prepare delete messages
@@ -286,9 +306,13 @@ func TestFlowGraph_DDNode_filterMessages(te *testing.T) {
 				s := &datapb.SegmentInfo{ID: id}
 				fs = append(fs, s)
 			}
+			factory := msgstream.NewPmsFactory()
+			deltaStream, err := factory.NewMsgStream(context.Background())
+			assert.Nil(t, err)
 			// Prepare ddNode states
 			ddn := ddNode{
 				flushedSegments: fs,
+				deltaMsgStream:  deltaStream,
 			}
 
 			for k, v := range test.ddnSegID2Ts {
@@ -346,7 +370,10 @@ func TestFlowGraph_DDNode_isFlushed(te *testing.T) {
 				s := &datapb.SegmentInfo{ID: id}
 				fs = append(fs, s)
 			}
-			ddn := &ddNode{flushedSegments: fs}
+			factory := msgstream.NewPmsFactory()
+			deltaStream, err := factory.NewMsgStream(context.Background())
+			assert.Nil(t, err)
+			ddn := &ddNode{flushedSegments: fs, deltaMsgStream: deltaStream}
 			assert.Equal(t, test.expectedOut, ddn.isFlushed(test.inSeg))
 		})
 	}
