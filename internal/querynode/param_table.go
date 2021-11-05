@@ -84,6 +84,9 @@ type ParamTable struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	// recovery
+	skipQueryChannelRecovery bool
 }
 
 // Params is a package scoped variable of type ParamTable.
@@ -144,6 +147,8 @@ func (p *ParamTable) Init() {
 	p.initKnowhereSimdType()
 
 	p.initRoleName()
+
+	p.initSkipQueryChannelRecovery()
 }
 
 func (p *ParamTable) initCacheSize() {
@@ -339,4 +344,8 @@ func (p *ParamTable) initKnowhereSimdType() {
 
 func (p *ParamTable) initRoleName() {
 	p.RoleName = "querynode"
+}
+
+func (p *ParamTable) initSkipQueryChannelRecovery() {
+	p.skipQueryChannelRecovery = p.ParseBool("msgChannel.skipQueryChannelRecovery", false)
 }

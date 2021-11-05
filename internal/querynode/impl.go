@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -133,21 +134,29 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	}
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
-	sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
-	if in.SeekPosition == nil || len(in.SeekPosition.MsgID) == 0 {
-		// as consumer
-		log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+
+	if Params.skipQueryChannelRecovery {
+		log.Debug("Skip query channel seek back ", zap.Strings("channels", consumeChannels),
+			zap.String("seek position", string(in.SeekPosition.MsgID)),
+			zap.Uint64("ts", in.SeekPosition.Timestamp))
+		sc.queryMsgStream.AsConsumerWithPosition(consumeChannels, consumeSubName, mqclient.SubscriptionPositionLatest)
 	} else {
-		// seek query channel
-		err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{in.SeekPosition})
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
+		sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
+		if in.SeekPosition == nil || len(in.SeekPosition.MsgID) == 0 {
+			// as consumer
+			log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+		} else {
+			// seek query channel
+			err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{in.SeekPosition})
+			if err != nil {
+				status := &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				}
+				return status, err
 			}
-			return status, err
+			log.Debug("querynode seek query channel: ", zap.Any("consumeChannels", consumeChannels))
 		}
-		log.Debug("querynode seek query channel: ", zap.Any("consumeChannels", consumeChannels))
 	}
 
 	// add result channel
