@@ -183,7 +183,7 @@ message HasCollectionRequest {
 }
 ```
 
-The server finds the collection through **collection_name** and judge whether the collection exists.
+The server finds the collection through **collection_name** and checks whether the collection exists.
 
 **Returns:**
 
