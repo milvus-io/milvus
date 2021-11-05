@@ -194,17 +194,6 @@ func (it *insertTask) getChannels() ([]pChan, error) {
 			return nil, err
 		}
 		channels, err = it.chMgr.getChannels(collID)
-		if err == nil {
-			for _, pchan := range channels {
-				err := it.chTicker.addPChan(pchan)
-				if err != nil {
-					log.Warn("failed to add pchan to channels time ticker",
-						zap.Error(err),
-						zap.Int64("collection id", collID),
-						zap.String("pchan", pchan))
-				}
-			}
-		}
 	}
 	return channels, err
 }
@@ -729,7 +718,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		IDs: &schemapb.IDs{
 			IdField: nil,
 		},
-		Timestamp: it.BeginTs(),
+		Timestamp: it.EndTs(),
 	}
 
 	collectionName := it.BaseInsertTask.CollectionName
@@ -1025,17 +1014,6 @@ func (it *insertTask) Execute(ctx context.Context) error {
 			it.result.Status.Reason = err.Error()
 			return err
 		}
-		channels, err := it.chMgr.getChannels(collID)
-		if err == nil {
-			for _, pchan := range channels {
-				err := it.chTicker.addPChan(pchan)
-				if err != nil {
-					log.Warn("failed to add pchan to channels time ticker",
-						zap.Error(err),
-						zap.String("pchan", pchan))
-				}
-			}
-		}
 		stream, err = it.chMgr.getDMLStream(collID)
 		if err != nil {
 			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -1266,11 +1244,6 @@ func (dct *dropCollectionTask) Execute(ctx context.Context) error {
 	dct.result, err = dct.rootCoord.DropCollection(ctx, dct.DropCollectionRequest)
 	if err != nil {
 		return err
-	}
-
-	pchans, _ := dct.chMgr.getChannels(collID)
-	for _, pchan := range pchans {
-		_ = dct.chTicker.removePChan(pchan)
 	}
 
 	_ = dct.chMgr.removeDMLStream(collID)
@@ -4642,17 +4615,6 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 			dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			dt.result.Status.Reason = err.Error()
 			return err
-		}
-		channels, err := dt.chMgr.getChannels(collID)
-		if err == nil {
-			for _, pchan := range channels {
-				err := dt.chTicker.addPChan(pchan)
-				if err != nil {
-					log.Warn("failed to add pchan to channels time ticker",
-						zap.Error(err),
-						zap.String("pchan", pchan))
-				}
-			}
 		}
 		stream, err = dt.chMgr.getDMLStream(collID)
 		if err != nil {
