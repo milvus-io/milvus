@@ -36,7 +36,7 @@ Filter with service name.
 
 ### Operation
 
-Operation in Service, eg request name, function name.
+Operation in Service, eg. request name, function name.
 
 ### Tags
 
@@ -46,7 +46,7 @@ Set tag to facilitate search. Tag is defined in code.
 
 Filter with time.
 
-### Min Duraton Max Duration
+### Min Duration & Max Duration
 
 The minimum and maximum request duration, you can use this condition to find the time-consuming and short-term requests.
 
