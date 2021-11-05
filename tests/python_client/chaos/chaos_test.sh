@@ -18,8 +18,8 @@ ns=${2:-"chaos-testing"}
 
 # switch namespace
 kubectl config set-context --current --namespace=${ns}
-pod="proxy"
-chaos_type="pod_failure"
+pod="standalone"
+chaos_type="pod_kill"
 release="milvus-chaos"
 ns="chaos-testing"
 
@@ -28,8 +28,17 @@ pushd ./scripts
 echo "uninstall milvus if exist"
 bash uninstall_milvus.sh ${release} ${ns}|| true
 echo "install milvus"
-bash install_milvus.sh ${release} ${ns}
+if [ ${pod} != "standalone" ];
+then
+    echo "insatll cluster"
+    bash install_milvus.sh ${release} ${ns}
+fi
 
+if [ ${pod} == "standalone" ];
+then
+    echo "install standalone"
+    helm install --wait --timeout 360s ${release} milvus/milvus --set service.type=NodePort -f ../standalone-values.yaml -n=${ns}
+fi
 # if chaos_type is pod_failure, update replicas
 if [ "$chaos_type" == "pod_failure" ];
 then
