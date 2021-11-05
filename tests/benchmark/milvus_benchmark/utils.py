@@ -157,6 +157,15 @@ def dict_update(source, target):
     return target
 
 
+def update_dict_value(server_resource, values_dict):
+    if not isinstance(server_resource, dict) or not isinstance(values_dict, dict):
+        return values_dict
+
+    target = dict_update(server_resource, values_dict)
+
+    return target
+
+
 def search_param_analysis(vector_query, filter_query):
     """ Search parameter adjustment, applicable pymilvus version >= 2.0.0rc7.dev24 """
 
