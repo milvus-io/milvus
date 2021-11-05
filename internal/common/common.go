@@ -51,5 +51,6 @@ const (
 	InvalidFieldID = int64(-1)
 )
 
-// Common implementation of ByteOrder for whole milvus
+// Endian is type alias of binary.LittleEndian.
+// Milvus uses little endian by default.
 var Endian = binary.LittleEndian
