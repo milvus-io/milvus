@@ -1,7 +1,7 @@
 kind: Schedule
 apiVersion: chaos-mesh.org/v1alpha1
 metadata:
-  name: test-rootcoord-pod-kill
+  name: test-standalone-pod-kill
   namespace: chaos-testing
 spec:
   schedule: '*/5 * * * * *'
