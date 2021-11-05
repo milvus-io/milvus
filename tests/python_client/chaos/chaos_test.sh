@@ -20,6 +20,7 @@ ns=${2:-"chaos-testing"}
 kubectl config set-context --current --namespace=${ns}
 pod="standalone"
 chaos_type="pod_kill"
+chaos_task="data-consist-test" # chaos-test or data-consist-test 
 release="milvus-chaos"
 ns="chaos-testing"
 
@@ -62,7 +63,16 @@ fi
 echo "start running testcase ${pod}"
 host=$(kubectl get svc/milvus-chaos -o jsonpath="{.spec.clusterIP}")
 python scripts/hello_milvus.py --host "$host"
-pytest -s -v test_chaos.py --host "$host" || echo "chaos test fail"
+# chaos test
+if [ "$chaos_task" == "chaos-test" ];
+then
+    pytest -s -v test_chaos.py --host "$host" || echo "chaos test fail"
+fi
+# data consist test
+if [ "$chaos_task" == "data-consist-test" ];
+then
+    pytest -s -v test_chaos_data_consist.py --host "$host" || echo "chaos test fail"
+fi
 sleep 30s
 echo "start running e2e test"
 python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
