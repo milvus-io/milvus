@@ -88,7 +88,7 @@ $ ./scripts/install_deps.sh
 $ make milvus
 ```
 
-获取更多内容，请阅读 [开发者文档](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md)
+获取更多内容，请阅读 [开发者文档](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md)。
 
 > **注意** 主分支用于 Milvus v2.0 代码开发。Milvus v1.0 于 2021 年 3 月 9 日发布，是 Milvus 的首个长期支持（LTS）版本。如需使用 Milvus 1.0，请切换至 [1.0 分支](https://github.com/milvus-io/milvus/tree/1.0)。
 
