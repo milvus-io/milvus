@@ -258,6 +258,7 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// GetStatisticsChannel gets the statistics channel of QueryCoord.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
