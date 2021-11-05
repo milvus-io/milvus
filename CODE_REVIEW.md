@@ -31,7 +31,7 @@ all Approvers are listed under OWNERS_ALIASES file.
 
 - Does the code do exactly the same as title and commit message describe?
 
-- Can this function and variable's behavior be inferred by its name
+- Can this function and variable's behavior be inferred by its name?
 
 - Do unit tests cover all the important code branches?
 
