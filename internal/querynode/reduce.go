@@ -26,6 +26,7 @@ import (
 	"unsafe"
 )
 
+// SearchResult contains a pointer to the search result in C++ memory
 type SearchResult struct {
 	cSearchResult C.CSearchResult
 }
