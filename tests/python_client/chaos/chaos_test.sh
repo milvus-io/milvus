@@ -66,3 +66,6 @@ pytest -s -v test_chaos.py --host "$host" || echo "chaos test fail"
 sleep 30s
 echo "start running e2e test"
 python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
+
+# save logs
+bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}
