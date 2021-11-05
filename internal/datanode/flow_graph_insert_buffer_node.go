@@ -68,6 +68,7 @@ type insertBufferNode struct {
 	timeTickStream          msgstream.MsgStream
 	segmentStatisticsStream msgstream.MsgStream
 	ttLogger                timeTickLogger
+	ttMerger                *mergedTimeTickerSender
 }
 
 type timeTickLogger struct {
@@ -154,6 +155,8 @@ func (ibNode *insertBufferNode) Name() string {
 }
 
 func (ibNode *insertBufferNode) Close() {
+	ibNode.ttMerger.close()
+
 	if ibNode.timeTickStream != nil {
 		ibNode.timeTickStream.Close()
 	}
@@ -667,25 +670,8 @@ func readBinary(reader io.Reader, receiver interface{}, dataType schemapb.DataTy
 // writeHardTimeTick writes timetick once insertBufferNode operates.
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	ibNode.ttLogger.LogTs(ts)
-	msgPack := msgstream.MsgPack{}
-	timeTickMsg := msgstream.DataNodeTtMsg{
-		BaseMsg: msgstream.BaseMsg{
-			BeginTimestamp: ts,
-			EndTimestamp:   ts,
-			HashValues:     []uint32{0},
-		},
-		DataNodeTtMsg: datapb.DataNodeTtMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DataNodeTt,
-				MsgID:     0,
-				Timestamp: ts,
-			},
-			ChannelName: ibNode.channelName,
-			Timestamp:   ts,
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return ibNode.timeTickStream.Produce(&msgPack)
+	ibNode.ttMerger.bufferTs(ts)
+	return nil
 }
 
 // uploadMemStates2Coord uploads latest changed segments statistics in DataNode memory to DataCoord
@@ -782,6 +768,28 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 	var segStatisticsMsgStream msgstream.MsgStream = segS
 	segStatisticsMsgStream.Start()
 
+	mt := newMergedTimeTickerSender(func(ts Timestamp) error {
+		msgPack := msgstream.MsgPack{}
+		timeTickMsg := msgstream.DataNodeTtMsg{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: ts,
+				EndTimestamp:   ts,
+				HashValues:     []uint32{0},
+			},
+			DataNodeTtMsg: datapb.DataNodeTtMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_DataNodeTt,
+					MsgID:     0,
+					Timestamp: ts,
+				},
+				ChannelName: config.vChannelName,
+				Timestamp:   ts,
+			},
+		}
+		msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+		return wTtMsgStream.Produce(&msgPack)
+	})
+
 	return &insertBufferNode{
 		BaseNode:     baseNode,
 		insertBuffer: sync.Map{},
@@ -797,5 +805,6 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 		replica:     config.replica,
 		idAllocator: config.allocator,
 		channelName: config.vChannelName,
+		ttMerger:    mt,
 	}, nil
 }

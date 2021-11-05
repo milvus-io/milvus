@@ -143,7 +143,9 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 		for _, test := range invalidInTests {
 			te.Run(test.description, func(t0 *testing.T) {
-				ibn := &insertBufferNode{}
+				ibn := &insertBufferNode{
+					ttMerger: newMergedTimeTickerSender(func(Timestamp) error { return nil }),
+				}
 				rt := ibn.Operate(test.in)
 				assert.Empty(t0, rt)
 			})
