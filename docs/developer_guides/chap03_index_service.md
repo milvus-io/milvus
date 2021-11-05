@@ -11,7 +11,7 @@ type IndexCoord interface {
 	Component
 	TimeTickProvider
 
-  // BuildIndex receives request from RootCoordinator to build an index.
+  // BuildIndex receives requests from RootCoordinator to build an index.
 	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
   // DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
 	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
@@ -154,7 +154,7 @@ type IndexNode interface {
 	Component
 	TimeTickProvider
 
-	// CreateIndex receives request from IndexCoordinator to build an index.
+	// CreateIndex receives requests from IndexCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error)
 	// GetMetrics gets the metrics about IndexNode.
