@@ -45,6 +45,9 @@ type Collection struct {
 	vChannels     []Channel
 	pChannels     []Channel
 
+	vDeltaChannels []Channel
+	pDeltaChannels []Channel
+
 	loadType loadType
 
 	releaseMu          sync.RWMutex // guards release
@@ -135,6 +138,57 @@ func (c *Collection) getPChannels() []Channel {
 	return c.pChannels
 }
 
+// addPChannels add physical channels to physical channels of collection
+func (c *Collection) addPDeltaChannels(channels []Channel) {
+OUTER:
+	for _, dstChan := range channels {
+		for _, srcChan := range c.pDeltaChannels {
+			if dstChan == srcChan {
+				log.Debug("pChannel has been existed in collection's pChannels",
+					zap.Any("collectionID", c.ID()),
+					zap.Any("pChannel", dstChan),
+				)
+				continue OUTER
+			}
+		}
+		log.Debug("add pChannel to collection",
+			zap.Any("collectionID", c.ID()),
+			zap.Any("pChannel", dstChan),
+		)
+		c.pDeltaChannels = append(c.pDeltaChannels, dstChan)
+	}
+}
+
+// getPChannels get physical channels of collection
+func (c *Collection) getPDeltaChannels() []Channel {
+	return c.pDeltaChannels
+}
+
+func (c *Collection) getVDeltaChannels() []Channel {
+	return c.vDeltaChannels
+}
+
+// addVChannels add virtual channels to collection
+func (c *Collection) addVDeltaChannels(channels []Channel) {
+OUTER:
+	for _, dstChan := range channels {
+		for _, srcChan := range c.vDeltaChannels {
+			if dstChan == srcChan {
+				log.Debug("vDeltaChannel has been existed in collection's vDeltaChannels",
+					zap.Any("collectionID", c.ID()),
+					zap.Any("vChannel", dstChan),
+				)
+				continue OUTER
+			}
+		}
+		log.Debug("add vDeltaChannel to collection",
+			zap.Any("collectionID", c.ID()),
+			zap.Any("vDeltaChannel", dstChan),
+		)
+		c.vDeltaChannels = append(c.vDeltaChannels, dstChan)
+	}
+}
+
 // setReleaseTime records when collection is released
 func (c *Collection) setReleaseTime(t Timestamp) {
 	c.releaseMu.Lock()
@@ -218,6 +272,8 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 		schema:             schema,
 		vChannels:          make([]Channel, 0),
 		pChannels:          make([]Channel, 0),
+		vDeltaChannels:     make([]Channel, 0),
+		pDeltaChannels:     make([]Channel, 0),
 		releasedPartitions: make(map[UniqueID]struct{}),
 	}
 	C.free(unsafe.Pointer(cSchemaBlob))

@@ -62,7 +62,6 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 			collectionID,
 			partitionID,
 			dsService.streamingReplica,
-			dsService.historicalReplica,
 			dsService.tSafeReplica,
 			vChannel,
 			dsService.msFactory)
@@ -212,7 +211,6 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 			collectionID,
 			partitionID,
 			dsService.streamingReplica,
-			dsService.historicalReplica,
 			dsService.tSafeReplica,
 			vChannel,
 			dsService.msFactory)

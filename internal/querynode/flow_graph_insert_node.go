@@ -33,8 +33,7 @@ import (
 
 type insertNode struct {
 	baseNode
-	streamingReplica  ReplicaInterface
-	historicalReplica ReplicaInterface
+	streamingReplica ReplicaInterface
 }
 
 type insertData struct {
@@ -119,6 +118,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 		if err != nil {
 			log.Warn(err.Error())
+			continue
 		}
 
 		var numOfRecords = len(iData.insertRecords[segmentID])
@@ -126,6 +126,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			offset, err := targetSegment.segmentPreInsert(numOfRecords)
 			if err != nil {
 				log.Warn(err.Error())
+				continue
 			}
 			iData.insertOffset[segmentID] = offset
 			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segmentID))
@@ -149,22 +150,28 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 1. filter segment by bloom filter
 	for _, delMsg := range iMsg.deleteMessages {
 		if iNode.streamingReplica.getSegmentNum() != 0 {
+			log.Debug("delete in streaming replica",
+				zap.Any("collectionID", delMsg.CollectionID),
+				zap.Any("collectionName", delMsg.CollectionName),
+				zap.Any("pks", delMsg.PrimaryKeys),
+				zap.Any("timestamp", delMsg.Timestamps))
 			processDeleteMessages(iNode.streamingReplica, delMsg, delData)
-		}
-		if iNode.historicalReplica.getSegmentNum() != 0 {
-			processDeleteMessages(iNode.historicalReplica, delMsg, delData)
 		}
 	}
 
 	// 2. do preDelete
 	for segmentID, pks := range delData.deleteIDs {
-		segment := iNode.getSegmentInReplica(segmentID)
+		segment, err := iNode.streamingReplica.getSegmentByID(segmentID)
+		if err != nil {
+			log.Debug(err.Error())
+			continue
+		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
 	}
 
 	// 3. do delete
-	for segmentID := range delData.deleteIDs {
+	for segmentID := range delData.deleteOffset {
 		wg.Add(1)
 		go iNode.delete(delData, segmentID, &wg)
 	}
@@ -275,9 +282,13 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
-	targetSegment := iNode.getSegmentInReplica(segmentID)
-	if targetSegment == nil {
-		log.Warn("targetSegment is nil")
+	targetSegment, err := iNode.streamingReplica.getSegmentByID(segmentID)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	if targetSegment.segmentType != segmentTypeGrowing {
 		return
 	}
 
@@ -285,47 +296,13 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
 
-	err := targetSegment.segmentDelete(offset, &ids, &timestamps)
+	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
 	if err != nil {
 		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
 		return
 	}
 
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
-}
-
-func (iNode *insertNode) getSegmentInReplica(segmentID int64) *Segment {
-	streamingSegment, err := iNode.streamingReplica.getSegmentByID(segmentID)
-	if err != nil {
-		log.Warn("Cannot find segment in streaming replica:", zap.Int64("segmentID", segmentID))
-	} else {
-		return streamingSegment
-	}
-	historicalSegment, err := iNode.historicalReplica.getSegmentByID(segmentID)
-	if err != nil {
-		log.Warn("Cannot find segment in historical replica:", zap.Int64("segmentID", segmentID))
-	} else {
-		return historicalSegment
-	}
-	log.Warn("Cannot find segment in both streaming and historical replica:", zap.Int64("segmentID", segmentID))
-	return nil
-}
-
-func (iNode *insertNode) getCollectionInReplica(segmentID int64) *Collection {
-	streamingCollection, err := iNode.streamingReplica.getCollectionByID(segmentID)
-	if err != nil {
-		log.Warn("Cannot find collection in streaming replica:", zap.Int64("collectionID", segmentID))
-	} else {
-		return streamingCollection
-	}
-	historicalCollection, err := iNode.historicalReplica.getCollectionByID(segmentID)
-	if err != nil {
-		log.Warn("Cannot find collection in historical replica:", zap.Int64("collectionID", segmentID))
-	} else {
-		return historicalCollection
-	}
-	log.Warn("Cannot find collection in both streaming and historical replica:", zap.Int64("collectionID", segmentID))
-	return nil
 }
 
 func (iNode *insertNode) getPrimaryKeys(msg *msgstream.InsertMsg) []int64 {
@@ -335,9 +312,9 @@ func (iNode *insertNode) getPrimaryKeys(msg *msgstream.InsertMsg) []int64 {
 	}
 	collectionID := msg.GetCollectionID()
 
-	collection := iNode.getCollectionInReplica(collectionID)
-	if collection == nil {
-		log.Warn("collectio is nil")
+	collection, err := iNode.streamingReplica.getCollectionByID(collectionID)
+	if err != nil {
+		log.Warn(err.Error())
 		return nil
 	}
 	offset := 0
@@ -402,7 +379,7 @@ func (iNode *insertNode) getPrimaryKeys(msg *msgstream.InsertMsg) []int64 {
 
 	return pks
 }
-func newInsertNode(streamingReplica ReplicaInterface, historicalReplica ReplicaInterface) *insertNode {
+func newInsertNode(streamingReplica ReplicaInterface) *insertNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -411,8 +388,7 @@ func newInsertNode(streamingReplica ReplicaInterface, historicalReplica ReplicaI
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		baseNode:          baseNode,
-		streamingReplica:  streamingReplica,
-		historicalReplica: historicalReplica,
+		baseNode:         baseNode,
+		streamingReplica: streamingReplica,
 	}
 }

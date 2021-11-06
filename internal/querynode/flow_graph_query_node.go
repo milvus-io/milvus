@@ -39,7 +39,6 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	collectionID UniqueID,
 	partitionID UniqueID,
 	streamingReplica ReplicaInterface,
-	historicalReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	channel Channel,
 	factory msgstream.Factory) *queryNodeFlowGraph {
@@ -57,7 +56,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 
 	var dmStreamNode node = q.newDmInputNode(ctx1, factory)
 	var filterDmNode node = newFilteredDmNode(streamingReplica, loadType, collectionID, partitionID)
-	var insertNode node = newInsertNode(streamingReplica, historicalReplica)
+	var insertNode node = newInsertNode(streamingReplica)
 	var serviceTimeNode node = newServiceTimeNode(ctx1, tSafeReplica, loadType, collectionID, partitionID, channel, factory)
 
 	q.flowGraph.AddNode(dmStreamNode)

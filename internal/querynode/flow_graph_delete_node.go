@@ -51,6 +51,11 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 1. filter segment by bloom filter
 	for _, delMsg := range dMsg.deleteMessages {
 		if dNode.replica.getSegmentNum() != 0 {
+			log.Debug("delete in historical replica",
+				zap.Any("collectionID", delMsg.CollectionID),
+				zap.Any("collectionName", delMsg.CollectionName),
+				zap.Any("pks", delMsg.PrimaryKeys),
+				zap.Any("timestamp", delMsg.Timestamps))
 			processDeleteMessages(dNode.replica, delMsg, delData)
 		}
 	}
@@ -59,7 +64,8 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := dNode.replica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Warn("Cannot find segment in historical replica:", zap.Int64("segmentID", segmentID))
+			log.Debug(err.Error())
+			continue
 		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
@@ -67,7 +73,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 3. do delete
 	wg := sync.WaitGroup{}
-	for segmentID := range delData.deleteIDs {
+	for segmentID := range delData.deleteOffset {
 		wg.Add(1)
 		go dNode.delete(delData, segmentID, &wg)
 	}
@@ -86,9 +92,9 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Debug("QueryNode::dNode::delete", zap.Any("SegmentID", segmentID))
-	targetSegment := dNode.getSegmentInReplica(segmentID)
-	if targetSegment == nil {
-		log.Warn("targetSegment is nil")
+	targetSegment, err := dNode.replica.getSegmentByID(segmentID)
+	if err != nil {
+		log.Error(err.Error())
 		return
 	}
 
@@ -100,22 +106,13 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
 
-	err := targetSegment.segmentDelete(offset, &ids, &timestamps)
+	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
 	if err != nil {
 		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
 		return
 	}
 
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
-}
-
-func (dNode *deleteNode) getSegmentInReplica(segmentID int64) *Segment {
-	segment, err := dNode.replica.getSegmentByID(segmentID)
-	if err != nil {
-	} else {
-		return segment
-	}
-	return nil
 }
 
 func newDeleteNode(historicalReplica ReplicaInterface) *deleteNode {

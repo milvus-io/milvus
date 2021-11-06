@@ -129,8 +129,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
 		case commonpb.MsgType_Delete:
 			log.Debug("DDNode receive delete messages")
-			forwardMsgs = append(forwardMsgs, msg)
 			dmsg := msg.(*msgstream.DeleteMsg)
+			for i := 0; i < len(dmsg.PrimaryKeys); i++ {
+				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
+			}
+			forwardMsgs = append(forwardMsgs, dmsg)
 			if dmsg.CollectionID != ddn.collectionID {
 				//log.Debug("filter invalid DeleteMsg, collection mis-match",
 				//	zap.Int64("Get msg collID", dmsg.CollectionID),
@@ -249,13 +252,15 @@ func newDDNode(ctx context.Context, clearSignal chan<- UniqueID, collID UniqueID
 	if err != nil {
 		return nil
 	}
-	deltaChannelName, err := rootcoord.ConvertChannelName(vchanInfo.ChannelName, Params.DmlChannelName, Params.DeltaChannelName)
+	pChannelName := rootcoord.ToPhysicalChannel(vchanInfo.ChannelName)
+	deltaChannelName, err := rootcoord.ConvertChannelName(pChannelName, Params.DmlChannelName, Params.DeltaChannelName)
 	if err != nil {
 		log.Error(err.Error())
 		return nil
 	}
+	deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
 	deltaStream.AsProducer([]string{deltaChannelName})
-	log.Debug("datanode AsProducer", zap.String("DeltaChannelName", Params.SegmentStatisticsChannelName))
+	log.Debug("datanode AsProducer", zap.String("DeltaChannelName", deltaChannelName))
 	var deltaMsgStream msgstream.MsgStream = deltaStream
 	deltaMsgStream.Start()
 

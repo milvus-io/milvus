@@ -18,6 +18,7 @@ package msgstream
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -140,19 +141,26 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 
 // DefaultRepackFunc is used to repack messages after hash by primary key
 func DefaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
-	result := make(map[int32]*MsgPack)
-	for i, request := range tsMsgs {
-		keys := hashKeys[i]
-		if len(keys) != 1 {
-			return nil, errors.New("len(msg.hashValue) must equal 1, but it is: " + strconv.Itoa(len(keys)))
-		}
-		key := keys[0]
-		_, ok := result[key]
-		if !ok {
-			msgPack := MsgPack{}
-			result[key] = &msgPack
-		}
-		result[key].Msgs = append(result[key].Msgs, request)
+	if len(hashKeys) < len(tsMsgs) {
+		return nil, fmt.Errorf(
+			"the length of hash keys (%d) is less than the length of messages (%d)",
+			len(hashKeys),
+			len(tsMsgs),
+		)
 	}
-	return result, nil
+
+	// after assigning segment id to msg, tsMsgs was already re-bucketed
+	pack := make(map[int32]*MsgPack)
+	for idx, msg := range tsMsgs {
+		if len(hashKeys[idx]) <= 0 {
+			return nil, fmt.Errorf("no hash key for %dth message", idx)
+		}
+		key := hashKeys[idx][0]
+		_, ok := pack[key]
+		if !ok {
+			pack[key] = &MsgPack{}
+		}
+		pack[key].Msgs = append(pack[key].Msgs, msg)
+	}
+	return pack, nil
 }
