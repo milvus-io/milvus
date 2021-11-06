@@ -2722,7 +2722,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful RootCoord Show segments operations",
+      "description": "Success count of show_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
