@@ -64,6 +64,7 @@ type Meta interface {
 	setSegmentInfos(segmentInfos map[UniqueID]*querypb.SegmentInfo) error
 	showSegmentInfos(collectionID UniqueID, partitionIDs []UniqueID) []*querypb.SegmentInfo
 	getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error)
+	getSegmentInfosByNode(nodeID int64) []*querypb.SegmentInfo
 
 	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
 
@@ -712,6 +713,19 @@ func (m *MetaReplica) getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentIn
 	}
 
 	return nil, errors.New("getSegmentInfoByID: can't find segmentID in segmentInfos")
+}
+func (m *MetaReplica) getSegmentInfosByNode(nodeID int64) []*querypb.SegmentInfo {
+	m.segmentMu.RLock()
+	defer m.segmentMu.RUnlock()
+
+	segmentInfos := make([]*querypb.SegmentInfo, 0)
+	for _, info := range m.segmentInfos {
+		if info.NodeID == nodeID {
+			segmentInfos = append(segmentInfos, proto.Clone(info).(*querypb.SegmentInfo))
+		}
+	}
+
+	return segmentInfos
 }
 
 func (m *MetaReplica) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {

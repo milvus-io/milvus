@@ -694,7 +694,7 @@ func Test_AssignInternalTask(t *testing.T) {
 		loadSegmentRequests = append(loadSegmentRequests, req)
 	}
 
-	err = assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, nil, false)
+	err = assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, nil, false, nil)
 	assert.Nil(t, err)
 
 	assert.NotEqual(t, 1, len(loadCollectionTask.getChildTask()))
@@ -785,6 +785,142 @@ func Test_handoffSegmentFail(t *testing.T) {
 
 	waitTaskFinalState(handoffTask, taskFailed)
 
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func TestLoadBalanceSegmentsTask(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	t.Run("Test LoadCollection", func(t *testing.T) {
+		loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+
+		err = queryCoord.scheduler.Enqueue(loadCollectionTask)
+		assert.Nil(t, err)
+		waitTaskFinalState(loadCollectionTask, taskExpired)
+	})
+
+	node2, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+
+	t.Run("Test LoadBalanceBySegmentID", func(t *testing.T) {
+		baseTask := newBaseTask(ctx, querypb.TriggerCondition_loadBalance)
+		loadBalanceTask := &loadBalanceTask{
+			baseTask: baseTask,
+			LoadBalanceRequest: &querypb.LoadBalanceRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_LoadBalanceSegments,
+				},
+				SourceNodeIDs:    []int64{node1.queryNodeID},
+				SealedSegmentIDs: []UniqueID{defaultSegmentID},
+			},
+			rootCoord: queryCoord.rootCoordClient,
+			dataCoord: queryCoord.dataCoordClient,
+			cluster:   queryCoord.cluster,
+			meta:      queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
+		assert.Nil(t, err)
+		waitTaskFinalState(loadBalanceTask, taskExpired)
+	})
+
+	t.Run("Test LoadBalanceByNotExistSegmentID", func(t *testing.T) {
+		baseTask := newBaseTask(ctx, querypb.TriggerCondition_loadBalance)
+		loadBalanceTask := &loadBalanceTask{
+			baseTask: baseTask,
+			LoadBalanceRequest: &querypb.LoadBalanceRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_LoadBalanceSegments,
+				},
+				SourceNodeIDs:    []int64{node1.queryNodeID},
+				SealedSegmentIDs: []UniqueID{defaultSegmentID + 100},
+			},
+			rootCoord: queryCoord.rootCoordClient,
+			dataCoord: queryCoord.dataCoordClient,
+			cluster:   queryCoord.cluster,
+			meta:      queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
+		assert.Nil(t, err)
+		waitTaskFinalState(loadBalanceTask, taskFailed)
+	})
+
+	t.Run("Test LoadBalanceByNode", func(t *testing.T) {
+		baseTask := newBaseTask(ctx, querypb.TriggerCondition_loadBalance)
+		loadBalanceTask := &loadBalanceTask{
+			baseTask: baseTask,
+			LoadBalanceRequest: &querypb.LoadBalanceRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_LoadBalanceSegments,
+				},
+				SourceNodeIDs: []int64{node1.queryNodeID},
+			},
+			rootCoord: queryCoord.rootCoordClient,
+			dataCoord: queryCoord.dataCoordClient,
+			cluster:   queryCoord.cluster,
+			meta:      queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
+		assert.Nil(t, err)
+		waitTaskFinalState(loadBalanceTask, taskExpired)
+	})
+
+	t.Run("Test LoadBalanceWithEmptySourceNode", func(t *testing.T) {
+		baseTask := newBaseTask(ctx, querypb.TriggerCondition_loadBalance)
+		loadBalanceTask := &loadBalanceTask{
+			baseTask: baseTask,
+			LoadBalanceRequest: &querypb.LoadBalanceRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_LoadBalanceSegments,
+				},
+			},
+			rootCoord: queryCoord.rootCoordClient,
+			dataCoord: queryCoord.dataCoordClient,
+			cluster:   queryCoord.cluster,
+			meta:      queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
+		assert.Nil(t, err)
+		waitTaskFinalState(loadBalanceTask, taskFailed)
+	})
+
+	t.Run("Test LoadBalanceByNotExistNode", func(t *testing.T) {
+		baseTask := newBaseTask(ctx, querypb.TriggerCondition_loadBalance)
+		loadBalanceTask := &loadBalanceTask{
+			baseTask: baseTask,
+			LoadBalanceRequest: &querypb.LoadBalanceRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_LoadBalanceSegments,
+				},
+				SourceNodeIDs: []int64{node1.queryNodeID + 100},
+			},
+			rootCoord: queryCoord.rootCoordClient,
+			dataCoord: queryCoord.dataCoordClient,
+			cluster:   queryCoord.cluster,
+			meta:      queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
+		assert.Nil(t, err)
+		waitTaskFinalState(loadBalanceTask, taskFailed)
+	})
+
+	t.Run("Test ReleaseCollection", func(t *testing.T) {
+		releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)
+		err = queryCoord.scheduler.processTask(releaseCollectionTask)
+		assert.Nil(t, err)
+	})
+
+	node1.stop()
+	node2.stop()
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)

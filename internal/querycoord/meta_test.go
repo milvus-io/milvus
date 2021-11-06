@@ -240,6 +240,11 @@ func TestMetaFunc(t *testing.T) {
 		assert.Equal(t, defaultSegmentID, infos[0].SegmentID)
 	})
 
+	t.Run("Test GetSegmentInfoByNode", func(t *testing.T) {
+		infos := meta.getSegmentInfosByNode(nodeID)
+		assert.Equal(t, 1, len(infos))
+	})
+
 	t.Run("Test getQueryChannel", func(t *testing.T) {
 		info, err := meta.getQueryChannelInfoByID(defaultCollectionID)
 		assert.NotNil(t, info.QueryChannelID)
