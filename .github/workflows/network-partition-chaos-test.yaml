@@ -71,9 +71,10 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           # replace chaos object
+          sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/network_partition\/'/g" constants.py
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_network_partition.yaml\'/g" constants.py
           cat constants.py
-          pytest -s -v test_chaos.py --host 127.0.0.1 --log-level=INFO --tb=no
+          pytest -s -v test_chaos.py --host 127.0.0.1
 
       - name: Export logs
         if: ${{ always() }}
