@@ -25,7 +25,8 @@ func TestIndexLoader_setIndexInfo(t *testing.T) {
 	defer cancel()
 
 	t.Run("test setIndexInfo", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		segment, err := genSimpleSealedSegment()
@@ -39,7 +40,8 @@ func TestIndexLoader_setIndexInfo(t *testing.T) {
 	})
 
 	t.Run("test nil root and index", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		segment, err := genSimpleSealedSegment()
@@ -55,7 +57,8 @@ func TestIndexLoader_getIndexBinlog(t *testing.T) {
 	defer cancel()
 
 	t.Run("test getIndexBinlog", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		paths, err := generateIndex(defaultSegmentID)
@@ -66,7 +69,8 @@ func TestIndexLoader_getIndexBinlog(t *testing.T) {
 	})
 
 	t.Run("test invalid path", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		_, _, _, err = historical.loader.indexLoader.getIndexBinlog([]string{""})
@@ -78,7 +82,8 @@ func TestIndexLoader_printIndexParams(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	historical, err := genSimpleHistorical(ctx)
+	tSafe := newTSafeReplica()
+	historical, err := genSimpleHistorical(ctx, tSafe)
 	assert.NoError(t, err)
 
 	indexKV := []*commonpb.KeyValuePair{
@@ -95,7 +100,8 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 	defer cancel()
 
 	t.Run("test loadIndex", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		segment, err := genSimpleSealedSegment()
@@ -112,7 +118,8 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 	})
 
 	t.Run("test set indexinfo with empty indexFilePath", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		segment, err := genSimpleSealedSegment()
@@ -144,7 +151,8 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 	//})
 
 	t.Run("test checkIndexReady failed", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		segment, err := genSimpleSealedSegment()

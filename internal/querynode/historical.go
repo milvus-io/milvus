@@ -43,6 +43,7 @@ type historical struct {
 	replica      ReplicaInterface
 	loader       *segmentLoader
 	statsService *statsService
+	tSafeReplica TSafeReplicaInterface
 
 	mu                   sync.Mutex // guards globalSealedSegments
 	globalSealedSegments map[UniqueID]*querypb.SegmentInfo
@@ -52,11 +53,12 @@ type historical struct {
 
 // newHistorical returns a new historical
 func newHistorical(ctx context.Context,
+	replica ReplicaInterface,
 	rootCoord types.RootCoord,
 	indexCoord types.IndexCoord,
 	factory msgstream.Factory,
-	etcdKV *etcdkv.EtcdKV) *historical {
-	replica := newCollectionReplica(etcdKV)
+	etcdKV *etcdkv.EtcdKV,
+	tSafeReplica TSafeReplicaInterface) *historical {
 	loader := newSegmentLoader(ctx, rootCoord, indexCoord, replica, etcdKV)
 	ss := newStatsService(ctx, replica, loader.indexLoader.fieldStatsChan, factory)
 
@@ -67,6 +69,7 @@ func newHistorical(ctx context.Context,
 		statsService:         ss,
 		globalSealedSegments: make(map[UniqueID]*querypb.SegmentInfo),
 		etcdKV:               etcdKV,
+		tSafeReplica:         tSafeReplica,
 	}
 }
 

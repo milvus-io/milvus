@@ -392,7 +392,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 			req:  genReleasePartitionsRequest(),
 			node: node,
 		}
-		task.node.streaming.dataSyncService.addPartitionFlowGraph(defaultCollectionID,
+		task.node.dataSyncService.addPartitionFlowGraph(defaultCollectionID,
 			defaultPartitionID,
 			[]Channel{defaultVChannel})
 		err = task.Execute(ctx)

@@ -192,8 +192,12 @@ func newQueryNodeMock() *QueryNode {
 		panic(err)
 	}
 	svr := NewQueryNode(ctx, msFactory)
-	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, svr.msFactory, etcdKV)
-	svr.streaming = newStreaming(ctx, msFactory, etcdKV, svr.historical.replica)
+	tsReplica := newTSafeReplica()
+	streamingReplica := newCollectionReplica(etcdKV)
+	historicalReplica := newCollectionReplica(etcdKV)
+	svr.historical = newHistorical(svr.queryNodeLoopCtx, historicalReplica, nil, nil, svr.msFactory, etcdKV, tsReplica)
+	svr.streaming = newStreaming(ctx, streamingReplica, msFactory, etcdKV, tsReplica)
+	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, msFactory)
 	svr.etcdKV = etcdKV
 
 	return svr

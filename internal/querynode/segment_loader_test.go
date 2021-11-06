@@ -37,7 +37,8 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("test load segment", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		err = historical.replica.removeSegment(defaultSegmentID)
@@ -68,7 +69,8 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	})
 
 	t.Run("test set segment error", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		err = historical.replica.removePartition(defaultPartitionID)
@@ -104,7 +106,8 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 	defer cancel()
 
 	runLoadSegmentFieldData := func(dataType schemapb.DataType) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		fieldUID := genConstantField(uidField)
@@ -185,7 +188,8 @@ func TestSegmentLoader_invalid(t *testing.T) {
 	defer cancel()
 
 	t.Run("test no collection", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		err = historical.replica.removeCollection(defaultCollectionID)
@@ -247,7 +251,8 @@ func TestSegmentLoader_invalid(t *testing.T) {
 	//})
 
 	t.Run("test no vec field 2", func(t *testing.T) {
-		historical, err := genSimpleHistorical(ctx)
+		tSafe := newTSafeReplica()
+		historical, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
 		err = historical.replica.removeCollection(defaultCollectionID)
@@ -291,7 +296,8 @@ func TestSegmentLoader_checkSegmentSize(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	historical, err := genSimpleHistorical(ctx)
+	tSafe := newTSafeReplica()
+	historical, err := genSimpleHistorical(ctx, tSafe)
 	assert.NoError(t, err)
 
 	err = historical.loader.checkSegmentSize(defaultSegmentID, map[UniqueID]int64{defaultSegmentID: 1024})
@@ -307,7 +313,8 @@ func TestSegmentLoader_estimateSegmentSize(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	historical, err := genSimpleHistorical(ctx)
+	tSafe := newTSafeReplica()
+	historical, err := genSimpleHistorical(ctx, tSafe)
 	assert.NoError(t, err)
 
 	seg, err := historical.replica.getSegmentByID(defaultSegmentID)

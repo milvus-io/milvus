@@ -28,23 +28,17 @@ import (
 type streaming struct {
 	ctx context.Context
 
-	replica           ReplicaInterface
-	historicalReplica ReplicaInterface
-	tSafeReplica      TSafeReplicaInterface
+	replica      ReplicaInterface
+	tSafeReplica TSafeReplicaInterface
 
-	dataSyncService *dataSyncService
-	msFactory       msgstream.Factory
+	msFactory msgstream.Factory
 }
 
-func newStreaming(ctx context.Context, factory msgstream.Factory, etcdKV *etcdkv.EtcdKV, historicalReplica ReplicaInterface) *streaming {
-	replica := newCollectionReplica(etcdKV)
-	tReplica := newTSafeReplica()
-	newDS := newDataSyncService(ctx, replica, historicalReplica, tReplica, factory)
+func newStreaming(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory, etcdKV *etcdkv.EtcdKV, tSafeReplica TSafeReplicaInterface) *streaming {
 
 	return &streaming{
-		replica:         replica,
-		tSafeReplica:    tReplica,
-		dataSyncService: newDS,
+		replica:      replica,
+		tSafeReplica: tSafeReplica,
 	}
 }
 
@@ -54,10 +48,6 @@ func (s *streaming) start() {
 
 func (s *streaming) close() {
 	// TODO: stop stats
-
-	if s.dataSyncService != nil {
-		s.dataSyncService.close()
-	}
 
 	// free collectionReplica
 	s.replica.freeAll()
