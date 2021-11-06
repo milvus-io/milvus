@@ -134,24 +134,27 @@ func (c *client) consume(consumer *consumer) {
 			}
 
 			for {
-				msg, err := consumer.client.server.Consume(consumer.topic, consumer.consumerName, 1)
+				n := cap(consumer.messageCh) - len(consumer.messageCh)
+				if n < 100 { // batch min size
+					n = 100
+				}
+				msgs, err := consumer.client.server.Consume(consumer.topic, consumer.consumerName, n)
 				if err != nil {
 					log.Debug("Consumer's goroutine cannot consume from (" + consumer.topic +
 						"," + consumer.consumerName + "): " + err.Error())
 					break
 				}
 
-				if len(msg) != 1 {
-					//log.Debug("Consumer's goroutine cannot consume from (" + consumer.topic +
-					//	"," + consumer.consumerName + "): message len(" + strconv.Itoa(len(msg)) +
-					//	") is not 1")
+				// no more msgs
+				if len(msgs) == 0 {
 					break
 				}
-
-				consumer.messageCh <- ConsumerMessage{
-					MsgID:   msg[0].MsgID,
-					Payload: msg[0].Payload,
-					Topic:   consumer.Topic(),
+				for _, msg := range msgs {
+					consumer.messageCh <- ConsumerMessage{
+						MsgID:   msg.MsgID,
+						Payload: msg.Payload,
+						Topic:   consumer.Topic(),
+					}
 				}
 			}
 		}
