@@ -283,7 +283,7 @@ The taskID is globally unique and is used to identify the task. OnEnqueue will a
 for the task. It can be seen that the timestamp of entering the queue must be greater than the timestamp that already
 exists in the queue, and it will also be greater than the timestamp of the task that exists in activateTask. At the end
 of the task's OnEnqueue, call the taskQueue's addUnissuedTask to add the task to the unissuedTasks. When OnEnqueue is
-executed, the external caller of taskSchdeuler calls WaitToFinish of the task to synchronously block and wait for the
+executed, the external caller of taskScheduler calls WaitToFinish of the task to synchronously block and wait for the
 execution of task to be done.
 
 When taskScheduler's background scheduling coroutine decides to schedule a task, it will call the taskQueue's
