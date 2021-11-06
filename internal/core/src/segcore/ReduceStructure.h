@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <cfloat>
 #include <cmath>
 
 #include "common/Consts.h"
@@ -56,11 +57,11 @@ struct SearchResultPair {
                 distance_ = search_result_->result_distances_.at(offset_);
             } else {
                 primary_key_ = INVALID_ID;
-                distance_ = MAXFLOAT;
+                distance_ = FLT_MAX;
             }
         } else {
             primary_key_ = INVALID_ID;
-            distance_ = MAXFLOAT;
+            distance_ = FLT_MAX;
         }
     }
 };
