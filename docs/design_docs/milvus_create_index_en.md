@@ -180,7 +180,7 @@ message CreateIndexRequest {
 
 14. There is a background service, `indexBuildLoop`, in the `IndexNode`. `indexBuildLoop` would call `scheduleIndexBuildTask` to get a `IndexBuildTask` from `IndexBuildQueue`, and then start another `goroutine` to build index and update meta.
 
-_Note_: `IndexNode` will not notify the `QueryCoord` to load the index files, if an user wants to speed up seach by these index files, he should call `ReleaseCollection` firstly, then call `LoadCollection` to load these index files.
+_Note_: `IndexNode` will not notify the `QueryCoord` to load the index files, if an user wants to speed up search by these index files, he should call `ReleaseCollection` firstly, then call `LoadCollection` to load these index files.
 
 15. As mentioned earlier, `RootCoord` would only search on these flushed segments on `CreateIndex` request, the following figure show how to deal with the newly add segments.
 
@@ -220,7 +220,7 @@ message SegmentInfo {
 
 17. If an user has called `CreateIndex` on this `Collection`, then when `RootCoord` receives `SegmentFlushCompleted` request, it would extract the `SegmentID` from the request, and send a `GetInsertBinlogPaths` request to `DataCoord` to get the `Binlog` paths, finally `RootCoord` would send a `BuildIndex` request to `IndexCoord` to notify `IndexCoord` to build index on this segment.
 
-18. The `Grpc` call of `SegmentFlushCompleted` might failed due to network problem or some others, so how to create index if the `Grpc` failed ? The follwing figure show the solution.
+18. The `Grpc` call of `SegmentFlushCompleted` might failed due to network problem or some others, so how to create index if the `Grpc` failed ? The following figure show the solution.
 
 ![data_coord_flushed](./graphs/milvus_create_index_root_coord_check.png)
 
