@@ -1,6 +1,6 @@
 from enum import Enum
 from random import randint
-
+import datetime
 from time import sleep
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
@@ -99,7 +99,11 @@ class InsertFlushChecker(Checker):
                 sleep(constants.WAIT_PER_OP / 10)
             else:
                 # call flush in property num_entities
-                if self.c_wrap.num_entities == (self.initial_entities + constants.DELTA_PER_INS):
+                t0 = datetime.datetime.now()
+                num_entities = self.c_wrap.num_entities
+                tt = datetime.datetime.now() - t0
+                log.info(f"flush time cost: {tt}")
+                if num_entities == (self.initial_entities + constants.DELTA_PER_INS):
                     self._succ += 1
                     self.initial_entities += constants.DELTA_PER_INS
                 else:
