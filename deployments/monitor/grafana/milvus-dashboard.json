@@ -2780,7 +2780,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total RootCoord Describe segments operations",
+      "description": "Total count of describe_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
