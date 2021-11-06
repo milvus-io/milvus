@@ -34,7 +34,7 @@ SINGLE_DEPLOY_MODE = "single"
 CLUSTER_DEPLOY_MODE = "cluster"
 CLUSTER_3RD_DEPLOY_MODE = "cluster_3rd"
 
-
+# chaos's config
 NAMESPACE = "milvus"
 CHAOS_NAMESPACE = "chaos-testing"
 DEFAULT_API_VERSION = 'chaos-mesh.org/v1alpha1'
