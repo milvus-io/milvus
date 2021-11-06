@@ -103,6 +103,7 @@ type ReplicaInterface interface {
 	removeExcludedSegments(collectionID UniqueID)
 	// addExcludedSegments will add excludedSegments to collectionReplica
 	addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo)
+	// getExcludedSegments returns excludedSegments of collectionReplica
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
 
 	// query mu
