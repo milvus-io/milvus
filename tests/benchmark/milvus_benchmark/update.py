@@ -80,8 +80,9 @@ def get_latest_tag(limit=200):
     auth_url = ""
     tags_url = ""
     tag_url = ""
+    master_latest = "master-latest"
 
-    master_latest_digest = get_config_digest(tag_url + "master-latest", get_token(auth_url))
+    master_latest_digest = get_config_digest(tag_url + master_latest, get_token(auth_url))
     tags = get_tags(tags_url, get_token(auth_url))
     tag_list = get_master_tags(tags)
 
