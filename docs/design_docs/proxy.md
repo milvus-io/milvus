@@ -441,7 +441,7 @@ type channelsTimeTicker interface {
 
 - getLastTick
 
-  getLastTick returns the minimum timestamp which has already beed synchronized of physical channel;
+  getLastTick returns the minimum timestamp which has already been synchronized of physical channel;
 
 channelsTimeTicker will maintain the map minTsStatistics that can be synchronized and the map currents that will be
 synchronized. They are all mappings from pChan to Timestamp. The channelsTimeTicker itself has a background coroutine,
@@ -506,4 +506,4 @@ type Cache interface {
 
 - RemovePartition
 
-  RemovePartition removes the meta information of paritition;
+  RemovePartition removes the meta information of partition;
