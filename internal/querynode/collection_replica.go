@@ -134,6 +134,7 @@ func (colReplica *collectionReplica) queryLock() {
 	colReplica.queryMu.Lock()
 }
 
+// queryUnlock guards query and delete segment operations
 func (colReplica *collectionReplica) queryUnlock() {
 	colReplica.queryMu.Unlock()
 }
