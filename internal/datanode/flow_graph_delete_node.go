@@ -175,7 +175,10 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
-	for _, msg := range fgMsg.deleteMessages {
+	for i, msg := range fgMsg.deleteMessages {
+		traceID, _, _ := trace.InfoFromSpan(spans[i])
+		log.Info("Buffer delete request in DataNode", zap.String("traceID", traceID))
+
 		if err := dn.bufferDeleteMsg(msg, fgMsg.timeRange); err != nil {
 			log.Error("buffer delete msg failed", zap.Error(err))
 		}
