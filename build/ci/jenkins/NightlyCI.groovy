@@ -3,18 +3,8 @@
 // When scheduling a job that gets automatically triggered by changes,
 // you need to include a [cronjob] tag within the commit message.
 String cron_timezone = "TZ=Asia/Shanghai"
-// String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
-String cron_string = ""
+String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
-// Trigger nightly ci for 2.0.0-rc8 branch temporarily
-switch(BRANCH_NAME) {
-  case "master":
-    cron_string = "50 22 * * *"
-    break
-  case "2.0.0-rc8":
-    cron_string = "50 23 * * *"
-    break
-}
 
 int total_timeout_minutes = 660
 
@@ -90,7 +80,7 @@ pipeline {
                                             --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
                                             --skip-export-logs \
                                             --skip-cleanup \
-                                            --test-extra-arg "--tags L0 L1 L2 --repeat-scope=session" \
+                                            --test-extra-arg "-n 4 --tags L0 L1 L2 --repeat-scope=session" \
                                             --test-timeout ${e2e_timeout_seconds}
                                             """
                                         } else {
