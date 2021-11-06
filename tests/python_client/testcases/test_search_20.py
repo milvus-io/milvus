@@ -730,7 +730,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True, nb=10)[0]
         # 2. search
-        log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
+        log.info("test_search_invalid_round_decimal: Searching collection %s" % collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp, round_decimal=round_decimal,
@@ -915,7 +915,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0:4]
         # 2. search
-        log.info("test_search_normal: searching collection %s" % collection_w.name)
+        log.info("test_search_normal_default_params: searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_params, default_limit,
