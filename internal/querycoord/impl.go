@@ -544,6 +544,54 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 	}, nil
 }
 
+// LoadBalance would do a load balancing operation between query nodes
+func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
+	log.Debug("LoadBalanceRequest received",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", req.Base.MsgID),
+		zap.Any("req", req),
+	)
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		err := errors.New("query coordinator is not healthy")
+		status.Reason = err.Error()
+		log.Debug("LoadBalance failed", zap.Error(err))
+		return status, nil
+	}
+
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
+	loadBalanceTask := &loadBalanceTask{
+		baseTask:           baseTask,
+		LoadBalanceRequest: req,
+		rootCoord:          qc.rootCoordClient,
+		dataCoord:          qc.dataCoordClient,
+		cluster:            qc.cluster,
+		meta:               qc.meta,
+	}
+	err := qc.scheduler.Enqueue(loadBalanceTask)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, nil
+	}
+
+	err = loadBalanceTask.waitToFinish()
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, nil
+	}
+	log.Debug("LoadBalanceRequest completed",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", req.Base.MsgID),
+		zap.Any("req", req),
+	)
+	return status, nil
+}
+
 func (qc *QueryCoord) isHealthy() bool {
 	code := qc.stateCode.Load().(internalpb.StateCode)
 	return code == internalpb.StateCode_Healthy

@@ -12,10 +12,11 @@
 package querynode
 
 import (
-	"errors"
-	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -36,9 +37,11 @@ func (g *globalSealedSegmentManager) addGlobalSegmentInfo(segmentInfo *querypb.S
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if segmentInfo.CollectionID != g.collectionID {
-		return errors.New(fmt.Sprintln("mismatch collectionID when addGlobalSegmentInfo, ",
-			"manager collectionID = ", g.collectionID, ", ",
-			"segmentInfo collectionID = ", segmentInfo.CollectionID))
+		log.Debug("mismatch collectionID when addGlobalSegmentInfo",
+			zap.Any("manager collectionID", g.collectionID),
+			zap.Any("segmentInfo collectionID", segmentInfo.CollectionID),
+		)
+		return nil
 	}
 	g.globalSealedSegments[segmentInfo.SegmentID] = segmentInfo
 	return nil

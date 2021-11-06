@@ -211,11 +211,6 @@ message DeleteRequest {
   repeated uint64 timestamps = 10;
 }
 
-message LoadBalanceSegmentsRequest {
-  common.MsgBase base = 1;
-  repeated int64 segmentIDs = 2;
-}
-
 message LoadIndex {
   common.MsgBase base = 1;
   int64 segmentID = 2;

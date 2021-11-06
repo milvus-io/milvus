@@ -281,6 +281,17 @@ func (coord *QueryCoordMock) GetSegmentInfo(ctx context.Context, req *querypb.Ge
 	panic("implement me")
 }
 
+func (coord *QueryCoordMock) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
+	if !coord.healthy() {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "unhealthy",
+		}, nil
+	}
+
+	panic("implement me")
+}
+
 func (coord *QueryCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !coord.healthy() {
 		return &milvuspb.GetMetricsResponse{

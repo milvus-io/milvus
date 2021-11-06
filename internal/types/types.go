@@ -911,6 +911,16 @@ type ProxyComponent interface {
 	// GetMetrics gets the metrics of the proxy.
 	GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
+	// LoadBalance would do a load balancing operation between query nodes.
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including source query node ids and sealed segment ids to balance
+	//
+	// The `ErrorCode` of `Status` is `Success` if load balance successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	LoadBalance(ctx context.Context, request *milvuspb.LoadBalanceRequest) (*commonpb.Status, error)
+
 	// CreateAlias notifies Proxy to create alias for a collection
 	//
 	// ctx is the context to control request deadline and cancellation
@@ -1018,6 +1028,7 @@ type QueryCoord interface {
 	CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error)
 	GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error)
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
+	LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error)
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }

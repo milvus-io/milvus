@@ -189,6 +189,16 @@ func TestGrpcTask(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("Test LoadBalance", func(t *testing.T) {
+		res, err := queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.ErrorCode)
+	})
+
 	t.Run("Test ReleaseParOfNotLoadedCol", func(t *testing.T) {
 		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
 			Base: &commonpb.MsgBase{
@@ -280,6 +290,17 @@ func TestGrpcTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		})
 		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test LoadBalance", func(t *testing.T) {
+		res, err := queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadBalanceSegments,
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, res.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -405,6 +426,16 @@ func TestGrpcTaskEnqueueFail(t *testing.T) {
 		})
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 		assert.NotNil(t, err)
+	})
+
+	t.Run("Test LoadBalance", func(t *testing.T) {
+		status, err := queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleaseCollection,
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
 
 	queryCoord.Stop()
@@ -579,6 +610,16 @@ func TestGrpcTaskBeforeHealthy(t *testing.T) {
 		})
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
 		assert.NotNil(t, err)
+	})
+
+	t.Run("Test LoadBalance", func(t *testing.T) {
+		res, err := unHealthyCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadBalanceSegments,
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.ErrorCode)
 	})
 
 	t.Run("Test ReleasePartition", func(t *testing.T) {

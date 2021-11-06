@@ -26,6 +26,7 @@ service QueryCoord {
   rpc CreateQueryChannel(CreateQueryChannelRequest) returns (CreateQueryChannelResponse) {}
   rpc GetPartitionStates(GetPartitionStatesRequest) returns (GetPartitionStatesResponse) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+  rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}

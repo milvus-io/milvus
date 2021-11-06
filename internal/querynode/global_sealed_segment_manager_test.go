@@ -34,7 +34,7 @@ func TestGlobalSealedSegmentManager(t *testing.T) {
 
 	segmentInfo.CollectionID = 1000
 	err = manager.addGlobalSegmentInfo(segmentInfo)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 
 	ids := manager.getGlobalSegmentIDs()
 	assert.Len(t, ids, 1)

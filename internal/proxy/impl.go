@@ -2417,6 +2417,47 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	}, nil
 }
 
+// LoadBalance would do a load balancing operation between query nodes
+func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
+	log.Debug("Proxy.LoadBalance",
+		zap.Int64("proxy_id", Params.ProxyID),
+		zap.Any("req", req))
+
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	infoResp, err := node.queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_LoadBalanceSegments,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.ProxyID,
+		},
+		SourceNodeIDs:    []int64{req.SrcNodeID},
+		DstNodeIDs:       req.DstNodeIDs,
+		BalanceReason:    querypb.TriggerCondition_grpcRequest,
+		SealedSegmentIDs: req.SealedSegmentIDs,
+	})
+	if err != nil {
+		log.Error("Failed to LoadBalance from Query Coordinator",
+			zap.Any("req", req), zap.Error(err))
+		status.Reason = err.Error()
+		return status, nil
+	}
+	if infoResp.ErrorCode != commonpb.ErrorCode_Success {
+		log.Error("Failed to LoadBalance from Query Coordinator", zap.String("errMsg", infoResp.Reason))
+		status.Reason = infoResp.Reason
+		return status, nil
+	}
+	log.Debug("LoadBalance Done", zap.Any("req", req), zap.Any("status", infoResp))
+	status.ErrorCode = commonpb.ErrorCode_Success
+	return status, nil
+}
+
 // checkHealthy checks proxy state is Healthy
 func (node *Proxy) checkHealthy() bool {
 	code := node.stateCode.Load().(internalpb.StateCode)

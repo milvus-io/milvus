@@ -297,6 +297,10 @@ func (m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSeg
 	return nil, nil
 }
 
+func (m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return nil, nil
 }
@@ -549,6 +553,10 @@ func (m *MockProxy) GetMetrics(ctx context.Context, request *milvuspb.GetMetrics
 	return nil, nil
 }
 
+func (m *MockProxy) LoadBalance(ctx context.Context, request *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -776,6 +784,11 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("GetMetrics", func(t *testing.T) {
 		_, err := server.GetMetrics(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("LoadBalance", func(t *testing.T) {
+		_, err := server.LoadBalance(ctx, nil)
 		assert.Nil(t, err)
 	})
 

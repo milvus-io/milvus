@@ -67,7 +67,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	dropPartitionMsg := DropPartitionMsg{}
 	queryNodeSegStatsMsg := QueryNodeStatsMsg{}
 	segmentStatisticsMsg := SegmentStatisticsMsg{}
-	loadBalanceSegmentsMsg := LoadBalanceSegmentsMsg{}
 	dataNodeTtMsg := DataNodeTtMsg{}
 	sealedSegmentsChangeInfoMsg := SealedSegmentsChangeInfoMsg{}
 
@@ -86,7 +85,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_CreatePartition] = createPartitionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropPartition] = dropPartitionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_SegmentStatistics] = segmentStatisticsMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_LoadBalanceSegments] = loadBalanceSegmentsMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DataNodeTt] = dataNodeTtMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_SealedSegmentsChangeInfo] = sealedSegmentsChangeInfoMsg.Unmarshal
 
