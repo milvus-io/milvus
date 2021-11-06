@@ -421,6 +421,7 @@ type TxnKV interface {
 ###### A.7.3 MetaKv
 
 ```go
+// MetaKv is TxnKV for meta data. It should save data with lease.
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
