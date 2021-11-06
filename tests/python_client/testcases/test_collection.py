@@ -1841,7 +1841,7 @@ class TestGetCollectionStats:
         """
         target: test collection rows_count is correct or not
         method: create collection, create partitions and add entities in one of the partitions,
-            assert the value returned by count_entities method is equal to length of entities
+                assert the value returned by count_entities method is equal to length of entities
         expected: the count is equal to the length of vectors
         """
         new_tag = "new_tag"
@@ -1859,7 +1859,7 @@ class TestGetCollectionStats:
         """
         target: test collection rows_count is correct or not
         method: create collection, create partitions and add entities in one of the partitions,
-            assert the value returned by count_entities method is equal to length of entities
+                assert the value returned by count_entities method is equal to length of entities
         expected: the collection count is equal to the length of entities
         """
         new_tag = "new_tag"
@@ -1937,7 +1937,7 @@ class TestGetCollectionStats:
         """
         target: test collection rows_count is correct or not with multiple collections of L2
         method: create collection and add entities in it,
-            assert the value returned by count_entities method is equal to length of entities
+                assert the value returned by count_entities method is equal to length of entities
         expected: row count in segments
         """
         collection_list = []
@@ -2365,7 +2365,7 @@ class TestDropCollection:
         """
         target: test delete collection created with correct params
         method: create collection and then delete,
-            assert the value returned by delete method
+                assert the value returned by delete method
         expected: status ok, and no collection in collections
         """
         connect.drop_collection(collection)
