@@ -53,6 +53,7 @@ type Cluster interface {
 	getNumDmChannels(nodeID int64) (int, error)
 
 	hasWatchedQueryChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
+	hasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
 	getCollectionInfosByID(ctx context.Context, nodeID int64) []*querypb.CollectionInfo
 	addQueryChannel(ctx context.Context, nodeID int64, in *querypb.AddQueryChannelRequest) error
 	removeQueryChannel(ctx context.Context, nodeID int64, in *querypb.RemoveQueryChannelRequest) error
@@ -295,9 +296,22 @@ func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64,
 			log.Debug("WatchDeltaChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
 			return err
 		}
+		err = c.clusterMeta.setDeltaChannel(in.CollectionID, in.Infos)
+		if err != nil {
+			log.Debug("WatchDeltaChannels: queryNode watch delta channel error", zap.String("error", err.Error()))
+			return err
+		}
+
 		return nil
 	}
 	return errors.New("WatchDeltaChannels: Can't find query node by nodeID ")
+}
+
+func (c *queryNodeCluster) hasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {
+	c.Lock()
+	defer c.Unlock()
+
+	return c.nodes[nodeID].hasWatchedDeltaChannel(collectionID)
 }
 
 func (c *queryNodeCluster) hasWatchedQueryChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {

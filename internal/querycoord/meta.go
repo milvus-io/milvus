@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -36,6 +37,7 @@ const (
 	collectionMetaPrefix          = "queryCoord-collectionMeta"
 	segmentMetaPrefix             = "queryCoord-segmentMeta"
 	queryChannelMetaPrefix        = "queryCoord-queryChannel"
+	deltaChannelMetaPrefix        = "queryCoord-deltaChannel"
 	sealedSegmentChangeInfoPrefix = "queryCoord-sealedSegmentChangeInfo"
 	globalQuerySeekPositionPrefix = "queryCoord-globalQuerySeekPosition"
 )
@@ -72,6 +74,9 @@ type Meta interface {
 	addDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
 	removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
 
+	getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*datapb.VchannelInfo, error)
+	setDeltaChannel(collectionID UniqueID, info []*datapb.VchannelInfo) error
+
 	getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error)
 	getQueryStreamByID(collectionID UniqueID) (msgstream.MsgStream, error)
 
@@ -99,6 +104,8 @@ type MetaReplica struct {
 	segmentMu         sync.RWMutex
 	queryChannelInfos map[UniqueID]*querypb.QueryChannelInfo
 	channelMu         sync.RWMutex
+	deltaChannelInfos map[UniqueID][]*datapb.VchannelInfo
+	deltaChannelMu    sync.RWMutex
 	queryStreams      map[UniqueID]msgstream.MsgStream
 	streamMu          sync.RWMutex
 
@@ -111,6 +118,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAll
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
+	deltaChannelInfos := make(map[UniqueID][]*datapb.VchannelInfo)
 	queryMsgStream := make(map[UniqueID]msgstream.MsgStream)
 	position := &internalpb.MsgPosition{}
 
@@ -124,6 +132,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAll
 		collectionInfos:    collectionInfos,
 		segmentInfos:       segmentInfos,
 		queryChannelInfos:  queryChannelInfos,
+		deltaChannelInfos:  deltaChannelInfos,
 		queryStreams:       queryMsgStream,
 		globalSeekPosition: position,
 	}
@@ -187,6 +196,25 @@ func (m *MetaReplica) reloadFromKV() error {
 		}
 		m.queryChannelInfos[collectionID] = queryChannelInfo
 	}
+
+	deltaChannelKeys, deltaChannelValues, err := m.client.LoadWithPrefix(deltaChannelMetaPrefix)
+	if err != nil {
+		return nil
+	}
+	for index, value := range deltaChannelValues {
+		collectionIDString, _ := filepath.Split(deltaChannelKeys[index])
+		collectionID, err := strconv.ParseInt(collectionIDString, 10, 64)
+		if err != nil {
+			return err
+		}
+		deltaChannelInfo := &datapb.VchannelInfo{}
+		err = proto.Unmarshal([]byte(value), deltaChannelInfo)
+		if err != nil {
+			return err
+		}
+		m.deltaChannelInfos[collectionID] = append(m.deltaChannelInfos[collectionID], deltaChannelInfo)
+	}
+
 	globalSeekPosValue, err := m.client.Load(globalQuerySeekPositionPrefix)
 	if err == nil {
 		position := &internalpb.MsgPosition{}
@@ -950,6 +978,33 @@ func createQueryChannel(collectionID UniqueID) *querypb.QueryChannelInfo {
 	return info
 }
 
+// Get delta channel info for collection, so far all the collection share the same query channel 0
+func (m *MetaReplica) getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*datapb.VchannelInfo, error) {
+	m.deltaChannelMu.RLock()
+	defer m.deltaChannelMu.RUnlock()
+	if infos, ok := m.deltaChannelInfos[collectionID]; ok {
+		return infos, nil
+	}
+
+	return nil, fmt.Errorf("delta channel not exist in meta")
+}
+
+func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.VchannelInfo) error {
+	m.deltaChannelMu.Lock()
+	defer m.deltaChannelMu.Unlock()
+	_, ok := m.deltaChannelInfos[collectionID]
+	if ok {
+		return nil
+	}
+
+	err := saveDeltaChannelInfo(collectionID, infos, m.client)
+	if err != nil {
+		return err
+	}
+	m.deltaChannelInfos[collectionID] = infos
+	return nil
+}
+
 // Get Query channel info for collection, so far all the collection share the same query channel 0
 func (m *MetaReplica) getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error) {
 	m.channelMu.Lock()
@@ -1148,4 +1203,18 @@ func saveQueryChannelInfo(collectionID UniqueID, info *querypb.QueryChannelInfo,
 
 	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
 	return kv.Save(key, string(infoBytes))
+}
+
+func saveDeltaChannelInfo(collectionID UniqueID, infos []*datapb.VchannelInfo, kv kv.MetaKv) error {
+	kvs := make(map[string]string)
+	for _, info := range infos {
+		infoBytes, err := proto.Marshal(info)
+		if err != nil {
+			return err
+		}
+
+		key := fmt.Sprintf("%s/%d/%s", deltaChannelMetaPrefix, collectionID, info.ChannelName)
+		kvs[key] = string(infoBytes)
+	}
+	return kv.MultiSave(kvs)
 }

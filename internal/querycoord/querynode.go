@@ -24,6 +24,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -51,6 +52,7 @@ type Node interface {
 	watchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest) error
 	//removeDmChannel(collectionID UniqueID, channels []string) error
 
+	hasWatchedDeltaChannel(collectionID UniqueID) bool
 	hasWatchedQueryChannel(collectionID UniqueID) bool
 	//showWatchedQueryChannels() []*querypb.QueryChannelInfo
 	addQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest) error
@@ -80,6 +82,7 @@ type queryNode struct {
 	sync.RWMutex
 	collectionInfos      map[UniqueID]*querypb.CollectionInfo
 	watchedQueryChannels map[UniqueID]*querypb.QueryChannelInfo
+	watchedDeltaChannels map[UniqueID][]*datapb.VchannelInfo
 	state                nodeState
 	stateLock            sync.RWMutex
 
@@ -92,6 +95,7 @@ type queryNode struct {
 func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
 	collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
 	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
+	watchedDeltaChannels := make(map[UniqueID][]*datapb.VchannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
 	client, err := nodeclient.NewClient(childCtx, address)
 	if err != nil {
@@ -107,6 +111,7 @@ func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.E
 		kvClient:             kv,
 		collectionInfos:      collectionInfo,
 		watchedQueryChannels: watchedChannels,
+		watchedDeltaChannels: watchedDeltaChannels,
 		state:                disConnect,
 	}
 
@@ -329,6 +334,14 @@ func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
 	return false
 }
 
+func (qn *queryNode) hasWatchedDeltaChannel(collectionID UniqueID) bool {
+	qn.RLock()
+	defer qn.RUnlock()
+
+	_, ok := qn.watchedDeltaChannels[collectionID]
+	return ok
+}
+
 //func (qn *queryNode) showWatchedQueryChannels() []*querypb.QueryChannelInfo {
 //	qn.RLock()
 //	defer qn.RUnlock()
@@ -340,6 +353,13 @@ func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
 //
 //	return results
 //}
+
+func (qn *queryNode) setDeltaChannelInfo(collectionID int64, infos []*datapb.VchannelInfo) {
+	qn.Lock()
+	defer qn.Unlock()
+
+	qn.watchedDeltaChannels[collectionID] = infos
+}
 
 func (qn *queryNode) setQueryChannelInfo(info *querypb.QueryChannelInfo) {
 	qn.Lock()
@@ -433,6 +453,7 @@ func (qn *queryNode) watchDeltaChannels(ctx context.Context, in *querypb.WatchDe
 	if status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(status.Reason)
 	}
+	qn.setDeltaChannelInfo(in.CollectionID, in.Infos)
 	return err
 }
 
