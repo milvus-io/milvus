@@ -131,6 +131,7 @@ type collectionReplica struct {
 	etcdKV *etcdkv.EtcdKV
 }
 
+// queryLock guards query and delete operations
 func (colReplica *collectionReplica) queryLock() {
 	colReplica.queryMu.Lock()
 }
