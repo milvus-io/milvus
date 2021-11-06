@@ -126,6 +126,10 @@ func (m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSeg
 	return m.infoResp, m.err
 }
 
+func (m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return m.metricResp, m.err
 }
@@ -315,6 +319,13 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.GetSegmentInfo(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("LoadBalance", func(t *testing.T) {
+		req := &querypb.LoadBalanceRequest{}
+		resp, err := server.LoadBalance(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {

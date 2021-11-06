@@ -51,6 +51,7 @@ service MilvusService {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
+  rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {}
 }
 
 message CreateAliasRequest {
@@ -703,6 +704,16 @@ message GetMetricsResponse {
   common.Status status = 1;
   string response = 2;  // response is of jsonic format
   string component_name = 3; // metrics from which component
+}
+
+/*
+* Do load balancing operation from src_nodeID to dst_nodeID.
+*/
+message LoadBalanceRequest {
+  common.MsgBase base = 1;
+  int64 src_nodeID = 2;
+  repeated int64 dst_nodeIDs = 3;
+  repeated int64 sealed_segmentIDs = 4;
 }
 
 service ProxyService {

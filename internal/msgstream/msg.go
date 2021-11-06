@@ -943,61 +943,6 @@ func (lim *LoadIndexMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 */
 
-/////////////////////////////////////////LoadBalanceSegments//////////////////////////////////////////
-
-// LoadBalanceSegmentsMsg is a message pack that contains load balance segments request
-type LoadBalanceSegmentsMsg struct {
-	BaseMsg
-	internalpb.LoadBalanceSegmentsRequest
-}
-
-// interface implementation validation
-var _ TsMsg = &LoadBalanceSegmentsMsg{}
-
-// ID returns the ID of this message pack
-func (l *LoadBalanceSegmentsMsg) ID() UniqueID {
-	return l.Base.MsgID
-}
-
-// Type returns the type of this message pack
-func (l *LoadBalanceSegmentsMsg) Type() MsgType {
-	return l.Base.MsgType
-}
-
-// SourceID indicated which component generated this message
-func (l *LoadBalanceSegmentsMsg) SourceID() int64 {
-	return l.Base.SourceID
-}
-
-// Marshal is used to serializing a message pack to byte array
-func (l *LoadBalanceSegmentsMsg) Marshal(input TsMsg) (MarshalType, error) {
-	load := input.(*LoadBalanceSegmentsMsg)
-	loadReq := &load.LoadBalanceSegmentsRequest
-	mb, err := proto.Marshal(loadReq)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-// Unmarshal is used to deserializing a message pack from byte array
-func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	loadReq := internalpb.LoadBalanceSegmentsRequest{}
-	in, err := convertToByteArray(input)
-	if err != nil {
-		return nil, err
-	}
-	err = proto.Unmarshal(in, &loadReq)
-	if err != nil {
-		return nil, err
-	}
-	loadMsg := &LoadBalanceSegmentsMsg{LoadBalanceSegmentsRequest: loadReq}
-	loadMsg.BeginTimestamp = loadReq.Base.Timestamp
-	loadMsg.EndTimestamp = loadReq.Base.Timestamp
-
-	return loadMsg, nil
-}
-
 /////////////////////////////////////////SealedSegmentsChangeInfoMsg//////////////////////////////////////////
 
 // SealedSegmentsChangeInfoMsg is a message pack that contains sealed segments change info

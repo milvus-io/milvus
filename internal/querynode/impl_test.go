@@ -172,7 +172,7 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
-	t.Run("test init global sealed segments failed", func(t *testing.T) {
+	t.Run("test not init global sealed segments", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -190,8 +190,8 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 		}
 
 		status, err := node.AddQueryChannel(ctx, req)
-		assert.Error(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
 	t.Run("test seek error", func(t *testing.T) {

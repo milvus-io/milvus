@@ -434,6 +434,10 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 	return s.proxy.GetMetrics(ctx, request)
 }
 
+func (s *Server) LoadBalance(ctx context.Context, request *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
+	return s.proxy.LoadBalance(ctx, request)
+}
+
 func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateAlias(ctx, request)
 }
