@@ -2,7 +2,7 @@
 
 ## Background
 
-Milvus supports one entity containing multiple vector fields and multiple scalar fields.
+In Milvus, one entity encapsulates multiple vectors and scalars.
 
 When creating a collection, you can specify using the primary key generated automatically or the user-provided primary key. If the user sets to use the user-provided primary key, each entity inserted must contain the primary key field, otherwise, the insertion will fail. The primary keys will be returned after the insertion request is successful.
 
