@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 import os
 import time
@@ -51,7 +53,6 @@ class TestChaosBase:
     port = 19530
     _chaos_config = None
     health_checkers = {}
-    checker_threads = {}
 
     def parser_testcase_config(self, chaos_yaml):
         tests_yaml = constants.TESTS_CONFIG_LOCATION + 'testcases.yaml'
@@ -118,12 +119,8 @@ class TestChaos(TestChaosBase):
                                 namespace=constants.CHAOS_NAMESPACE)
         meta_name = self._chaos_config.get('metadata', None).get('name', None)
         chaos_res.delete(meta_name, raise_ex=False)
-        for k, ch in self.health_checkers.items():
-            ch.terminate()
-            log.info(f"tear down: checker {k} terminated")
         sleep(2)
-        for k, t in self.checker_threads.items():
-            log.info(f"Thread {k} is_alive(): {t.is_alive()}")
+        log.info(f'Alive threads: {threading.enumerate()}')
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', cc.get_chaos_yamls())
@@ -131,7 +128,7 @@ class TestChaos(TestChaosBase):
         # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
         log.info(connections.get_connection_addr('default'))
-        self.checker_threads = cc.start_monitor_threads(self.health_checkers)
+        cc.start_monitor_threads(self.health_checkers)
 
         # parse chaos object
         chaos_config = cc.gen_experiment_config(chaos_yaml)
@@ -174,8 +171,7 @@ class TestChaos(TestChaosBase):
         # wait 40s
         sleep(constants.CHAOS_DURATION)
 
-        for k, t in self.checker_threads.items():
-            log.info(f"10s later: Thread {k} is_alive(): {t.is_alive()}")
+        log.info(f'Alive threads: {threading.enumerate()}')
 
         # assert statistic
         log.info("******2nd assert after chaos injected: ")
@@ -193,8 +189,7 @@ class TestChaos(TestChaosBase):
         # delete chaos
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
-        for k, t in self.checker_threads.items():
-            log.info(f"Thread {k} is_alive(): {t.is_alive()}")
+        log.info(f'Alive threads: {threading.enumerate()}')
         sleep(2)
 
         # reconnect if needed
