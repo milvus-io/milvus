@@ -116,7 +116,7 @@ func (c *LongTermChecker) Stop() {
 	close(c.ch)
 }
 
-func getTimetravel(ctx context.Context, allocator allocator) (*timetravel, error) {
+func getTimetravelReverseTime(ctx context.Context, allocator allocator) (*timetravel, error) {
 	ts, err := allocator.allocTimestamp(ctx)
 	if err != nil {
 		return nil, err

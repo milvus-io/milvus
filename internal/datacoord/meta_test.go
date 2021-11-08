@@ -540,3 +540,72 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 		})
 	}
 }
+
+func Test_meta_GetSegmentsOfCollection(t *testing.T) {
+	type fields struct {
+		segments *SegmentsInfo
+	}
+	type args struct {
+		collectionID UniqueID
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		expect []*SegmentInfo
+	}{
+		{
+			"test get segments",
+			fields{
+				&SegmentsInfo{
+					map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:           1,
+								CollectionID: 1,
+							},
+						},
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:           2,
+								CollectionID: 1,
+							},
+						},
+						3: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:           3,
+								CollectionID: 2,
+							},
+						},
+					},
+				},
+			},
+			args{
+				collectionID: 1,
+			},
+			[]*SegmentInfo{
+				{
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:           1,
+						CollectionID: 1,
+					},
+				},
+				{
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:           2,
+						CollectionID: 1,
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &meta{
+				segments: tt.fields.segments,
+			}
+			got := m.GetSegmentsOfCollection(tt.args.collectionID)
+			assert.ElementsMatch(t, tt.expect, got)
+		})
+	}
+}

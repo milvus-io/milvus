@@ -101,18 +101,6 @@ func (m *meta) GetCollection(collectionID UniqueID) *datapb.CollectionInfo {
 	return collection
 }
 
-// GetCollections get all collections id from local cache
-func (m *meta) GetCollectionsID() []UniqueID {
-	m.RLock()
-	defer m.RUnlock()
-
-	res := make([]UniqueID, 0, len(m.collections))
-	for _, c := range m.collections {
-		res = append(res, c.GetID())
-	}
-	return res
-}
-
 type chanPartSegments struct {
 	collecionID UniqueID
 	partitionID UniqueID
@@ -368,7 +356,11 @@ func (m *meta) GetSegmentsOfCollection(collectionID UniqueID) []*SegmentInfo {
 
 	ret := make([]*SegmentInfo, 0)
 	segments := m.segments.GetSegments()
-	ret = append(ret, segments...)
+	for _, segment := range segments {
+		if segment.GetCollectionID() == collectionID {
+			ret = append(ret, segment)
+		}
+	}
 	return ret
 }
 
@@ -497,28 +489,6 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	defer m.Unlock()
 
 	m.segments.SetIsCompacting(segmentID, compacting)
-}
-
-// MoveSegmentBinlogs migration logic, moving segment binlong information for legacy keys
-func (m *meta) MoveSegmentBinlogs(segmentID UniqueID, oldPathPrefix string, field2Binlogs map[UniqueID][]string) error {
-	m.Lock()
-	defer m.Unlock()
-
-	m.segments.AddSegmentBinlogs(segmentID, field2Binlogs)
-
-	removals := []string{oldPathPrefix}
-	kv := make(map[string]string)
-
-	if segment := m.segments.GetSegment(segmentID); segment != nil {
-		k := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		v, err := proto.Marshal(segment.SegmentInfo)
-		if err != nil {
-			log.Error("DataCoord MoveSegmentBinlogs marshal failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
-			return fmt.Errorf("DataCoord MoveSegmentBinlogs segmentID:%d, marshal failed:%w", segment.GetID(), err)
-		}
-		kv[k] = string(v)
-	}
-	return m.client.MultiSaveAndRemoveWithPrefix(kv, removals)
 }
 
 func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult) error {
