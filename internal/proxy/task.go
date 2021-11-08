@@ -2291,9 +2291,7 @@ func mergeRetrieveResults(retrieveResults []*internalpb.RetrieveResults) (*milvu
 			}
 		}
 	}
-	if skipDupCnt > 0 {
-		log.Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
-	}
+	log.Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
 
 	if ret == nil {
 		ret = &milvuspb.QueryResults{
