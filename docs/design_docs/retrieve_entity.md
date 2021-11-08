@@ -10,7 +10,7 @@ The primary keys will be returned after the insertion request is successful.
 
 Milvus currently only supports primary keys of int64 type.
 
-QueryNode subscribes to the insert channel and will determine whether to use the data extracted from insert channel or data processed by DataNode to provide services according to the status of a segment.
+QueryNode subscribes to the insert channel and will determine whether to use the data extracted from the insert channel or data processed by DataNode to provide services according to the status of a segment.
 
 ## Goals
 
