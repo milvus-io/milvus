@@ -180,7 +180,8 @@ class TestCreateBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
         """
-        target: test create two partitions, and insert vectors with the same tag to each collection, check status returned
+        target: test create two partitions, and insert vectors with the same tag to
+                each collection, check status returned
         method: call function: create_partition
         expected: status ok, collection length is correct
         """
