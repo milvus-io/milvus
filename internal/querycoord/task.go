@@ -1565,6 +1565,17 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 			continue
 		}
 
+		//  segment which is compacted from should be exist in query node
+		for _, compactedSegID := range segmentInfo.CompactionFrom {
+			_, err = ht.meta.getSegmentInfoByID(compactedSegID)
+			if err != nil {
+				log.Error("handoffTask: compacted segment has not been loaded into memory", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Int64("segmentID", segmentID))
+				ht.setResultInfo(err)
+				return err
+			}
+		}
+
+		// segment which is compacted to should not exist in query node
 		_, err = ht.meta.getSegmentInfoByID(segmentID)
 		if err != nil {
 			getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
@@ -1585,11 +1596,12 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				if segmentBinlogs.SegmentID == segmentID {
 					findBinlog = true
 					segmentLoadInfo := &querypb.SegmentLoadInfo{
-						SegmentID:    segmentID,
-						PartitionID:  partitionID,
-						CollectionID: collectionID,
-						BinlogPaths:  segmentBinlogs.FieldBinlogs,
-						NumOfRows:    segmentBinlogs.NumOfRows,
+						SegmentID:      segmentID,
+						PartitionID:    partitionID,
+						CollectionID:   collectionID,
+						BinlogPaths:    segmentBinlogs.FieldBinlogs,
+						NumOfRows:      segmentBinlogs.NumOfRows,
+						CompactionFrom: segmentInfo.CompactionFrom,
 					}
 
 					msgBase := proto.Clone(ht.Base).(*commonpb.MsgBase)

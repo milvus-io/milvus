@@ -383,6 +383,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 	// generate segment change info according segment info to updated
 	col2SegmentChangeInfos := make(col2SealedSegmentChangeInfos)
 
+	segmentsCompactionFrom := make([]UniqueID, 0)
 	// get segmentInfos to sav
 	for collectionID, onlineInfos := range saves {
 		segmentsChangeInfo := &querypb.SealedSegmentsChangeInfo{
@@ -408,6 +409,20 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 				}
 			}
 			segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, changeInfo)
+
+			// generate offline segment change info if the loaded segment is compacted from other sealed segments
+			for _, compactionSegmentID := range info.CompactionFrom {
+				compactionSegmentInfo, err := m.getSegmentInfoByID(compactionSegmentID)
+				if err == nil && compactionSegmentInfo.SegmentState == querypb.SegmentState_sealed {
+					segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, &querypb.SegmentChangeInfo{
+						OfflineNodeID:   compactionSegmentInfo.NodeID,
+						OfflineSegments: []*querypb.SegmentInfo{compactionSegmentInfo},
+					})
+					segmentsCompactionFrom = append(segmentsCompactionFrom, compactionSegmentID)
+				} else {
+					return nil, fmt.Errorf("saveGlobalSealedSegInfos: the compacted segment %d has not been loaded into memory", compactionSegmentID)
+				}
+			}
 		}
 		col2SegmentChangeInfos[collectionID] = segmentsChangeInfo
 	}
@@ -475,6 +490,15 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		}
 	}
 
+	// remove compacted segment info from etcd
+	for _, segmentID := range segmentsCompactionFrom {
+		segmentKey := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
+		err := m.client.Remove(segmentKey)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	// save queryChannelInfo and sealedSegmentsChangeInfo to etcd
 	saveKvs := make(map[string]string)
 	for collectionID, queryChannelInfo := range queryChannelInfosMap {
@@ -515,6 +539,9 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 			segmentID := info.SegmentID
 			m.segmentInfos[segmentID] = info
 		}
+	}
+	for _, segmentID := range segmentsCompactionFrom {
+		delete(m.segmentInfos, segmentID)
 	}
 	m.segmentMu.Unlock()
 

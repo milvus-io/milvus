@@ -374,10 +374,10 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 					segmentID := segmentInfo.SegmentID
 					if Params.AutoHandoff {
 						log.Debug("watchHandoffSegmentLoop: handoff segment received",
-							zap.Any("collectionID", collectionID),
-							zap.Any("partitionID", partitionID),
-							zap.Any("segmentID", segmentID),
-							zap.Any("channel", segmentInfo.ChannelID),
+							zap.Int64("collectionID", collectionID),
+							zap.Int64("partitionID", partitionID),
+							zap.Int64("segmentID", segmentID),
+							zap.Any("segmentInfo", segmentInfo),
 						)
 						baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_handoff)
 						handoffReq := &querypb.HandoffSegmentsRequest{
