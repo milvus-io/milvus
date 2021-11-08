@@ -5,7 +5,7 @@ ISSUE: link to the github issue
 
 PRs: link to the github PRs
 
-Keywords: list keywords about this mep
+Keywords: list keywords about this MEP
 
 Released: <Milvus Release Version>
 
