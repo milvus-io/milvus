@@ -34,7 +34,6 @@ class Checker:
     def __init__(self):
         self._succ = 0
         self._fail = 0
-        self._running = True
         self.c_wrap = ApiCollectionWrapper()
         self.c_wrap.init_collection(name=cf.gen_unique_str('Checker_'),
                                     schema=cf.gen_default_collection_schema(),
@@ -49,9 +48,6 @@ class Checker:
     def succ_rate(self):
         return self._succ / self.total() if self.total() != 0 else 0
 
-    def terminate(self):
-        self._running = False
-
     def reset(self):
         self._succ = 0
         self._fail = 0
@@ -64,7 +60,7 @@ class SearchChecker(Checker):
         self.c_wrap.load()   # do load before search
 
     def keep_running(self):
-        while self._running is True:
+        while True:
             search_vec = cf.gen_vectors(5, ct.default_dim)
             _, result = self.c_wrap.search(
                                 data=search_vec,
@@ -87,7 +83,7 @@ class InsertFlushChecker(Checker):
         self.initial_entities = self.c_wrap.num_entities
 
     def keep_running(self):
-        while self._running:
+        while True:
             _, insert_result = \
                 self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.DELTA_PER_INS),
                                    timeout=timeout, check_task=CheckTasks.check_nothing)
@@ -116,7 +112,7 @@ class CreateChecker(Checker):
         super().__init__()
 
     def keep_running(self):
-        while self._running is True:
+        while True:
             _, result = self.c_wrap.init_collection(
                                     name=cf.gen_unique_str("CreateChecker_"),
                                     schema=cf.gen_default_collection_schema(),
@@ -139,7 +135,7 @@ class IndexChecker(Checker):
         log.debug(f"Index ready entities: {self.c_wrap.num_entities }")  # do as a flush before indexing
 
     def keep_running(self):
-        while self._running:
+        while True:
             _, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
                                                  constants.DEFAULT_INDEX_PARAM,
                                                  name=cf.gen_unique_str('index_'),
@@ -158,7 +154,7 @@ class QueryChecker(Checker):
         self.c_wrap.load()      # load before query
 
     def keep_running(self):
-        while self._running:
+        while True:
             int_values = []
             for _ in range(5):
                 int_values.append(randint(0, constants.ENTITIES_FOR_SEARCH))
