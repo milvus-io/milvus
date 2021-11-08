@@ -174,7 +174,7 @@ type Meta struct {
 Meta is used to record the state of the index.
 
 - Revision: The number of times IndexMeta has been changed in etcd. It's the same as Event.Kv.Version in etcd.
-  When IndexCoord watches the IndexMeta in etcd is changed, can compare `revision` and Event.Kv.Versionto determine
+  When IndexCoord watches the IndexMeta in etcd is changed, can compare `revision` and Event.Kv.Version to determine
   this modification of IndexMeta is caused by IndexCoord or IndexNode. If it is caused by IndexNode, the Meta in
   IndexCoord must be updated.
 
