@@ -19,6 +19,7 @@ type IndexCoord interface {
 	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
   // GetIndexStates gets the index states of the IndexBuildIDs in the request from RootCoordinator.
 	GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
+  // GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
 	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
