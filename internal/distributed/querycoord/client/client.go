@@ -306,6 +306,7 @@ func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	return ret.(*commonpb.Status), err
 }
 
+// ReleaseCollection release the data of the specified collections in the QueryCoord.
 func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
