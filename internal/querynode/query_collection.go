@@ -40,6 +40,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+const searchParallelSize = 10
+
 type queryMsg interface {
 	msgstream.TsMsg
 	GuaranteeTs() Timestamp
@@ -74,6 +76,8 @@ type queryCollection struct {
 	localCacheEnabled  bool
 
 	globalSegmentManager *globalSealedSegmentManager
+
+	searchParallelChan chan struct{}
 }
 
 func newQueryCollection(releaseCtx context.Context,
@@ -115,6 +119,8 @@ func newQueryCollection(releaseCtx context.Context,
 		remoteChunkManager:   remoteChunkManager,
 		localCacheEnabled:    localCacheEnabled,
 		globalSegmentManager: newGlobalSealedSegmentManager(collectionID),
+
+		searchParallelChan: make(chan struct{}, searchParallelSize),
 	}
 
 	err := qc.registerCollectionTSafe()
@@ -445,7 +451,36 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	case commonpb.MsgType_Retrieve:
 		err = q.retrieve(msg)
 	case commonpb.MsgType_Search:
-		err = q.search(msg)
+		q.searchParallelChan <- struct{}{}
+		go func() {
+			defer func() {
+				<-q.searchParallelChan
+			}()
+			err = q.search(msg)
+			if err != nil {
+				go func() {
+					publishErr := q.publishFailedQueryResult(msg, err.Error())
+					if publishErr != nil {
+						finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+						log.Error(finalErr.Error())
+						return
+					}
+					log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+						zap.Int64("collectionID", collectionID),
+						zap.Int64("msgID", msg.ID()),
+						zap.String("msgType", msgTypeStr),
+					)
+					log.Error(err.Error())
+				}()
+			}
+			log.Debug("do query done in receiveQueryMsg",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("msgID", msg.ID()),
+				zap.String("msgType", msgTypeStr),
+			)
+			tr.Elapse("all done")
+			sp.Finish()
+		}()
 	default:
 		err = fmt.Errorf("receive invalid msgType = %d", msgType)
 		return err
@@ -1085,10 +1120,13 @@ func (q *queryCollection) search(msg queryMsg) error {
 		//	fmt.Println(testHits.IDs)
 		//	fmt.Println(testHits.Scores)
 		//}
-		err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
-		if err != nil {
-			return err
-		}
+		go func() {
+			err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
+			if err != nil {
+				// should not happen
+				log.Error(err.Error())
+			}
+		}()
 		tr.Record("publish search result")
 	}
 
