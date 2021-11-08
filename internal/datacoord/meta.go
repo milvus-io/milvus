@@ -308,15 +308,13 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 		modSegments[cp.GetSegmentID()] = s
 	}
 
-	for id := range modSegments {
-		if segment := m.segments.GetSegment(id); segment != nil {
-			segBytes, err := proto.Marshal(segment.SegmentInfo)
-			if err != nil {
-				return fmt.Errorf("DataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
-			}
-			key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-			kv[key] = string(segBytes)
+	for _, segment := range modSegments {
+		segBytes, err := proto.Marshal(segment.SegmentInfo)
+		if err != nil {
+			return fmt.Errorf("DataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
 		}
+		key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+		kv[key] = string(segBytes)
 	}
 
 	if len(kv) == 0 {
