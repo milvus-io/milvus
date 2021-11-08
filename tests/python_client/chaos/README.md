@@ -13,6 +13,8 @@ Chaos tests run in pytest framework, same as e2e tests.
 
 Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/tests/README.md)
 
+## Flow Chart
+[![img](https://github.com/milvus-io/milvus/raw/master/tests/python_client/graphs/chaos_test_flow_chart.jpg)](https://github.com/milvus-io/milvus/blob/master/tests/python_client/graphs/chaos_test_flow_chart.jpg)
 ## Test Scenarios
 ### Milvus in cluster mode
 #### pod kill
