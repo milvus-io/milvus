@@ -76,6 +76,7 @@ def get_config_digest(url, token):
 
 
 def get_latest_tag(limit=200):
+    """ get the latest tag of master """
 
     auth_url = ""
     tags_url = ""
