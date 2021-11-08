@@ -13,6 +13,7 @@ package rocksmq
 
 import (
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -64,9 +65,35 @@ func InitRocksMQ() error {
 		idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
 		_ = idAllocator.Initialize()
 
-		atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, params.ParseInt64("rocksmq.retentionTimeInMinutes"))
-		atomic.StoreInt64(&RocksmqRetentionSizeInMB, params.ParseInt64("rocksmq.retentionSizeInMB"))
-		log.Debug("Rocksmq retention: ", zap.Any("RocksmqRetentionTimeInMinutes", RocksmqRetentionTimeInMinutes), zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB))
+		rawRmqPageSize, err := params.Load("rocksmq.rocksmqPageSize")
+		if err == nil && rawRmqPageSize != "" {
+			rmqPageSize, err := strconv.ParseInt(rawRmqPageSize, 10, 64)
+			if err == nil {
+				atomic.StoreInt64(&RocksmqPageSize, rmqPageSize)
+			} else {
+				log.Warn("rocksmq.rocksmqPageSize is invalid, using default value 2G")
+			}
+		}
+		rawRmqRetentionTimeInMinutes, err := params.Load("rocksmq.retentionTimeInMinutes")
+		if err == nil && rawRmqRetentionTimeInMinutes != "" {
+			rawRmqRetentionTimeInMinutes, err := strconv.ParseInt(rawRmqRetentionTimeInMinutes, 10, 64)
+			if err == nil {
+				atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, rawRmqRetentionTimeInMinutes)
+			} else {
+				log.Warn("rocksmq.retentionTimeInMinutes is invalid, using default value 3 days")
+			}
+		}
+		rawRmqRetentionSizeInMB, err := params.Load("rocksmq.retentionSizeInMB")
+		if err == nil && rawRmqRetentionSizeInMB != "" {
+			rawRmqRetentionSizeInMB, err := strconv.ParseInt(rawRmqRetentionSizeInMB, 10, 64)
+			if err == nil {
+				atomic.StoreInt64(&RocksmqRetentionSizeInMB, rawRmqRetentionSizeInMB)
+			} else {
+				log.Warn("rocksmq.retentionSizeInMB is invalid, using default value 0")
+			}
+		}
+		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", RocksmqRetentionTimeInMinutes),
+			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB), zap.Any("RocksmqPageSize", RocksmqPageSize))
 		Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
 		if err != nil {
 			panic(err)
