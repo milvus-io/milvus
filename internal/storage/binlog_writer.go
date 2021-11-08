@@ -51,10 +51,12 @@ func (writer *baseBinlogWriter) isClosed() bool {
 	return writer.buffer != nil
 }
 
+// GetEventNums returns the number of event writers
 func (writer *baseBinlogWriter) GetEventNums() int32 {
 	return int32(len(writer.eventWriters))
 }
 
+// GetRowNums returns writer's number of rows
 func (writer *baseBinlogWriter) GetRowNums() (int32, error) {
 	if writer.isClosed() {
 		return writer.length, nil
