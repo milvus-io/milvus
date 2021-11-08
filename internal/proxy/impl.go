@@ -390,6 +390,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 	return rct.result, nil
 }
 
+// DescribeCollection get the meta information of specific collection, such as schema, created timestamp and etc.
 func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.DescribeCollectionResponse{
