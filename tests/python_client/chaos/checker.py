@@ -5,7 +5,7 @@ from time import sleep
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from common import common_type as ct
-import constants
+from chaos import constants
 
 from common.common_type import CheckTasks
 from utils.util_log import test_log as log
