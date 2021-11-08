@@ -49,7 +49,7 @@ type downloader interface {
 type uploader interface {
 	// upload saves InsertData and DeleteData into blob storage.
 	//  stats-binlogs are generated from InsertData.
-	upload(ctx context.Context, segID, partID UniqueID, iData *InsertData, dData *DeleteData, meta *etcdpb.CollectionMeta) (*cpaths, error)
+	upload(ctx context.Context, segID, partID UniqueID, iData []*InsertData, dData *DeleteData, meta *etcdpb.CollectionMeta) (*cpaths, error)
 }
 
 type binlogIO struct {
@@ -71,7 +71,7 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 
 			case <-ctx.Done():
 				close(r)
-				log.Debug("binlog download canceled by context done")
+				log.Warn("ctx done when downloading kvs from blob storage")
 				return
 
 			default:
@@ -107,16 +107,32 @@ type cpaths struct {
 func (b *binlogIO) upload(
 	ctx context.Context,
 	segID, partID UniqueID,
-	iData *InsertData,
+	iDatas []*InsertData,
 	dData *DeleteData,
 	meta *etcdpb.CollectionMeta) (*cpaths, error) {
 
-	kvs, inpaths, statspaths, err := b.genInsertBlobs(iData, partID, segID, meta)
-	if err != nil {
-		log.Warn("generate insert blobs wrong", zap.Error(err))
-		return nil, err
+	var p = &cpaths{
+		inPaths:    make([]*datapb.FieldBinlog, 0),
+		statsPaths: make([]*datapb.FieldBinlog, 0),
 	}
-	p := &cpaths{inpaths, statspaths, nil}
+
+	kvs := make(map[string]string)
+
+	for _, iData := range iDatas {
+		kv, inpaths, statspaths, err := b.genInsertBlobs(iData, partID, segID, meta)
+		if err != nil {
+			log.Warn("generate insert blobs wrong", zap.Error(err))
+			return nil, err
+		}
+
+		for k, v := range kv {
+			kvs[k] = v
+		}
+
+		p.inPaths = append(p.inPaths, inpaths...)
+		p.statsPaths = append(p.statsPaths, statspaths...)
+
+	}
 
 	// If there are delta logs
 	if dData != nil {

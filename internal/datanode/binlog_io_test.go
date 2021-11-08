@@ -44,7 +44,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			Data: map[int64]int64{888: 666666},
 		}
 
-		p, err := b.upload(context.TODO(), 1, 10, iData, dData, meta)
+		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
 		assert.NoError(t, err)
 		assert.Equal(t, 11, len(p.inPaths))
 		assert.Equal(t, 3, len(p.statsPaths))
@@ -53,7 +53,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		p, err = b.upload(ctx, 1, 10, iData, dData, meta)
+		p, err = b.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
 		assert.EqualError(t, err, errUploadToBlobStorage.Error())
 		assert.Nil(t, p)
 	})

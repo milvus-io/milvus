@@ -137,6 +137,10 @@ func clearEtcd(rootPath string) error {
 type MetaFactory struct {
 }
 
+func NewMetaFactory() *MetaFactory {
+	return &MetaFactory{}
+}
+
 type DataFactory struct {
 	rawData []byte
 }
@@ -151,15 +155,29 @@ type RootCoordFactory struct {
 type DataCoordFactory struct {
 	types.DataCoord
 
-	SaveBinlogPathError     bool
-	SaveBinlogPathNotSucess bool
+	SaveBinlogPathError      bool
+	SaveBinlogPathNotSuccess bool
+
+	CompleteCompactionError      bool
+	CompleteCompactionNotSuccess bool
+}
+
+func (ds *DataCoordFactory) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
+	if ds.CompleteCompactionError {
+		return nil, errors.New("Error")
+	}
+	if ds.CompleteCompactionNotSuccess {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+	}
+
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
 func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	if ds.SaveBinlogPathError {
 		return nil, errors.New("Error")
 	}
-	if ds.SaveBinlogPathNotSucess {
+	if ds.SaveBinlogPathNotSuccess {
 		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 	}
 
@@ -514,23 +532,34 @@ func genFlowGraphDeleteMsg(pks []int64, chanName string) flowGraphMsg {
 
 type AllocatorFactory struct {
 	sync.Mutex
-	r *rand.Rand
+	r       *rand.Rand
+	isvalid bool
+	random  bool
 }
 
 var _ allocatorInterface = &AllocatorFactory{}
 
 func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
 	f := &AllocatorFactory{
-		r: rand.New(rand.NewSource(time.Now().UnixNano())),
+		r:       rand.New(rand.NewSource(time.Now().UnixNano())),
+		isvalid: len(id) == 0 || (len(id) > 0 && id[0] > 0),
 	}
-
 	return f
 }
 
 func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
 	alloc.Lock()
 	defer alloc.Unlock()
-	return alloc.r.Int63n(10000), nil
+
+	if !alloc.isvalid {
+		return -1, errors.New("allocID error")
+	}
+
+	if alloc.random {
+		return alloc.r.Int63n(10000), nil
+	}
+
+	return 19530, nil
 }
 
 func (alloc *AllocatorFactory) allocIDBatch(count uint32) (UniqueID, uint32, error) {
@@ -659,6 +688,13 @@ func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.
 
 func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return nil, errors.New("mocked failure")
+}
+
+func genInsertDataWithRowIDs(rowIDs [2]int64) *InsertData {
+	iD := genInsertData()
+	iD.Data[0].(*s.Int64FieldData).Data = rowIDs[:]
+
+	return iD
 }
 
 func genInsertData() *InsertData {
