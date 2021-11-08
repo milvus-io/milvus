@@ -31,7 +31,7 @@ type DataCoord interface {
 	// SaveBinlogPaths updates segments binlogs(including insert binlogs, stats logs and delta logs)
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
-
+  // GetMetrics gets the metrics about DataCoord
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 ```
