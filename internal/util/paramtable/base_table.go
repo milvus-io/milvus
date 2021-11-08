@@ -164,14 +164,8 @@ func (gp *BaseTable) tryloadFromEnv() {
 
 	pulsarAddress := os.Getenv("PULSAR_ADDRESS")
 	if pulsarAddress == "" {
-		pulsarHost, err := gp.Load("pulsar.address")
-		if err != nil {
-			panic(err)
-		}
-		port, err := gp.Load("pulsar.port")
-		if err != nil {
-			panic(err)
-		}
+		pulsarHost := gp.LoadWithDefault("pulsar.address", "localhost")
+		port := gp.LoadWithDefault("pulsar.port", "6650")
 		pulsarAddress = "pulsar://" + pulsarHost + ":" + port
 	}
 	gp.Save("_PulsarAddress", pulsarAddress)
@@ -188,7 +182,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 
 	insertBufferFlushSize := os.Getenv("DATA_NODE_IBUFSIZE")
 	if insertBufferFlushSize == "" {
-		insertBufferFlushSize = gp.LoadWithDefault("datanode.flush.insertBufSize", "16777216")
+		insertBufferFlushSize = gp.LoadWithDefault("dataNode.flush.insertBufSize", "16777216")
 	}
 	gp.Save("_DATANODE_INSERTBUFSIZE", insertBufferFlushSize)
 

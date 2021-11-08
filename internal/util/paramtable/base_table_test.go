@@ -119,13 +119,8 @@ func TestBaseTable_Remove(t *testing.T) {
 
 func TestBaseTable_LoadYaml(t *testing.T) {
 	err := baseParams.LoadYaml("milvus.yaml")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Panics(t, func() { baseParams.LoadYaml("advanced/not_exist.yaml") })
-
-	_, err = baseParams.Load("etcd.address")
-	assert.Nil(t, err)
-	_, err = baseParams.Load("pulsar.port")
-	assert.Nil(t, err)
 }
 
 func TestBaseTable_ConfDir(t *testing.T) {

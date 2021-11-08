@@ -78,6 +78,6 @@ func TestMemoryKV_GetSize(t *testing.T) {
 	key2 := "TestMemoryKV_GetSize_key2"
 
 	size, err = memKV.GetSize(key2)
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, int64(0), size)
 }

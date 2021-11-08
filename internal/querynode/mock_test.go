@@ -408,7 +408,7 @@ func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 }
 
 func genLocalChunkManager() (storage.ChunkManager, error) {
-	p, err := Params.BaseParams.Load("storage.path")
+	p, err := Params.BaseParams.Load("localStorage.path")
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +428,7 @@ func genRemoteChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 }
 
 func genVectorChunkManager(ctx context.Context) (storage.ChunkManager, error) {
-	p, err := Params.BaseParams.Load("storage.path")
+	p, err := Params.BaseParams.Load("localStorage.path")
 	if err != nil {
 		return nil, err
 	}

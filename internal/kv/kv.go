@@ -17,6 +17,8 @@
 package kv
 
 import (
+	"errors"
+
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -59,9 +61,20 @@ type ValueKV interface {
 	Load(key string) (Value, error)
 }
 
+var (
+	// ErrorKeyInvalid is returned when Load an invalid or not exists key.
+	ErrorKeyInvalid = errors.New("key not exsit or invalid")
+)
+
 // BaseKV contains base operations of kv. Include save, load and remove.
 type BaseKV interface {
+	// Load loads a given key from base kv
+	// If key invalid or not exist in kv, return ErrorKeyInvalid
+	// If key exist, return the value
+	// Under development, see https://github.com/milvus-io/milvus/issues/11313
+	// Current behavior is unsure.
 	Load(key string) (string, error)
+
 	MultiLoad(keys []string) ([]string, error)
 	LoadWithPrefix(key string) ([]string, []string, error)
 	Save(key, value string) error

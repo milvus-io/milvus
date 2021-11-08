@@ -22,6 +22,8 @@ import (
 	"sync"
 
 	"github.com/google/btree"
+
+	"github.com/milvus-io/milvus/internal/kv"
 )
 
 // MemoryKV implements DataKV interface and relies on underling btree.BTree.
@@ -30,6 +32,9 @@ type MemoryKV struct {
 	sync.RWMutex
 	tree *btree.BTree
 }
+
+// Check if MemoryKV implements BaseKV interface
+var _ kv.BaseKV = (*MemoryKV)(nil)
 
 // NewMemoryKV returns an in-memory kvBase for testing.
 func NewMemoryKV() *MemoryKV {
@@ -47,23 +52,25 @@ func (s memoryKVItem) Less(than btree.Item) bool {
 	return s.key < than.(memoryKVItem).key
 }
 
-// Load loads an object with @key.
-func (kv *MemoryKV) Load(key string) (string, error) {
-	kv.RLock()
-	defer kv.RUnlock()
-	item := kv.tree.Get(memoryKVItem{key, ""})
-	// TODO，load unexisted key behavior is weird
-	if item == nil {
-		return "", nil
+// Load loads a given key from base kv
+// If key invalid or not exist in kv, return ErrorKeyInvalid
+// If key exist, return the value
+func (memkv *MemoryKV) Load(key string) (string, error) {
+	memkv.RLock()
+	defer memkv.RUnlock()
+	if !memkv.tree.Has(memoryKVItem{key, ""}) {
+		return "", kv.ErrorKeyInvalid
 	}
+
+	item := memkv.tree.Get(memoryKVItem{key, ""})
 	return item.(memoryKVItem).value, nil
 }
 
 // LoadWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
-func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) string {
-	kv.RLock()
-	defer kv.RUnlock()
-	item := kv.tree.Get(memoryKVItem{key, ""})
+func (memkv *MemoryKV) LoadWithDefault(key, defaultValue string) string {
+	memkv.RLock()
+	defer memkv.RUnlock()
+	item := memkv.tree.Get(memoryKVItem{key, ""})
 
 	if item == nil {
 		return defaultValue
@@ -72,12 +79,12 @@ func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) string {
 }
 
 // LoadRange loads objects with range @startKey to @endKey with @limit number of objects.
-func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
-	kv.RLock()
-	defer kv.RUnlock()
+func (memkv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
+	memkv.RLock()
+	defer memkv.RUnlock()
 	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
-	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item btree.Item) bool {
+	memkv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item btree.Item) bool {
 		keys = append(keys, item.(memoryKVItem).key)
 		values = append(values, item.(memoryKVItem).value)
 		if limit > 0 {
@@ -89,76 +96,76 @@ func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 }
 
 // Save object with @key to btree. Object value is @value.
-func (kv *MemoryKV) Save(key, value string) error {
-	kv.Lock()
-	defer kv.Unlock()
-	kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
+func (memkv *MemoryKV) Save(key, value string) error {
+	memkv.Lock()
+	defer memkv.Unlock()
+	memkv.tree.ReplaceOrInsert(memoryKVItem{key, value})
 	return nil
 }
 
 // Remove deletes an object with @key.
-func (kv *MemoryKV) Remove(key string) error {
-	kv.Lock()
-	defer kv.Unlock()
+func (memkv *MemoryKV) Remove(key string) error {
+	memkv.Lock()
+	defer memkv.Unlock()
 
-	kv.tree.Delete(memoryKVItem{key, ""})
+	memkv.tree.Delete(memoryKVItem{key, ""})
 	return nil
 }
 
 // MultiLoad loads objects with multi @keys.
-func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error) {
-	kv.RLock()
-	defer kv.RUnlock()
+func (memkv *MemoryKV) MultiLoad(keys []string) ([]string, error) {
+	memkv.RLock()
+	defer memkv.RUnlock()
 	result := make([]string, 0, len(keys))
 	for _, key := range keys {
-		item := kv.tree.Get(memoryKVItem{key, ""})
+		item := memkv.tree.Get(memoryKVItem{key, ""})
 		result = append(result, item.(memoryKVItem).value)
 	}
 	return result, nil
 }
 
 // MultiSave saves given key-value pairs in MemoryKV atomicly.
-func (kv *MemoryKV) MultiSave(kvs map[string]string) error {
-	kv.Lock()
-	defer kv.Unlock()
+func (memkv *MemoryKV) MultiSave(kvs map[string]string) error {
+	memkv.Lock()
+	defer memkv.Unlock()
 	for key, value := range kvs {
-		kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
+		memkv.tree.ReplaceOrInsert(memoryKVItem{key, value})
 	}
 	return nil
 }
 
 // MultiRemove removes given @keys in MemoryKV atomicly.
-func (kv *MemoryKV) MultiRemove(keys []string) error {
-	kv.Lock()
-	defer kv.Unlock()
+func (memkv *MemoryKV) MultiRemove(keys []string) error {
+	memkv.Lock()
+	defer memkv.Unlock()
 	for _, key := range keys {
-		kv.tree.Delete(memoryKVItem{key, ""})
+		memkv.tree.Delete(memoryKVItem{key, ""})
 	}
 	return nil
 }
 
 // MultiSaveAndRemove saves and removes given key-value pairs in MemoryKV atomicly.
-func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
-	kv.Lock()
-	defer kv.Unlock()
+func (memkv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
+	memkv.Lock()
+	defer memkv.Unlock()
 	for key, value := range saves {
-		kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
+		memkv.tree.ReplaceOrInsert(memoryKVItem{key, value})
 	}
 	for _, key := range removals {
-		kv.tree.Delete(memoryKVItem{key, ""})
+		memkv.tree.Delete(memoryKVItem{key, ""})
 	}
 	return nil
 }
 
 // LoadWithPrefix returns all keys & values with given prefix.
-func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	kv.Lock()
-	defer kv.Unlock()
+func (memkv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
+	memkv.Lock()
+	defer memkv.Unlock()
 
 	var keys []string
 	var values []string
 
-	kv.tree.Ascend(func(i btree.Item) bool {
+	memkv.tree.Ascend(func(i btree.Item) bool {
 		if strings.HasPrefix(i.(memoryKVItem).key, key) {
 			keys = append(keys, i.(memoryKVItem).key)
 			values = append(values, i.(memoryKVItem).value)
@@ -169,22 +176,22 @@ func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
 }
 
 // Close dummy close
-func (kv *MemoryKV) Close() {
+func (memkv *MemoryKV) Close() {
 }
 
 // MultiRemoveWithPrefix not implemented
-func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error {
+func (memkv *MemoryKV) MultiRemoveWithPrefix(keys []string) error {
 	panic("not implement")
 }
 
 // MultiSaveAndRemoveWithPrefix saves key-value pairs in @saves, & remove key with prefix in @removals in MemoryKV atomicly.
-func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
-	kv.Lock()
-	defer kv.Unlock()
+func (memkv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
+	memkv.Lock()
+	defer memkv.Unlock()
 
 	var keys []memoryKVItem
 	for _, key := range removals {
-		kv.tree.Ascend(func(i btree.Item) bool {
+		memkv.tree.Ascend(func(i btree.Item) bool {
 			if strings.HasPrefix(i.(memoryKVItem).key, key) {
 				keys = append(keys, i.(memoryKVItem))
 			}
@@ -192,37 +199,37 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remova
 		})
 	}
 	for _, item := range keys {
-		kv.tree.Delete(item)
+		memkv.tree.Delete(item)
 	}
 
 	for key, value := range saves {
-		kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
+		memkv.tree.ReplaceOrInsert(memoryKVItem{key, value})
 	}
 	return nil
 }
 
 // RemoveWithPrefix remove key of given prefix in MemoryKV atomicly.
-func (kv *MemoryKV) RemoveWithPrefix(key string) error {
-	kv.Lock()
-	defer kv.Unlock()
+func (memkv *MemoryKV) RemoveWithPrefix(key string) error {
+	memkv.Lock()
+	defer memkv.Unlock()
 
 	var keys []btree.Item
 
-	kv.tree.Ascend(func(i btree.Item) bool {
+	memkv.tree.Ascend(func(i btree.Item) bool {
 		if strings.HasPrefix(i.(memoryKVItem).key, key) {
 			keys = append(keys, i.(memoryKVItem))
 		}
 		return true
 	})
 	for _, item := range keys {
-		kv.tree.Delete(item)
+		memkv.tree.Delete(item)
 	}
 	return nil
 }
 
 // LoadPartial item already in memory, just slice the value.
-func (kv *MemoryKV) LoadPartial(key string, start, end int64) ([]byte, error) {
-	value, err := kv.Load(key)
+func (memkv *MemoryKV) LoadPartial(key string, start, end int64) ([]byte, error) {
+	value, err := memkv.Load(key)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +242,8 @@ func (kv *MemoryKV) LoadPartial(key string, start, end int64) ([]byte, error) {
 	}
 }
 
-func (kv *MemoryKV) GetSize(key string) (int64, error) {
-	value, err := kv.Load(key)
+func (memkv *MemoryKV) GetSize(key string) (int64, error) {
+	value, err := memkv.Load(key)
 	if err != nil {
 		return 0, err
 	}
