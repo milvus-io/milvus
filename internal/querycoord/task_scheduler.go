@@ -929,11 +929,12 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 					collectionID := loadInfo.CollectionID
 					segmentID := loadInfo.SegmentID
 					segmentInfo := &querypb.SegmentInfo{
-						SegmentID:    segmentID,
-						CollectionID: loadInfo.CollectionID,
-						PartitionID:  loadInfo.PartitionID,
-						NodeID:       dstNodeID,
-						SegmentState: querypb.SegmentState_sealed,
+						SegmentID:      segmentID,
+						CollectionID:   loadInfo.CollectionID,
+						PartitionID:    loadInfo.PartitionID,
+						NodeID:         dstNodeID,
+						SegmentState:   querypb.SegmentState_sealed,
+						CompactionFrom: loadInfo.CompactionFrom,
 					}
 					if _, ok := segmentInfosToSave[collectionID]; !ok {
 						segmentInfosToSave[collectionID] = make([]*querypb.SegmentInfo, 0)

@@ -244,6 +244,7 @@ message SegmentLoadInfo {
   int64 num_of_rows = 7;
   repeated data.FieldBinlog statslogs = 8;
   repeated data.DeltaLogInfo deltalogs = 9;
+  repeated int64 compactionFrom = 10; // segmentIDs compacted from
 }
 
 message LoadSegmentsRequest {
