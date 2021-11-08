@@ -9,10 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "segcore/plan_c.h"
+#include "pb/segcore.pb.h"
 #include "query/Plan.h"
 #include "segcore/Collection.h"
-#include "pb/segcore.pb.h"
+#include "segcore/plan_c.h"
 
 CStatus
 CreateSearchPlan(CCollection c_col, const char* dsl, CSearchPlan* res_plan) {
