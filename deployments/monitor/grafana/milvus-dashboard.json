@@ -3213,7 +3213,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total DataNode flush segments operations",
+      "description": "Total count of flush_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
