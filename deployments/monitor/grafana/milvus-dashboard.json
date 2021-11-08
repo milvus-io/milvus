@@ -2997,7 +2997,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of show_segments",
+      "description": "per-minute increasing rate of show_segments requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
