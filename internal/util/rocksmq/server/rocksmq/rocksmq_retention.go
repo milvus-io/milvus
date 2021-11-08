@@ -134,7 +134,7 @@ func (ri *retentionInfo) retention() error {
 					return true
 				}
 				if lastRetentionTs+checkTime < timeNow {
-					err := ri.newExpiredCleanUp(topic)
+					err := ri.expiredCleanUp(topic)
 					if err != nil {
 						log.Warn("Retention expired clean failed", zap.Any("error", err))
 					}
@@ -159,7 +159,7 @@ func (ri *retentionInfo) Stop() {
 // 2. check acked size from the last unexpired page id;
 // 3. delete acked info by range of page id;
 // 4. delete message by range of page id;
-func (ri *retentionInfo) newExpiredCleanUp(topic string) error {
+func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	var deletedAckedSize int64 = 0
 	var startID UniqueID
