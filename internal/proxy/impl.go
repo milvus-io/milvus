@@ -289,6 +289,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 	return hct.result, nil
 }
 
+// LoadCollection load a collection into query nodes.
 func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
