@@ -32,7 +32,7 @@ type DataCoord interface {
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
 	// GetFlushedSegments returns flushed segment list of requested collection/parition
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
-
+  // GetMetrics gets the metrics about DataCoord
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 ```
