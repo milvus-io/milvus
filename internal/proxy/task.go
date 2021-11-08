@@ -1824,9 +1824,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 	}
-	if skipDupCnt > 0 {
-		log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
-	}
+	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 	ret.Results.TopK = realTopK
 
 	if metricType != "IP" {
