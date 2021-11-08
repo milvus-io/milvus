@@ -2838,7 +2838,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success RootCoord Describe segments operations",
+      "description": "Success count of describe_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
