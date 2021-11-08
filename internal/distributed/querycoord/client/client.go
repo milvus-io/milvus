@@ -290,6 +290,7 @@ func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 	return ret.(*querypb.ShowCollectionsResponse), err
 }
 
+// LoadCollection loads the data of the specified collections in the QueryCoord.
 func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
