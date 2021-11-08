@@ -10,11 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <mutex>
-#include "exceptions/EasyAssert.h"
-#include "knowhere/archive/KnowhereConfig.h"
-#include "easyloggingpp/easylogging++.h"
+
 #include "ConfigKnowhere.h"
+#include "exceptions/EasyAssert.h"
+#include "easyloggingpp/easylogging++.h"
 #include "faiss/FaissHook.h"
+#include "log/Log.h"
+#include "knowhere/archive/KnowhereConfig.h"
 
 namespace milvus {
 namespace config {
@@ -46,12 +48,17 @@ KnowhereSetSimdType(const char* value) {
         simd_type = milvus::engine::KnowhereConfig::SimdType::AVX512;
     } else if (strcmp(value, "avx2") == 0) {
         simd_type = milvus::engine::KnowhereConfig::SimdType::AVX2;
-    } else if (strcmp(value, "sse") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::SSE;
+    } else if (strcmp(value, "avx") == 0 || strcmp(value, "sse4_2") == 0) {
+        simd_type = milvus::engine::KnowhereConfig::SimdType::SSE4_2;
     } else {
         PanicInfo("invalid SIMD type: " + std::string(value));
     }
-    return milvus::engine::KnowhereConfig::SetSimdType(simd_type);
+    try {
+        return milvus::engine::KnowhereConfig::SetSimdType(simd_type);
+    } catch (std::exception& e) {
+        LOG_SERVER_ERROR_ << e.what();
+        PanicInfo(e.what());
+    }
 }
 
 }  // namespace config

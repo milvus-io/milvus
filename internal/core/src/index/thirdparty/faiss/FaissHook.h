@@ -20,7 +20,7 @@ typedef InvertedListScanner* (*sq_sel_inv_list_scanner_func_ptr)(MetricType, con
 
 extern bool faiss_use_avx512;
 extern bool faiss_use_avx2;
-extern bool faiss_use_sse;
+extern bool faiss_use_sse4_2;
 
 extern fvec_func_ptr fvec_inner_product;
 extern fvec_func_ptr fvec_L2sqr;
@@ -33,7 +33,7 @@ extern sq_sel_inv_list_scanner_func_ptr sq_sel_inv_list_scanner;
 
 extern bool support_avx512();
 extern bool support_avx2();
-extern bool support_sse();
+extern bool support_sse4_2();
 
 extern bool hook_init(std::string& cpu_flag);
 
