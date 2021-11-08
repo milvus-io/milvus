@@ -116,7 +116,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 			return
 		case <-t.globalTrigger.C:
 			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			tt, err := getTimetravel(cctx, t.allocator)
+			tt, err := getTimetravelReverseTime(cctx, t.allocator)
 			if err != nil {
 				log.Warn("unbale to get compaction timetravel", zap.Error(err))
 				cancel()
@@ -420,7 +420,7 @@ func (t *compactionTrigger) singleCompaction(segment *SegmentInfo, isForce bool,
 		return nil, nil
 	}
 
-	if !t.shouldDoSingleCompaction(segment, timetravel) {
+	if !isForce && !t.shouldDoSingleCompaction(segment, timetravel) {
 		return nil, nil
 	}
 

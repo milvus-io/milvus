@@ -349,7 +349,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			cctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 			defer cancel()
 
-			tt, err := getTimetravel(cctx, s.allocator)
+			tt, err := getTimetravelReverseTime(cctx, s.allocator)
 			if err == nil {
 				if err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
 					segmentID, segment.GetInsertChannel(), tt); err != nil {
