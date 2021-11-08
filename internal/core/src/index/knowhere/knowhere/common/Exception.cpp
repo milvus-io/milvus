@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <cstdio>
-#include <cstring>
 #include <utility>
 
 #include "Log.h"
@@ -23,13 +22,19 @@ KnowhereException::KnowhereException(std::string msg) : msg_(std::move(msg)) {
 }
 
 KnowhereException::KnowhereException(const std::string& m, const char* funcName, const char* file, int line) {
-    const char* filename = funcName;
-    while (auto tmp = strchr(filename, '/')) {
-        filename = tmp + 1;
+    std::string filename;
+    try {
+        size_t pos;
+        std::string file_path(file);
+        pos = file_path.find_last_of('/');
+        filename = file_path.substr(pos + 1);
+    } catch (std::exception& e) {
+        LOG_KNOWHERE_ERROR_ << e.what();
     }
-    int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
+
+    int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s", funcName, filename.c_str(), line, m.c_str());
     msg_.resize(size + 1);
-    snprintf(msg_.data(), m.size(), "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
+    snprintf(&msg_[0], msg_.size(), "Error in %s at %s:%d: %s", funcName, filename.c_str(), line, m.c_str());
 }
 
 const char*
