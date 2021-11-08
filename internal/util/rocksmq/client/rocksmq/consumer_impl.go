@@ -12,6 +12,8 @@
 package rocksmq
 
 import (
+	"sync"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
@@ -21,6 +23,8 @@ type consumer struct {
 	client       *client
 	consumerName string
 	options      ConsumerOptions
+
+	startOnce sync.Once
 
 	msgMutex  chan struct{}
 	messageCh chan ConsumerMessage
@@ -95,6 +99,10 @@ func (c *consumer) MsgMutex() chan struct{} {
 }
 
 func (c *consumer) Chan() <-chan ConsumerMessage {
+	c.startOnce.Do(func() {
+		c.client.wg.Add(1)
+		go c.client.consume(c)
+	})
 	return c.messageCh
 }
 
