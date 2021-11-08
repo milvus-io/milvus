@@ -28,4 +28,3 @@ pytest-reportportal==5.0.10
 
 # for customize config test
 python-benedict==0.24.3
-pytest-dependency==0.5.1
