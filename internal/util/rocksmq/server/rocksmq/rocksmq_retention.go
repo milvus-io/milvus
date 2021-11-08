@@ -154,6 +154,11 @@ func (ri *retentionInfo) Stop() {
 	})
 }
 
+// expiredCleanUp check message retention by page:
+// 1. check acked timestamp of each page id, if expired, the whole page is expired;
+// 2. check acked size from the last unexpired page id;
+// 3. delete acked info by range of page id;
+// 4. delete message by range of page id;
 func (ri *retentionInfo) newExpiredCleanUp(topic string) error {
 	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	var deletedAckedSize int64 = 0
