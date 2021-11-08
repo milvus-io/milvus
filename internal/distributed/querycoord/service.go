@@ -310,6 +310,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	return s.queryCoord.GetSegmentInfo(ctx, req)
 }
 
+// LoadBalance migrate the sealed segments on the source node to the dst nodes
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return s.queryCoord.LoadBalance(ctx, req)
 }
