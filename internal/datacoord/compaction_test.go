@@ -365,3 +365,63 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 		})
 	}
 }
+
+func Test_getCompactionTasksBySignalID(t *testing.T) {
+	type fields struct {
+		plans map[int64]*compactionTask
+	}
+	type args struct {
+		signalID int64
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   []*compactionTask
+	}{
+		{
+			"test get compaction tasks",
+			fields{
+				plans: map[int64]*compactionTask{
+					1: {
+						triggerInfo: &compactionSignal{id: 1},
+						state:       executing,
+					},
+					2: {
+						triggerInfo: &compactionSignal{id: 1},
+						state:       completed,
+					},
+					3: {
+						triggerInfo: &compactionSignal{id: 1},
+						state:       timeout,
+					},
+				},
+			},
+			args{1},
+			[]*compactionTask{
+				{
+					triggerInfo: &compactionSignal{id: 1},
+					state:       executing,
+				},
+				{
+					triggerInfo: &compactionSignal{id: 1},
+					state:       completed,
+				},
+				{
+					triggerInfo: &compactionSignal{id: 1},
+					state:       timeout,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &compactionPlanHandler{
+				plans: tt.fields.plans,
+			}
+			got := h.getCompactionTasksBySignalID(tt.args.signalID)
+			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}

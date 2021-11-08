@@ -175,3 +175,9 @@ message DMLMsgHeader {
     common.MsgBase base = 1;
     string shardName = 2;
 }
+
+enum CompactionState {
+  UndefiedState = 0;
+  Executing = 1;
+  Completed = 2;
+}

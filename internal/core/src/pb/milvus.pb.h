@@ -53,7 +53,7 @@ struct TableStruct_milvus_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[68]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[75]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -75,6 +75,9 @@ extern CalcDistanceRequestDefaultTypeInternal _CalcDistanceRequest_default_insta
 class CalcDistanceResults;
 class CalcDistanceResultsDefaultTypeInternal;
 extern CalcDistanceResultsDefaultTypeInternal _CalcDistanceResults_default_instance_;
+class CompactionMergeInfo;
+class CompactionMergeInfoDefaultTypeInternal;
+extern CompactionMergeInfoDefaultTypeInternal _CompactionMergeInfo_default_instance_;
 class CreateAliasRequest;
 class CreateAliasRequestDefaultTypeInternal;
 extern CreateAliasRequestDefaultTypeInternal _CreateAliasRequest_default_instance_;
@@ -141,6 +144,18 @@ extern GetCollectionStatisticsRequestDefaultTypeInternal _GetCollectionStatistic
 class GetCollectionStatisticsResponse;
 class GetCollectionStatisticsResponseDefaultTypeInternal;
 extern GetCollectionStatisticsResponseDefaultTypeInternal _GetCollectionStatisticsResponse_default_instance_;
+class GetCompactionPlansRequest;
+class GetCompactionPlansRequestDefaultTypeInternal;
+extern GetCompactionPlansRequestDefaultTypeInternal _GetCompactionPlansRequest_default_instance_;
+class GetCompactionPlansResponse;
+class GetCompactionPlansResponseDefaultTypeInternal;
+extern GetCompactionPlansResponseDefaultTypeInternal _GetCompactionPlansResponse_default_instance_;
+class GetCompactionStateRequest;
+class GetCompactionStateRequestDefaultTypeInternal;
+extern GetCompactionStateRequestDefaultTypeInternal _GetCompactionStateRequest_default_instance_;
+class GetCompactionStateResponse;
+class GetCompactionStateResponseDefaultTypeInternal;
+extern GetCompactionStateResponseDefaultTypeInternal _GetCompactionStateResponse_default_instance_;
 class GetIndexBuildProgressRequest;
 class GetIndexBuildProgressRequestDefaultTypeInternal;
 extern GetIndexBuildProgressRequestDefaultTypeInternal _GetIndexBuildProgressRequest_default_instance_;
@@ -201,6 +216,12 @@ extern LoadCollectionRequestDefaultTypeInternal _LoadCollectionRequest_default_i
 class LoadPartitionsRequest;
 class LoadPartitionsRequestDefaultTypeInternal;
 extern LoadPartitionsRequestDefaultTypeInternal _LoadPartitionsRequest_default_instance_;
+class ManualCompactionRequest;
+class ManualCompactionRequestDefaultTypeInternal;
+extern ManualCompactionRequestDefaultTypeInternal _ManualCompactionRequest_default_instance_;
+class ManualCompactionResponse;
+class ManualCompactionResponseDefaultTypeInternal;
+extern ManualCompactionResponseDefaultTypeInternal _ManualCompactionResponse_default_instance_;
 class MutationResult;
 class MutationResultDefaultTypeInternal;
 extern MutationResultDefaultTypeInternal _MutationResult_default_instance_;
@@ -275,6 +296,7 @@ template<> ::milvus::proto::milvus::AlterAliasRequest* Arena::CreateMaybeMessage
 template<> ::milvus::proto::milvus::BoolResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::BoolResponse>(Arena*);
 template<> ::milvus::proto::milvus::CalcDistanceRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::CalcDistanceRequest>(Arena*);
 template<> ::milvus::proto::milvus::CalcDistanceResults* Arena::CreateMaybeMessage<::milvus::proto::milvus::CalcDistanceResults>(Arena*);
+template<> ::milvus::proto::milvus::CompactionMergeInfo* Arena::CreateMaybeMessage<::milvus::proto::milvus::CompactionMergeInfo>(Arena*);
 template<> ::milvus::proto::milvus::CreateAliasRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::CreateAliasRequest>(Arena*);
 template<> ::milvus::proto::milvus::CreateCollectionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::CreateCollectionRequest>(Arena*);
 template<> ::milvus::proto::milvus::CreateIndexRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::CreateIndexRequest>(Arena*);
@@ -297,6 +319,10 @@ template<> ::milvus::proto::milvus::FlushResponse* Arena::CreateMaybeMessage<::m
 template<> ::milvus::proto::milvus::FlushResponse_CollSegIDsEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::milvus::FlushResponse_CollSegIDsEntry_DoNotUse>(Arena*);
 template<> ::milvus::proto::milvus::GetCollectionStatisticsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCollectionStatisticsRequest>(Arena*);
 template<> ::milvus::proto::milvus::GetCollectionStatisticsResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCollectionStatisticsResponse>(Arena*);
+template<> ::milvus::proto::milvus::GetCompactionPlansRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCompactionPlansRequest>(Arena*);
+template<> ::milvus::proto::milvus::GetCompactionPlansResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCompactionPlansResponse>(Arena*);
+template<> ::milvus::proto::milvus::GetCompactionStateRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCompactionStateRequest>(Arena*);
+template<> ::milvus::proto::milvus::GetCompactionStateResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCompactionStateResponse>(Arena*);
 template<> ::milvus::proto::milvus::GetIndexBuildProgressRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetIndexBuildProgressRequest>(Arena*);
 template<> ::milvus::proto::milvus::GetIndexBuildProgressResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetIndexBuildProgressResponse>(Arena*);
 template<> ::milvus::proto::milvus::GetIndexStateRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetIndexStateRequest>(Arena*);
@@ -317,6 +343,8 @@ template<> ::milvus::proto::milvus::InsertRequest* Arena::CreateMaybeMessage<::m
 template<> ::milvus::proto::milvus::LoadBalanceRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::LoadBalanceRequest>(Arena*);
 template<> ::milvus::proto::milvus::LoadCollectionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::LoadCollectionRequest>(Arena*);
 template<> ::milvus::proto::milvus::LoadPartitionsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::LoadPartitionsRequest>(Arena*);
+template<> ::milvus::proto::milvus::ManualCompactionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::ManualCompactionRequest>(Arena*);
+template<> ::milvus::proto::milvus::ManualCompactionResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::ManualCompactionResponse>(Arena*);
 template<> ::milvus::proto::milvus::MutationResult* Arena::CreateMaybeMessage<::milvus::proto::milvus::MutationResult>(Arena*);
 template<> ::milvus::proto::milvus::PersistentSegmentInfo* Arena::CreateMaybeMessage<::milvus::proto::milvus::PersistentSegmentInfo>(Arena*);
 template<> ::milvus::proto::milvus::PlaceholderGroup* Arena::CreateMaybeMessage<::milvus::proto::milvus::PlaceholderGroup>(Arena*);
@@ -11757,6 +11785,1008 @@ class LoadBalanceRequest :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
+// -------------------------------------------------------------------
+
+class ManualCompactionRequest :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.ManualCompactionRequest) */ {
+ public:
+  ManualCompactionRequest();
+  virtual ~ManualCompactionRequest();
+
+  ManualCompactionRequest(const ManualCompactionRequest& from);
+  ManualCompactionRequest(ManualCompactionRequest&& from) noexcept
+    : ManualCompactionRequest() {
+    *this = ::std::move(from);
+  }
+
+  inline ManualCompactionRequest& operator=(const ManualCompactionRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ManualCompactionRequest& operator=(ManualCompactionRequest&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ManualCompactionRequest& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ManualCompactionRequest* internal_default_instance() {
+    return reinterpret_cast<const ManualCompactionRequest*>(
+               &_ManualCompactionRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    68;
+
+  friend void swap(ManualCompactionRequest& a, ManualCompactionRequest& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ManualCompactionRequest* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ManualCompactionRequest* New() const final {
+    return CreateMaybeMessage<ManualCompactionRequest>(nullptr);
+  }
+
+  ManualCompactionRequest* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ManualCompactionRequest>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ManualCompactionRequest& from);
+  void MergeFrom(const ManualCompactionRequest& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ManualCompactionRequest* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.ManualCompactionRequest";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kCollectionIDFieldNumber = 1,
+    kTimetravelFieldNumber = 2,
+  };
+  // int64 collectionID = 1;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // uint64 timetravel = 2;
+  void clear_timetravel();
+  ::PROTOBUF_NAMESPACE_ID::uint64 timetravel() const;
+  void set_timetravel(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.ManualCompactionRequest)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 timetravel_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ManualCompactionResponse :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.ManualCompactionResponse) */ {
+ public:
+  ManualCompactionResponse();
+  virtual ~ManualCompactionResponse();
+
+  ManualCompactionResponse(const ManualCompactionResponse& from);
+  ManualCompactionResponse(ManualCompactionResponse&& from) noexcept
+    : ManualCompactionResponse() {
+    *this = ::std::move(from);
+  }
+
+  inline ManualCompactionResponse& operator=(const ManualCompactionResponse& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ManualCompactionResponse& operator=(ManualCompactionResponse&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ManualCompactionResponse& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ManualCompactionResponse* internal_default_instance() {
+    return reinterpret_cast<const ManualCompactionResponse*>(
+               &_ManualCompactionResponse_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    69;
+
+  friend void swap(ManualCompactionResponse& a, ManualCompactionResponse& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ManualCompactionResponse* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ManualCompactionResponse* New() const final {
+    return CreateMaybeMessage<ManualCompactionResponse>(nullptr);
+  }
+
+  ManualCompactionResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ManualCompactionResponse>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ManualCompactionResponse& from);
+  void MergeFrom(const ManualCompactionResponse& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ManualCompactionResponse* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.ManualCompactionResponse";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kStatusFieldNumber = 1,
+    kCompactionIDFieldNumber = 2,
+  };
+  // .milvus.proto.common.Status status = 1;
+  bool has_status() const;
+  void clear_status();
+  const ::milvus::proto::common::Status& status() const;
+  ::milvus::proto::common::Status* release_status();
+  ::milvus::proto::common::Status* mutable_status();
+  void set_allocated_status(::milvus::proto::common::Status* status);
+
+  // int64 compactionID = 2;
+  void clear_compactionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 compactionid() const;
+  void set_compactionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.ManualCompactionResponse)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::milvus::proto::common::Status* status_;
+  ::PROTOBUF_NAMESPACE_ID::int64 compactionid_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class GetCompactionStateRequest :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.GetCompactionStateRequest) */ {
+ public:
+  GetCompactionStateRequest();
+  virtual ~GetCompactionStateRequest();
+
+  GetCompactionStateRequest(const GetCompactionStateRequest& from);
+  GetCompactionStateRequest(GetCompactionStateRequest&& from) noexcept
+    : GetCompactionStateRequest() {
+    *this = ::std::move(from);
+  }
+
+  inline GetCompactionStateRequest& operator=(const GetCompactionStateRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GetCompactionStateRequest& operator=(GetCompactionStateRequest&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const GetCompactionStateRequest& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const GetCompactionStateRequest* internal_default_instance() {
+    return reinterpret_cast<const GetCompactionStateRequest*>(
+               &_GetCompactionStateRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    70;
+
+  friend void swap(GetCompactionStateRequest& a, GetCompactionStateRequest& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GetCompactionStateRequest* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline GetCompactionStateRequest* New() const final {
+    return CreateMaybeMessage<GetCompactionStateRequest>(nullptr);
+  }
+
+  GetCompactionStateRequest* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<GetCompactionStateRequest>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const GetCompactionStateRequest& from);
+  void MergeFrom(const GetCompactionStateRequest& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(GetCompactionStateRequest* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.GetCompactionStateRequest";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kCompactionIDFieldNumber = 1,
+  };
+  // int64 compactionID = 1;
+  void clear_compactionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 compactionid() const;
+  void set_compactionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.GetCompactionStateRequest)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::int64 compactionid_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class GetCompactionStateResponse :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.GetCompactionStateResponse) */ {
+ public:
+  GetCompactionStateResponse();
+  virtual ~GetCompactionStateResponse();
+
+  GetCompactionStateResponse(const GetCompactionStateResponse& from);
+  GetCompactionStateResponse(GetCompactionStateResponse&& from) noexcept
+    : GetCompactionStateResponse() {
+    *this = ::std::move(from);
+  }
+
+  inline GetCompactionStateResponse& operator=(const GetCompactionStateResponse& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GetCompactionStateResponse& operator=(GetCompactionStateResponse&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const GetCompactionStateResponse& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const GetCompactionStateResponse* internal_default_instance() {
+    return reinterpret_cast<const GetCompactionStateResponse*>(
+               &_GetCompactionStateResponse_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    71;
+
+  friend void swap(GetCompactionStateResponse& a, GetCompactionStateResponse& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GetCompactionStateResponse* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline GetCompactionStateResponse* New() const final {
+    return CreateMaybeMessage<GetCompactionStateResponse>(nullptr);
+  }
+
+  GetCompactionStateResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<GetCompactionStateResponse>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const GetCompactionStateResponse& from);
+  void MergeFrom(const GetCompactionStateResponse& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(GetCompactionStateResponse* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.GetCompactionStateResponse";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kStatusFieldNumber = 1,
+    kExecutingPlanNoFieldNumber = 3,
+    kTimeoutPlanNoFieldNumber = 4,
+    kCompletedPlanNoFieldNumber = 5,
+    kStateFieldNumber = 2,
+  };
+  // .milvus.proto.common.Status status = 1;
+  bool has_status() const;
+  void clear_status();
+  const ::milvus::proto::common::Status& status() const;
+  ::milvus::proto::common::Status* release_status();
+  ::milvus::proto::common::Status* mutable_status();
+  void set_allocated_status(::milvus::proto::common::Status* status);
+
+  // int64 executingPlanNo = 3;
+  void clear_executingplanno();
+  ::PROTOBUF_NAMESPACE_ID::int64 executingplanno() const;
+  void set_executingplanno(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 timeoutPlanNo = 4;
+  void clear_timeoutplanno();
+  ::PROTOBUF_NAMESPACE_ID::int64 timeoutplanno() const;
+  void set_timeoutplanno(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 completedPlanNo = 5;
+  void clear_completedplanno();
+  ::PROTOBUF_NAMESPACE_ID::int64 completedplanno() const;
+  void set_completedplanno(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // .milvus.proto.common.CompactionState state = 2;
+  void clear_state();
+  ::milvus::proto::common::CompactionState state() const;
+  void set_state(::milvus::proto::common::CompactionState value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.GetCompactionStateResponse)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::milvus::proto::common::Status* status_;
+  ::PROTOBUF_NAMESPACE_ID::int64 executingplanno_;
+  ::PROTOBUF_NAMESPACE_ID::int64 timeoutplanno_;
+  ::PROTOBUF_NAMESPACE_ID::int64 completedplanno_;
+  int state_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class GetCompactionPlansRequest :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.GetCompactionPlansRequest) */ {
+ public:
+  GetCompactionPlansRequest();
+  virtual ~GetCompactionPlansRequest();
+
+  GetCompactionPlansRequest(const GetCompactionPlansRequest& from);
+  GetCompactionPlansRequest(GetCompactionPlansRequest&& from) noexcept
+    : GetCompactionPlansRequest() {
+    *this = ::std::move(from);
+  }
+
+  inline GetCompactionPlansRequest& operator=(const GetCompactionPlansRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GetCompactionPlansRequest& operator=(GetCompactionPlansRequest&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const GetCompactionPlansRequest& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const GetCompactionPlansRequest* internal_default_instance() {
+    return reinterpret_cast<const GetCompactionPlansRequest*>(
+               &_GetCompactionPlansRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    72;
+
+  friend void swap(GetCompactionPlansRequest& a, GetCompactionPlansRequest& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GetCompactionPlansRequest* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline GetCompactionPlansRequest* New() const final {
+    return CreateMaybeMessage<GetCompactionPlansRequest>(nullptr);
+  }
+
+  GetCompactionPlansRequest* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<GetCompactionPlansRequest>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const GetCompactionPlansRequest& from);
+  void MergeFrom(const GetCompactionPlansRequest& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(GetCompactionPlansRequest* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.GetCompactionPlansRequest";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kCompactionIDFieldNumber = 1,
+  };
+  // int64 compactionID = 1;
+  void clear_compactionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 compactionid() const;
+  void set_compactionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.GetCompactionPlansRequest)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::int64 compactionid_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class GetCompactionPlansResponse :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.GetCompactionPlansResponse) */ {
+ public:
+  GetCompactionPlansResponse();
+  virtual ~GetCompactionPlansResponse();
+
+  GetCompactionPlansResponse(const GetCompactionPlansResponse& from);
+  GetCompactionPlansResponse(GetCompactionPlansResponse&& from) noexcept
+    : GetCompactionPlansResponse() {
+    *this = ::std::move(from);
+  }
+
+  inline GetCompactionPlansResponse& operator=(const GetCompactionPlansResponse& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GetCompactionPlansResponse& operator=(GetCompactionPlansResponse&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const GetCompactionPlansResponse& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const GetCompactionPlansResponse* internal_default_instance() {
+    return reinterpret_cast<const GetCompactionPlansResponse*>(
+               &_GetCompactionPlansResponse_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    73;
+
+  friend void swap(GetCompactionPlansResponse& a, GetCompactionPlansResponse& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GetCompactionPlansResponse* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline GetCompactionPlansResponse* New() const final {
+    return CreateMaybeMessage<GetCompactionPlansResponse>(nullptr);
+  }
+
+  GetCompactionPlansResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<GetCompactionPlansResponse>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const GetCompactionPlansResponse& from);
+  void MergeFrom(const GetCompactionPlansResponse& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(GetCompactionPlansResponse* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.GetCompactionPlansResponse";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kMergeInfosFieldNumber = 3,
+    kStatusFieldNumber = 1,
+    kStateFieldNumber = 2,
+  };
+  // repeated .milvus.proto.milvus.CompactionMergeInfo mergeInfos = 3;
+  int mergeinfos_size() const;
+  void clear_mergeinfos();
+  ::milvus::proto::milvus::CompactionMergeInfo* mutable_mergeinfos(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo >*
+      mutable_mergeinfos();
+  const ::milvus::proto::milvus::CompactionMergeInfo& mergeinfos(int index) const;
+  ::milvus::proto::milvus::CompactionMergeInfo* add_mergeinfos();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo >&
+      mergeinfos() const;
+
+  // .milvus.proto.common.Status status = 1;
+  bool has_status() const;
+  void clear_status();
+  const ::milvus::proto::common::Status& status() const;
+  ::milvus::proto::common::Status* release_status();
+  ::milvus::proto::common::Status* mutable_status();
+  void set_allocated_status(::milvus::proto::common::Status* status);
+
+  // .milvus.proto.common.CompactionState state = 2;
+  void clear_state();
+  ::milvus::proto::common::CompactionState state() const;
+  void set_state(::milvus::proto::common::CompactionState value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.GetCompactionPlansResponse)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo > mergeinfos_;
+  ::milvus::proto::common::Status* status_;
+  int state_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class CompactionMergeInfo :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.CompactionMergeInfo) */ {
+ public:
+  CompactionMergeInfo();
+  virtual ~CompactionMergeInfo();
+
+  CompactionMergeInfo(const CompactionMergeInfo& from);
+  CompactionMergeInfo(CompactionMergeInfo&& from) noexcept
+    : CompactionMergeInfo() {
+    *this = ::std::move(from);
+  }
+
+  inline CompactionMergeInfo& operator=(const CompactionMergeInfo& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline CompactionMergeInfo& operator=(CompactionMergeInfo&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const CompactionMergeInfo& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const CompactionMergeInfo* internal_default_instance() {
+    return reinterpret_cast<const CompactionMergeInfo*>(
+               &_CompactionMergeInfo_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    74;
+
+  friend void swap(CompactionMergeInfo& a, CompactionMergeInfo& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(CompactionMergeInfo* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline CompactionMergeInfo* New() const final {
+    return CreateMaybeMessage<CompactionMergeInfo>(nullptr);
+  }
+
+  CompactionMergeInfo* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<CompactionMergeInfo>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const CompactionMergeInfo& from);
+  void MergeFrom(const CompactionMergeInfo& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(CompactionMergeInfo* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.CompactionMergeInfo";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kSourcesFieldNumber = 1,
+    kTargetFieldNumber = 2,
+  };
+  // repeated int64 sources = 1;
+  int sources_size() const;
+  void clear_sources();
+  ::PROTOBUF_NAMESPACE_ID::int64 sources(int index) const;
+  void set_sources(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_sources(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      sources() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_sources();
+
+  // int64 target = 2;
+  void clear_target();
+  ::PROTOBUF_NAMESPACE_ID::int64 target() const;
+  void set_target(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.CompactionMergeInfo)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > sources_;
+  mutable std::atomic<int> _sources_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::int64 target_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
 // ===================================================================
 
 
@@ -22532,9 +23562,400 @@ LoadBalanceRequest::mutable_sealed_segmentids() {
   return &sealed_segmentids_;
 }
 
+// -------------------------------------------------------------------
+
+// ManualCompactionRequest
+
+// int64 collectionID = 1;
+inline void ManualCompactionRequest::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ManualCompactionRequest::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ManualCompactionRequest.collectionID)
+  return collectionid_;
+}
+inline void ManualCompactionRequest::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ManualCompactionRequest.collectionID)
+}
+
+// uint64 timetravel = 2;
+inline void ManualCompactionRequest::clear_timetravel() {
+  timetravel_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 ManualCompactionRequest::timetravel() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ManualCompactionRequest.timetravel)
+  return timetravel_;
+}
+inline void ManualCompactionRequest::set_timetravel(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  timetravel_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ManualCompactionRequest.timetravel)
+}
+
+// -------------------------------------------------------------------
+
+// ManualCompactionResponse
+
+// .milvus.proto.common.Status status = 1;
+inline bool ManualCompactionResponse::has_status() const {
+  return this != internal_default_instance() && status_ != nullptr;
+}
+inline const ::milvus::proto::common::Status& ManualCompactionResponse::status() const {
+  const ::milvus::proto::common::Status* p = status_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ManualCompactionResponse.status)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::Status*>(
+      &::milvus::proto::common::_Status_default_instance_);
+}
+inline ::milvus::proto::common::Status* ManualCompactionResponse::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.ManualCompactionResponse.status)
+  
+  ::milvus::proto::common::Status* temp = status_;
+  status_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::Status* ManualCompactionResponse::mutable_status() {
+  
+  if (status_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::Status>(GetArenaNoVirtual());
+    status_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.ManualCompactionResponse.status)
+  return status_;
+}
+inline void ManualCompactionResponse::set_allocated_status(::milvus::proto::common::Status* status) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
+  }
+  if (status) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      status = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, status, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  status_ = status;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.ManualCompactionResponse.status)
+}
+
+// int64 compactionID = 2;
+inline void ManualCompactionResponse::clear_compactionid() {
+  compactionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ManualCompactionResponse::compactionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ManualCompactionResponse.compactionID)
+  return compactionid_;
+}
+inline void ManualCompactionResponse::set_compactionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  compactionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ManualCompactionResponse.compactionID)
+}
+
+// -------------------------------------------------------------------
+
+// GetCompactionStateRequest
+
+// int64 compactionID = 1;
+inline void GetCompactionStateRequest::clear_compactionid() {
+  compactionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetCompactionStateRequest::compactionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionStateRequest.compactionID)
+  return compactionid_;
+}
+inline void GetCompactionStateRequest::set_compactionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  compactionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetCompactionStateRequest.compactionID)
+}
+
+// -------------------------------------------------------------------
+
+// GetCompactionStateResponse
+
+// .milvus.proto.common.Status status = 1;
+inline bool GetCompactionStateResponse::has_status() const {
+  return this != internal_default_instance() && status_ != nullptr;
+}
+inline const ::milvus::proto::common::Status& GetCompactionStateResponse::status() const {
+  const ::milvus::proto::common::Status* p = status_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionStateResponse.status)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::Status*>(
+      &::milvus::proto::common::_Status_default_instance_);
+}
+inline ::milvus::proto::common::Status* GetCompactionStateResponse::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.GetCompactionStateResponse.status)
+  
+  ::milvus::proto::common::Status* temp = status_;
+  status_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::Status* GetCompactionStateResponse::mutable_status() {
+  
+  if (status_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::Status>(GetArenaNoVirtual());
+    status_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetCompactionStateResponse.status)
+  return status_;
+}
+inline void GetCompactionStateResponse::set_allocated_status(::milvus::proto::common::Status* status) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
+  }
+  if (status) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      status = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, status, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  status_ = status;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetCompactionStateResponse.status)
+}
+
+// .milvus.proto.common.CompactionState state = 2;
+inline void GetCompactionStateResponse::clear_state() {
+  state_ = 0;
+}
+inline ::milvus::proto::common::CompactionState GetCompactionStateResponse::state() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionStateResponse.state)
+  return static_cast< ::milvus::proto::common::CompactionState >(state_);
+}
+inline void GetCompactionStateResponse::set_state(::milvus::proto::common::CompactionState value) {
+  
+  state_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetCompactionStateResponse.state)
+}
+
+// int64 executingPlanNo = 3;
+inline void GetCompactionStateResponse::clear_executingplanno() {
+  executingplanno_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetCompactionStateResponse::executingplanno() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionStateResponse.executingPlanNo)
+  return executingplanno_;
+}
+inline void GetCompactionStateResponse::set_executingplanno(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  executingplanno_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetCompactionStateResponse.executingPlanNo)
+}
+
+// int64 timeoutPlanNo = 4;
+inline void GetCompactionStateResponse::clear_timeoutplanno() {
+  timeoutplanno_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetCompactionStateResponse::timeoutplanno() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionStateResponse.timeoutPlanNo)
+  return timeoutplanno_;
+}
+inline void GetCompactionStateResponse::set_timeoutplanno(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  timeoutplanno_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetCompactionStateResponse.timeoutPlanNo)
+}
+
+// int64 completedPlanNo = 5;
+inline void GetCompactionStateResponse::clear_completedplanno() {
+  completedplanno_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetCompactionStateResponse::completedplanno() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionStateResponse.completedPlanNo)
+  return completedplanno_;
+}
+inline void GetCompactionStateResponse::set_completedplanno(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  completedplanno_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetCompactionStateResponse.completedPlanNo)
+}
+
+// -------------------------------------------------------------------
+
+// GetCompactionPlansRequest
+
+// int64 compactionID = 1;
+inline void GetCompactionPlansRequest::clear_compactionid() {
+  compactionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetCompactionPlansRequest::compactionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionPlansRequest.compactionID)
+  return compactionid_;
+}
+inline void GetCompactionPlansRequest::set_compactionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  compactionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetCompactionPlansRequest.compactionID)
+}
+
+// -------------------------------------------------------------------
+
+// GetCompactionPlansResponse
+
+// .milvus.proto.common.Status status = 1;
+inline bool GetCompactionPlansResponse::has_status() const {
+  return this != internal_default_instance() && status_ != nullptr;
+}
+inline const ::milvus::proto::common::Status& GetCompactionPlansResponse::status() const {
+  const ::milvus::proto::common::Status* p = status_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionPlansResponse.status)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::Status*>(
+      &::milvus::proto::common::_Status_default_instance_);
+}
+inline ::milvus::proto::common::Status* GetCompactionPlansResponse::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.GetCompactionPlansResponse.status)
+  
+  ::milvus::proto::common::Status* temp = status_;
+  status_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::Status* GetCompactionPlansResponse::mutable_status() {
+  
+  if (status_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::Status>(GetArenaNoVirtual());
+    status_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetCompactionPlansResponse.status)
+  return status_;
+}
+inline void GetCompactionPlansResponse::set_allocated_status(::milvus::proto::common::Status* status) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
+  }
+  if (status) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      status = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, status, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  status_ = status;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetCompactionPlansResponse.status)
+}
+
+// .milvus.proto.common.CompactionState state = 2;
+inline void GetCompactionPlansResponse::clear_state() {
+  state_ = 0;
+}
+inline ::milvus::proto::common::CompactionState GetCompactionPlansResponse::state() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionPlansResponse.state)
+  return static_cast< ::milvus::proto::common::CompactionState >(state_);
+}
+inline void GetCompactionPlansResponse::set_state(::milvus::proto::common::CompactionState value) {
+  
+  state_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetCompactionPlansResponse.state)
+}
+
+// repeated .milvus.proto.milvus.CompactionMergeInfo mergeInfos = 3;
+inline int GetCompactionPlansResponse::mergeinfos_size() const {
+  return mergeinfos_.size();
+}
+inline void GetCompactionPlansResponse::clear_mergeinfos() {
+  mergeinfos_.Clear();
+}
+inline ::milvus::proto::milvus::CompactionMergeInfo* GetCompactionPlansResponse::mutable_mergeinfos(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetCompactionPlansResponse.mergeInfos)
+  return mergeinfos_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo >*
+GetCompactionPlansResponse::mutable_mergeinfos() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.GetCompactionPlansResponse.mergeInfos)
+  return &mergeinfos_;
+}
+inline const ::milvus::proto::milvus::CompactionMergeInfo& GetCompactionPlansResponse::mergeinfos(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionPlansResponse.mergeInfos)
+  return mergeinfos_.Get(index);
+}
+inline ::milvus::proto::milvus::CompactionMergeInfo* GetCompactionPlansResponse::add_mergeinfos() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.GetCompactionPlansResponse.mergeInfos)
+  return mergeinfos_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo >&
+GetCompactionPlansResponse::mergeinfos() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.GetCompactionPlansResponse.mergeInfos)
+  return mergeinfos_;
+}
+
+// -------------------------------------------------------------------
+
+// CompactionMergeInfo
+
+// repeated int64 sources = 1;
+inline int CompactionMergeInfo::sources_size() const {
+  return sources_.size();
+}
+inline void CompactionMergeInfo::clear_sources() {
+  sources_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 CompactionMergeInfo::sources(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.CompactionMergeInfo.sources)
+  return sources_.Get(index);
+}
+inline void CompactionMergeInfo::set_sources(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  sources_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.CompactionMergeInfo.sources)
+}
+inline void CompactionMergeInfo::add_sources(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  sources_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.CompactionMergeInfo.sources)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+CompactionMergeInfo::sources() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.CompactionMergeInfo.sources)
+  return sources_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+CompactionMergeInfo::mutable_sources() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.CompactionMergeInfo.sources)
+  return &sources_;
+}
+
+// int64 target = 2;
+inline void CompactionMergeInfo::clear_target() {
+  target_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 CompactionMergeInfo::target() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.CompactionMergeInfo.target)
+  return target_;
+}
+inline void CompactionMergeInfo::set_target(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  target_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.CompactionMergeInfo.target)
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

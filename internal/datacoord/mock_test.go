@@ -521,10 +521,10 @@ func (h *mockCompactionHandler) isFull() bool {
 	panic("not implemented")
 }
 
-// get compaction by signal id and return the number of executing/completed/timeout plans
-func (h *mockCompactionHandler) getCompactionBySignalID(signalID int64) (executing int, completed int, timeout int) {
-	if f, ok := h.methods["getCompactionBySignalID"]; ok {
-		if ff, ok := f.(func(signalID int64) (executing int, completed int, timeout int)); ok {
+// get compaction tasks by signal id
+func (h *mockCompactionHandler) getCompactionTasksBySignalID(signalID int64) []*compactionTask {
+	if f, ok := h.methods["getCompactionTasksBySignalID"]; ok {
+		if ff, ok := f.(func(signalID int64) []*compactionTask); ok {
 			return ff(signalID)
 		}
 	}

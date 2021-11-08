@@ -52,6 +52,8 @@ service MilvusService {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
   rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {}
+  rpc GetCompactionState(GetCompactionStateRequest) returns (GetCompactionStateResponse) {}
+  rpc ManualCompaction(ManualCompactionRequest) returns (ManualCompactionResponse) {}
 }
 
 message CreateAliasRequest {
@@ -714,6 +716,43 @@ message LoadBalanceRequest {
   int64 src_nodeID = 2;
   repeated int64 dst_nodeIDs = 3;
   repeated int64 sealed_segmentIDs = 4;
+}
+
+message ManualCompactionRequest {
+  int64 collectionID = 1;
+  uint64 timetravel = 2;
+}
+
+message ManualCompactionResponse {
+  common.Status status = 1;
+  int64 compactionID = 2;
+}
+
+message GetCompactionStateRequest {
+  int64 compactionID = 1;
+}
+
+message GetCompactionStateResponse {
+  common.Status status = 1;
+  common.CompactionState state = 2;
+  int64 executingPlanNo = 3;
+  int64 timeoutPlanNo = 4;
+  int64 completedPlanNo = 5;
+}
+
+message GetCompactionPlansRequest {
+  int64 compactionID = 1;
+}
+
+message GetCompactionPlansResponse {
+  common.Status status = 1;
+  common.CompactionState state = 2;
+  repeated CompactionMergeInfo mergeInfos = 3;
+}
+
+message CompactionMergeInfo {
+  repeated int64 sources = 1;
+  int64 target = 2;
 }
 
 service ProxyService {

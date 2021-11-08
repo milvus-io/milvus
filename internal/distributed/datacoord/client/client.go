@@ -546,7 +546,7 @@ func (c *Client) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 	return ret.(*commonpb.Status), err
 }
 
-func (c *Client) ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error) {
+func (c *Client) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
 		if err != nil {
@@ -558,10 +558,10 @@ func (c *Client) ManualCompaction(ctx context.Context, req *datapb.ManualCompact
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*datapb.ManualCompactionResponse), err
+	return ret.(*milvuspb.ManualCompactionResponse), err
 }
 
-func (c *Client) GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error) {
+func (c *Client) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
 		if err != nil {
@@ -573,5 +573,20 @@ func (c *Client) GetCompactionState(ctx context.Context, req *datapb.GetCompacti
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*datapb.GetCompactionStateResponse), err
+	return ret.(*milvuspb.GetCompactionStateResponse), err
+}
+
+func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetCompactionStateWithPlans(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.GetCompactionPlansResponse), err
 }

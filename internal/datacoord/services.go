@@ -645,10 +645,10 @@ func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 	return resp, nil
 }
 
-func (s *Server) ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error) {
+func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	log.Debug("receive manual compaction", zap.Int64("collectionID", req.GetCollectionID()))
 
-	resp := &datapb.ManualCompactionResponse{
+	resp := &milvuspb.ManualCompactionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -679,9 +679,9 @@ func (s *Server) ManualCompaction(ctx context.Context, req *datapb.ManualCompact
 	return resp, nil
 }
 
-func (s *Server) GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error) {
+func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	log.Debug("receive get compaction state request", zap.Int64("compactionID", req.GetCompactionID()))
-	resp := &datapb.GetCompactionStateResponse{
+	resp := &milvuspb.GetCompactionStateResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -699,16 +699,80 @@ func (s *Server) GetCompactionState(ctx context.Context, req *datapb.GetCompacti
 		return resp, nil
 	}
 
-	executing, completed, timeout := s.compactionHandler.getCompactionBySignalID(req.GetCompactionID())
-	if executing != 0 {
-		resp.State = datapb.CompactionState_Executing
-	} else {
-		resp.State = datapb.CompactionState_Completed
-	}
+	tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
+	state, executingCnt, completedCnt, timeoutCnt := getCompactionState(tasks)
 
-	resp.ExecutingPlanNo = int64(executing)
-	resp.CompletedPlanNo = int64(completed)
-	resp.TimeoutPlanNo = int64(timeout)
+	resp.State = state
+	resp.ExecutingPlanNo = int64(executingCnt)
+	resp.CompletedPlanNo = int64(completedCnt)
+	resp.TimeoutPlanNo = int64(timeoutCnt)
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
+}
+
+func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	log.Debug("received GetCompactionStateWithPlans request", zap.Int64("compactionID", req.GetCompactionID()))
+
+	resp := &milvuspb.GetCompactionPlansResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+	}
+
+	if s.isClosed() {
+		log.Warn("failed to get compaction state with plans", zap.Int64("compactionID", req.GetCompactionID()), zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		return resp, nil
+	}
+
+	if !Params.EnableCompaction {
+		resp.Status.Reason = "compaction disabled"
+		return resp, nil
+	}
+
+	tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
+	for _, task := range tasks {
+		resp.MergeInfos = append(resp.MergeInfos, getCompactionMergeInfo(task))
+	}
+
+	state, _, _, _ := getCompactionState(tasks)
+
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	resp.State = state
+	return resp, nil
+}
+
+func getCompactionMergeInfo(task *compactionTask) *milvuspb.CompactionMergeInfo {
+	segments := task.plan.GetSegmentBinlogs()
+	var sources []int64
+	for _, s := range segments {
+		sources = append(sources, s.GetSegmentID())
+	}
+
+	var target int64 = -1
+	if task.result != nil {
+		target = task.result.GetSegmentID()
+	}
+
+	return &milvuspb.CompactionMergeInfo{
+		Sources: sources,
+		Target:  target,
+	}
+}
+
+func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, timeoutCnt int) {
+	for _, t := range tasks {
+		switch t.state {
+		case executing:
+			executingCnt++
+		case completed:
+			completedCnt++
+		case timeout:
+			timeoutCnt++
+		}
+	}
+	if executingCnt != 0 {
+		state = commonpb.CompactionState_Executing
+	} else {
+		state = commonpb.CompactionState_Completed
+	}
+	return
 }
