@@ -28,7 +28,7 @@ TEST_F(KnowhereTest, KNOWHERE_RESOURCE_TEST) {
     ASSERT_TRUE(s.ok());
 
     KnowhereConfig::SetSimdType(KnowhereConfig::SimdType::AUTO);
-    KnowhereConfig::SetSimdType(KnowhereConfig::SimdType::SSE);
+    KnowhereConfig::SetSimdType(KnowhereConfig::SimdType::SSE4_2);
     KnowhereConfig::SetSimdType(KnowhereConfig::SimdType::AVX2);
     KnowhereConfig::SetSimdType(KnowhereConfig::SimdType::AVX512);
 

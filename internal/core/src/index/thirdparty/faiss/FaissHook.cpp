@@ -18,7 +18,7 @@ namespace faiss {
 
 bool faiss_use_avx512 = true;
 bool faiss_use_avx2 = true;
-bool faiss_use_sse = true;
+bool faiss_use_sse4_2 = true;
 
 /* set default to AVX */
 fvec_func_ptr fvec_inner_product = fvec_inner_product_avx;
@@ -48,8 +48,8 @@ bool support_avx2() {
     return (instruction_set_inst.AVX2());
 }
 
-bool support_sse() {
-    if (!faiss_use_sse) return false;
+bool support_sse4_2() {
+    if (!faiss_use_sse4_2) return false;
 
     InstructionSet& instruction_set_inst = InstructionSet::GetInstance();
     return (instruction_set_inst.SSE42());
@@ -85,7 +85,7 @@ bool hook_init(std::string& cpu_flag) {
         sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx;
 
         cpu_flag = "AVX2";
-    } else if (support_sse()) {
+    } else if (support_sse4_2()) {
         /* for IVFFLAT */
         fvec_inner_product = fvec_inner_product_sse;
         fvec_L2sqr = fvec_L2sqr_sse;
@@ -97,7 +97,7 @@ bool hook_init(std::string& cpu_flag) {
         sq_sel_quantizer = sq_select_quantizer_ref;
         sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_ref;
 
-        cpu_flag = "SSE42";
+        cpu_flag = "SSE4_2";
     } else {
         cpu_flag = "UNSUPPORTED";
         return false;
