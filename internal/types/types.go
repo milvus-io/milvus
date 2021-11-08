@@ -224,6 +224,7 @@ type DataCoord interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	// CompleteCompaction completes a compaction with the result
 	CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error)
+	// ManualCompaction triggers a compaction for a collection
 	ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error)
 	GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error)
 }
