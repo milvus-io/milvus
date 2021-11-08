@@ -5,7 +5,19 @@ metadata:
   labels:
     app: milvus
 spec:
-  dependencies: { }
-  config: { }
-  components: { }
+  dependencies:
+    etcd:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true
+    pulsar:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true
+    storage:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true
+  config: {}
+  components: {}
   
