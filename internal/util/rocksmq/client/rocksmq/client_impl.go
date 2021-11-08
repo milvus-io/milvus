@@ -158,6 +158,7 @@ func (c *client) consume(consumer *consumer) {
 	}
 }
 
+// Close close the channel to notify rocksmq to stop operation and close rocksmq server
 func (c *client) Close() {
 	// TODO(yukun): Should call server.close() here?
 	c.closeOnce.Do(func() {
