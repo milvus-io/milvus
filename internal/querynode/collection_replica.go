@@ -112,6 +112,7 @@ type ReplicaInterface interface {
 	queryRLock()
 	queryRUnlock()
 
+	// getSegmentsMemSize get the memory size in bytes of all the Segments
 	getSegmentsMemSize() int64
 	freeAll()
 	printReplica()
