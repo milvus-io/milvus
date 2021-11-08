@@ -226,6 +226,7 @@ type DataCoord interface {
 	CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error)
 	// ManualCompaction triggers a compaction for a collection
 	ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error)
+	// GetCompactionState gets the state of a compaction
 	GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error)
 }
 
