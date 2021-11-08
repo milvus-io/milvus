@@ -1260,9 +1260,7 @@ func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcor
 			}
 		}
 	}
-	if skipDupCnt > 0 {
-		log.Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
-	}
+	log.Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
 
 	// not found, return default values indicating not result found
 	if ret == nil {
