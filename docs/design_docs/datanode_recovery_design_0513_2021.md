@@ -39,7 +39,7 @@ The detailed design can be found at [datanode flowgraph recovery design](datanod
 After DataNode subscribes to a stateful vchannel, DataNode starts to work, or more specifically, flowgraph starts to work.
 
 Vchannel is stateful because we don't want to process twice what's already processed. And a "processed" message means its
-already persistant. In DataNode's terminology, a message is processed if it's been flushed.
+already persistent. In DataNode's terminology, a message is processed if it's been flushed.
 
 DataCoord tells DataNode stateful vchannel info through RPC `WatchDmChannels`, so that DataNode won't process
 the same messages over and over again. So flowgraph needs ability to consume messages in the middle of a vchannel.
