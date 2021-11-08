@@ -5,6 +5,7 @@ logger = logging.getLogger("milvus_benchmark.parser")
 
 
 def operations_parser(operations):
+    """ get the type and params of test """
     if not operations:
         raise Exception("No operations in suite defined")
     for run_type, run_params in operations.items():
