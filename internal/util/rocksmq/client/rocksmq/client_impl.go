@@ -82,8 +82,6 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 				return nil, err
 			}
 		}
-		c.wg.Add(1)
-		go c.consume(consumer)
 		return consumer, nil
 	}
 	consumer, err := newConsumer(c, options)
@@ -113,8 +111,6 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 
 	// Take messages from RocksDB and put it into consumer.Chan(),
 	// trigger by consumer.MsgMutex which trigger by producer
-	c.wg.Add(1)
-	go c.consume(consumer)
 	c.consumerOptions = append(c.consumerOptions, options)
 
 	return consumer, nil
