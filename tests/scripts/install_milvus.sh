@@ -46,6 +46,7 @@ if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
   MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus"
 fi
 
+# create namespace when it does not exist
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true
 
 if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
