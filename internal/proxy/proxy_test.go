@@ -1340,7 +1340,7 @@ func TestProxy(t *testing.T) {
 			Base: nil,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 	})
 
 	// TODO(dragondriver): dummy
