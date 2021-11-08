@@ -605,7 +605,16 @@ func (insertCodec *InsertCodec) Close() error {
 // DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
 // timestamp represents the time when this instance was deleted
 type DeleteData struct {
-	Data map[int64]int64 // primary key to timestamp
+	Pks      []int64     // primary keys
+	Tss      []Timestamp // timestamps
+	RowCount int64
+}
+
+// Append append 1 pk&ts pair to DeleteData
+func (data *DeleteData) Append(pk UniqueID, ts Timestamp) {
+	data.Pks = append(data.Pks, pk)
+	data.Tss = append(data.Tss, ts)
+	data.RowCount++
 }
 
 // DeleteCodec serializes and deserializes the delete data
@@ -626,24 +635,31 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	if err != nil {
 		return nil, err
 	}
+	if len(data.Pks) != len(data.Tss) {
+		return nil, fmt.Errorf("The length of pks, and TimeStamps is not equal")
+	}
+	length := len(data.Pks)
 	sizeTotal := 0
-	startTs, endTs := math.MaxInt64, math.MinInt64
-	for key, value := range data.Data {
-		if value < int64(startTs) {
-			startTs = int(value)
+	var startTs, endTs Timestamp
+	startTs, endTs = math.MaxUint64, 0
+	for i := 0; i < length; i++ {
+		pk := data.Pks[i]
+		ts := data.Tss[i]
+		if ts < startTs {
+			startTs = ts
 		}
-		if value > int64(endTs) {
-			endTs = int(value)
+		if ts > endTs {
+			endTs = ts
 		}
-		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", key, value))
+		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", pk, ts))
 		if err != nil {
 			return nil, err
 		}
-		sizeTotal += binary.Size(key)
-		sizeTotal += binary.Size(value)
+		sizeTotal += binary.Size(pk)
+		sizeTotal += binary.Size(ts)
 	}
-	eventWriter.SetEventTimestamp(uint64(startTs), uint64(endTs))
-	binlogWriter.SetEventTimeStamp(uint64(startTs), uint64(endTs))
+	eventWriter.SetEventTimestamp(startTs, endTs)
+	binlogWriter.SetEventTimeStamp(startTs, endTs)
 
 	// https://github.com/milvus-io/milvus/issues/9620
 	// It's a little complicated to count the memory size of a map.
@@ -676,7 +692,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	}
 
 	var pid, sid UniqueID
-	result := &DeleteData{Data: make(map[int64]int64)}
+	result := &DeleteData{}
 	for _, blob := range blobs {
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
@@ -710,17 +726,19 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				return InvalidUniqueID, InvalidUniqueID, nil, err
 			}
 
-			ts, err := strconv.ParseInt(splits[1], 10, 64)
+			ts, err := strconv.ParseUint(splits[1], 10, 64)
 			if err != nil {
 				return InvalidUniqueID, InvalidUniqueID, nil, err
 			}
 
-			result.Data[pk] = ts
+			result.Pks = append(result.Pks, pk)
+			result.Tss = append(result.Tss, ts)
 		}
 
 		deleteCodec.readerCloseFunc = append(deleteCodec.readerCloseFunc, readerClose(binlogReader))
 
 	}
+	result.RowCount = int64(len(result.Pks))
 
 	return pid, sid, result, nil
 }

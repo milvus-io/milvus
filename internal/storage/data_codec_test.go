@@ -313,8 +313,12 @@ func TestInsertCodec(t *testing.T) {
 func TestDeleteCodec(t *testing.T) {
 	deleteCodec := NewDeleteCodec()
 	deleteData := &DeleteData{
-		Data: map[int64]int64{1: 43757345, 2: 23578294723},
+		Pks:      []int64{1},
+		Tss:      []uint64{43757345},
+		RowCount: int64(1),
 	}
+
+	deleteData.Append(2, 23578294723)
 	blob, err := deleteCodec.Serialize(CollectionID, 1, 1, deleteData)
 	assert.Nil(t, err)
 

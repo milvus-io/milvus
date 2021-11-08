@@ -114,6 +114,7 @@ func (b *binlogIO) upload(
 	var p = &cpaths{
 		inPaths:    make([]*datapb.FieldBinlog, 0),
 		statsPaths: make([]*datapb.FieldBinlog, 0),
+		deltaInfo:  &datapb.DeltaLogInfo{},
 	}
 
 	kvs := make(map[string]string)
@@ -135,7 +136,7 @@ func (b *binlogIO) upload(
 	}
 
 	// If there are delta logs
-	if dData != nil {
+	if dData.RowCount > 0 {
 		k, v, err := b.genDeltaBlobs(dData, meta.GetID(), partID, segID)
 		if err != nil {
 			log.Warn("generate delta blobs wrong", zap.Error(err))
@@ -143,10 +144,8 @@ func (b *binlogIO) upload(
 		}
 
 		kvs[k] = bytes.NewBuffer(v).String()
-		p.deltaInfo = &datapb.DeltaLogInfo{
-			RecordEntries: uint64(len(v)),
-			DeltaLogPath:  k,
-		}
+		p.deltaInfo.RecordEntries = uint64(len(v))
+		p.deltaInfo.DeltaLogPath = k
 	}
 
 	success := make(chan struct{})

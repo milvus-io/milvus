@@ -72,12 +72,10 @@ func (ddb *DelDataBuf) updateTimeRange(tr TimeRange) {
 
 func newDelDataBuf() *DelDataBuf {
 	return &DelDataBuf{
-		delData: &DeleteData{
-			Data: make(map[int64]int64),
-		},
-		size:   0,
-		tsFrom: math.MaxUint64,
-		tsTo:   0,
+		delData: &DeleteData{},
+		size:    0,
+		tsFrom:  math.MaxUint64,
+		tsTo:    0,
 	}
 }
 
@@ -93,7 +91,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys))
 
 	segIDToPkMap := make(map[UniqueID][]int64)
-	segIDToTsMap := make(map[UniqueID][]int64)
+	segIDToTsMap := make(map[UniqueID][]uint64)
 
 	m := dn.filterSegmentByPK(msg.PartitionID, msg.PrimaryKeys)
 	for i, pk := range msg.PrimaryKeys {
@@ -104,7 +102,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		}
 		for _, segID := range segIDs {
 			segIDToPkMap[segID] = append(segIDToPkMap[segID], pk)
-			segIDToTsMap[segID] = append(segIDToTsMap[segID], int64(msg.Timestamps[i]))
+			segIDToTsMap[segID] = append(segIDToTsMap[segID], msg.Timestamps[i])
 		}
 	}
 
@@ -125,8 +123,9 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		delData := delDataBuf.delData
 
 		for i := 0; i < rows; i++ {
-			delData.Data[pks[i]] = tss[i]
-			log.Debug("delete", zap.Int64("primary key", pks[i]), zap.Int64("ts", tss[i]))
+			delData.Pks = append(delData.Pks, pks[i])
+			delData.Tss = append(delData.Tss, tss[i])
+			log.Debug("delete", zap.Int64("primary key", pks[i]), zap.Uint64("ts", tss[i]))
 		}
 
 		// store
@@ -145,8 +144,9 @@ func (dn *deleteNode) showDelBuf() {
 		if v, ok := dn.delBuf.Load(segID); ok {
 			delDataBuf, _ := v.(*DelDataBuf)
 			log.Debug("del data buffer status", zap.Int64("segID", segID), zap.Int64("size", delDataBuf.size))
-			for pk, ts := range delDataBuf.delData.Data {
-				log.Debug("del data", zap.Int64("pk", pk), zap.Int64("ts", ts))
+			length := len(delDataBuf.delData.Pks)
+			for i := 0; i < length; i++ {
+				log.Debug("del data", zap.Int64("pk", delDataBuf.delData.Pks[i]), zap.Uint64("ts", delDataBuf.delData.Tss[i]))
 			}
 		} else {
 			log.Error("segment not exist", zap.Int64("segID", segID))
