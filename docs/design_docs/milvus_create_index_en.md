@@ -151,9 +151,9 @@ message BuildIndexResponse {
 
 10. When `RootCoood` receives the `BuildIndexResponse`, it would extract the `IndexBuildID` from the response, update `RootCoord`'s `metaTable`, then send responses to `Proxy`.
 
-11. There is a background service, `assignTaskLoop`, in `IndexCoord`. `assignTaskLoop` would call `GetUnassignedTask` periodically, the default interval is 3s. `GetUnassignedTask` would list these segments whos `index meta` has been updated, but index has not been created yet.
+11. There is a background service, `assignTaskLoop`, in `IndexCoord`. `assignTaskLoop` would call `GetUnassignedTask` periodically, the default interval is 3s. `GetUnassignedTask` would list these segments whose `index meta` has been updated, but index has not been created yet.
 
-12. The previous step has listed the segments whose index has not been created, for each those segments, `IndexCoord` would call `PeekClient` to get an available `IndexNode`, and send `CreateIndex` request to this `IndexNode`. The `proto` is defined as follow.
+12. The previous step has listed the segments whose index has not been created, for each those segments, `IndexCoord` would call `PeekClient` to get an available `IndexNode`, and send `CreateIndex` request to this `IndexNode`. The `proto` is defined as follows.
 
 ```proto
 service IndexNode {
