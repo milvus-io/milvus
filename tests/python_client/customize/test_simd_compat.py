@@ -45,15 +45,15 @@ class TestSimdCompatibility:
         for name in self.release_names:
             milvus_op.uninstall(name, namespace)
 
-    """
-    steps
-    1. [test_milvus_install]: set up milvus with customized simd configured
-    2. [test_simd_compat_e2e]: verify milvus is working well
-    4. [test_milvus_cleanup]: clear the env  "avx", "avx2", "avx512"
-    """
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('simd', supported_simd_types)
     def test_simd_compat_e2e(self, simd):
+        """
+       steps
+       1. [test_milvus_install]: set up milvus with customized simd configured
+       2. [test_simd_compat_e2e]: verify milvus is working well
+       4. [test_milvus_cleanup]: delete milvus instances in teardown
+       """
         log.info(f"start to install milvus with simd {simd}")
         release_name, host, port = _install_milvus(simd)
         self.release_names.append(release_name)
