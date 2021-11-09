@@ -44,13 +44,14 @@ def get_tags(url, token):
 
 def get_master_tags(tags_list):
     _list = []
+    tag_name = "master"
 
     if not isinstance(tags_list, list):
         print("tags_list is not a list.")
         return _list
 
     for tag in tags_list:
-        if "master" in tag and tag != "master-latest":
+        if tag_name in tag and tag != tag_name + "-latest":
             _list.append(tag)
     return _list
 
