@@ -107,6 +107,7 @@ type ReplicaInterface interface {
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
 
 	// query mu
+	// queryLock guards query and delete operations
 	queryLock()
 	queryUnlock()
 	// queryRLock guards query and delete segment operations
