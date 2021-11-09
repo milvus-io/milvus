@@ -7,8 +7,8 @@ Growing segment has the following additional interfaces:
 2. `Insert(reseveredOffset, size, ...Data...)`: write `...Data...` into range `[reseveredOffset, reseveredOffset + size)`. this interface is allowed to be called concurrently.
 
    1. `...Data...` contains row_ids, timestamps two system attributes, and other columns
-   2. data column can be stored either row based or columne based.
-   3. `PreDelete & Delete(reseveredOffset, row_ids, timestamps)` is the delete interface similar to intert interface.
+   2. data column can be stored either row based or column based.
+   3. `PreDelete & Delete(reseveredOffset, row_ids, timestamps)` is the delete interface similar to insert interface.
 
 Growing segment stores data in the form of chunk. The number of rows in each chunk is restricted by configs.
 
@@ -24,7 +24,7 @@ When `metric type` is specified in the schema, the default parameters will build
 
 ## SegmentGrowingImpl internal
 
-1. SegcoreConfig: contains parameters for Segcore，it has to be speficied before create segment
+1. SegcoreConfig: contains parameters for Segcore，it has to be specified before create segment
 2. InsertRecord: inserted data put to here
 3. DeleteRecord: wait for delete implementation
 4. IndexingRecord: contains data with small index
