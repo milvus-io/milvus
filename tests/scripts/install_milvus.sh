@@ -11,6 +11,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+# Exit immediately for non zero status
 set -e
 set -x
 
@@ -46,7 +47,7 @@ if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
   MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus"
 fi
 
-# create namespace when it does not exist
+# Create namespace when it does not exist
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true
 
 if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
