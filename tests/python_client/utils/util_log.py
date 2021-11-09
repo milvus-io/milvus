@@ -18,6 +18,7 @@ class TestLog:
         try:
             formatter = logging.Formatter("[%(asctime)s - %(levelname)s - %(name)s]: "
                                           "%(message)s (%(filename)s:%(lineno)s)")
+            # [%(process)s] process NO.
             dh = logging.FileHandler(self.log_debug)
             dh.setLevel(logging.DEBUG)
             dh.setFormatter(formatter)
@@ -41,7 +42,7 @@ class TestLog:
             ch = logging.StreamHandler(sys.stdout)
             ch.setLevel(logging.DEBUG)
             ch.setFormatter(formatter)
-            # self.log.addHandler(ch)
+            self.log.addHandler(ch)
 
         except Exception as e:
             print("Can not use %s or %s or %s to log. error : %s" % (log_debug, log_file, log_err, str(e)))
