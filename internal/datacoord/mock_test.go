@@ -472,10 +472,10 @@ func (h *mockCompactionHandler) stop() {
 }
 
 // execCompactionPlan start to execute plan and return immediately
-func (h *mockCompactionHandler) execCompactionPlan(plan *datapb.CompactionPlan) error {
+func (h *mockCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
 	if f, ok := h.methods["execCompactionPlan"]; ok {
-		if ff, ok := f.(func(plan *datapb.CompactionPlan) error); ok {
-			return ff(plan)
+		if ff, ok := f.(func(signal *compactionSignal, plan *datapb.CompactionPlan) error); ok {
+			return ff(signal, plan)
 		}
 	}
 	panic("not implemented")

@@ -24,7 +24,7 @@ type compactionPlanContext interface {
 	start()
 	stop()
 	// execCompactionPlan start to execute plan and return immediately
-	execCompactionPlan(plan *datapb.CompactionPlan) error
+	execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error
 	// completeCompaction record the result of a compaction
 	completeCompaction(result *datapb.CompactionResult) error
 	// getCompaction return compaction task. If planId does not exist, return nil.
@@ -60,9 +60,10 @@ type compactionTask struct {
 
 func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask {
 	task := &compactionTask{
-		plan:       t.plan,
-		state:      t.state,
-		dataNodeID: t.dataNodeID,
+		triggerInfo: t.triggerInfo,
+		plan:        t.plan,
+		state:       t.state,
+		dataNodeID:  t.dataNodeID,
 	}
 	for _, opt := range opts {
 		opt(task)
@@ -131,7 +132,7 @@ func (c *compactionPlanHandler) stop() {
 }
 
 // execCompactionPlan start to execute plan and return immediately
-func (c *compactionPlanHandler) execCompactionPlan(plan *datapb.CompactionPlan) error {
+func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -146,9 +147,10 @@ func (c *compactionPlanHandler) execCompactionPlan(plan *datapb.CompactionPlan) 
 	c.sessions.Compaction(nodeID, plan)
 
 	task := &compactionTask{
-		plan:       plan,
-		state:      executing,
-		dataNodeID: nodeID,
+		triggerInfo: signal,
+		plan:        plan,
+		state:       executing,
+		dataNodeID:  nodeID,
 	}
 	c.plans[plan.PlanID] = task
 	c.executingTaskNum++
@@ -188,8 +190,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	default:
 		return errors.New("unknown compaction type")
 	}
-	c.plans[planID] = c.plans[planID].shadowClone(setState(completed))
-	c.plans[planID] = c.plans[planID].shadowClone(setResult(result))
+	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
 	c.executingTaskNum--
 	if c.plans[planID].plan.GetType() == datapb.CompactionType_MergeCompaction {
 		c.flushCh <- result.GetSegmentID()

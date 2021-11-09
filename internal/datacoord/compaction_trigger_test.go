@@ -17,7 +17,7 @@ type spyCompactionHandler struct {
 }
 
 // execCompactionPlan start to execute plan and return immediately
-func (h *spyCompactionHandler) execCompactionPlan(plan *datapb.CompactionPlan) error {
+func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
 	h.spyChan <- plan
 	return nil
 }

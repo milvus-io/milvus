@@ -21,7 +21,8 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 		chManager *ChannelManager
 	}
 	type args struct {
-		plan *datapb.CompactionPlan
+		signal *compactionSignal
+		plan   *datapb.CompactionPlan
 	}
 	tests := []struct {
 		name    string
@@ -53,7 +54,8 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				},
 			},
 			args{
-				plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction},
+				signal: &compactionSignal{id: 100},
+				plan:   &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction},
 			},
 			false,
 			nil,
@@ -66,12 +68,13 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				sessions:  tt.fields.sessions,
 				chManager: tt.fields.chManager,
 			}
-			err := c.execCompactionPlan(tt.args.plan)
+			err := c.execCompactionPlan(tt.args.signal, tt.args.plan)
 			assert.Equal(t, tt.err, err)
 			if err == nil {
 				<-ch
 				task := c.getCompaction(tt.args.plan.PlanID)
 				assert.Equal(t, tt.args.plan, task.plan)
+				assert.Equal(t, tt.args.signal, task.triggerInfo)
 			}
 		})
 	}
@@ -92,6 +95,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 		fields  fields
 		args    args
 		wantErr bool
+		want    *compactionTask
 	}{
 		{
 			"test complete non existed compaction task",
@@ -102,6 +106,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				result: &datapb.CompactionResult{PlanID: 2},
 			},
 			true,
+			nil,
 		},
 		{
 			"test complete completed task",
@@ -112,13 +117,15 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				result: &datapb.CompactionResult{PlanID: 1},
 			},
 			true,
+			nil,
 		},
 		{
 			"test complete inner compaction",
 			fields{
 				map[int64]*compactionTask{
 					1: {
-						state: executing,
+						triggerInfo: &compactionSignal{id: 1},
+						state:       executing,
 						plan: &datapb.CompactionPlan{
 							PlanID: 1,
 							SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
@@ -147,13 +154,25 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				},
 			},
 			false,
+			&compactionTask{
+				triggerInfo: &compactionSignal{id: 1},
+				state:       completed,
+				plan: &datapb.CompactionPlan{
+					PlanID: 1,
+					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
+					},
+					Type: datapb.CompactionType_InnerCompaction,
+				},
+			},
 		},
 		{
 			"test complete merge compaction",
 			fields{
 				map[int64]*compactionTask{
 					1: {
-						state: executing,
+						triggerInfo: &compactionSignal{id: 1},
+						state:       executing,
 						plan: &datapb.CompactionPlan{
 							PlanID: 1,
 							SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
@@ -184,6 +203,18 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				},
 			},
 			false,
+			&compactionTask{
+				triggerInfo: &compactionSignal{id: 1},
+				state:       completed,
+				plan: &datapb.CompactionPlan{
+					PlanID: 1,
+					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
+						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}}},
+					},
+					Type: datapb.CompactionType_MergeCompaction,
+				},
+			},
 		},
 	}
 	for _, tt := range tests {
