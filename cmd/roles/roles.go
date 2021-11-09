@@ -93,7 +93,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 
 	wg.Add(1)
 	go func() {
-		rootcoord.Params.Init()
+		rootcoord.Params.InitOnce()
 
 		f := setLoggerFunc(localMsg)
 		rootcoord.Params.SetLogConfig(f)
@@ -122,7 +122,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 	wg.Add(1)
 	go func() {
 		proxy.Params.InitAlias(alias)
-		proxy.Params.Init()
+		proxy.Params.InitOnce()
 
 		f := setLoggerFunc(localMsg)
 		proxy.Params.SetLogConfig(f)
@@ -150,7 +150,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 
 	wg.Add(1)
 	go func() {
-		querycoord.Params.Init()
+		querycoord.Params.InitOnce()
 
 		f := setLoggerFunc(localMsg)
 		querycoord.Params.SetLogConfig(f)
@@ -179,7 +179,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 	wg.Add(1)
 	go func() {
 		querynode.Params.InitAlias(alias)
-		querynode.Params.Init()
+		querynode.Params.InitOnce()
 
 		f := setLoggerFunc(localMsg)
 		querynode.Params.SetLogConfig(f)
@@ -207,7 +207,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 
 	wg.Add(1)
 	go func() {
-		datacoord.Params.Init()
+		datacoord.Params.InitOnce()
 
 		f := setLoggerFunc(localMsg)
 		datacoord.Params.SetLogConfig(f)
@@ -236,7 +236,7 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 	wg.Add(1)
 	go func() {
 		datanode.Params.InitAlias(alias)
-		datanode.Params.Init()
+		datanode.Params.InitOnce()
 		f := setLoggerFunc(localMsg)
 		datanode.Params.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
@@ -263,7 +263,7 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 
 	wg.Add(1)
 	go func() {
-		indexcoord.Params.Init()
+		indexcoord.Params.InitOnce()
 
 		f := setLoggerFunc(localMsg)
 		indexcoord.Params.SetLogConfig(f)
@@ -291,7 +291,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 	wg.Add(1)
 	go func() {
 		indexnode.Params.InitAlias(alias)
-		indexnode.Params.Init()
+		indexnode.Params.InitOnce()
 
 		f := setLoggerFunc(localMsg)
 		indexnode.Params.SetLogConfig(f)
