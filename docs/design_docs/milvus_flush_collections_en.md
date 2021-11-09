@@ -85,7 +85,7 @@ type FlushTask struct {
 
       `FlushTask` does nothing at this phase, and returns directly
 
-4. After receiving a `Flush` request from `Proxy`, `DataCoord` would call `SealAllSegments` to seal all the growing segments belonging to this `Collection`, and will not allocate new `ID`s for these segments any more. After that, `DataCoord` would send a response to `Proxy`, which contains all the sealed segment `ID`s.
+4. After receiving a `Flush` request from `Proxy`, `DataCoord` would call `SealAllSegments` to seal all the growing segments belonging to this `Collection`, and would not allocate new `ID`s for these segments anymore. After that, `DataCoord` would send a response to `Proxy`, which contains all the sealed segment `ID`s.
 
 5. In `Milvus 2.0`,  `Flush` is an asynchronous operation. So when `SDK` receives the response of `Flush`, it only means that the `DataCoord` has sealed these segments. There are 2 problems that we have to solve.
     - The sealed segments might still in memory, and have not been written into persistent storage yet.
