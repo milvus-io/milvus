@@ -37,6 +37,8 @@ service DataCoord {
   rpc ManualCompaction(milvus.ManualCompactionRequest) returns (milvus.ManualCompactionResponse) {}
   rpc GetCompactionState(milvus.GetCompactionStateRequest) returns (milvus.GetCompactionStateResponse) {}
   rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
+
+  rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
 }
 
 service DataNode {
@@ -349,4 +351,13 @@ message CompactionResult {
 message SegmentFieldBinlogMeta {
   int64  fieldID = 1;
   string binlog_path = 2;
+}
+
+message WatchChannelsRequest {
+  int64 collectionID = 1;
+  repeated string channelNames = 2;
+}
+
+message WatchChannelsResponse {
+  common.Status status = 1;
 }

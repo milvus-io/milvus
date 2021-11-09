@@ -184,9 +184,6 @@ func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
 }
 
 func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, maxTs Timestamp) error {
-	if err := ddn.sendDeltaTimeTick(minTs); err != nil {
-		return err
-	}
 	if len(msgs) != 0 {
 		var msgPack = msgstream.MsgPack{
 			Msgs:    msgs,

@@ -231,10 +231,16 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
+
 		return nil
 	}
 
 	err = createCollectionFn()
+	if err != nil {
+		return err
+	}
+
+	err = t.core.CallWatchChannels(ctx, collID, vchanNames)
 	if err != nil {
 		return err
 	}

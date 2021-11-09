@@ -51,6 +51,7 @@ type MockDataCoord struct {
 	compactionStateResp  *milvuspb.GetCompactionStateResponse
 	manualCompactionResp *milvuspb.ManualCompactionResponse
 	compactionPlansResp  *milvuspb.GetCompactionPlansResponse
+	watchChannelsResp    *datapb.WatchChannelsResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -143,6 +144,10 @@ func (m *MockDataCoord) GetCompactionState(ctx context.Context, req *milvuspb.Ge
 
 func (m *MockDataCoord) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
 	return m.compactionPlansResp, m.err
+}
+
+func (m *MockDataCoord) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	return m.watchChannelsResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -289,6 +294,15 @@ func Test_NewServer(t *testing.T) {
 			metricResp: &milvuspb.GetMetricsResponse{},
 		}
 		resp, err := server.GetMetrics(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("WatchChannels", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			watchChannelsResp: &datapb.WatchChannelsResponse{},
+		}
+		resp, err := server.WatchChannels(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

@@ -590,3 +590,18 @@ func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	}
 	return ret.(*milvuspb.GetCompactionPlansResponse), err
 }
+
+func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.WatchChannels(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*datapb.WatchChannelsResponse), err
+}

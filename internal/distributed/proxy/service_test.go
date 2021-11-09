@@ -395,6 +395,10 @@ func (m *MockDataCoord) GetCompactionStateWithPlans(ctx context.Context, req *mi
 	return nil, nil
 }
 
+func (m *MockDataCoord) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase

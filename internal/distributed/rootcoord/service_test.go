@@ -165,6 +165,10 @@ func TestGrpcService(t *testing.T) {
 	core.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		return rootcoord.Params.MinSegmentSizeToEnableIndex, nil
 	}
+	core.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
+		return nil
+	}
+
 	segs := []typeutil.UniqueID{}
 	segLock := sync.Mutex{}
 	core.CallGetFlushedSegmentsService = func(ctx context.Context, collID, partID typeutil.UniqueID) ([]typeutil.UniqueID, error) {

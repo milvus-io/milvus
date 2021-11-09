@@ -79,6 +79,7 @@ func newTSafe(ctx context.Context, channel Channel) tSafer {
 		watcherList: make([]*tSafeWatcher, 0),
 		tSafeChan:   make(chan tSafeMsg, channelSize),
 		tSafeRecord: make(map[UniqueID]Timestamp),
+		tSafe:       math.MaxUint64,
 	}
 	return t
 }
