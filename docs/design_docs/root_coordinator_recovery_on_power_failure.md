@@ -5,7 +5,7 @@
 1. `RC` (Root Coordinator) reads meta from etcd when it starts
 2. `RC` needs to store the `position` of the msgstream into etcd every time it consumes the msgstream.
 3. `RC` reads the `position` of msgstream from etcd when it starts up, then it seeks to the specified `position` and re-consumes the msgstream
-4. Ensure that all messages from the msgstream are processed in idempotent fashion, so that repeated consumption of the same message does not cause system inconsistencies
+4. Ensure that all messages from the msgstream are processed in an idempotent fashion, so that repeated consumption of the same message does not cause system inconsistencies
 5. `RC` registers itself in etcd and finds out if the dependent `DC(Data Coordinator)` and `IC(Index Coordinator)` are online via etcd
 
 ## 2. Specific tasks
