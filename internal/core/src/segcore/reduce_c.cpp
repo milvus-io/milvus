@@ -9,19 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <vector>
 #include <unordered_set>
+#include <vector>
 
 #include "common/Consts.h"
 #include "common/Types.h"
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
+#include "pb/milvus.pb.h"
 #include "query/Plan.h"
-#include "segcore/reduce_c.h"
 #include "segcore/Reduce.h"
 #include "segcore/ReduceStructure.h"
 #include "segcore/SegmentInterface.h"
-#include "pb/milvus.pb.h"
+#include "segcore/reduce_c.h"
 
 using SearchResult = milvus::SearchResult;
 
