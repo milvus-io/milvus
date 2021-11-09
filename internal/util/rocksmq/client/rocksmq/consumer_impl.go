@@ -98,6 +98,7 @@ func (c *consumer) MsgMutex() chan struct{} {
 	return c.msgMutex
 }
 
+// Chan start consume goroutine and return message channel
 func (c *consumer) Chan() <-chan ConsumerMessage {
 	c.startOnce.Do(func() {
 		c.client.wg.Add(1)
