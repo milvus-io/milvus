@@ -90,4 +90,39 @@ class TestCompactionParams(TestcaseBase):
 
 @pytest.mark.skip(reason="Waiting for development")
 class TestCompactionOperation(TestcaseBase):
-    pass
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_compact_after_index(self):
+        """
+        target: test compact after create index
+        method: 1.insert data into two segments
+                2.create index
+                3.compact
+                4.search
+        expected: Verify segment info and index info
+        """
+        pass
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_compact_after_binary_index(self):
+        """
+        target: test compact after create index
+        method: 1.insert binary data into two segments
+                2.create binary index
+                3.compact
+                4.search
+        expected: Verify segment info and index info
+        """
+        pass
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_compact_before_index(self):
+        """
+        target: test compact and create index
+        method: 1.insert data into two segments
+                2.compact
+                3.create index
+                4.search
+        expected: Verify search result and index info
+        """
+        pass
