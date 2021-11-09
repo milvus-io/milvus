@@ -701,7 +701,7 @@ message ShowPartitionsResponse {
 **partition_names** is a list contains all partitions' name.
 **partitionIDs** is a list contains all partitions' ids. And the index of a partition in **partition_names** and **partitionIDs** are same.
 
-#### 3.2 Manipulation Requsts
+#### 3.2 Manipulation Requests
 
 ###### 3.2.1 Insert
 
