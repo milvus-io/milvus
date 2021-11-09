@@ -1,0 +1,50 @@
+name: SIMD Compatibility Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-simd-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        simd_types: ["sse4_2", "avx", "avx2", "avx512"]   
+    steps:
+      
+      - name: Creating kind cluster
+        uses: helm/kind-action@v1.2.0
+      
+      - name: Print cluster information
+        run: |
+          kubectl config view
+          kubectl cluster-info
+          kubectl get nodes
+          kubectl get pods -n kube-system
+          helm version
+          kubectl version
+
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install dependency
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
+          pip install -r requirements.txt
+          pip install --upgrade protobuf
+      
+      - name: install milvus operator
+        timeout-minutes: 5
+        shell: bash
+        working-directory: tests/python_client/customize
+        run: |
+          kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.5.3/cert-manager.yaml
+          sleep 30
+          kubectl get pods -n cert-manager
+          kubectl apply -f default.yaml
+          
