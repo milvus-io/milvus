@@ -285,27 +285,60 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 		zap.Any("searchPartitionIDs", searchPartIDs),
 	)
 
+	var err2 error
 	for _, partID := range searchPartIDs {
 		segIDs, err := h.replica.getSegmentIDs(partID)
 		if err != nil {
 			return searchResults, searchSegmentIDs, err
 		}
+
+		var segmentLock sync.RWMutex
+		var wg sync.WaitGroup
+
 		for _, segID := range segIDs {
-			seg, err := h.replica.getSegmentByID(segID)
-			if err != nil {
-				return searchResults, searchSegmentIDs, err
-			}
-			if !seg.getOnService() {
-				continue
-			}
-			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
-			if err != nil {
-				return searchResults, searchSegmentIDs, err
-			}
-			searchResults = append(searchResults, searchResult)
-			searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)
+			segID2 := segID
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				seg, err := h.replica.getSegmentByID(segID2)
+				if err != nil {
+					err2 = err
+					return
+				}
+				if !seg.getOnService() {
+					return
+				}
+				searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
+				if err != nil {
+					err2 = err
+					return
+				}
+				segmentLock.Lock()
+				searchResults = append(searchResults, searchResult)
+				searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)
+				segmentLock.Unlock()
+			}()
+
+			//sp2, _ := trace.StartSpanFromContextWithOperationName(ctx, "QueryNode-historical-search-segment", opentracing.Tags{"sgeID": segID})
+			//seg, err := h.replica.getSegmentByID(segID)
+			//if err != nil {
+			//	return searchResults, searchSegmentIDs, err
+			//}
+			//if !seg.getOnService() {
+			//	continue
+			//}
+			//searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
+			//if err != nil {
+			//	return searchResults, searchSegmentIDs, err
+			//}
+			//searchResults = append(searchResults, searchResult)
+			//searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)
+			//sp2.Finish()
+		}
+		wg.Wait()
+		if err2 != nil {
+			return searchResults, searchSegmentIDs, err2
 		}
 	}
-
 	return searchResults, searchSegmentIDs, nil
 }
