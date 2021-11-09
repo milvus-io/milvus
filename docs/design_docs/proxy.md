@@ -302,14 +302,14 @@ the queue can be scheduled.
 
 ![task_scheduler_1](./graphs/task_scheduler_1.png)
 
-The following figure is a schematic diagram of taskScheduer's scheduling of DmQueue.
+The following figure is a schematic diagram of taskScheduler's scheduling of DmQueue.
 
 The tasks in DmQueue can be scheduled in parallel. In a scheduling process, taskScheduler will execute several tasks
 from each task concurrently.
 
 ![task_scheduler_2](./graphs/task_scheduler_2.png)
 
-The following figure is a schematic diagram of taskScheduer's scheduling of DqQueue.
+The following figure is a schematic diagram of taskScheduler's scheduling of DqQueue.
 
 ![task_scheduler_1](./graphs/task_scheduler_2.png)
 
@@ -317,7 +317,7 @@ The tasks in DqQueue can be scheduled in parallel. In a scheduling process, task
 concurrently.
 
 In order to facilitate the channelsTimeTicker component to obtain the synchronization point information corresponding to all
-DmChannels, the taskScheduer needs to maintain a copy of the time statistics of the physical channels of all currently
+DmChannels, the taskScheduler needs to maintain a copy of the time statistics of the physical channels of all currently
 unexecuted and executing tasks in the DmQueue. The member pChanSatisticsInfos is a map containing the mapping from pChan
 to pChanStatInfo pointers. Among them, pChan is an alias of string, and pChanStatInfo is a custom structure, defined as
 follows:
