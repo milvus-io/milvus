@@ -651,7 +651,7 @@ func (sched *taskScheduler) collectResultLoop() {
 	defer queryResultMsgStream.Close()
 
 	searchResultBufs := make(map[UniqueID]*searchResultBuf)
-	searchResultBufFlags := make(map[UniqueID]bool) // if value is true, we can ignore queryResult
+	searchResultBufFlags := make(map[UniqueID]bool) // if value is true, we can ignore searchResult
 	queryResultBufs := make(map[UniqueID]*queryResultBuf)
 	queryResultBufFlags := make(map[UniqueID]bool) // if value is true, we can ignore queryResult
 
