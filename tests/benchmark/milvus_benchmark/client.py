@@ -3,7 +3,7 @@ import pdb
 import random
 import logging
 import json
-import time, datetime
+import time
 import traceback
 from multiprocessing import Process
 from pymilvus import Milvus, DataType
