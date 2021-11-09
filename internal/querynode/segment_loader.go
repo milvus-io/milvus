@@ -335,14 +335,7 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 		return err
 	}
 
-	rowCount := len(deltaData.Data)
-	pks := make([]int64, 0)
-	tss := make([]Timestamp, 0)
-	for pk, ts := range deltaData.Data {
-		pks = append(pks, pk)
-		tss = append(tss, Timestamp(ts))
-	}
-	err = segment.segmentLoadDeletedRecord(pks, tss, int64(rowCount))
+	err = segment.segmentLoadDeletedRecord(deltaData.Pks, deltaData.Tss, deltaData.RowCount)
 	if err != nil {
 		return err
 	}

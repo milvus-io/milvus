@@ -41,7 +41,8 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		iData := genInsertData()
 		dData := &DeleteData{
-			Data: map[int64]int64{888: 666666},
+			Pks: []int64{888},
+			Tss: []uint64{666666},
 		}
 
 		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
@@ -127,7 +128,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		tests := []struct {
 			isvalid  bool
 			deletepk int64
-			ts       int64
+			ts       uint64
 
 			description string
 		}{
@@ -139,7 +140,8 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				if test.isvalid {
 
 					k, v, err := b.genDeltaBlobs(&DeleteData{
-						Data: map[int64]int64{test.deletepk: test.ts},
+						Pks: []int64{test.deletepk},
+						Tss: []uint64{test.ts},
 					}, meta.GetID(), 10, 1)
 
 					assert.NoError(t, err)

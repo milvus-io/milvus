@@ -97,9 +97,11 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 	var (
 		pk2ts = make(map[UniqueID]Timestamp)
 		dbuff = &DelDataBuf{
-			delData: &DeleteData{Data: make(map[UniqueID]UniqueID)},
-			tsFrom:  math.MaxUint64,
-			tsTo:    0,
+			delData: &DeleteData{
+				Pks: make([]UniqueID, 0),
+				Tss: make([]Timestamp, 0)},
+			tsFrom: math.MaxUint64,
+			tsTo:   0,
 		}
 	)
 
@@ -110,13 +112,16 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 			return nil, nil, err
 		}
 
-		for pk, ts := range dData.Data {
-			if timetravelTs != Timestamp(0) && Timestamp(ts) <= timetravelTs {
-				pk2ts[pk] = Timestamp(ts)
+		for i := int64(0); i < dData.RowCount; i++ {
+			pk := dData.Pks[i]
+			ts := dData.Tss[i]
+
+			if timetravelTs != Timestamp(0) && Timestamp(dData.Tss[i]) <= timetravelTs {
+				pk2ts[pk] = ts
 				continue
 			}
 
-			dbuff.delData.Data[pk] = ts
+			dbuff.delData.Append(pk, ts)
 
 			if Timestamp(ts) < dbuff.tsFrom {
 				dbuff.tsFrom = Timestamp(ts)
@@ -128,7 +133,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 		}
 	}
 
-	dbuff.updateSize(int64(len(dbuff.delData.Data)))
+	dbuff.updateSize(dbuff.delData.RowCount)
 
 	return pk2ts, dbuff, nil
 }
@@ -146,10 +151,9 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 		fID2Content = make(map[UniqueID][]interface{})
 	)
 
+	// get dim
 	for _, fs := range schema.GetFields() {
 		fID2Type[fs.GetFieldID()] = fs.GetDataType()
-
-		// get dim
 		if fs.GetDataType() == schemapb.DataType_FloatVector ||
 			fs.GetDataType() == schemapb.DataType_BinaryVector {
 			for _, t := range fs.GetTypeParams() {
@@ -165,7 +169,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 	}
 
 	for mergeItr.HasNext() {
-		// There will be no error if HasNext() returns true
+		//  no error if HasNext() returns true
 		vInter, _ := mergeItr.Next()
 
 		v, ok := vInter.(*storage.Value)
@@ -349,13 +353,12 @@ func (t *compactionTask) compact() error {
 
 	mergeItr := storage.NewMergeIterator(iItr)
 
-	deltaMap, deltaBuf, err := t.mergeDeltalogs(dblobs, t.plan.GetTimetravel())
+	deltaPk2Ts, deltaBuf, err := t.mergeDeltalogs(dblobs, t.plan.GetTimetravel())
 	if err != nil {
-		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return err
 	}
 
-	iDatas, numRows, err := t.merge(mergeItr, deltaMap, meta.GetSchema())
+	iDatas, numRows, err := t.merge(mergeItr, deltaPk2Ts, meta.GetSchema())
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return err
