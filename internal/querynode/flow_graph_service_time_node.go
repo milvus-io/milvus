@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -65,7 +66,13 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	} else {
 		id = stNode.collectionID
 	}
+	if strings.Contains(stNode.vChannel, "delta") {
+		log.Debug("99999999999999999999999999", zap.Any("vchannel", stNode.vChannel), zap.Any("ts", serviceTimeMsg.timeRange.timestampMax))
+	}
 	err := stNode.tSafeReplica.setTSafe(stNode.vChannel, id, serviceTimeMsg.timeRange.timestampMax)
+	if strings.Contains(stNode.vChannel, "delta") {
+		log.Debug("99999999999999999999999999", zap.Any("vchannel", stNode.vChannel), zap.Any("ts", serviceTimeMsg.timeRange.timestampMax))
+	}
 	if err != nil {
 		log.Warn(err.Error())
 	}

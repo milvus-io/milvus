@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -804,6 +805,11 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
 			ms.chanMsgBufMutex.Unlock()
 
 			if tsMsg.Type() == commonpb.MsgType_TimeTick {
+				if len(ms.consumerChannels) > 0 {
+					if strings.Contains(ms.consumerChannels[0], "delta") {
+						log.Debug("222222222222222222222222222222", zap.Any("vchannel", ms.consumerChannels[0]), zap.Any("ts", tsMsg.(*TimeTickMsg).Base.Timestamp))
+					}
+				}
 				ms.chanTtMsgTimeMutex.Lock()
 				ms.chanTtMsgTime[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
 				ms.chanTtMsgTimeMutex.Unlock()

@@ -172,10 +172,24 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	sCol.addVChannels(vChannels)
 	sCol.addPChannels(pChannels)
 	sCol.setLoadType(l)
+	hCol, err := w.node.historical.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+	hCol.addVChannels(vChannels)
+	hCol.addPChannels(pChannels)
+	hCol.setLoadType(l)
 	if loadPartition {
 		sCol.deleteReleasedPartition(partitionID)
+		hCol.deleteReleasedPartition(partitionID)
 		if hasPartitionInStreaming := w.node.streaming.replica.hasPartition(partitionID); !hasPartitionInStreaming {
 			err := w.node.streaming.replica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+		if hasPartitionInHistorical := w.node.historical.replica.hasPartition(partitionID); !hasPartitionInHistorical {
+			err := w.node.historical.replica.addPartition(collectionID, partitionID)
 			if err != nil {
 				return err
 			}
@@ -365,6 +379,16 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	}
 	hCol.addVDeltaChannels(vDeltaChannels)
 	hCol.addPDeltaChannels(pDeltaChannels)
+
+	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {
+		return fmt.Errorf("cannot find collection with collectionID, %d", collectionID)
+	}
+	sCol, err := w.node.streaming.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+	sCol.addVDeltaChannels(vDeltaChannels)
+	sCol.addPDeltaChannels(pDeltaChannels)
 
 	// get subscription name
 	getUniqueSubName := func() string {
@@ -582,12 +606,14 @@ const (
 func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	log.Debug("Execute release collection task", zap.Any("collectionID", r.req.CollectionID))
 	errMsg := "release collection failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
+	log.Debug("release streaming", zap.Any("collectionID", r.req.CollectionID))
 	err := r.releaseReplica(r.node.streaming.replica, replicaStreaming)
 	if err != nil {
 		return errors.New(errMsg + err.Error())
 	}
 
 	// remove collection metas in streaming and historical
+	log.Debug("release historical", zap.Any("collectionID", r.req.CollectionID))
 	err = r.releaseReplica(r.node.historical.replica, replicaHistorical)
 	if err != nil {
 		return errors.New(errMsg + err.Error())
@@ -606,6 +632,7 @@ func (r *releaseCollectionTask) releaseReplica(replica ReplicaInterface, replica
 		return err
 	}
 	// set release time
+	log.Debug("set release time", zap.Any("collectionID", r.req.CollectionID))
 	collection.setReleaseTime(r.req.Base.Timestamp)
 
 	// sleep to wait for query tasks done
@@ -706,6 +733,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("start release partition", zap.Any("collectionID", r.req.CollectionID))
 
 	// release partitions
 	vChannels := sCol.getVChannels()
@@ -747,6 +775,26 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 
 		hCol.addReleasedPartition(id)
 		sCol.addReleasedPartition(id)
+	}
+	pids, err := r.node.historical.replica.getPartitionIDs(r.req.CollectionID)
+	if err != nil {
+		return err
+	}
+	log.Debug("start release history pids", zap.Any("pids", pids))
+	if len(pids) == 0 && hCol.getLoadType() == loadTypePartition {
+		r.node.dataSyncService.removeCollectionDeltaFlowGraph(r.req.CollectionID)
+		vChannels := hCol.getVDeltaChannels()
+		for _, channel := range vChannels {
+			log.Debug("Releasing tSafe in releasePartitionTask...",
+				zap.Any("collectionID", r.req.CollectionID),
+				zap.Any("vChannel", channel),
+			)
+			// no tSafe in tSafeReplica, don't return error
+			err = r.node.tSafeReplica.removeTSafe(channel)
+			if err != nil {
+				log.Warn(err.Error())
+			}
+		}
 	}
 
 	// release global segment info

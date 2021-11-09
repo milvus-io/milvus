@@ -79,6 +79,7 @@ func newTSafe(ctx context.Context, channel Channel) tSafer {
 		watcherList: make([]*tSafeWatcher, 0),
 		tSafeChan:   make(chan tSafeMsg, channelSize),
 		tSafeRecord: make(map[UniqueID]Timestamp),
+		tSafe:       math.MaxUint64,
 	}
 	return t
 }
@@ -103,9 +104,11 @@ func (ts *tSafe) start() {
 			case m, ok := <-ts.tSafeChan:
 				if !ok {
 					// should not happen!!
-					return
+					panic("should not happen")
 				}
+				log.Debug("get tsafe lock")
 				ts.tSafeMu.Lock()
+				log.Debug("get tsafe lock end")
 				ts.tSafeRecord[m.id] = m.t
 				var tmpT Timestamp = math.MaxUint64
 				for _, t := range ts.tSafeRecord {
@@ -118,11 +121,11 @@ func (ts *tSafe) start() {
 					watcher.notify()
 				}
 
-				//log.Debug("set tSafe done",
-				//	zap.Any("id", m.id),
-				//	zap.Any("channel", ts.channel),
-				//	zap.Any("t", m.t),
-				//	zap.Any("tSafe", ts.tSafe))
+				log.Debug("set tSafe done",
+					zap.Any("id", m.id),
+					zap.Any("channel", ts.channel),
+					zap.Any("t", m.t),
+					zap.Any("tSafe", ts.tSafe))
 				ts.tSafeMu.Unlock()
 			}
 		}

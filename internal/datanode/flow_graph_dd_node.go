@@ -184,9 +184,6 @@ func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
 }
 
 func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, maxTs Timestamp) error {
-	if err := ddn.sendDeltaTimeTick(minTs); err != nil {
-		return err
-	}
 	if len(msgs) != 0 {
 		var msgPack = msgstream.MsgPack{
 			Msgs:    msgs,
@@ -197,6 +194,7 @@ func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, max
 			return err
 		}
 	}
+	log.Debug("111111111111111111111111111111111111", zap.Any("channel", ddn.deltaMsgStream.GetProduceChannels()), zap.Any("maxTs", maxTs))
 	if err := ddn.sendDeltaTimeTick(maxTs); err != nil {
 		return err
 	}
