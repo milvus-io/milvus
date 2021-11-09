@@ -506,6 +506,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 	return g.result, nil
 }
 
+// ShowCollections list all collections in Milvus.
 func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.ShowCollectionsResponse{
