@@ -338,6 +338,7 @@ func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 	return ret.(*querypb.ShowPartitionsResponse), err
 }
 
+// LoadPartitions loads the data of the specified partitions in the QueryCoord.
 func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
