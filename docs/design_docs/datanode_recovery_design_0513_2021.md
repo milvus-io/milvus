@@ -38,7 +38,7 @@ The detailed design can be found at [datanode flowgraph recovery design](datanod
 
 After DataNode subscribes to a stateful vchannel, DataNode starts to work, or more specifically, flowgraph starts to work.
 
-Vchannel is stateful because we don't want to process twice what's already processed. And a "processed" message means its
+Vchannel is stateful because we don't want to process twice what's already processed, as a "processed" message means its
 already persistent. In DataNode's terminology, a message is processed if it's been flushed.
 
 DataCoord tells DataNode stateful vchannel info through RPC `WatchDmChannels`, so that DataNode won't process
@@ -48,7 +48,7 @@ DataNode tells DataCoord vchannel states after each flush through RPC `SaveBinlo
 keeps the vchannel states update.
 
 
-## Some of the following interface/proto designs are outdated, will be updated soon
+## Some interface/proto designs below are outdated, will be updated soon
 
 ### 1. DataNode no longer interacts with etcd except service registering
 
