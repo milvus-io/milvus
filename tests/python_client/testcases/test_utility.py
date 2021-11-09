@@ -1345,4 +1345,38 @@ class TestUtilityAdvanced(TestcaseBase):
         for t in threads:
             t.join()
         log.debug(self.utility_wrap.list_collections()[0])
-
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_get_query_segment_info_empty_collection(self):
+        """
+        target: test getting query segment info of empty collection
+        method: init a collection and get query segment info
+        expected: length of segment is 0
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        collection_w.load()
+        res, _ = self.utility_wrap.get_query_segment_info(c_name)
+        assert len(res) == 0
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_get_query_segment_info(self):
+        """
+        target: test getting query segment info of collection with data
+        method: init a collection, insert data and get query segment info
+        expected: 
+            1. length of segment is greater than 0
+            2. the sum num_rows of each segment is equal to num of entities
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        nb = 3000
+        df = cf.gen_default_dataframe_data(nb)
+        collection_w.insert(df)
+        collection_w.load()      
+        res, _ = self.utility_wrap.get_query_segment_info(c_name)
+        assert len(res) > 0
+        cnt = 0
+        for r in res:
+            cnt += r.num_rows
+        assert cnt == nb
