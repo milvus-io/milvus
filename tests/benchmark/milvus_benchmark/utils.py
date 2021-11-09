@@ -219,7 +219,6 @@ def search_param_analysis(vector_query, filter_query):
         "limit": limit,
         "expression": expression
     }
-    # logger.debug("[search_param_analysis] search_param_analysis: %s" % str(result))
     return result
 
 
