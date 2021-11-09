@@ -143,32 +143,34 @@ func (q *queryCollection) close() {
 
 // registerCollectionTSafe registers tSafe watcher if vChannels exists
 func (q *queryCollection) registerCollectionTSafe() error {
-	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
+	streamingCollection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
 		return err
 	}
-	// historicalCollection, err := q.historical.replica.getCollectionByID(q.collectionID)
-	// if err != nil {
-	// 	return err
-	// }
-
-	log.Debug("register tSafe watcher and init watcher select case",
-		zap.Any("collectionID", collection.ID()),
-		zap.Any("dml channels", collection.getVChannels()),
-		// zap.Any("delta channels", collection.getVChannels()),
-	)
-	for _, channel := range collection.getVChannels() {
-		err = q.addTSafeWatcher(channel)
+	for _, channel := range streamingCollection.getVChannels() {
+		err := q.addTSafeWatcher(channel)
 		if err != nil {
 			return err
 		}
 	}
-	// for _, channel := range historicalCollection.getVChannels() {
-	// 	err := q.addTSafeWatcher(channel)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
+	log.Debug("register tSafe watcher and init watcher select case",
+		zap.Any("collectionID", streamingCollection.ID()),
+		zap.Any("dml channels", streamingCollection.getVChannels()))
+
+	historicalCollection, err := q.historical.replica.getCollectionByID(q.collectionID)
+	if err != nil {
+		return err
+	}
+	for _, channel := range historicalCollection.getVChannels() {
+		err := q.addTSafeWatcher(channel)
+		if err != nil {
+			return err
+		}
+	}
+	log.Debug("register tSafe watcher and init watcher select case",
+		zap.Any("collectionID", historicalCollection.ID()),
+		zap.Any("delta channels", historicalCollection.getVChannels()))
+
 	return nil
 }
 
@@ -179,7 +181,8 @@ func (q *queryCollection) addTSafeWatcher(vChannel Channel) error {
 		err := errors.New(fmt.Sprintln("tSafeWatcher of queryCollection has been exists, ",
 			"collectionID = ", q.collectionID, ", ",
 			"channel = ", vChannel))
-		return err
+		log.Warn(err.Error())
+		return nil
 	}
 	q.tSafeWatchers[vChannel] = newTSafeWatcher()
 	err := q.streaming.tSafeReplica.registerTSafeWatcher(vChannel, q.tSafeWatchers[vChannel])
@@ -939,22 +942,18 @@ func (q *queryCollection) search(msg queryMsg) error {
 	searchResults := make([]*SearchResult, 0)
 
 	// historical search
-	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
-	if err1 != nil {
-		log.Warn(err1.Error())
-		return err1
+	hisSearchResults, sealedSegmentSearched, err := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
+	if err != nil {
+		return err
 	}
 	searchResults = append(searchResults, hisSearchResults...)
 	tr.Record("historical search done")
 
-	// streaming search
-	var err2 error
 	for _, channel := range collection.getVChannels() {
 		var strSearchResults []*SearchResult
-		strSearchResults, err2 = q.streaming.search(searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
-		if err2 != nil {
-			log.Warn(err2.Error())
-			return err2
+		strSearchResults, err := q.streaming.search(searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+		if err != nil {
+			return err
 		}
 		searchResults = append(searchResults, strSearchResults...)
 	}
@@ -1163,20 +1162,19 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 				Schema: collection.schema,
 			}, q.localCacheEnabled)
 	}
+
 	// historical retrieve
-	hisRetrieveResults, sealedSegmentRetrieved, err1 := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vectorChunkManager, plan)
-	if err1 != nil {
-		log.Warn(err1.Error())
-		return err1
+	hisRetrieveResults, sealedSegmentRetrieved, err := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vectorChunkManager, plan)
+	if err != nil {
+		return err
 	}
 	mergeList = append(mergeList, hisRetrieveResults...)
 	tr.Record("historical retrieve done")
 
 	// streaming retrieve
-	strRetrieveResults, _, err2 := q.streaming.retrieve(collectionID, retrieveMsg.PartitionIDs, plan)
-	if err2 != nil {
-		log.Warn(err2.Error())
-		return err2
+	strRetrieveResults, _, err := q.streaming.retrieve(collectionID, retrieveMsg.PartitionIDs, plan)
+	if err != nil {
+		return err
 	}
 	mergeList = append(mergeList, strRetrieveResults...)
 	tr.Record("streaming retrieve done")

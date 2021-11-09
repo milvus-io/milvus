@@ -136,6 +136,8 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 
 		err = node.streaming.replica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
+		err = node.historical.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
 
 		req := &queryPb.AddQueryChannelRequest{
 			Base:             genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),

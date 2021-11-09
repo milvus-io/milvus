@@ -18,7 +18,7 @@ type filterDeleteNode struct {
 }
 
 func (fddNode *filterDeleteNode) Name() string {
-	return "fddNode"
+	return "fdNode"
 }
 
 func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {

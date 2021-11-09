@@ -915,10 +915,9 @@ func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface
 		return nil, err
 	}
 	col.addVChannels([]Channel{
-		// defaultHistoricalVChannel,
-		defaultVChannel,
+		defaultHistoricalVChannel,
 	})
-	// h.tSafeReplica.addTSafe(defaultHistoricalVChannel)
+	h.tSafeReplica.addTSafe(defaultHistoricalVChannel)
 	return h, nil
 }
 

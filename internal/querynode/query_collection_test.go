@@ -108,11 +108,16 @@ func genSimpleSealedSegmentsChangeInfoMsg() *msgstream.SealedSegmentsChangeInfoM
 func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) {
 	// register
 	queryCollection.tSafeWatchers[defaultVChannel] = newTSafeWatcher()
+	queryCollection.tSafeWatchers[defaultHistoricalVChannel] = newTSafeWatcher()
 	queryCollection.streaming.tSafeReplica.addTSafe(defaultVChannel)
 	queryCollection.streaming.tSafeReplica.registerTSafeWatcher(defaultVChannel, queryCollection.tSafeWatchers[defaultVChannel])
+	queryCollection.historical.tSafeReplica.addTSafe(defaultHistoricalVChannel)
+	queryCollection.historical.tSafeReplica.registerTSafeWatcher(defaultHistoricalVChannel, queryCollection.tSafeWatchers[defaultHistoricalVChannel])
 	queryCollection.addTSafeWatcher(defaultVChannel)
+	queryCollection.addTSafeWatcher(defaultHistoricalVChannel)
 
 	queryCollection.streaming.tSafeReplica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
+	queryCollection.historical.tSafeReplica.setTSafe(defaultHistoricalVChannel, defaultCollectionID, timestamp)
 }
 
 func TestQueryCollection_withoutVChannel(t *testing.T) {

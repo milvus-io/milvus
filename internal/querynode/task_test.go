@@ -331,11 +331,13 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("test execute no collection in streaming", func(t *testing.T) {
+	t.Run("test execute no collection", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
 		err = node.streaming.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		err = node.historical.replica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		task := releaseCollectionTask{
@@ -399,7 +401,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("test execute no collection in historical", func(t *testing.T) {
+	t.Run("test execute no collection", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -410,22 +412,11 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		err = node.historical.replica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
-		err = task.Execute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("test execute no collection in streaming", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		task := releasePartitionsTask{
-			req:  genReleasePartitionsRequest(),
-			node: node,
-		}
 		err = node.streaming.replica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		err = task.Execute(ctx)
 		assert.Error(t, err)
 	})
+
 }
