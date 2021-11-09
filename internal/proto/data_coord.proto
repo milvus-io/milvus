@@ -226,6 +226,7 @@ message SaveBinlogPathsRequest {
   bool flushed = 7;
   repeated FieldBinlog field2StatslogPaths = 8;
   repeated DeltaLogInfo deltalogs = 9;
+  bool dropped = 10;
 }
 
 message CheckPoint {
