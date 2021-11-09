@@ -6,6 +6,7 @@ class LogConfig:
         self.log_debug = ""
         self.log_err = ""
         self.log_info = ""
+        self.log_worker = ""
         self.get_default_config()
 
     @staticmethod
@@ -32,6 +33,9 @@ class LogConfig:
         self.log_debug = "%s/ci_test_log.debug" % log_dir
         self.log_info = "%s/ci_test_log.log" % log_dir
         self.log_err = "%s/ci_test_log.err" % log_dir
+        work_log = os.environ.get('PYTEST_XDIST_WORKER')
+        if work_log is not None:
+            self.log_worker = f'{log_dir}/{work_log}.log'
 
         self.create_path(log_dir)
 
