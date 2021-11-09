@@ -134,7 +134,7 @@ type dataSyncService struct {
 }
 ```
 
-DataNode Init -> Resigter to etcd -> Discovery data service -> Discover master service -> IDLE
+DataNode Init -> Register to etcd -> Discovery data service -> Discover master service -> IDLE
 
 WatchDmChannels -> new dataSyncService -> HEALTH
 
