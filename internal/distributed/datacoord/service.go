@@ -267,10 +267,14 @@ func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 	return s.dataCoord.CompleteCompaction(ctx, req)
 }
 
-func (s *Server) ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error) {
+func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	return s.dataCoord.ManualCompaction(ctx, req)
 }
 
-func (s *Server) GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error) {
+func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	return s.dataCoord.GetCompactionState(ctx, req)
+}
+
+func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	return s.dataCoord.GetCompactionStateWithPlans(ctx, req)
 }

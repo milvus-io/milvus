@@ -2406,3 +2406,61 @@ func TestProxy(t *testing.T) {
 	wg.Wait()
 	cancel()
 }
+
+func Test_GetCompactionState(t *testing.T) {
+	t.Run("get compaction state", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionState(context.TODO(), nil)
+		assert.EqualValues(t, &milvuspb.GetCompactionStateResponse{}, resp)
+		assert.Nil(t, err)
+	})
+
+	t.Run("get compaction state with unhealthy proxy", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
+		resp, err := proxy.GetCompactionState(context.TODO(), nil)
+		assert.EqualValues(t, unhealthyStatus(), resp.Status)
+		assert.Nil(t, err)
+	})
+}
+
+func Test_ManualCompaction(t *testing.T) {
+	t.Run("test manual compaction", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		resp, err := proxy.ManualCompaction(context.TODO(), nil)
+		assert.EqualValues(t, &milvuspb.ManualCompactionResponse{}, resp)
+		assert.Nil(t, err)
+	})
+	t.Run("test manual compaction with unhealthy", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
+		resp, err := proxy.ManualCompaction(context.TODO(), nil)
+		assert.EqualValues(t, unhealthyStatus(), resp.Status)
+		assert.Nil(t, err)
+	})
+}
+
+func Test_GetCompactionStateWithPlans(t *testing.T) {
+	t.Run("test get compaction state with plans", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
+		assert.EqualValues(t, &milvuspb.GetCompactionPlansResponse{}, resp)
+		assert.Nil(t, err)
+	})
+	t.Run("test get compaction state with plans with unhealthy proxy", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
+		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
+		assert.EqualValues(t, unhealthyStatus(), resp.Status)
+		assert.Nil(t, err)
+	})
+}

@@ -42,8 +42,8 @@ func (h *spyCompactionHandler) isFull() bool {
 	return false
 }
 
-// get compaction by signal id and return the number of executing/completed/timeout plans
-func (h *spyCompactionHandler) getCompactionBySignalID(signalID int64) (executing int, completed int, timeout int) {
+// get compaction tasks by signal id
+func (h *spyCompactionHandler) getCompactionTasksBySignalID(signalID int64) []*compactionTask {
 	panic("not implemented") // TODO: Implement
 }
 

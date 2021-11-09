@@ -2462,6 +2462,45 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 	return status, nil
 }
 
+func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
+	log.Info("received GetCompactionState request", zap.Int64("compactionID", req.GetCompactionID()))
+	resp := &milvuspb.GetCompactionStateResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	resp, err := node.dataCoord.GetCompactionState(ctx, req)
+	log.Info("received GetCompactionState response", zap.Int64("compactionID", req.GetCompactionID()), zap.Any("resp", resp), zap.Error(err))
+	return resp, err
+}
+
+func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
+	log.Info("received ManualCompaction request", zap.Int64("collectionID", req.GetCollectionID()))
+	resp := &milvuspb.ManualCompactionResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	resp, err := node.dataCoord.ManualCompaction(ctx, req)
+	log.Info("received ManualCompaction response", zap.Int64("collectionID", req.GetCollectionID()), zap.Any("resp", resp), zap.Error(err))
+	return resp, err
+}
+
+func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	log.Info("received GetCompactionStateWithPlans request", zap.Int64("compactionID", req.GetCompactionID()))
+	resp := &milvuspb.GetCompactionPlansResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	resp, err := node.dataCoord.GetCompactionStateWithPlans(ctx, req)
+	log.Info("received GetCompactionStateWithPlans response", zap.Int64("compactionID", req.GetCompactionID()), zap.Any("resp", resp), zap.Error(err))
+	return resp, err
+}
+
 // checkHealthy checks proxy state is Healthy
 func (node *Proxy) checkHealthy() bool {
 	code := node.stateCode.Load().(internalpb.StateCode)

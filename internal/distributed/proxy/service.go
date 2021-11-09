@@ -449,3 +449,15 @@ func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasReque
 func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	return s.proxy.AlterAlias(ctx, request)
 }
+
+func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
+	return s.proxy.GetCompactionState(ctx, req)
+}
+
+func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
+	return s.proxy.ManualCompaction(ctx, req)
+}
+
+func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	return s.proxy.GetCompactionStateWithPlans(ctx, req)
+}

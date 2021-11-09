@@ -48,8 +48,9 @@ type MockDataCoord struct {
 	recoverResp          *datapb.GetRecoveryInfoResponse
 	flushSegResp         *datapb.GetFlushedSegmentsResponse
 	metricResp           *milvuspb.GetMetricsResponse
-	compactionStateResp  *datapb.GetCompactionStateResponse
-	manualCompactionResp *datapb.ManualCompactionResponse
+	compactionStateResp  *milvuspb.GetCompactionStateResponse
+	manualCompactionResp *milvuspb.ManualCompactionResponse
+	compactionPlansResp  *milvuspb.GetCompactionPlansResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -132,12 +133,16 @@ func (m *MockDataCoord) CompleteCompaction(ctx context.Context, req *datapb.Comp
 	return m.status, m.err
 }
 
-func (m *MockDataCoord) ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error) {
+func (m *MockDataCoord) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	return m.manualCompactionResp, m.err
 }
 
-func (m *MockDataCoord) GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error) {
+func (m *MockDataCoord) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	return m.compactionStateResp, m.err
+}
+
+func (m *MockDataCoord) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	return m.compactionPlansResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

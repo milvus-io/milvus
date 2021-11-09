@@ -168,12 +168,16 @@ func (coord *DataCoordMock) CompleteCompaction(ctx context.Context, req *datapb.
 	return &commonpb.Status{}, nil
 }
 
-func (coord *DataCoordMock) ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error) {
-	return &datapb.ManualCompactionResponse{}, nil
+func (coord *DataCoordMock) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
+	return &milvuspb.ManualCompactionResponse{}, nil
 }
 
-func (coord *DataCoordMock) GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error) {
-	return &datapb.GetCompactionStateResponse{}, nil
+func (coord *DataCoordMock) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
+	return &milvuspb.GetCompactionStateResponse{}, nil
+}
+
+func (coord *DataCoordMock) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	return &milvuspb.GetCompactionPlansResponse{}, nil
 }
 
 func NewDataCoordMock() *DataCoordMock {

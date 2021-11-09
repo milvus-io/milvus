@@ -34,8 +34,9 @@ service DataCoord {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
   rpc CompleteCompaction(CompactionResult) returns (common.Status) {}
-  rpc ManualCompaction(ManualCompactionRequest) returns (ManualCompactionResponse) {}
-  rpc GetCompactionState(GetCompactionStateRequest) returns (GetCompactionStateResponse) {}
+  rpc ManualCompaction(milvus.ManualCompactionRequest) returns (milvus.ManualCompactionResponse) {}
+  rpc GetCompactionState(milvus.GetCompactionStateRequest) returns (milvus.GetCompactionStateResponse) {}
+  rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
 }
 
 service DataNode {
@@ -341,34 +342,6 @@ message CompactionResult {
   repeated FieldBinlog insert_logs = 4;
   repeated FieldBinlog field2StatslogPaths = 5;
   repeated DeltaLogInfo deltalogs = 6;
-}
-
-message ManualCompactionRequest {
-  int64 collectionID = 1;
-  uint64 timetravel = 2;
-}
-
-message ManualCompactionResponse {
-  common.Status status = 1;
-  int64 compactionID = 2;
-}
-
-message GetCompactionStateRequest {
-  int64 compactionID = 1;
-}
-
-enum CompactionState {
-  UndefiedState = 0;
-  Executing = 1;
-  Completed = 2;
-}
-
-message GetCompactionStateResponse {
-  common.Status status = 1;
-  CompactionState state = 2;
-  int64 executingPlanNo = 3;
-  int64 timeoutPlanNo = 4;
-  int64 completedPlanNo = 5;
 }
 
 // Deprecated

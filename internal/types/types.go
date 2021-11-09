@@ -1,5 +1,4 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.//
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
@@ -225,9 +224,10 @@ type DataCoord interface {
 	// CompleteCompaction completes a compaction with the result
 	CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error)
 	// ManualCompaction triggers a compaction for a collection
-	ManualCompaction(ctx context.Context, req *datapb.ManualCompactionRequest) (*datapb.ManualCompactionResponse, error)
+	ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
 	// GetCompactionState gets the state of a compaction
-	GetCompactionState(ctx context.Context, req *datapb.GetCompactionStateRequest) (*datapb.GetCompactionStateResponse, error)
+	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
+	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
 }
 
 // IndexNode is the interface `indexnode` package implements
@@ -953,6 +953,9 @@ type ProxyComponent interface {
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
 	AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
+	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
+	ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
+	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
 }
 
 // QueryNode is the interface `querynode` package implements
