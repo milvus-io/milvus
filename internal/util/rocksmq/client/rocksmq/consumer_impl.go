@@ -94,6 +94,7 @@ func (c *consumer) Topic() string {
 	return c.topic
 }
 
+// MsgMutex return the message mutex channel of consumer
 func (c *consumer) MsgMutex() chan struct{} {
 	return c.msgMutex
 }
