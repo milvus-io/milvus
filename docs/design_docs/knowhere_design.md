@@ -5,7 +5,7 @@
 Vector index is a time-efficient and space-efficient data structure built on vectors through a certain mathematical model. Through the vector index, we can efficiently query several vectors similar to the target vector.
 Since accurate retrieval is usually very time-consuming, most of the vector index types of Milvus use ANNS (Approximate Nearest Neighbors Search). Compared with accurate retrieval, the core idea of ANNS is no longer limited to returning the most accurate result, but only searching for neighbors of the target. ANNS improves retrieval efficiency by sacrificing accuracy within an acceptable range.
 
-## What can knowhere do
+## What can Knowhere do
 
 Knowhere is the vector search execution engine of Milvus. It encapsulates many popular vector index algorithm libraries, such as faiss, hnswlib, NGT, annoy, and provides a set of unified interfaces. In addition, Knowhere also supports heterogeneous computing.
 
@@ -77,7 +77,7 @@ Size();
 ## Data Format
 
 The vector data used for index and query is stored as a one-dimensional array.
-And the first `dim * sizeof(data_type)` bytes of the array is the first vector; then `row_num -1` vectors followed.
+The first `dim * sizeof(data_type)` bytes of the array is the first vector; then `row_num -1` vectors followed.
 
 ## Sequence
 
