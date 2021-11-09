@@ -3412,7 +3412,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total DataNode Watch dm channel operations",
+      "description": "Total count of watch_dm_channels requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
