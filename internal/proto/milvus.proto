@@ -54,6 +54,7 @@ service MilvusService {
   rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {}
   rpc GetCompactionState(GetCompactionStateRequest) returns (GetCompactionStateResponse) {}
   rpc ManualCompaction(ManualCompactionRequest) returns (ManualCompactionResponse) {}
+  rpc GetCompactionStateWithPlans(GetCompactionPlansRequest) returns (GetCompactionPlansResponse) {}
 }
 
 message CreateAliasRequest {
