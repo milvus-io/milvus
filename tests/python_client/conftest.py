@@ -157,7 +157,8 @@ def initialize_env(request):
     assert ip_check(host) and number_check(port)
 
     """ modify log files """
-    cf.modify_file(file_path_list=[log_config.log_debug, log_config.log_info, log_config.log_err], is_modify=clean_log)
+    cf.modify_file(file_path_list=[log_config.log_debug, log_config.log_info, log_config.log_err, log_config.log_worker],
+                   is_modify=clean_log)
 
     log.info("#" * 80)
     log.info("[initialize_milvus] Log cleaned up, start testing...")
