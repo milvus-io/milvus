@@ -225,7 +225,7 @@ class TestCollectionParams(TestcaseBase):
         """
         target: test collection with dup name and invalid schema
         method: 1. default schema 2. invalid schema
-        expected: raise exception and
+        expected: raise exception
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
