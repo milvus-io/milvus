@@ -44,9 +44,9 @@ possible.
 
 As mentioned above, QueryNodes will continue to get insert records and timetick from the message queue. Every time a
 timetick is consumed, QueryNodes will update this timetick as the serviceable time-"ServiceTime". With the above figure,
-it is easy to understand ServiceTime that QueryNodes can see all the data before ServiceTime.
+it is easy to understand that QueryNodes can see all the data before ServiceTime.
 
-With this ServiceTime, Milvus provides GuaranteeTs according to the needs of different users for consistency and
+With ServiceTime, Milvus provides GuaranteeTs according to the needs of different users for consistency and
 availability. Users can specify GuaranteeTs to inform QueryNodes that search request must see all the data before
 GuaranteeTs.
 
