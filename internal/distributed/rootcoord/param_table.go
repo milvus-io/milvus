@@ -52,10 +52,6 @@ type ParamTable struct {
 func (p *ParamTable) Init() {
 	once.Do(func() {
 		p.BaseTable.Init()
-		err := p.LoadYaml("advanced/root_coord.yaml")
-		if err != nil {
-			panic(err)
-		}
 		p.initAddress()
 		p.initPort()
 		p.initIndexCoordAddress()

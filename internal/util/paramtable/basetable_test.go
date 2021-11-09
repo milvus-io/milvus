@@ -156,6 +156,28 @@ func TestBateTable_ConfPath(t *testing.T) {
 	assert.Equal(t, filepath.Clean(config), filepath.Clean(dir+"/../../../configs/"))
 }
 
+func TestBaseTable_Env(t *testing.T) {
+	os.Setenv("milvus.test", "test")
+	os.Setenv("milvus.test.test2", "test2")
+
+	baseParams.Init()
+	result, _ := baseParams.Load("test")
+	assert.Equal(t, result, "test")
+
+	result, _ = baseParams.Load("test.test2")
+	assert.Equal(t, result, "test2")
+
+	err := os.Setenv("milvus.invalid=xxx", "test")
+	assert.Error(t, err)
+
+	err = os.Setenv("milvus.invalid", "xxx=test")
+	assert.NoError(t, err)
+
+	baseParams.Init()
+	result, _ = baseParams.Load("invalid")
+	assert.Equal(t, result, "xxx=test")
+}
+
 func TestBaseTable_Parse(t *testing.T) {
 	t.Run("ParseBool", func(t *testing.T) {
 		assert.Nil(t, baseParams.Save("key", "true"))

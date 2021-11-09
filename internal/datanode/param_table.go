@@ -104,10 +104,6 @@ func (p *ParamTable) InitOnce() {
 // Init initializes DataNode configs
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
-	err := p.LoadYaml("advanced/data_node.yaml")
-	if err != nil {
-		panic(err)
-	}
 
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
@@ -141,11 +137,11 @@ func (p *ParamTable) Init() {
 }
 
 func (p *ParamTable) initFlowGraphMaxQueueLength() {
-	p.FlowGraphMaxQueueLength = p.ParseInt32("dataNode.dataSync.flowGraph.maxQueueLength")
+	p.FlowGraphMaxQueueLength = p.ParseInt32WithDefault("dataNode.dataSync.flowGraph.maxQueueLength", 1024)
 }
 
 func (p *ParamTable) initFlowGraphMaxParallelism() {
-	p.FlowGraphMaxParallelism = p.ParseInt32("dataNode.dataSync.flowGraph.maxParallelism")
+	p.FlowGraphMaxParallelism = p.ParseInt32WithDefault("dataNode.dataSync.flowGraph.maxParallelism", 1024)
 }
 
 func (p *ParamTable) initFlushInsertBufferSize() {

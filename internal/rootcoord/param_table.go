@@ -66,10 +66,6 @@ func (p *ParamTable) InitOnce() {
 func (p *ParamTable) Init() {
 	// load yaml
 	p.BaseTable.Init()
-	err := p.LoadYaml("advanced/root_coord.yaml")
-	if err != nil {
-		panic(err)
-	}
 
 	p.initPulsarAddress()
 	p.initEtcdEndpoints()

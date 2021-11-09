@@ -108,9 +108,6 @@ func (p *ParamTable) InitOnce() {
 // Init is used to initialize configuration items.
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
-	if err := p.LoadYaml("advanced/query_node.yaml"); err != nil {
-		panic(err)
-	}
 
 	p.initCacheSize()
 	p.initInContainer()
@@ -245,29 +242,29 @@ func (p *ParamTable) initRocksmqPath() {
 // advanced params
 // stats
 func (p *ParamTable) initStatsPublishInterval() {
-	p.StatsPublishInterval = p.ParseInt("queryNode.stats.publishInterval")
+	p.StatsPublishInterval = p.ParseIntWithDefault("queryNode.stats.publishInterval", 1000)
 }
 
 // dataSync:
 func (p *ParamTable) initFlowGraphMaxQueueLength() {
-	p.FlowGraphMaxQueueLength = p.ParseInt32("queryNode.dataSync.flowGraph.maxQueueLength")
+	p.FlowGraphMaxQueueLength = p.ParseInt32WithDefault("queryNode.dataSync.flowGraph.maxQueueLength", 1024)
 }
 
 func (p *ParamTable) initFlowGraphMaxParallelism() {
-	p.FlowGraphMaxParallelism = p.ParseInt32("queryNode.dataSync.flowGraph.maxParallelism")
+	p.FlowGraphMaxParallelism = p.ParseInt32WithDefault("queryNode.dataSync.flowGraph.maxParallelism", 1024)
 }
 
 // msgStream
 func (p *ParamTable) initSearchReceiveBufSize() {
-	p.SearchReceiveBufSize = p.ParseInt64("queryNode.msgStream.search.recvBufSize")
+	p.SearchReceiveBufSize = p.ParseInt64WithDefault("queryNode.msgStream.search.recvBufSize", 512)
 }
 
 func (p *ParamTable) initSearchPulsarBufSize() {
-	p.SearchPulsarBufSize = p.ParseInt64("queryNode.msgStream.search.pulsarBufSize")
+	p.SearchPulsarBufSize = p.ParseInt64WithDefault("queryNode.msgStream.search.pulsarBufSize", 512)
 }
 
 func (p *ParamTable) initSearchResultReceiveBufSize() {
-	p.SearchResultReceiveBufSize = p.ParseInt64("queryNode.msgStream.searchResult.recvBufSize")
+	p.SearchResultReceiveBufSize = p.ParseInt64WithDefault("queryNode.msgStream.searchResult.recvBufSize", 64)
 }
 
 // ------------------------  channel names
@@ -333,7 +330,7 @@ func (p *ParamTable) initGracefulTime() {
 }
 
 func (p *ParamTable) initSegcoreChunkRows() {
-	p.ChunkRows = p.ParseInt64("queryNode.segcore.chunkRows")
+	p.ChunkRows = p.ParseInt64WithDefault("queryNode.segcore.chunkRows", 32768)
 }
 
 func (p *ParamTable) initKnowhereSimdType() {
