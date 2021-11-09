@@ -2558,7 +2558,7 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ergeInfo\022\017\n\007sources\030\001 \003(\003\022\016\n\006target\030\002 \001("
   "\003*!\n\010ShowType\022\007\n\003All\020\000\022\014\n\010InMemory\020\001*>\n\017"
   "PlaceholderType\022\010\n\004None\020\000\022\020\n\014BinaryVecto"
-  "r\020d\022\017\n\013FloatVector\020e2\230\035\n\rMilvusService\022_"
+  "r\020d\022\017\n\013FloatVector\020e2\233\036\n\rMilvusService\022_"
   "\n\020CreateCollection\022,.milvus.proto.milvus"
   ".CreateCollectionRequest\032\033.milvus.proto."
   "common.Status\"\000\022[\n\016DropCollection\022*.milv"
@@ -2651,12 +2651,15 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "us.proto.milvus.GetCompactionStateRespon"
   "se\"\000\022q\n\020ManualCompaction\022,.milvus.proto."
   "milvus.ManualCompactionRequest\032-.milvus."
-  "proto.milvus.ManualCompactionResponse\"\0002"
-  "u\n\014ProxyService\022e\n\014RegisterLink\022(.milvus"
-  ".proto.milvus.RegisterLinkRequest\032).milv"
-  "us.proto.milvus.RegisterLinkResponse\"\000B5"
-  "Z3github.com/milvus-io/milvus/internal/p"
-  "roto/milvuspbb\006proto3"
+  "proto.milvus.ManualCompactionResponse\"\000\022"
+  "\200\001\n\033GetCompactionStateWithPlans\022..milvus"
+  ".proto.milvus.GetCompactionPlansRequest\032"
+  "/.milvus.proto.milvus.GetCompactionPlans"
+  "Response\"\0002u\n\014ProxyService\022e\n\014RegisterLi"
+  "nk\022(.milvus.proto.milvus.RegisterLinkReq"
+  "uest\032).milvus.proto.milvus.RegisterLinkR"
+  "esponse\"\000B5Z3github.com/milvus-io/milvus"
+  "/internal/proto/milvuspbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_milvus_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
@@ -2742,7 +2745,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mil
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_milvus_2eproto_once;
 static bool descriptor_table_milvus_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto = {
-  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 14301,
+  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 14432,
   &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 75, 2,
   schemas, file_default_instances, TableStruct_milvus_2eproto::offsets,
   file_level_metadata_milvus_2eproto, 75, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,
