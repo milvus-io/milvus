@@ -3354,7 +3354,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Successful DataNode Flush segments operations",
+      "description": "Success count of flush_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
