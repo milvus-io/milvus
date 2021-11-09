@@ -51,6 +51,7 @@ enum SegmentState {
     Sealed = 3;
     Flushed = 4;
     Flushing = 5;
+    Dropped = 6;
 }
 
 message Status {
