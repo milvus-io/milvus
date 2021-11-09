@@ -23,6 +23,7 @@ type QueryCoord interface {
 	LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error)
   // ReleasePartitions notifies Proxy to release collection's data
 	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
+  // CreateQueryChannel creates the channels for querying in QueryCoord.
 	CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error)
 	GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error)
   // GetSegmentInfo requests segment info
