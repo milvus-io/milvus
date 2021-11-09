@@ -370,6 +370,7 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	return ret.(*commonpb.Status), err
 }
 
+// CreateQueryChannel creates the channels for querying in QueryCoord.
 func (c *Client) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
