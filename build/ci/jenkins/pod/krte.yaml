@@ -4,6 +4,7 @@ metadata:
   labels:
     app: milvus-e2e
 spec:
+  enableServiceLinks: false
   containers:
   - name: main
     image: milvusdb/krte:20210722-806d13f
