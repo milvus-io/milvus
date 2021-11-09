@@ -49,7 +49,10 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// 1. filter segment by bloom filter
-	for _, delMsg := range dMsg.deleteMessages {
+	for i, delMsg := range dMsg.deleteMessages {
+		traceID, _, _ := trace.InfoFromSpan(spans[i])
+		log.Info("Process delete request in QueryNode", zap.String("traceID", traceID))
+
 		if dNode.replica.getSegmentNum() != 0 {
 			log.Debug("delete in historical replica",
 				zap.Any("collectionID", delMsg.CollectionID),

@@ -1367,8 +1367,8 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Delete")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
-	log.Info("Delete request begin", zap.String("traceID", traceID))
-	defer log.Info("Delete request end", zap.String("traceID", traceID))
+	log.Info("Start processing delete request in Proxy", zap.String("traceID", traceID))
+	defer log.Info("Finish processing delete request in Proxy", zap.String("traceID", traceID))
 
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
@@ -1405,7 +1405,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		chTicker: node.chTicker,
 	}
 
-	log.Debug("Delete request enqueue",
+	log.Debug("Enqueue delete request in Proxy",
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1423,14 +1423,15 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	log.Debug("Delete request detail",
+	log.Debug("Detail of delete request in Proxy",
 		zap.String("role", Params.RoleName),
 		zap.Int64("msgID", dt.Base.MsgID),
 		zap.Uint64("timestamp", dt.Base.Timestamp),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
-		zap.String("expr", request.Expr))
+		zap.String("expr", request.Expr),
+		zap.String("traceID", traceID))
 
 	if err := dt.WaitToFinish(); err != nil {
 		log.Error("Failed to execute delete task in task scheduler: "+err.Error(), zap.String("traceID", traceID))

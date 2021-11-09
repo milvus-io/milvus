@@ -70,7 +70,9 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		},
 	}
 
-	for _, msg := range msgStreamMsg.TsMessages() {
+	for i, msg := range msgStreamMsg.TsMessages() {
+		traceID, _, _ := trace.InfoFromSpan(spans[i])
+		log.Info("Filter invalid message in QueryNode", zap.String("traceID", traceID))
 		switch msg.Type() {
 		case commonpb.MsgType_Insert:
 			resMsg := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
