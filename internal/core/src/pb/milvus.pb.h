@@ -7903,14 +7903,17 @@ class SearchRequest :
     kPartitionNamesFieldNumber = 4,
     kOutputFieldsFieldNumber = 8,
     kSearchParamsFieldNumber = 9,
+    kNqsFieldNumber = 13,
+    kMsgIdsFieldNumber = 14,
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kDslFieldNumber = 5,
     kPlaceholderGroupFieldNumber = 6,
     kBaseFieldNumber = 1,
+    kDslTypeFieldNumber = 7,
+    kMergedFieldNumber = 12,
     kTravelTimestampFieldNumber = 10,
     kGuaranteeTimestampFieldNumber = 11,
-    kDslTypeFieldNumber = 7,
   };
   // repeated string partition_names = 4;
   int partition_names_size() const;
@@ -7956,6 +7959,28 @@ class SearchRequest :
   ::milvus::proto::common::KeyValuePair* add_search_params();
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
       search_params() const;
+
+  // repeated int64 nqs = 13;
+  int nqs_size() const;
+  void clear_nqs();
+  ::PROTOBUF_NAMESPACE_ID::int64 nqs(int index) const;
+  void set_nqs(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_nqs(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      nqs() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_nqs();
+
+  // repeated int64 msg_ids = 14;
+  int msg_ids_size() const;
+  void clear_msg_ids();
+  ::PROTOBUF_NAMESPACE_ID::int64 msg_ids(int index) const;
+  void set_msg_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_msg_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      msg_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_msg_ids();
 
   // string db_name = 2;
   void clear_db_name();
@@ -8009,6 +8034,16 @@ class SearchRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // .milvus.proto.common.DslType dsl_type = 7;
+  void clear_dsl_type();
+  ::milvus::proto::common::DslType dsl_type() const;
+  void set_dsl_type(::milvus::proto::common::DslType value);
+
+  // bool merged = 12;
+  void clear_merged();
+  bool merged() const;
+  void set_merged(bool value);
+
   // uint64 travel_timestamp = 10;
   void clear_travel_timestamp();
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp() const;
@@ -8019,11 +8054,6 @@ class SearchRequest :
   ::PROTOBUF_NAMESPACE_ID::uint64 guarantee_timestamp() const;
   void set_guarantee_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
-  // .milvus.proto.common.DslType dsl_type = 7;
-  void clear_dsl_type();
-  ::milvus::proto::common::DslType dsl_type() const;
-  void set_dsl_type(::milvus::proto::common::DslType value);
-
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.SearchRequest)
  private:
   class _Internal;
@@ -8032,14 +8062,19 @@ class SearchRequest :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> output_fields_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > search_params_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > nqs_;
+  mutable std::atomic<int> _nqs_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > msg_ids_;
+  mutable std::atomic<int> _msg_ids_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr dsl_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr placeholder_group_;
   ::milvus::proto::common::MsgBase* base_;
+  int dsl_type_;
+  bool merged_;
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp_;
   ::PROTOBUF_NAMESPACE_ID::uint64 guarantee_timestamp_;
-  int dsl_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -19522,6 +19557,80 @@ inline void SearchRequest::set_guarantee_timestamp(::PROTOBUF_NAMESPACE_ID::uint
   
   guarantee_timestamp_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.guarantee_timestamp)
+}
+
+// bool merged = 12;
+inline void SearchRequest::clear_merged() {
+  merged_ = false;
+}
+inline bool SearchRequest::merged() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.merged)
+  return merged_;
+}
+inline void SearchRequest::set_merged(bool value) {
+  
+  merged_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.merged)
+}
+
+// repeated int64 nqs = 13;
+inline int SearchRequest::nqs_size() const {
+  return nqs_.size();
+}
+inline void SearchRequest::clear_nqs() {
+  nqs_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SearchRequest::nqs(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.nqs)
+  return nqs_.Get(index);
+}
+inline void SearchRequest::set_nqs(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  nqs_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.nqs)
+}
+inline void SearchRequest::add_nqs(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  nqs_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.SearchRequest.nqs)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+SearchRequest::nqs() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.SearchRequest.nqs)
+  return nqs_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+SearchRequest::mutable_nqs() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.SearchRequest.nqs)
+  return &nqs_;
+}
+
+// repeated int64 msg_ids = 14;
+inline int SearchRequest::msg_ids_size() const {
+  return msg_ids_.size();
+}
+inline void SearchRequest::clear_msg_ids() {
+  msg_ids_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SearchRequest::msg_ids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.msg_ids)
+  return msg_ids_.Get(index);
+}
+inline void SearchRequest::set_msg_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  msg_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.msg_ids)
+}
+inline void SearchRequest::add_msg_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  msg_ids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.SearchRequest.msg_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+SearchRequest::msg_ids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.SearchRequest.msg_ids)
+  return msg_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+SearchRequest::mutable_msg_ids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.SearchRequest.msg_ids)
+  return &msg_ids_;
 }
 
 // -------------------------------------------------------------------

@@ -565,6 +565,9 @@ message SearchRequest {
   repeated common.KeyValuePair search_params = 9; // must
   uint64 travel_timestamp = 10;
   uint64 guarantee_timestamp = 11; // guarantee_timestamp
+  bool merged = 12;
+  repeated int64 nqs = 13;
+  repeated int64 msg_ids = 14;
 }
 
 message Hits {

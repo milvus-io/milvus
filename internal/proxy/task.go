@@ -1312,12 +1312,14 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 type searchTask struct {
 	Condition
 	*internalpb.SearchRequest
-	ctx       context.Context
-	resultBuf chan []*internalpb.SearchResults
-	result    *milvuspb.SearchResults
-	query     *milvuspb.SearchRequest
-	chMgr     channelsMgr
-	qc        types.QueryCoord
+	ctx        context.Context
+	resultBuf  chan []*internalpb.SearchResults
+	result     *milvuspb.SearchResults
+	query      *milvuspb.SearchRequest
+	chMgr      channelsMgr
+	qc         types.QueryCoord
+	merged     bool
+	skipReduce bool
 }
 
 func (st *searchTask) TraceCtx() context.Context {
@@ -1330,6 +1332,7 @@ func (st *searchTask) ID() UniqueID {
 
 func (st *searchTask) SetID(uid UniqueID) {
 	st.Base.MsgID = uid
+	st.query.Base.MsgID = uid
 }
 
 func (st *searchTask) Name() string {
@@ -1356,6 +1359,14 @@ func (st *searchTask) OnEnqueue() error {
 	st.Base = &commonpb.MsgBase{}
 	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
+
+	if st.query == nil {
+		st.query = &milvuspb.SearchRequest{}
+	}
+	st.query.Base = &commonpb.MsgBase{}
+	st.query.Base.MsgType = commonpb.MsgType_Search
+	st.query.Base.SourceID = Params.ProxyID
+
 	return nil
 }
 
@@ -1600,6 +1611,10 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	st.SearchRequest.Dsl = st.query.Dsl
 	st.SearchRequest.PlaceholderGroup = st.query.PlaceholderGroup
 
+	st.SearchRequest.Merged = st.query.Merged
+	st.SearchRequest.Nqs = st.query.Nqs
+	st.SearchRequest.MsgIds = st.query.MsgIds
+
 	return nil
 }
 
@@ -1651,16 +1666,24 @@ func (st *searchTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
-	err = stream.Produce(&msgPack)
-	if err != nil {
-		log.Debug("proxy", zap.String("send search request failed", err.Error()))
+
+	if !st.merged {
+		err = stream.Produce(&msgPack)
+		if err != nil {
+			log.Debug("proxy", zap.String("send search request failed", err.Error()))
+		}
+		log.Debug("proxy sent one searchMsg",
+			zap.Any("collectionID", st.CollectionID),
+			zap.Any("msgID", tsMsg.ID()),
+			zap.Int("length of search msg", len(msgPack.Msgs)),
+		)
+		return err
 	}
-	log.Debug("proxy sent one searchMsg",
-		zap.Any("collectionID", st.CollectionID),
-		zap.Any("msgID", tsMsg.ID()),
-		zap.Int("length of search msg", len(msgPack.Msgs)),
-	)
-	return err
+
+	log.Debug("skip producing search requests into stream due to merged",
+		zap.Int64("id", st.Base.MsgID))
+
+	return nil
 }
 
 func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
@@ -1854,13 +1877,22 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 	defer func() {
 		tr.Elapse("done")
 	}()
+
+	if st.skipReduce {
+		log.Info("no necessary to do reduce stage",
+			zap.Int64("id", st.ID()))
+		return nil
+	}
+
+	log.Debug("searchTask.PostExecute, waiting for search results",
+		zap.Int64("id", st.ID()))
+
 	for {
 		select {
 		case <-st.TraceCtx().Done():
 			log.Debug("Proxy", zap.Int64("searchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
 			return fmt.Errorf("searchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
-			// fmt.Println("searchResults: ", searchResults)
 			filterSearchResults := make([]*internalpb.SearchResults, 0)
 			var filterReason string
 			for _, partialSearchResult := range searchResults {
