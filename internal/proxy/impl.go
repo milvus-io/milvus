@@ -449,6 +449,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 	return dct.result, nil
 }
 
+// GetCollectionStatistics get the collection statistics, such as `num_rows`.
 func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetCollectionStatisticsResponse{
