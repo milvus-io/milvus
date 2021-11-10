@@ -614,6 +614,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	return cpt.result, nil
 }
 
+// DropPartition drop a partition in specific collection.
 func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
