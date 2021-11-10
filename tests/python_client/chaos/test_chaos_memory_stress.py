@@ -212,10 +212,19 @@ class TestChaosData:
         chaos_res.create(chaos_config)
         log.info("Chaos injected")
 
-        def finalize_test():
-            for k, ch in mic_checkers.items():
-                log.debug(f'Succ rate of {k.value}: {ch.succ_rate()}')
-            chaos_res.delete(meta_name, raise_ex=False)
+        # convert string duration time to a int number in seconds
+        if isinstance(duration, str):
+            duration = duration.replace('h', '*3600+')
+            duration = duration.replace('m', '*60+')
+            duration = duration.replace('s', '*1')
+        else:
+            log.error("Duration must be string type")
 
-        timer = threading.Timer(interval=60, function=finalize_test, args=())
+        # Delete experiment after it's over
+        timer = threading.Timer(interval=eval(duration), function=chaos_res.delete, args=(meta_name, False))
         timer.start()
+        timer.join()
+
+        # output milvus op succ rate
+        for k, ch in mic_checkers.items():
+            log.debug(f'Succ rate of {k.value}: {ch.succ_rate()}')
