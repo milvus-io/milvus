@@ -35,6 +35,11 @@ type MarshaledHits struct {
 	cMarshaledHits C.CMarshaledHits
 }
 
+// RetrieveResult contains a pointer to the retrieve result in C++ memory
+type RetrieveResult struct {
+	cRetrieveResult C.CRetrieveResult
+}
+
 func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchResult, numSegments int64) error {
 	if plan.cSearchPlan == nil {
 		return errors.New("nil search plan")

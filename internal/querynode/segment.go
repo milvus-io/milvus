@@ -316,10 +316,15 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	if s.segmentPtr == nil {
 		return nil, errors.New("null seg core pointer")
 	}
-	resProto := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, C.uint64_t(plan.Timestamp))
+
+	var retrieveResult RetrieveResult
+	ts := C.uint64_t(plan.Timestamp)
+	status := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
+	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
+		return nil, err
+	}
 	result := new(segcorepb.RetrieveResults)
-	err := HandleCProtoResult(&resProto, result)
-	if err != nil {
+	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
 		return nil, err
 	}
 	return result, nil
