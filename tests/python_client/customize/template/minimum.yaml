@@ -1,0 +1,47 @@
+apiVersion: milvus.io/v1alpha1
+kind: MilvusCluster
+metadata:
+  name: my-release
+  labels:
+    app: milvus
+spec:
+  components:
+    image: milvusdb/milvus-dev:master-latest
+  config:
+    knowhere:
+      simdType: avx2
+  dependencies:
+    etcd:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true 
+        values:
+          replicaCount: 1 
+    pulsar:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true 
+        values:
+          components:
+            autorecovery: false
+          zookeeper:
+            replicaCount: 1
+          bookkeeper:
+            replicaCount: 1
+          broker:
+            replicaCount: 1
+            configData:
+              ## Enable `autoSkipNonRecoverableData` since bookkeeper is running
+              ## without persistence
+              autoSkipNonRecoverableData: "true"
+              managedLedgerDefaultEnsembleSize: "1"
+              managedLedgerDefaultWriteQuorum: "1"
+              managedLedgerDefaultAckQuorum: "1"
+          proxy:
+            replicaCount: 1
+    storage:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true 
+        values:
+          mode: standalone
