@@ -48,7 +48,7 @@ type downloader interface {
 
 type uploader interface {
 	// upload saves InsertData and DeleteData into blob storage.
-	//  stats-binlogs are generated from InsertData.
+	// stats-binlogs are generated from InsertData.
 	upload(ctx context.Context, segID, partID UniqueID, iData []*InsertData, dData *DeleteData, meta *etcdpb.CollectionMeta) (*cpaths, error)
 }
 
