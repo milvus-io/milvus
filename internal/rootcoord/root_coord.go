@@ -124,6 +124,8 @@ type Core struct {
 	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error
 	CallReleasePartitionService  func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error
 
+	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
+
 	// dml channels used for insert
 	dmlChannels *dmlChannels
 
@@ -232,6 +234,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.CallGetFlushedSegmentsService == nil {
 		return fmt.Errorf("CallGetFlushedSegments is nil")
+	}
+	if c.CallWatchChannels == nil {
+		return fmt.Errorf("WatchChannelReq is nil")
 	}
 	if c.NewProxyClient == nil {
 		return fmt.Errorf("NewProxyClient is nil")
@@ -672,6 +677,26 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		return rsp.Segments, nil
 	}
 
+	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) (retErr error) {
+		defer func() {
+			if err := recover(); err != nil {
+				retErr = fmt.Errorf("watch channels panic, msg = %v", err)
+			}
+		}()
+		<-initCh
+		req := &datapb.WatchChannelsRequest{
+			CollectionID: collectionID,
+			ChannelNames: channelNames,
+		}
+		rsp, err := s.WatchChannels(ctx, req)
+		if err != nil {
+			return err
+		}
+		if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return fmt.Errorf("data coord watch channels failed, reason = %s", rsp.Status.Reason)
+		}
+		return nil
+	}
 	return nil
 }
 

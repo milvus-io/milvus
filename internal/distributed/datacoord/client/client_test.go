@@ -110,6 +110,10 @@ func (m *MockDataCoordClient) GetCompactionStateWithPlans(ctx context.Context, r
 	return &milvuspb.GetCompactionPlansResponse{}, m.err
 }
 
+func (m *MockDataCoordClient) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest, opts ...grpc.CallOption) (*datapb.WatchChannelsResponse, error) {
+	return &datapb.WatchChannelsResponse{}, m.err
+}
+
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
 
@@ -194,6 +198,9 @@ func Test_NewClient(t *testing.T) {
 
 		r19, err := client.GetCompactionStateWithPlans(ctx, nil)
 		retCheck(retNotNil, r19, err)
+
+		r20, err := client.WatchChannels(ctx, nil)
+		retCheck(retNotNil, r20, err)
 	}
 
 	client.getGrpcClient = func() (datapb.DataCoordClient, error) {

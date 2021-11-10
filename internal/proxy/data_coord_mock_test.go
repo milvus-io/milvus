@@ -194,6 +194,10 @@ func (coord *DataCoordMock) GetCompactionStateWithPlans(ctx context.Context, req
 	return &milvuspb.GetCompactionPlansResponse{}, nil
 }
 
+func (coord *DataCoordMock) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	return &datapb.WatchChannelsResponse{}, nil
+}
+
 func NewDataCoordMock() *DataCoordMock {
 	return &DataCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),

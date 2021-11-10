@@ -779,3 +779,34 @@ func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState
 	}
 	return
 }
+
+func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	log.Debug("receive watch channels request", zap.Any("channels", req.GetChannelNames()))
+	resp := &datapb.WatchChannelsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+
+	if s.isClosed() {
+		log.Warn("failed to  watch channels request", zap.Any("channels", req.GetChannelNames()),
+			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		return resp, nil
+	}
+	for _, channelName := range req.GetChannelNames() {
+		ch := &channel{
+			Name:         channelName,
+			CollectionID: req.GetCollectionID(),
+		}
+		err := s.channelManager.Watch(ch)
+		if err != nil {
+			log.Warn("fail to watch channelName", zap.String("channelName", channelName), zap.Error(err))
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+	}
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+
+	return resp, nil
+}

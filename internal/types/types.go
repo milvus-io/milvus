@@ -228,6 +228,8 @@ type DataCoord interface {
 	// GetCompactionState gets the state of a compaction
 	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
 	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
+
+	WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
 }
 
 // IndexNode is the interface `indexnode` package implements

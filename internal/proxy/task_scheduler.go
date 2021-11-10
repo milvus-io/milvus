@@ -342,11 +342,8 @@ type dqTaskQueue struct {
 }
 
 func (queue *ddTaskQueue) Enqueue(t task) error {
-	log.Debug("get mutex")
 	queue.lock.Lock()
-	log.Debug("get mutex end")
 	defer queue.lock.Unlock()
-	log.Debug("get mutex enqueue")
 	return queue.baseTaskQueue.Enqueue(t)
 }
 

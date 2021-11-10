@@ -161,7 +161,7 @@ func (q *queryCollection) registerCollectionTSafe() error {
 	if err != nil {
 		return err
 	}
-	for _, channel := range historicalCollection.getVChannels() {
+	for _, channel := range historicalCollection.getVDeltaChannels() {
 		err := q.addTSafeWatcher(channel)
 		if err != nil {
 			return err
@@ -169,7 +169,7 @@ func (q *queryCollection) registerCollectionTSafe() error {
 	}
 	log.Debug("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", historicalCollection.ID()),
-		zap.Any("delta channels", historicalCollection.getVChannels()))
+		zap.Any("delta channels", historicalCollection.getVDeltaChannels()))
 
 	return nil
 }
@@ -426,7 +426,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	serviceTime := q.getServiceableTime()
 	gt, _ := tsoutil.ParseTS(guaranteeTs)
 	st, _ := tsoutil.ParseTS(serviceTime)
-	if guaranteeTs > serviceTime && len(collection.getVChannels()) > 0 {
+	if guaranteeTs > serviceTime && (len(collection.getVChannels()) > 0 || len(collection.getVDeltaChannels()) > 0) {
 		log.Debug("query node::receiveQueryMsg: add to unsolvedMsg",
 			zap.Any("collectionID", q.collectionID),
 			zap.Any("sm.GuaranteeTimestamp", gt),

@@ -148,6 +148,13 @@ func (d *dataMock) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushe
 	return rsp, nil
 }
 
+func (d *dataMock) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	return &datapb.WatchChannelsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}}, nil
+}
+
 type queryMock struct {
 	types.QueryCoord
 	collID []typeutil.UniqueID
@@ -2438,7 +2445,14 @@ func TestCheckInit(t *testing.T) {
 		return nil
 	}
 	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
+		return nil
+	}
+	err = c.checkInit()
 	assert.Nil(t, err)
+
 	err = c.Stop()
 	assert.Nil(t, err)
 }
