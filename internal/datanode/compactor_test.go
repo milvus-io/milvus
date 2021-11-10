@@ -55,6 +55,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		assert.NotNil(t, meta)
 
 		rc.setCollectionID(-2)
+		task.Replica.(*SegmentReplica).collSchema = nil
 		_, _, _, err = task.getSegmentMeta(100)
 		assert.Error(t, err)
 	})
@@ -288,7 +289,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 	t.Run("Test compact invalid", func(t *testing.T) {
 		invalidAlloc := NewAllocatorFactory(-1)
-		emptyTask := &compactionTask{}
+		ctx, cancel := context.WithCancel(context.TODO())
+		emptyTask := &compactionTask{
+			ctx:    ctx,
+			cancel: cancel,
+		}
 		emptySegmentBinlogs := []*datapb.CompactionSegmentBinlogs{}
 
 		plan := &datapb.CompactionPlan{
@@ -314,6 +319,8 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		plan.SegmentBinlogs = notEmptySegmentBinlogs
 		err = emptyTask.compact()
 		assert.Error(t, err)
+
+		emptyTask.stop()
 	})
 
 	t.Run("Test typeI compact valid", func(t *testing.T) {
@@ -358,13 +365,25 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			Channel:          "channelname",
 		}
 
-		task := newCompactionTask(mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
+		ctx, cancel := context.WithCancel(context.TODO())
+		cancel()
+		canceledTask := newCompactionTask(ctx, mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
+		err = canceledTask.compact()
+		assert.Error(t, err)
+
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
 		err = task.compact()
 		assert.NoError(t, err)
 
 		updates, err := replica.getSegmentStatisticsUpdates(segID)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), updates.GetNumRows())
+
+		id := task.getCollection()
+		assert.Equal(t, UniqueID(1), id)
+
+		planID := task.getPlanID()
+		assert.Equal(t, plan.GetPlanID(), planID)
 
 		// New test, remove all the binlogs in memkv
 		//  Deltas in timetravel range
@@ -458,7 +477,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		}
 
 		alloc.random = false // generated ID = 19530
-		task := newCompactionTask(mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
 		err = task.compact()
 		assert.NoError(t, err)
 
@@ -525,7 +544,7 @@ type mockFlushManager struct {
 
 var _ flushManager = (*mockFlushManager)(nil)
 
-func (mfm *mockFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, pos *internalpb.MsgPosition) error {
+func (mfm *mockFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error {
 	return nil
 }
 

@@ -417,6 +417,7 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 			CollectionName: "col1",
 			PartitionName:  "default",
 			SegmentID:      1,
+			CollectionID:   UniqueID(0),
 			ShardName:      chanName,
 			Timestamps:     []Timestamp{Timestamp(idx + 1000)},
 			RowIDs:         []UniqueID{UniqueID(idx)},

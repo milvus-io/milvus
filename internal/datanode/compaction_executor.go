@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"runtime"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
@@ -32,6 +33,7 @@ var maxParallelCompactionNum = calculeateParallel()
 
 type compactionExecutor struct {
 	parallelCh chan struct{}
+	executing  sync.Map // planID to compactor
 	taskCh     chan compactor
 }
 
@@ -47,6 +49,7 @@ func calculeateParallel() int {
 func newCompactionExecutor() *compactionExecutor {
 	return &compactionExecutor{
 		parallelCh: make(chan struct{}, maxParallelCompactionNum),
+		executing:  sync.Map{},
 		taskCh:     make(chan compactor, maxTaskNum),
 	}
 }
@@ -72,6 +75,7 @@ func (c *compactionExecutor) executeTask(task compactor) {
 		<-c.parallelCh
 	}()
 
+	c.executing.Store(task.getPlanID(), task)
 	log.Info("start to execute compaction", zap.Int64("planID", task.getPlanID()))
 
 	err := task.compact()
@@ -82,5 +86,24 @@ func (c *compactionExecutor) executeTask(task compactor) {
 		)
 	}
 
+	c.executing.Delete(task.getPlanID())
 	log.Info("end to execute compaction", zap.Int64("planID", task.getPlanID()))
+}
+
+func (c *compactionExecutor) stopTask(planID UniqueID) {
+	task, loaded := c.executing.LoadAndDelete(planID)
+	if loaded {
+		log.Warn("compaction executor stop task", zap.Int64("planID", planID))
+		task.(compactor).stop()
+	}
+}
+
+func (c *compactionExecutor) stopExecutingtaskByCollectionID(collID UniqueID) {
+	c.executing.Range(func(key interface{}, value interface{}) bool {
+		if value.(compactor).getCollection() == collID {
+			c.stopTask(key.(UniqueID))
+		}
+
+		return true
+	})
 }

@@ -68,7 +68,7 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 			wg.Done()
 		}(ids[i])
 		go func(id []byte) {
-			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]string{}, map[UniqueID]string{}, false, &internalpb.MsgPosition{
+			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]string{}, map[UniqueID]string{}, false, false, &internalpb.MsgPosition{
 				MsgID: id,
 			})
 			wg.Done()
@@ -107,7 +107,7 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 		q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]string{}, map[UniqueID]string{}, false, &internalpb.MsgPosition{
+		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]string{}, map[UniqueID]string{}, false, false, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -149,7 +149,7 @@ func TestRendezvousFlushManager(t *testing.T) {
 		m.flushDelData(nil, 1, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		m.flushBufferData(nil, 1, true, &internalpb.MsgPosition{
+		m.flushBufferData(nil, 1, true, false, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -199,7 +199,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 		m.flushDelData(nil, 1, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		m.flushBufferData(nil, 1, true, &internalpb.MsgPosition{
+		m.flushBufferData(nil, 1, true, false, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -212,7 +212,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	finish.Add(1)
 	id := make([]byte, 10)
 	rand.Read(id)
-	m.flushBufferData(nil, 2, true, &internalpb.MsgPosition{
+	m.flushBufferData(nil, 2, true, false, &internalpb.MsgPosition{
 		MsgID: id,
 	})
 
@@ -238,7 +238,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 
 	finish.Add(1)
 	rand.Read(id)
-	m.flushBufferData(nil, 2, false, &internalpb.MsgPosition{
+	m.flushBufferData(nil, 2, false, false, &internalpb.MsgPosition{
 		MsgID: id,
 	})
 	m.flushDelData(nil, 2, &internalpb.MsgPosition{

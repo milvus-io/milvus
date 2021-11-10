@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -146,6 +147,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				make(chan UniqueID),
 				df,
 				newCache(),
+				memkv.NewMemoryKV(),
 			)
 
 			if !test.isValidCase {
@@ -222,7 +224,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	signalCh := make(chan UniqueID, 100)
-	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache())
+	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache(), memkv.NewMemoryKV())
 
 	assert.Nil(t, err)
 	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)

@@ -44,6 +44,8 @@ type deleteNode struct {
 	replica      Replica
 	idAllocator  allocatorInterface
 	flushManager flushManager
+
+	clearSignal chan<- UniqueID
 }
 
 // DelDataBuf buffers insert data, monitoring buffer size and limit
@@ -206,8 +208,12 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 					dn.delBuf.Delete(segmentToFlush)
 				}
 			}
-
 		}
+	}
+
+	if fgMsg.dropCollection {
+		log.Debug("DeleteNode reveives dropCollection signal")
+		dn.clearSignal <- dn.replica.getCollectionID()
 	}
 
 	for _, sp := range spans {
@@ -235,7 +241,7 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []int64) map[int64]
 	return result
 }
 
-func newDeleteNode(ctx context.Context, fm flushManager, config *nodeConfig) (*deleteNode, error) {
+func newDeleteNode(ctx context.Context, fm flushManager, sig chan<- UniqueID, config *nodeConfig) (*deleteNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)
@@ -248,5 +254,6 @@ func newDeleteNode(ctx context.Context, fm flushManager, config *nodeConfig) (*d
 		idAllocator:  config.allocator,
 		channelName:  config.vChannelName,
 		flushManager: fm,
+		clearSignal:  sig,
 	}, nil
 }

@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -53,13 +54,13 @@ var _ flowgraph.Node = (*ddNode)(nil)
 type ddNode struct {
 	BaseNode
 
-	clearSignal  chan<- UniqueID
 	collectionID UniqueID
 
 	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
 	flushedSegments []*datapb.SegmentInfo
 
 	deltaMsgStream msgstream.MsgStream
+	dropMode       atomic.Value
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -89,6 +90,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
+	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
+		log.Debug("ddNode in dropMode")
+		return []Msg{}
+	}
+
 	var fgMsg = flowGraphMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
 		timeRange: TimeRange{
@@ -97,6 +103,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		},
 		startPositions: make([]*internalpb.MsgPosition, 0),
 		endPositions:   make([]*internalpb.MsgPosition, 0),
+		dropCollection: false,
 	}
 
 	forwardMsgs := make([]msgstream.TsMsg, 0)
@@ -104,9 +111,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
-				log.Info("Destroying current flowgraph", zap.Any("collectionID", ddn.collectionID))
-				ddn.clearSignal <- ddn.collectionID
-				return []Msg{}
+				log.Info("Receiving DropCollection msg", zap.Any("collectionID", ddn.collectionID))
+				ddn.dropMode.Store(true)
+				fgMsg.dropCollection = true
 			}
 		case commonpb.MsgType_Insert:
 			log.Debug("DDNode receive insert messages")
@@ -233,7 +240,7 @@ func (ddn *ddNode) Close() {
 	}
 }
 
-func newDDNode(ctx context.Context, clearSignal chan<- UniqueID, collID UniqueID, vchanInfo *datapb.VchannelInfo, msFactory msgstream.Factory) *ddNode {
+func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelInfo, msFactory msgstream.Factory) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.FlowGraphMaxQueueLength)
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxParallelism)
@@ -247,6 +254,7 @@ func newDDNode(ctx context.Context, clearSignal chan<- UniqueID, collID UniqueID
 
 	deltaStream, err := msFactory.NewMsgStream(ctx)
 	if err != nil {
+		log.Error(err.Error())
 		return nil
 	}
 	pChannelName := rootcoord.ToPhysicalChannel(vchanInfo.ChannelName)
@@ -255,6 +263,7 @@ func newDDNode(ctx context.Context, clearSignal chan<- UniqueID, collID UniqueID
 		log.Error(err.Error())
 		return nil
 	}
+
 	deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
 	deltaStream.AsProducer([]string{deltaChannelName})
 	log.Debug("datanode AsProducer", zap.String("DeltaChannelName", deltaChannelName))
@@ -263,11 +272,12 @@ func newDDNode(ctx context.Context, clearSignal chan<- UniqueID, collID UniqueID
 
 	dd := &ddNode{
 		BaseNode:        baseNode,
-		clearSignal:     clearSignal,
 		collectionID:    collID,
 		flushedSegments: fs,
 		deltaMsgStream:  deltaMsgStream,
 	}
+
+	dd.dropMode.Store(false)
 
 	for _, us := range vchanInfo.GetUnflushedSegments() {
 		dd.segID2SegInfo.Store(us.GetID(), us)

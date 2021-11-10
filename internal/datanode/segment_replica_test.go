@@ -571,6 +571,18 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 	})
 
+	t.Run("Test listAllSegmentIDs", func(t *testing.T) {
+		sr := &SegmentReplica{
+			newSegments:     map[UniqueID]*Segment{1: {segmentID: 1}},
+			normalSegments:  map[UniqueID]*Segment{2: {segmentID: 2}},
+			flushedSegments: map[UniqueID]*Segment{3: {segmentID: 3}},
+		}
+
+		ids := sr.listAllSegmentIDs()
+		assert.ElementsMatch(t, []UniqueID{1, 2, 3}, ids)
+
+	})
+
 	t.Run("Test_addSegmentMinIOLoadError", func(t *testing.T) {
 		sr, err := newReplica(context.Background(), rc, 1)
 		assert.Nil(t, err)

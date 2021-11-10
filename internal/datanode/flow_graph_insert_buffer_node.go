@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -40,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -247,14 +245,45 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			zap.Int64("buffer limit", bd.(*BufferData).limit))
 	}
 
-	segmentsToFlush := make([]UniqueID, 0, len(seg2Upload)+1) //auto flush number + possible manual flush
-
+	// Flush
 	type flushTask struct {
 		buffer    *BufferData
 		segmentID UniqueID
 		flushed   bool
+		dropped   bool
 	}
-	flushTaskList := make([]flushTask, 0, len(seg2Upload)+1)
+
+	var (
+		flushTaskList   []flushTask
+		segmentsToFlush []UniqueID
+	)
+
+	if fgMsg.dropCollection {
+		segmentsToFlush := ibNode.replica.listAllSegmentIDs()
+		log.Debug("Recive drop collection req and flushing all segments",
+			zap.Any("segments", segmentsToFlush))
+		flushTaskList = make([]flushTask, 0, len(segmentsToFlush))
+
+		for _, seg2Flush := range segmentsToFlush {
+			var buf *BufferData
+			bd, ok := ibNode.insertBuffer.Load(seg2Flush)
+			if !ok {
+				buf = nil
+			} else {
+				buf = bd.(*BufferData)
+			}
+			flushTaskList = append(flushTaskList, flushTask{
+				buffer:    buf,
+				segmentID: seg2Flush,
+				flushed:   false,
+				dropped:   true,
+			})
+		}
+		goto flush // Jump over the auto-flush and manual flush procedure
+	}
+
+	segmentsToFlush = make([]UniqueID, 0, len(seg2Upload)+1) //auto flush number + possible manual flush
+	flushTaskList = make([]flushTask, 0, len(seg2Upload)+1)
 
 	// Auto Flush
 	for _, segToFlush := range seg2Upload {
@@ -267,6 +296,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 				buffer:    ibuffer,
 				segmentID: segToFlush,
 				flushed:   false,
+				dropped:   false,
 			})
 		}
 	}
@@ -274,6 +304,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	// Manual Flush
 	select {
 	case fmsg := <-ibNode.flushChan:
+
 		log.Debug(". Receiving flush message",
 			zap.Int64("segmentID", fmsg.segmentID),
 			zap.Int64("collectionID", fmsg.collectionID),
@@ -299,13 +330,15 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 				buffer:    buf,
 				segmentID: currentSegID,
 				flushed:   fmsg.flushed,
+				dropped:   false,
 			})
 		}
 	default:
 	}
 
+flush:
 	for _, task := range flushTaskList {
-		err := ibNode.flushManager.flushBufferData(task.buffer, task.segmentID, task.flushed, endPositions[0])
+		err := ibNode.flushManager.flushBufferData(task.buffer, task.segmentID, task.flushed, task.dropped, endPositions[0])
 		if err != nil {
 			log.Warn("failed to invoke flushBufferData", zap.Error(err))
 		} else {
@@ -327,6 +360,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		startPositions:  fgMsg.startPositions,
 		endPositions:    fgMsg.endPositions,
 		segmentsToFlush: segmentsToFlush,
+		dropCollection:  fgMsg.dropCollection,
 	}
 
 	for _, sp := range spans {
@@ -717,24 +751,6 @@ func (ibNode *insertBufferNode) uploadMemStates2Coord(segIDs []UniqueID) error {
 		Msgs: []msgstream.TsMsg{msg},
 	}
 	return ibNode.segmentStatisticsStream.Produce(&msgPack)
-}
-
-func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID, ts Timestamp) (meta *etcdpb.CollectionMeta, err error) {
-	if !ibNode.replica.hasSegment(segmentID, true) {
-		return nil, fmt.Errorf("No such segment %d in the replica", segmentID)
-	}
-
-	collID := ibNode.replica.getCollectionID()
-	sch, err := ibNode.replica.getCollectionSchema(collID, ts)
-	if err != nil {
-		return nil, err
-	}
-
-	meta = &etcdpb.CollectionMeta{
-		ID:     collID,
-		Schema: sch,
-	}
-	return
 }
 
 func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID UniqueID) (collID, partitionID UniqueID, err error) {

@@ -28,6 +28,13 @@ func TestCompactionExecutor(t *testing.T) {
 		ex.execute(newMockCompactor(true))
 	})
 
+	t.Run("Test stopTask", func(t *testing.T) {
+		ex := newCompactionExecutor()
+		mc := newMockCompactor(true)
+		ex.executing.Store(UniqueID(1), mc)
+		ex.stopTask(UniqueID(1))
+	})
+
 	t.Run("Test start", func(t *testing.T) {
 		ex := newCompactionExecutor()
 		ctx, cancel := context.WithCancel(context.TODO())
@@ -59,21 +66,35 @@ func TestCompactionExecutor(t *testing.T) {
 
 }
 
-func newMockCompactor(isvalid bool) compactor {
-	return &mockCompactor{isvalid}
+func newMockCompactor(isvalid bool) *mockCompactor {
+	return &mockCompactor{isvalid: isvalid}
 }
 
 type mockCompactor struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
 	isvalid bool
 }
 
+var _ compactor = (*mockCompactor)(nil)
+
 func (mc *mockCompactor) compact() error {
-	if mc.isvalid {
+	if !mc.isvalid {
 		return errStart
 	}
 	return nil
 }
 
 func (mc *mockCompactor) getPlanID() UniqueID {
+	return 1
+}
+
+func (mc *mockCompactor) stop() {
+	if mc.cancel != nil {
+		mc.cancel()
+	}
+}
+
+func (mc *mockCompactor) getCollection() UniqueID {
 	return 1
 }
