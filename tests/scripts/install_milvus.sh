@@ -13,6 +13,8 @@
 
 # Exit immediately for non zero status
 set -e
+
+# Print commands
 set -x
 
 MILVUS_HELM_REPO="https://github.com/milvus-io/milvus-helm.git"
