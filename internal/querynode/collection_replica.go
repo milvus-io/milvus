@@ -109,6 +109,7 @@ type ReplicaInterface interface {
 	// query mu
 	// queryLock guards query and delete operations
 	queryLock()
+	// queryUnlock guards query and delete segment operations
 	queryUnlock()
 	// queryRLock guards query and delete segment operations
 	queryRLock()
