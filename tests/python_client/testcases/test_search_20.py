@@ -525,7 +525,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def test_search_partition_deleted(self):
         """
         target: test search deleted partition
-        method: 1. search the collection
+        method: 1. create a collection with partitions
                 2. delete a partition
                 3. search the deleted partition
         expected: raise exception and report the error
