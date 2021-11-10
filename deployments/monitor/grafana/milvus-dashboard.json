@@ -3732,7 +3732,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of watch_dm_channels",
+      "description": "per-minute increasing rate of watch_dm_channels requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
