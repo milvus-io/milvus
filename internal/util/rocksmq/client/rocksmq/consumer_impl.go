@@ -58,6 +58,7 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 	}, nil
 }
 
+// getExistedConsumer new a consumer and put the existed mutex channel to the new consumer
 func getExistedConsumer(c *client, options ConsumerOptions, msgMutex chan struct{}) (*consumer, error) {
 	if c == nil {
 		return nil, newError(InvalidConfiguration, "client is nil")
