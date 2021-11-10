@@ -86,6 +86,7 @@ func getExistedConsumer(c *client, options ConsumerOptions, msgMutex chan struct
 	}, nil
 }
 
+// Subscription returns the consumer name
 func (c *consumer) Subscription() string {
 	return c.consumerName
 }
