@@ -646,6 +646,7 @@ func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 	return resp, nil
 }
 
+// ManualCompaction triggers a compaction for a collection
 func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	log.Debug("receive manual compaction", zap.Int64("collectionID", req.GetCollectionID()))
 
