@@ -92,7 +92,7 @@
           "expr": "sum(up{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\",app_kubernetes_io_component=\"datacoord\"})*(-1)",
           "format": "time_series",
           "interval": "",
-          "legendFormat": "sss",
+          "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "A"
         }
