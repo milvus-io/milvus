@@ -214,10 +214,10 @@ type SearchMsg struct {
 }
 ```
 
-- _RetriveMsg_
+- _RetrieveMsg_
 
 ```go
-type RetriveRequest struct {
+type RetrieveRequest struct {
 	Base               *commonpb.MsgBase
 	ResultChannelID    string
 	DbID               int64
@@ -229,7 +229,7 @@ type RetriveRequest struct {
 	GuaranteeTimestamp uint64
 }
 
-type RetriveMsg struct {
+type RetrieveMsg struct {
 	BaseMsg
 	RetrieveRequest
 }
