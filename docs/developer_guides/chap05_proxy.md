@@ -67,6 +67,7 @@ type InvalidateCollMetaCacheRequest struct {
 type Proxy interface {
 	Component
 
+	// InvalidateCollectionMetaCache notifies Proxy to clear all the meta cache of specific collection.
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 ```
