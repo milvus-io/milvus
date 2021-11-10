@@ -27,7 +27,6 @@ void
 KnowhereInitImpl() {
     auto init = []() {
         namespace eg = milvus::engine;
-        eg::KnowhereConfig::SetSimdType(eg::KnowhereConfig::SimdType::AUTO);
         eg::KnowhereConfig::SetBlasThreshold(16384);
         eg::KnowhereConfig::SetEarlyStopThreshold(0);
         eg::KnowhereConfig::SetLogHandler();
