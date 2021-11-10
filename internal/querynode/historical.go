@@ -217,7 +217,7 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 			if err != nil {
 				return retrieveResults, retrieveSegmentIDs, err
 			}
-			result, err := seg.getEntityByIds(plan)
+			result, err := seg.retrieve(plan)
 			if err != nil {
 				return retrieveResults, retrieveSegmentIDs, err
 			}
