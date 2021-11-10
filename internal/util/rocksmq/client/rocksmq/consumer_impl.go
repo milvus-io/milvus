@@ -90,6 +90,7 @@ func (c *consumer) Subscription() string {
 	return c.consumerName
 }
 
+// Topic returns the topic of the consumer
 func (c *consumer) Topic() string {
 	return c.topic
 }
