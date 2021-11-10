@@ -58,9 +58,6 @@ typedef struct CProtoResult {
     CProto proto;
 } CProtoResult;
 
-CProtoResult
-CTestBoolArrayPb(CProto pb);
-
 #ifdef __cplusplus
 }
 #endif
