@@ -144,6 +144,21 @@ class TestIndexOperation(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_index_create_with_different_indexes(self):
+        """
+        target: test create index on one field, with two different type of index
+        method: create two different indexes
+        expected: only latest index can be created for a collection
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
+        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index)
+        
+        assert len(collection_w.indexes) == 1
+        assert collection_w.indexes[0].params["index_type"] == default_index["index_type"]
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
         """
         target: test index with empty collection
