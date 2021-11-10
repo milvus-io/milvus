@@ -290,7 +290,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=tmp_expr)
 
-    @pytest.mark.xfail(reason="Waiting for debug")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_after_index(self):
         """
@@ -306,9 +305,44 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
         # delete entity
-        collection_w.delete(tmp_expr)
-        assert collection_w.num_entities == tmp_nb - 1
-        assert collection_w.has_index()
+        res, _ = collection_w.delete(tmp_expr)
+        assert res.delete_count == 1
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+        assert collection_w.has_index()[0]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_and_index(self):
+        """
+        target: test delete and create index
+        method: 1.insert
+                2.delete half
+                3.flush and create index
+                4.search
+        expected: Empty search result
+        """
+        # init collection and insert data without flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        insert_res, _ = collection_w.insert(df)
+
+        # delete half and flush
+        expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
+        del_res, _ = collection_w.delete(expr)
+        assert collection_w.num_entities == ct.default_nb
+
+        # create index
+        index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params)
+        assert collection_w.has_index()[0]
+
+        collection_w.load()
+        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+        # assert search results not contains deleted ids
+        inter = set(insert_res.primary_keys[:ct.default_nb // 2]).intersection(set(search_res[0].ids))
+        log.debug(inter)
+        assert len(inter) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_query_ids_both_sealed_and_channel(self):
@@ -344,7 +378,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, tmp_nb]}',
                            check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.xfail(reason="Waiting for debug")
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_search(self):
         """
@@ -355,17 +388,20 @@ class TestDeleteOperation(TestcaseBase):
         # init collection with nb default data
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         entity, _ = collection_w.query(tmp_expr, output_fields=["%"])
-        default_search_exp = "int64 >= 0"
-        search_res, _ = collection_w.search(entity[ct.default_float_vec_field_name], ct.default_float_vec_field_name,
-                                            ct.default_search_params, limit=1)
+        default_search_exp = "int64 == 0"
+        search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit, default_search_exp)
         # assert search results contains entity
-        # todo
+        assert 0 in search_res[0].ids
+
         del_res, _ = collection_w.delete(tmp_expr)
         assert del_res.delete_count == 1
-        search_res_2, _ = collection_w.search(entity[ct.default_float_vec_field_name], ct.default_float_vec_field_name,
-                                              ct.default_search_params, limit=1)
+        search_res_2, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
+                                              ct.default_float_vec_field_name,
+                                              ct.default_search_params, ct.default_limit, default_search_exp)
         # assert search result is not equal to entity
-        # todo
+        assert len(search_res_2) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_repeated_values(self):
