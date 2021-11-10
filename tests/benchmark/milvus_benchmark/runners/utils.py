@@ -72,6 +72,8 @@ def get_len_vectors_per_file(data_type, dimension):
             vectors_per_file = 100000
         elif dimension == 16384:
             vectors_per_file = 10000
+        else:
+            raise Exception("dimension: %s not supported" % str(dimension))
     elif data_type == "sift":
         vectors_per_file = SIFT_VECTORS_PER_FILE
     elif data_type in ["binary"]:
