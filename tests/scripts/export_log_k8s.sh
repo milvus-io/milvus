@@ -1,4 +1,6 @@
 #!/bin/bash
+
+# Exit immediately for non zero status
 set -e
 
 ns_name=$1
