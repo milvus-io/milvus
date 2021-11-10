@@ -3629,7 +3629,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute rate of flush segments",
+      "description": "per-minute increasing rate of flush_segments requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
