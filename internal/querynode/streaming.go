@@ -83,7 +83,7 @@ func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *Retrieve
 			if err != nil {
 				return retrieveResults, retrieveSegmentIDs, err
 			}
-			result, err := seg.getEntityByIds(plan)
+			result, err := seg.retrieve(plan)
 			if err != nil {
 				return retrieveResults, retrieveSegmentIDs, err
 			}

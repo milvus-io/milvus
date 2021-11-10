@@ -312,7 +312,7 @@ func (s *Segment) search(plan *SearchPlan,
 	return &searchResult, nil
 }
 
-func (s *Segment) getEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	s.segPtrMu.RLock()
 	defer s.segPtrMu.RUnlock()
 	if s.segmentPtr == nil {

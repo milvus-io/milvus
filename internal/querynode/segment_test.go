@@ -225,7 +225,7 @@ func TestSegment_retrieve(t *testing.T) {
 	defer plan.delete()
 	assert.NoError(t, err)
 
-	res, err := segment.getEntityByIds(plan)
+	res, err := segment.retrieve(plan)
 	assert.NoError(t, err)
 
 	assert.Equal(t, res.GetFieldsData()[0].GetScalars().Data.(*schemapb.ScalarField_IntData).IntData.Data, []int32{1, 2, 3})
