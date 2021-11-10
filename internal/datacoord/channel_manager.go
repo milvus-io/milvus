@@ -317,3 +317,33 @@ func (c *ChannelManager) FindWatcher(channel string) (int64, error) {
 	}
 	return 0, errChannelNotWatched
 }
+
+// RemoveChannel removes the channel from channel manager
+func (c *ChannelManager) RemoveChannel(channelName string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	nodeID, ch := c.findChannel(channelName)
+	if ch == nil {
+		return nil
+	}
+
+	var op ChannelOpSet
+	op.Delete(nodeID, []*channel{ch})
+	if err := c.store.Update(op); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *ChannelManager) findChannel(channelName string) (int64, *channel) {
+	infos := c.store.GetNodesChannels()
+	for _, info := range infos {
+		for _, channelInfo := range info.Channels {
+			if channelInfo.Name == channelName {
+				return info.NodeID, channelInfo
+			}
+		}
+	}
+	return 0, nil
+}

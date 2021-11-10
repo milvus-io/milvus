@@ -83,6 +83,8 @@ type Manager interface {
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 	// ExpireAllocations notifies segment status to expire old allocations
 	ExpireAllocations(channel string, ts Timestamp) error
+	// DropSegmentsOfChannel drops all segments in a channel
+	DropSegmentsOfChannel(ctx context.Context, channel string)
 }
 
 // Allocation records the allocation info
@@ -481,4 +483,24 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		}
 	}
 	return nil
+}
+
+// DropSegmentsOfChannel drops all segments in a channel
+func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	validSegments := make([]int64, 0, len(s.segments))
+	for _, sid := range s.segments {
+		segment := s.meta.GetSegment(sid)
+		if segment != nil && segment.GetInsertChannel() != channel {
+			validSegments = append(validSegments, sid)
+		}
+		s.meta.SetAllocations(sid, nil)
+		for _, allocation := range segment.allocations {
+			putAllocation(allocation)
+		}
+	}
+
+	s.segments = validSegments
 }

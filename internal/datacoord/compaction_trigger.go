@@ -294,6 +294,7 @@ func (t *compactionTrigger) globalMergeCompaction(signal *compactionSignal, isFo
 	m := t.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
 		_, has := colls[segment.GetCollectionID()]
 		return (has || len(collections) == 0) && // if filters collection
+			isSegmentHealthy(segment) &&
 			segment.State == commonpb.SegmentState_Flushed && // flushed only
 			!segment.isCompacting // not compacting now
 	}) // m is list of chanPartSegments, which is channel-partition organized segments

@@ -167,6 +167,13 @@ func SetDataNodeCreator(creator dataNodeCreatorFunc) Option {
 	}
 }
 
+// SetSegmentManager returns an Option to set SegmentManager
+func SetSegmentManager(manager Manager) Option {
+	return func(svr *Server) {
+		svr.segmentManager = manager
+	}
+}
+
 // CreateServer create `Server` instance
 func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
@@ -359,7 +366,9 @@ func (s *Server) initServiceDiscovery() error {
 }
 
 func (s *Server) startSegmentManager() {
-	s.segmentManager = newSegmentManager(s.meta, s.allocator)
+	if s.segmentManager == nil {
+		s.segmentManager = newSegmentManager(s.meta, s.allocator)
+	}
 }
 
 func (s *Server) initMeta() error {
@@ -499,7 +508,8 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				}
 
 				staleSegments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
-					return info.GetInsertChannel() == ch &&
+					return isSegmentHealthy(info) &&
+						info.GetInsertChannel() == ch &&
 						!info.lastFlushTime.IsZero() &&
 						time.Since(info.lastFlushTime).Minutes() >= segmentTimedFlushDuration
 				})

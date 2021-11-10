@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -495,4 +494,59 @@ func TestAllocationPool(t *testing.T) {
 		assert.EqualValues(t, 0, allo.SegmentID)
 
 	})
+}
+
+func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
+	type fields struct {
+		meta     *meta
+		segments []UniqueID
+	}
+	type args struct {
+		channel string
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   []UniqueID
+	}{
+		{
+			"test drop segments",
+			fields{
+				meta: &meta{
+					segments: &SegmentsInfo{
+						segments: map[int64]*SegmentInfo{
+							1: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:            1,
+									InsertChannel: "ch1",
+								},
+							},
+							2: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:            2,
+									InsertChannel: "ch2",
+								},
+							},
+						},
+					},
+				},
+				segments: []UniqueID{1, 2},
+			},
+			args{
+				"ch1",
+			},
+			[]UniqueID{2},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SegmentManager{
+				meta:     tt.fields.meta,
+				segments: tt.fields.segments,
+			}
+			s.DropSegmentsOfChannel(context.TODO(), tt.args.channel)
+			assert.ElementsMatch(t, tt.want, s.segments)
+		})
+	}
 }

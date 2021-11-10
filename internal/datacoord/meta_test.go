@@ -241,7 +241,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		err = meta.AddSegment(segment1)
 		assert.Nil(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, true, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog1"}}},
+		err = meta.UpdateFlushSegmentsInfo(1, true, false, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog1"}}},
 			[]*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog1"}}},
 			[]*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
@@ -262,7 +262,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta, err := newMeta(memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil, nil, nil)
+		err = meta.UpdateFlushSegmentsInfo(1, false, false, nil, nil, nil, nil, nil)
 		assert.Nil(t, err)
 	})
 
@@ -274,7 +274,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		err = meta.AddSegment(segment1)
 		assert.Nil(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, false, nil, nil, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
+		err = meta.UpdateFlushSegmentsInfo(1, false, false, nil, nil, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
 
 			[]*datapb.SegmentStartPosition{{SegmentID: 2, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.Nil(t, err)
@@ -296,7 +296,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		}
 		meta.segments.SetSegment(1, segmentInfo)
 
-		err = meta.UpdateFlushSegmentsInfo(1, true, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog"}}},
+		err = meta.UpdateFlushSegmentsInfo(1, true, false, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog"}}},
 			[]*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog"}}},
 			[]*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
