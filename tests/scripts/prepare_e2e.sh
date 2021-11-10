@@ -18,6 +18,8 @@
 
 # Exit immediately for non zero status
 set -e
+
+# Print commands
 set -x
 
 SOURCE="${BASH_SOURCE[0]}"
