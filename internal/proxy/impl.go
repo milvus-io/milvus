@@ -668,6 +668,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 	return dpt.result, nil
 }
 
+// HasPartition check if partition exist.
 func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.BoolResponse{
