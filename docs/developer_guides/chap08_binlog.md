@@ -96,11 +96,11 @@ INDEX_FILE_EVENT
 
 DESCRIPTOR_EVENT must appear in all column files and always be the first event.
 
-INSERT_EVENT 可以出现在除 DDL binlog 文件外的其他列的 binlog
+INSERT_EVENT may appear in any column binlog except DDL binlog files.
 
-DELETE_EVENT 只能用于 primary key 的 binlog 文件（目前只有按照 primary key 删除）
+DELETE_EVENT can only be used in primary key's binlog files（currently we can only delete by primary key).
 
-CREATE_COLLECTION_EVENT、DROP_COLLECTION_EVENT、CREATE_PARTITION_EVENT、DROP_PARTITION_EVENT 只出现在 DDL binlog 文件
+CREATE_COLLECTION_EVENT、DROP_COLLECTION_EVENT、CREATE_PARTITION_EVENT、DROP_PARTITION_EVENT only appers in DDL binlog files.
 
 ### 8.4 Event data part
 
