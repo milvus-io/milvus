@@ -174,7 +174,7 @@ func (b *binlogIO) upload(
 	return p, nil
 }
 
-// returns key, value
+// genDeltaBlobs returns key, value
 func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueID) (string, []byte, error) {
 	dCodec := storage.NewDeleteCodec()
 
