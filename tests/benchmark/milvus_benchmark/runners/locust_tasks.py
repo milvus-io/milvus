@@ -1,6 +1,5 @@
 import pdb
 import random
-import time
 import logging
 import math 
 from locust import TaskSet, task
