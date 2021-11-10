@@ -117,6 +117,7 @@ type ReplicaInterface interface {
 
 	// getSegmentsMemSize get the memory size in bytes of all the Segments
 	getSegmentsMemSize() int64
+	// freeAll will free all meta info from collectionReplica
 	freeAll()
 	printReplica()
 }
