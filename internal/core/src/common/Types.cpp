@@ -51,16 +51,3 @@ MetricTypeToName(MetricType metric_type) {
 }
 
 }  // namespace milvus
-
-CProtoResult
-CTestBoolArrayPb(CProto pb) {
-    milvus::proto::schema::BoolArray bool_array;
-    bool_array.ParseFromArray(pb.proto_blob, pb.proto_size);
-    // std::cout << pb.proto_size << std::endl;
-    // std::cout << bool_array.DebugString() << std::endl;
-    for (auto& b : *bool_array.mutable_data()) {
-        b = !b;
-    }
-    // create bool proto
-    return milvus::AllocCProtoResult(bool_array);
-}

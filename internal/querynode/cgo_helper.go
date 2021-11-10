@@ -27,7 +27,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"unsafe"
 )
 
@@ -94,15 +93,4 @@ func HandleCProtoResult(cRes *C.CProtoResult, msg proto.Message) error {
 	blob := C.GoBytes(unsafe.Pointer(cpro.proto_blob), C.int32_t(cpro.proto_size))
 	defer C.free(cpro.proto_blob)
 	return proto.Unmarshal(blob, msg)
-}
-
-// TestBoolArray this function will accept a BoolArray input,
-// and return a BoolArray output
-// which negates all elements of the input
-func TestBoolArray(cpb *ProtoCGo) (*schemapb.BoolArray, error) {
-	res := C.CTestBoolArrayPb(cpb.CProto)
-	ba := new(schemapb.BoolArray)
-	err := HandleCProtoResult(&res, ba)
-
-	return ba, err
 }
