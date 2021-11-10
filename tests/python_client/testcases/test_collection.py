@@ -2964,8 +2964,8 @@ class TestReleaseAdvanced:
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, **query, _async=True)
         connect.release_partitions(collection, [default_tag])
-        with pytest.raises(Exception) as e:
-            res = connect.search(collection, **default_single_query)
+        res = connect.search(collection, **default_single_query)
+        assert len(res[0]) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_collection_during_searching_A(self, connect, collection):
