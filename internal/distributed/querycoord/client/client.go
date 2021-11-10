@@ -386,6 +386,7 @@ func (c *Client) CreateQueryChannel(ctx context.Context, req *querypb.CreateQuer
 	return ret.(*querypb.CreateQueryChannelResponse), err
 }
 
+// GetPartitionStates gets the states of the specified partition.
 func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
