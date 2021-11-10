@@ -18,15 +18,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
-
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func newGetStatisticsFunc(pchans []pChan) getPChanStatisticsFuncType {
