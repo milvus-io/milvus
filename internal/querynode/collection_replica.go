@@ -118,6 +118,7 @@ type ReplicaInterface interface {
 	// getSegmentsMemSize get the memory size in bytes of all the Segments
 	getSegmentsMemSize() int64
 	freeAll()
+	// printReplica prints the collections, partitions and segments in the collectionReplica
 	printReplica()
 }
 
