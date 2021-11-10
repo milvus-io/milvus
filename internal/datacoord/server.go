@@ -32,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -97,14 +99,16 @@ type Server struct {
 	isServing        ServerState
 	helper           ServerHelper
 
-	kvClient        *etcdkv.EtcdKV
-	meta            *meta
-	segmentManager  Manager
-	allocator       allocator
-	cluster         *Cluster
-	sessionManager  *SessionManager
-	channelManager  *ChannelManager
-	rootCoordClient types.RootCoord
+	kvClient         *etcdkv.EtcdKV
+	meta             *meta
+	segmentManager   Manager
+	allocator        allocator
+	cluster          *Cluster
+	sessionManager   *SessionManager
+	channelManager   *ChannelManager
+	rootCoordClient  types.RootCoord
+	garbageCollector *garbageCollector
+	gcOpt            GcOption
 
 	compactionTrigger trigger
 	compactionHandler compactionPlanContext
@@ -249,6 +253,10 @@ func (s *Server) Start() error {
 		return err
 	}
 
+	if err = s.initGarbageCollection(); err != nil {
+		return err
+	}
+
 	s.startServerLoop()
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()
@@ -289,6 +297,42 @@ func (s *Server) createCompactionTrigger() {
 
 func (s *Server) stopCompactionTrigger() {
 	s.compactionTrigger.stop()
+}
+
+func (s *Server) initGarbageCollection() error {
+	var cli *minio.Client
+	var err error
+	if Params.EnableGarbageCollection {
+		cli, err = minio.New(Params.MinioAddress, &minio.Options{
+			Creds:  credentials.NewStaticV4(Params.MinioAccessKeyID, Params.MinioSecretAccessKey, ""),
+			Secure: Params.MinioUseSSL,
+		})
+		if err != nil {
+			return err
+		}
+		has, err := cli.BucketExists(context.TODO(), Params.MinioBucketName)
+		if err != nil {
+			return err
+		}
+		if !has {
+			err = cli.MakeBucket(context.TODO(), Params.MinioBucketName, minio.MakeBucketOptions{})
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	s.garbageCollector = newGarbageCollector(s.meta, GcOption{
+		cli:        cli,
+		enabled:    Params.EnableGarbageCollection,
+		bucketName: Params.MinioBucketName,
+		rootPath:   Params.MinioRootPath,
+
+		checkInterval:    defaultGcInterval,
+		missingTolerance: defaultMissingTolerance,
+		dropTolerance:    defaultMissingTolerance,
+	})
+	return nil
 }
 
 func (s *Server) initServiceDiscovery() error {
@@ -342,6 +386,7 @@ func (s *Server) startServerLoop() {
 	s.startDataNodeTtLoop(s.serverLoopCtx)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
+	s.garbageCollector.start()
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
 		log.Error("Data Coord disconnected from etcd, process will exit", zap.Int64("Server Id", s.session.ServerID))
 		if err := s.Stop(); err != nil {
@@ -651,6 +696,7 @@ func (s *Server) Stop() error {
 	}
 	log.Debug("dataCoord server shutdown")
 	s.cluster.Close()
+	s.garbageCollector.close()
 	s.stopServerLoop()
 
 	if Params.EnableCompaction {
