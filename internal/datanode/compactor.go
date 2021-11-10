@@ -52,6 +52,9 @@ type compactor interface {
 	getPlanID() UniqueID
 }
 
+// make sure compactionTask implements compactor interface
+var _ compactor = (*compactionTask)(nil)
+
 type compactionTask struct {
 	downloader
 	uploader
