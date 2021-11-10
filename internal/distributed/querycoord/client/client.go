@@ -402,6 +402,7 @@ func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 	return ret.(*querypb.GetPartitionStatesResponse), err
 }
 
+// GetSegmentInfo gets the information of the specified segment from QueryCoord.
 func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
