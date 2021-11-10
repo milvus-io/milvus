@@ -10,15 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <mutex>
+
 #include <map>
+#include <memory>
 #include <shared_mutex>
 #include <utility>
-#include <memory>
 #include <tbb/concurrent_hash_map.h>
+
+#include "common/Types.h"
 #include "exceptions/EasyAssert.h"
 #include "knowhere/index/vector_index/VecIndex.h"
-#include "common/Types.h"
 
 namespace milvus::segcore {
 
@@ -63,4 +64,5 @@ struct SealedIndexingRecord {
     std::map<FieldOffset, SealedIndexingEntryPtr> field_indexings_;
     mutable std::shared_mutex mutex_;
 };
+
 }  // namespace milvus::segcore
