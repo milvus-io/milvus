@@ -12,12 +12,12 @@ This document will explain a special parameter in the search request-"Guarantee 
 
 Like most distributed systems, Milvus will assign a timestamp to each record that enters the system.
 
-At the same time, Milvus is a system that separates storage and computing. 
+At the same time, Milvus is a system that separates storage and computing.
 
 The DataNodes handle the data persistence load, and the data will eventually be flushed to MinIO/S3 or other distributed
 object storage.
 
-QueryNodes handle the computing(read) requests. The reading link will process two types of data at the same time--batch 
+QueryNodes handle the computing(read) requests. The reading link will process two types of data at the same time--batch
 data and streaming data.
 
 Among them, the batch data will no longer be changed, and the search request will see all the data in the batch data.
@@ -70,11 +70,11 @@ As shown in the figure below, different GuaranteeTs correspond to four different
 ![relationship-between-consistency-and-guaranteeTs](./figs/guarantee-ts-consistency-relationship.png)
 
 - Strong consistency: GuaranteeTs is set to the newest timestamp of the system, QueryNodes will wait for the ServiceTime
-to be greater than or equal to the GuaranteeTs;
+  to be greater than or equal to the GuaranteeTs;
 - Eventual consistency: Set GuaranteeTs to 0 and skip the check, QueryNodes will execute search requests immediately;
 - Bounded Staleness: Set GuaranteeTs to an older timestamp, such as 1 minutes ago, the query can be executed immediately
-within a tolerable range;
+  within a tolerable range;
 - Read your own write (Session): Set GuaranteeTs to the client last write, in this way, every client will see all their
-own data.
+  own data.
 
 Milvus provides the strong consistency by default.
