@@ -16,7 +16,7 @@
 
 | 硬件名称 | 建议配置                                                                                                |
 | ---- | --------------------------------------------------------------------------------------------------- |
-| CPU  | x86_64 平台<br> Intel CPU Sandy Bridge 或以上<br> CPU 指令集<br> _ SSE42<br> _ AVX<br> _ AVX2<br> _ AVX512 |
+| CPU  | x86_64 平台<br> Intel CPU Sandy Bridge 或以上<br> CPU 指令集<br> - SSE4_2<br> - AVX<br> - AVX2<br> - AVX512 |
 | 内存   | 16 GB 或以上                                                                                           |
 
 ##### 软件
