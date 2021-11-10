@@ -1,6 +1,6 @@
 # Development
 
-This document will help to setup your development environment and run tests. If you encounter a problem, please file an issue.
+This document will help to set up your development environment and run tests. If you encounter a problem, please file an issue.
 
 Table of contents
 =================
