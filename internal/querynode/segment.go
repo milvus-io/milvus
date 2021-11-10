@@ -56,6 +56,7 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
+// VectorFieldInfo contains binlog info of vector field
 type VectorFieldInfo struct {
 	fieldBinlog *datapb.FieldBinlog
 }
