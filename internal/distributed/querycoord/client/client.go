@@ -418,6 +418,7 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	return ret.(*querypb.GetSegmentInfoResponse), err
 }
 
+// LoadBalance migrate the sealed segments on the source node to the dst nodes.
 func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
