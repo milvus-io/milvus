@@ -68,11 +68,6 @@ func (pt *ParamTable) InitAlias(alias string) {
 // Init is used to initialize configuration items.
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
-	// TODO, load index_node.yaml
-	/*err := pt.LoadYaml("advanced/index_node.yaml")
-	if err != nil {
-		panic(err)
-	}*/
 	pt.initParams()
 }
 

@@ -33,6 +33,8 @@ import (
 // UniqueID is type alias of typeutil.UniqueID
 type UniqueID = typeutil.UniqueID
 
+const envPrefix string = "milvus"
+
 type Base interface {
 	Load(key string) (string, error)
 	LoadRange(key, endKey string, limit int) ([]string, []string, error)
@@ -60,6 +62,8 @@ func (gp *BaseTable) Init() {
 	gp.loadFromCommonYaml()
 
 	gp.loadFromMilvusYaml()
+
+	gp.loadFromComponentYaml()
 
 	gp.tryloadFromEnv()
 
@@ -104,6 +108,18 @@ func (gp *BaseTable) loadFromMilvusYaml() {
 	}
 }
 
+func (gp *BaseTable) loadFromComponentYaml() bool {
+	configFile := gp.configDir + "advanced/component.yaml"
+	if _, err := os.Stat(configFile); err == nil {
+		if err := gp.LoadYaml("advanced/component.yaml"); err != nil {
+			panic(err)
+		}
+		return true
+	}
+	log.Debug("failed to find component.yaml in config, skip..")
+	return false
+}
+
 func (gp *BaseTable) loadFromCommonYaml() bool {
 	configFile := gp.configDir + "advanced/common.yaml"
 	if _, err := os.Stat(configFile); err == nil {
@@ -117,6 +133,7 @@ func (gp *BaseTable) loadFromCommonYaml() bool {
 }
 
 func (gp *BaseTable) tryloadFromEnv() {
+	var err error
 	minioAddress := os.Getenv("MINIO_ADDRESS")
 	if minioAddress == "" {
 		minioHost, err := gp.Load("minio.address")
@@ -129,10 +146,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		}
 		minioAddress = minioHost + ":" + port
 	}
-	err := gp.Save("_MinioAddress", minioAddress)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_MinioAddress", minioAddress)
 
 	etcdEndpoints := os.Getenv("ETCD_ENDPOINTS")
 	if etcdEndpoints == "" {
@@ -141,10 +155,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 			panic(err)
 		}
 	}
-	err = gp.Save("_EtcdEndpoints", etcdEndpoints)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_EtcdEndpoints", etcdEndpoints)
 
 	pulsarAddress := os.Getenv("PULSAR_ADDRESS")
 	if pulsarAddress == "" {
@@ -158,10 +169,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		}
 		pulsarAddress = "pulsar://" + pulsarHost + ":" + port
 	}
-	err = gp.Save("_PulsarAddress", pulsarAddress)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_PulsarAddress", pulsarAddress)
 
 	rocksmqPath := os.Getenv("ROCKSMQ_PATH")
 	if rocksmqPath == "" {
@@ -171,10 +179,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		}
 		rocksmqPath = path
 	}
-	err = gp.Save("_RocksmqPath", rocksmqPath)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_RocksmqPath", rocksmqPath)
 
 	rootCoordAddress := os.Getenv("ROOT_COORD_ADDRESS")
 	if rootCoordAddress == "" {
@@ -188,10 +193,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		}
 		rootCoordAddress = rootCoordHost + ":" + port
 	}
-	err = gp.Save("_RootCoordAddress", rootCoordAddress)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_RootCoordAddress", rootCoordAddress)
 
 	indexCoordAddress := os.Getenv("INDEX_COORD_ADDRESS")
 	if indexCoordAddress == "" {
@@ -205,10 +207,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		}
 		indexCoordAddress = indexCoordHost + ":" + port
 	}
-	err = gp.Save("_IndexCoordAddress", indexCoordAddress)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_IndexCoordAddress", indexCoordAddress)
 
 	queryCoordAddress := os.Getenv("QUERY_COORD_ADDRESS")
 	if queryCoordAddress == "" {
@@ -222,10 +221,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		}
 		queryCoordAddress = serviceHost + ":" + port
 	}
-	err = gp.Save("_QueryCoordAddress", queryCoordAddress)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_QueryCoordAddress", queryCoordAddress)
 
 	dataCoordAddress := os.Getenv("DATA_COORD_ADDRESS")
 	if dataCoordAddress == "" {
@@ -239,26 +235,13 @@ func (gp *BaseTable) tryloadFromEnv() {
 		}
 		dataCoordAddress = serviceHost + ":" + port
 	}
-	err = gp.Save("_DataCoordAddress", dataCoordAddress)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_DataCoordAddress", dataCoordAddress)
 
 	insertBufferFlushSize := os.Getenv("DATA_NODE_IBUFSIZE")
 	if insertBufferFlushSize == "" {
-		//var err error
-		insertBufferFlushSize, err = gp.Load("datanode.flush.insertBufSize")
-		if err != nil {
-			panic(err)
-		}
+		insertBufferFlushSize = gp.LoadWithDefault("datanode.flush.insertBufSize", "16777216")
 	}
-	if insertBufferFlushSize == "" {
-		insertBufferFlushSize = "16777216" //use default
-	}
-	err = gp.Save("_DATANODE_INSERTBUFSIZE", insertBufferFlushSize)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_DATANODE_INSERTBUFSIZE", insertBufferFlushSize)
 
 	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
 	if minioAccessKey == "" {
@@ -267,10 +250,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 			panic(err)
 		}
 	}
-	err = gp.Save("_MinioAccessKeyID", minioAccessKey)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_MinioAccessKeyID", minioAccessKey)
 
 	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
 	if minioSecretKey == "" {
@@ -279,10 +259,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 			panic(err)
 		}
 	}
-	err = gp.Save("_MinioSecretAccessKey", minioSecretKey)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_MinioSecretAccessKey", minioSecretKey)
 
 	minioUseSSL := os.Getenv("MINIO_USE_SSL")
 	if minioUseSSL == "" {
@@ -291,10 +268,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 			panic(err)
 		}
 	}
-	err = gp.Save("_MinioUseSSL", minioUseSSL)
-	if err != nil {
-		panic(err)
-	}
+	gp.Save("_MinioUseSSL", minioUseSSL)
 
 	minioBucketName := os.Getenv("MINIO_BUCKET_NAME")
 	if minioBucketName == "" {
@@ -303,9 +277,18 @@ func (gp *BaseTable) tryloadFromEnv() {
 			panic(err)
 		}
 	}
-	err = gp.Save("_MinioBucketName", minioBucketName)
-	if err != nil {
-		panic(err)
+	gp.Save("_MinioBucketName", minioBucketName)
+
+	// try to load environment start with ENV_PREFIX
+	for _, e := range os.Environ() {
+		parts := strings.SplitN(e, "=", 2)
+		if strings.Contains(parts[0], envPrefix) {
+			parts := strings.SplitN(e, "=", 2)
+			// remove the ENV PREFIX and use the rest as key
+			keyParts := strings.SplitAfterN(parts[0], ".", 2)
+			// mem kv throw no errors
+			gp.Save(keyParts[1], parts[1])
+		}
 	}
 }
 

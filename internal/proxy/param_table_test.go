@@ -99,18 +99,8 @@ func shouldPanic(t *testing.T, name string, f func()) {
 
 func TestParamTable_Panics(t *testing.T) {
 	shouldPanic(t, "proxy.timeTickInterval", func() {
-		Params.Remove("proxy.timeTickInterval")
-		Params.initTimeTickInterval()
-	})
-
-	shouldPanic(t, "proxy.timeTickInterval", func() {
 		Params.Save("proxy.timeTickInterval", "")
 		Params.initTimeTickInterval()
-	})
-
-	shouldPanic(t, "proxy.msgStream.timeTick.bufSize", func() {
-		Params.Remove("proxy.msgStream.timeTick.bufSize")
-		Params.initMsgStreamTimeTickBufSize()
 	})
 
 	shouldPanic(t, "proxy.msgStream.timeTick.bufSize", func() {
@@ -119,18 +109,8 @@ func TestParamTable_Panics(t *testing.T) {
 	})
 
 	shouldPanic(t, "proxy.maxNameLength", func() {
-		Params.Remove("proxy.maxNameLength")
-		Params.initMaxNameLength()
-	})
-
-	shouldPanic(t, "proxy.maxNameLength", func() {
 		Params.Save("proxy.maxNameLength", "abc")
 		Params.initMaxNameLength()
-	})
-
-	shouldPanic(t, "proxy.maxFieldNum", func() {
-		Params.Remove("proxy.maxFieldNum")
-		Params.initMaxFieldNum()
 	})
 
 	shouldPanic(t, "proxy.maxFieldNum", func() {
@@ -139,28 +119,13 @@ func TestParamTable_Panics(t *testing.T) {
 	})
 
 	shouldPanic(t, "proxy.maxShardNum", func() {
-		Params.Remove("proxy.maxShardNum")
-		Params.initMaxShardNum()
-	})
-
-	shouldPanic(t, "proxy.maxShardNum", func() {
 		Params.Save("proxy.maxShardNum", "abc")
 		Params.initMaxShardNum()
 	})
 
 	shouldPanic(t, "proxy.maxDimension", func() {
-		Params.Remove("proxy.maxDimension")
-		Params.initMaxDimension()
-	})
-
-	shouldPanic(t, "proxy.maxDimension", func() {
 		Params.Save("proxy.maxDimension", "-asdf")
 		Params.initMaxDimension()
-	})
-
-	shouldPanic(t, "proxy.maxTaskNum", func() {
-		Params.Remove("proxy.maxTaskNum")
-		Params.initMaxTaskNum()
 	})
 
 	shouldPanic(t, "proxy.maxTaskNum", func() {

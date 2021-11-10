@@ -55,11 +55,6 @@ var once sync.Once
 // Init is used to initialize configuration items.
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
-	// TODO, load index_node.yaml
-	/*err := pt.LoadYaml("advanced/index_coord.yaml")
-	if err != nil {
-		panic(err)
-	}*/
 
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()

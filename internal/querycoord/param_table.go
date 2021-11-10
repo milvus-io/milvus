@@ -86,15 +86,6 @@ func (p *ParamTable) InitOnce() {
 //Init is used to initialize params
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
-	err := p.LoadYaml("advanced/query_node.yaml")
-	if err != nil {
-		panic(err)
-	}
-
-	err = p.LoadYaml("milvus.yaml")
-	if err != nil {
-		panic(err)
-	}
 
 	p.initQueryCoordAddress()
 	p.initRoleName()

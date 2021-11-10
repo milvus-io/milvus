@@ -80,10 +80,6 @@ func (p *ParamTable) Init() {
 	// load yaml
 	p.BaseTable.Init()
 
-	if err := p.LoadYaml("advanced/data_coord.yaml"); err != nil {
-		panic(err)
-	}
-
 	// set members
 	p.initEtcdEndpoints()
 	p.initMetaRootPath()
