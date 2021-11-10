@@ -334,6 +334,43 @@ func (m *meta) ListSegmentIDs() []UniqueID {
 	return infos
 }
 
+// ListSegmentFiles lists all segment related file paths in valid & dropped list
+func (m *meta) ListSegmentFiles() ([]string, []string) {
+	m.RLock()
+	defer m.RUnlock()
+
+	var valid []string
+	var dropped []string
+
+	for _, segment := range m.segments.GetSegments() {
+		for _, binlog := range segment.GetBinlogs() {
+			if segment.State != commonpb.SegmentState_Dropped {
+				valid = append(valid, binlog.Binlogs...)
+			} else {
+				dropped = append(valid, binlog.Binlogs...)
+			}
+		}
+
+		for _, statLog := range segment.GetStatslogs() {
+			if segment.State != commonpb.SegmentState_Dropped {
+				valid = append(valid, statLog.Binlogs...)
+			} else {
+				dropped = append(valid, statLog.Binlogs...)
+			}
+		}
+
+		for _, deltaLog := range segment.GetDeltalogs() {
+			if segment.State != commonpb.SegmentState_Dropped {
+				valid = append(valid, deltaLog.GetDeltaLogPath())
+			} else {
+				dropped = append(valid, deltaLog.GetDeltaLogPath())
+			}
+
+		}
+	}
+	return valid, dropped
+}
+
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`
 func (m *meta) GetSegmentsByChannel(dmlCh string) []*SegmentInfo {
 	m.RLock()
