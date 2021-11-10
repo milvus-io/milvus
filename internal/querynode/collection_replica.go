@@ -120,6 +120,7 @@ type ReplicaInterface interface {
 	getSegmentsMemSize() int64
 	// freeAll will free all meta info from collectionReplica
 	freeAll()
+	// printReplica prints the collections, partitions and segments in the collectionReplica
 	printReplica()
 }
 
