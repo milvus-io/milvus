@@ -34,10 +34,11 @@ class TestLog:
             eh.setFormatter(formatter)
             self.log.addHandler(eh)
 
-            wh = logging.FileHandler(self.log_worker)
-            wh.setLevel(logging.DEBUG)
-            wh.setFormatter(formatter)
-            self.log.addHandler(wh)
+            if self.log_worker != "":
+                wh = logging.FileHandler(self.log_worker)
+                wh.setLevel(logging.DEBUG)
+                wh.setFormatter(formatter)
+                self.log.addHandler(wh)
 
             ch = logging.StreamHandler(sys.stdout)
             ch.setLevel(logging.DEBUG)
