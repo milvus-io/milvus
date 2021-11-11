@@ -827,7 +827,8 @@ class TestCollectionSearch(TestcaseBase):
             assert hits.distances[0] == 0.0
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_with_dup_primary_key(self, dim, auto_id, _async):
+    @pytest.mark.parametrize("dup_times", [1,2,3])
+    def test_search_with_dup_primary_key(self, dim, auto_id, _async, dup_times):
         """
         target: test search with duplicate primary key
         method: 1.insert same data twice
@@ -840,9 +841,10 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, insert_data, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                                 auto_id=auto_id,
                                                                                 dim=dim)[0:4]
-        # insert data again
-        insert_res, _ = collection_w.insert(insert_data[0])
-        insert_ids.extend(insert_res.primary_keys)
+        # insert dup data multi times
+        for i in range(dup_times):
+            insert_res, _ = collection_w.insert(insert_data[0])
+            insert_ids.extend(insert_res.primary_keys)
         # search
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:nq], default_search_field,
