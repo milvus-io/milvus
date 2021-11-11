@@ -903,6 +903,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 	return g.result, nil
 }
 
+// ShowPartitions list all partitions in the specific collection.
 func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.ShowPartitionsResponse{
