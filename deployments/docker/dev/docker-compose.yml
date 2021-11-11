@@ -20,7 +20,7 @@ services:
       # nettyMaxFrameSizeBytes must be calculated from maxMessageSize + 10240 (padding)
       - nettyMaxFrameSizeBytes=104867840 # this is 104857600 + 10240 (padding)
       - defaultRetentionTimeInMinutes=10080
-      - defaultRetentionSizeInMB=-1
+      - defaultRetentionSizeInMB=8192
       # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
       - PULSAR_PREFIX_maxMessageSize=104857600
       - PULSAR_GC=-XX:+UseG1GC
