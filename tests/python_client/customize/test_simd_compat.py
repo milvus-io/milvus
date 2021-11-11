@@ -25,7 +25,7 @@ def _install_milvus(simd):
     milvus_op = MilvusOperator()
     log.info(f"install milvus with configs: {cus_configs}")
     milvus_op.install(cus_configs)
-    healthy = milvus_op.wait_for_healthy(release_name, namespace)
+    healthy = milvus_op.wait_for_healthy(release_name, namespace, timeout=1200)
     log.info(f"milvus healthy: {healthy}")
     if healthy:
         endpoint = milvus_op.endpoint(release_name, namespace).split(':')
@@ -38,12 +38,10 @@ def _install_milvus(simd):
 
 
 class TestSimdCompatibility:
-    release_names = []
 
     def teardown_method(self):
         milvus_op = MilvusOperator()
-        for name in self.release_names:
-            milvus_op.uninstall(name, namespace)
+        milvus_op.uninstall(self.release_name, namespace)
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('simd', supported_simd_types)
@@ -56,7 +54,7 @@ class TestSimdCompatibility:
        """
         log.info(f"start to install milvus with simd {simd}")
         release_name, host, port = _install_milvus(simd)
-        self.release_names.append(release_name)
+        self.release_name = release_name
         assert host is not None
         conn = connections.connect("default", host=host, port=port)
         assert conn is not None
