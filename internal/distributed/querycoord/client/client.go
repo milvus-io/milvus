@@ -434,6 +434,7 @@ func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	return ret.(*commonpb.Status), err
 }
 
+// GetMetrics gets the metrics information of QueryCoord.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
