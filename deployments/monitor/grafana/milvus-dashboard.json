@@ -5431,7 +5431,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Process Opened Fds",
+      "title": "Number of process opened fds",
       "tooltip": {
         "shared": true,
         "sort": 0,
