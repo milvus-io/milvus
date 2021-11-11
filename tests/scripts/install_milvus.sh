@@ -42,7 +42,7 @@ else
   MILVUS_SERVICE_TYPE="${MILVUS_SERVICE_TYPE:-ClusterIP}"
 fi
 
-
+# Get Milvus Chart from git
 if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
   TMP_DIR="$(mktemp -d)"
   git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
