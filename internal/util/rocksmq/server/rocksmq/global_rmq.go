@@ -18,11 +18,11 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"go.uber.org/zap"
 
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	"go.uber.org/zap"
 )
 
 // Rmq is global rocksmq instance that will be initialized only once

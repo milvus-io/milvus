@@ -21,10 +21,10 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+
 	"github.com/stretchr/testify/assert"
 )
 

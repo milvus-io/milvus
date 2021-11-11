@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )

@@ -18,8 +18,8 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+
 	"github.com/stretchr/testify/assert"
 )
 
