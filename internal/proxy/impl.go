@@ -843,6 +843,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 	return rpt.result, nil
 }
 
+// GetPartitionStatistics get the statistics of partition, such as num_rows.
 func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetPartitionStatisticsResponse{
