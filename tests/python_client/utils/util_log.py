@@ -1,4 +1,3 @@
-import logging
 import sys
 
 from config.log_config import log_config
@@ -6,6 +5,7 @@ from config.log_config import log_config
 
 class TestLog:
     def __init__(self, logger, log_debug, log_file, log_err, log_worker):
+        import logging
         self.logger = logger
         self.log_debug = log_debug
         self.log_file = log_file
