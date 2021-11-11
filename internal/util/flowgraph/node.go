@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+
+	"go.uber.org/zap"
 )
 
 // Node is the interface defines the behavior of flowgraph

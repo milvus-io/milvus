@@ -13,9 +13,8 @@ package flowgraph
 
 import (
 	"context"
-	"sync"
-
 	"errors"
+	"sync"
 )
 
 // TimeTickedFlowGraph flowgraph with input from tt msg stream
