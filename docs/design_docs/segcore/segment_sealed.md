@@ -7,10 +7,10 @@ SegmentSealed has an extra interface rather than segment_inferface:
     3. `VecIndex`: vector index
 2. `LoadFieldData(loadFieldDataInfo)`: load column data, could be either scalar column or vector column
     1. Note: indexes and vector data for the same column may coexist. Indexes are prioritized in search
-3. `DropIndex(fieldId)`: drop and release exist index of specified field
-4. `DropFieldData(fieldId)`: drop and release exist data for specified field
+3. `DropIndex(fieldId)`: drop and release existed index of specified field
+4. `DropFieldData(fieldId)`: drop and release existed data for specified field
 
-Search is executable as long as all the column involved in the search are loaded.
+Search is executable as long as all the columns involved in the search are loaded.
 
 # SegmentSealedImpl internal data definition
 1. `row_count_opt_`:
@@ -19,7 +19,7 @@ Search is executable as long as all the column involved in the search are loaded
 3. `xxx_ready_bitset_` & `system_ready_count_`
    1. Used to record whether the corresponding column is loaded. Bitset corresponds to FieldOffset
    2. Query is executable If and only if the following conditions are met:
-      1. system_ready_count_ == 2， which means all the system column RowId/Timestamp is loaded
+      1. system_ready_count_ == 2， which means all the system columns' RowId/Timestamp are loaded
       2. The scalar columns involved in the query has been loaded
       3. For the vector columns involved in the query, either the original data or the index is loaded
 4. `scalar_indexings_`: store scalar index
