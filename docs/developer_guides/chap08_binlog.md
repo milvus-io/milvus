@@ -100,7 +100,7 @@ INSERT_EVENT may appear in any column binlog except DDL binlog files.
 
 DELETE_EVENT can only be used in primary key's binlog files（currently we can only delete by primary key).
 
-CREATE_COLLECTION_EVENT、DROP_COLLECTION_EVENT、CREATE_PARTITION_EVENT、DROP_PARTITION_EVENT only appers in DDL binlog files.
+CREATE_COLLECTION_EVENT、DROP_COLLECTION_EVENT、CREATE_PARTITION_EVENT、DROP_PARTITION_EVENT only appears in DDL binlog files.
 
 ### 8.4 Event data part
 
