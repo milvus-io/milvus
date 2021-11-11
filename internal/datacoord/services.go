@@ -114,13 +114,8 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()))
 
-		if coll := s.meta.GetCollection(r.CollectionID); coll == nil {
-			if err := s.loadCollectionFromRootCoord(ctx, r.CollectionID); err != nil {
-				log.Error("load collection from rootcoord error",
-					zap.Int64("collectionID", r.CollectionID),
-					zap.Error(err))
-				continue
-			}
+		if coll := s.GetCollection(ctx, r.CollectionID); coll == nil {
+			continue
 		}
 
 		s.cluster.Watch(r.ChannelName, r.CollectionID)

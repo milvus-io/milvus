@@ -804,16 +804,9 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 	}
 	// use collection start position when segment position is not found
 	if seekPosition == nil {
-		coll := s.meta.GetCollection(collectionID)
-		if coll != nil {
-			for _, sp := range coll.GetStartPositions() {
-				if sp.GetKey() == rootcoord.ToPhysicalChannel(channel) {
-					seekPosition = &internalpb.MsgPosition{
-						ChannelName: channel,
-						MsgID:       sp.GetData(),
-					}
-				}
-			}
+		collection := s.GetCollection(s.ctx, collectionID)
+		if collection != nil {
+			seekPosition = getCollectionStartPosition(channel, collection)
 		}
 	}
 
@@ -824,6 +817,19 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 		FlushedSegments:   flushed,
 		UnflushedSegments: unflushed,
 	}
+}
+
+func getCollectionStartPosition(channel string, collectionInfo *datapb.CollectionInfo) *internalpb.MsgPosition {
+	for _, sp := range collectionInfo.GetStartPositions() {
+		if sp.GetKey() != rootcoord.ToPhysicalChannel(channel) {
+			continue
+		}
+		return &internalpb.MsgPosition{
+			ChannelName: channel,
+			MsgID:       sp.GetData(),
+		}
+	}
+	return nil
 }
 
 // trimSegmentInfo returns a shallow copy of datapb.SegmentInfo and sets ALL binlog info to nil
@@ -840,4 +846,17 @@ func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 		StartPosition:  info.StartPosition,
 		DmlPosition:    info.DmlPosition,
 	}
+}
+
+func (s *Server) GetCollection(ctx context.Context, collectionID UniqueID) *datapb.CollectionInfo {
+	coll := s.meta.GetCollection(collectionID)
+	if coll != nil {
+		return coll
+	}
+	err := s.loadCollectionFromRootCoord(ctx, collectionID)
+	if err != nil {
+		log.Warn("failed to load collection from RootCoord", zap.Int64("collectionID", collectionID), zap.Error(err))
+	}
+
+	return s.meta.GetCollection(collectionID)
 }
