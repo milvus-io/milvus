@@ -19,9 +19,8 @@ namespace knowhere {
 
 ConfAdapterPtr
 AdapterMgr::GetAdapter(const IndexType type) {
-    if (!init_) {
-        RegisterAdapter();
-    }
+    auto register_wrapper = [&, this]() { RegisterAdapter(); };
+    std::call_once(once_, register_wrapper);
 
     try {
         return collection_.at(type)();
@@ -34,8 +33,6 @@ AdapterMgr::GetAdapter(const IndexType type) {
 
 void
 AdapterMgr::RegisterAdapter() {
-    init_ = true;
-
     REGISTER_CONF_ADAPTER(ConfAdapter, IndexEnum::INDEX_FAISS_IDMAP, idmap_adapter);
     REGISTER_CONF_ADAPTER(IVFConfAdapter, IndexEnum::INDEX_FAISS_IVFFLAT, ivf_adapter);
     REGISTER_CONF_ADAPTER(IVFPQConfAdapter, IndexEnum::INDEX_FAISS_IVFPQ, ivfpq_adapter);
@@ -56,6 +53,9 @@ AdapterMgr::RegisterAdapter() {
     REGISTER_CONF_ADAPTER(RHNSWSQConfAdapter, IndexEnum::INDEX_RHNSWSQ, rhnswsq_adapter);
     REGISTER_CONF_ADAPTER(NGTPANNGConfAdapter, IndexEnum::INDEX_NGTPANNG, ngtpanng_adapter);
     REGISTER_CONF_ADAPTER(NGTONNGConfAdapter, IndexEnum::INDEX_NGTONNG, ngtonng_adapter);
+
+    // though init_ won't be used later, it's better to set `init_` to true after registration was done.
+    init_ = true;
 }
 
 }  // namespace knowhere
