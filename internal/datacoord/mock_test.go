@@ -584,3 +584,21 @@ func (t *mockCompactionTrigger) stop() {
 	}
 	panic("not implemented")
 }
+
+type mockHandler struct {
+}
+
+func newMockHandler() *mockHandler {
+	return &mockHandler{}
+}
+
+func (h *mockHandler) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo {
+	return &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channel,
+	}
+}
+
+func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
+	return false
+}
