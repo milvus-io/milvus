@@ -21,10 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jarcoal/httpmock"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
+	"github.com/jarcoal/httpmock"
 	"github.com/stretchr/testify/assert"
 )
 

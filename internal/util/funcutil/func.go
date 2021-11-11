@@ -23,14 +23,13 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
-
-	"github.com/go-basic/ipv4"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/go-basic/ipv4"
+	"go.uber.org/zap"
 )
 
 // CheckGrpcReady wait for context timeout, or wait 100ms then send nil to targetCh
