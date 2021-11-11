@@ -26,10 +26,10 @@ import (
 )
 
 // RocksmqRetentionTimeInMinutes is the time of retention
-var RocksmqRetentionTimeInMinutes int64 = 4320
+var RocksmqRetentionTimeInMinutes int64 = 10080
 
 // RocksmqRetentionSizeInMB is the size of retention
-var RocksmqRetentionSizeInMB int64 = 0
+var RocksmqRetentionSizeInMB int64 = 8192
 
 // Const value that used to convert unit
 const (
