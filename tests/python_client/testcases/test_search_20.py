@@ -455,7 +455,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         target: test the scenario which search the released collection
         method: 1. create collection
                 2. release partition
-                3. search with specifying the released partition
+                3. search the released partition
         expected: raise exception and report the error
         """
         # 1. initialize with data
