@@ -45,3 +45,50 @@ func TestReload(t *testing.T) {
 		assert.True(t, cm2.Match(3, "channel2"))
 	})
 }
+
+func TestChannelManager_RemoveChannel(t *testing.T) {
+	type fields struct {
+		store RWChannelStore
+	}
+	type args struct {
+		channelName string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		{
+			"test remove existed channel",
+			fields{
+				store: &ChannelStore{
+					store: memkv.NewMemoryKV(),
+					channelsInfo: map[int64]*NodeChannelInfo{
+						1: {
+							NodeID: 1,
+							Channels: []*channel{
+								{"ch1", 1},
+							},
+						},
+					},
+				},
+			},
+			args{
+				"ch1",
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &ChannelManager{
+				store: tt.fields.store,
+			}
+			err := c.RemoveChannel(tt.args.channelName)
+			assert.Equal(t, tt.wantErr, err != nil)
+			_, ch := c.findChannel(tt.args.channelName)
+			assert.Nil(t, ch)
+		})
+	}
+}

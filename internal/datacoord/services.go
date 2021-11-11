@@ -289,9 +289,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 // SaveBinlogPaths update segment related binlog path
 // works for Checkpoints and Flush
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	resp := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}
+	resp := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
 
 	if s.isClosed() {
 		resp.Reason = serverNotServingErrMsg
@@ -319,12 +317,19 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if !s.channelManager.Match(nodeID, channel) {
 		FailResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
 		log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+		return resp, nil
 	}
 
 	// set segment to SegmentState_Flushing and save binlogs and checkpoints
-	err := s.meta.UpdateFlushSegmentsInfo(req.GetSegmentID(), req.GetFlushed(),
-		req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(),
-		req.GetCheckPoints(), req.GetStartPositions())
+	err := s.meta.UpdateFlushSegmentsInfo(
+		req.GetSegmentID(),
+		req.GetFlushed(),
+		req.GetDropped(),
+		req.GetField2BinlogPaths(),
+		req.GetField2StatslogPaths(),
+		req.GetDeltalogs(),
+		req.GetCheckPoints(),
+		req.GetStartPositions())
 	if err != nil {
 		log.Error("save binlog and checkpoints failed",
 			zap.Int64("segmentID", req.GetSegmentID()),
@@ -336,7 +341,15 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", req.GetField2BinlogPaths()))
 
-	if req.Flushed {
+	if req.GetDropped() && s.checkShouldDropChannel(channel) {
+		err = s.channelManager.RemoveChannel(channel)
+		if err != nil {
+			log.Warn("failed to remove channel", zap.String("channel", channel), zap.Error(err))
+		}
+		s.segmentManager.DropSegmentsOfChannel(ctx, channel)
+	}
+
+	if req.GetFlushed() {
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
 		s.flushCh <- req.SegmentID
 
@@ -355,6 +368,21 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
+}
+
+func (s *Server) checkShouldDropChannel(channel string) bool {
+	segments := s.meta.GetSegmentsByChannel(channel)
+	for _, segment := range segments {
+		if segment.GetStartPosition() != nil && // fitler empty segment
+			// FIXME: we filter compaction generated segments
+			// because datanode may not know the segment due to the network lag or
+			// datacoord crash when handling CompleteCompaction.
+			len(segment.CompactionFrom) != 0 &&
+			segment.GetState() != commonpb.SegmentState_Dropped {
+			return false
+		}
+	}
+	return true
 }
 
 // GetComponentStates returns DataCoord's current state
