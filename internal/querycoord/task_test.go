@@ -694,10 +694,10 @@ func Test_AssignInternalTask(t *testing.T) {
 		loadSegmentRequests = append(loadSegmentRequests, req)
 	}
 
-	err = assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, nil, false, nil)
+	internalTasks, err := assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, nil, false, nil)
 	assert.Nil(t, err)
 
-	assert.NotEqual(t, 1, len(loadCollectionTask.getChildTask()))
+	assert.NotEqual(t, 1, len(internalTasks))
 
 	queryCoord.Stop()
 	err = removeAllSession()

@@ -38,11 +38,12 @@ import (
 )
 
 const (
-	defaultCollectionID = UniqueID(2021)
-	defaultPartitionID  = UniqueID(2021)
-	defaultSegmentID    = UniqueID(2021)
-	defaultQueryNodeID  = int64(100)
-	defaultChannelNum   = 2
+	defaultCollectionID     = UniqueID(2021)
+	defaultPartitionID      = UniqueID(2021)
+	defaultSegmentID        = UniqueID(2021)
+	defaultQueryNodeID      = int64(100)
+	defaultChannelNum       = 2
+	defaultNumRowPerSegment = 10000
 )
 
 func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.CollectionSchema {
@@ -347,6 +348,7 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 				segmentBinlog := &datapb.SegmentBinlogs{
 					SegmentID:    segmentID,
 					FieldBinlogs: fieldBinlogs,
+					NumOfRows:    defaultNumRowPerSegment,
 				}
 				data.Segment2Binlog[segmentID] = segmentBinlog
 			}
