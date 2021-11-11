@@ -1,6 +1,6 @@
 # Milvus Code Review Guide
 
-All PRs are checked in automatically by the sre-robot, with the following condition:
+All PRs are checked in automatically by the sre-robot, with the following conditions:
 
 1. DCO check passed
 2. All test passed and code coverage check passed, with a `ci-passed` label
