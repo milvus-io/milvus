@@ -507,7 +507,6 @@ class TestPartitionOperations(TestcaseBase):
         assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("flush", [True, False])
     @pytest.mark.parametrize("data", [cf.gen_default_list_data(nb=3000)])
     @pytest.mark.parametrize("index_param", cf.gen_simple_index())
     def test_partition_drop_indexed_partition(self, data, index_param):
@@ -516,7 +515,6 @@ class TestPartitionOperations(TestcaseBase):
         method: 1. create a partition
                 2. insert same data
                 3. create an index
-                4. flush or not flush (remove flush step for issue # 5837)
                 5. drop the partition
         expected: drop successfully
         """
@@ -534,10 +532,6 @@ class TestPartitionOperations(TestcaseBase):
 
         # create index of collection
         collection_w.create_index(ct.default_float_vec_field_name, index_param)
-
-        # # flush
-        # if flush:
-        #     self._connect().flush([collection_w.name])
 
         # drop partition
         partition_w.drop()
