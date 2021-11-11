@@ -101,7 +101,7 @@ func TestHistorical_Search(t *testing.T) {
 		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
 		assert.NoError(t, err)
 
-		_, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
+		_, _, err = his.search(ctx, searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
 		assert.NoError(t, err)
 	})
 
@@ -115,7 +115,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.replica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
-		_, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
+		_, _, err = his.search(ctx, searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
 		assert.Error(t, err)
 	})
 
@@ -129,7 +129,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.replica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
-		_, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
+		_, _, err = his.search(ctx, searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
 		assert.Error(t, err)
 	})
 
@@ -147,7 +147,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.replica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		_, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
+		_, _, err = his.search(ctx, searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
 		assert.Error(t, err)
 	})
 
@@ -161,7 +161,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.replica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, ids, err := his.search(searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
+		res, ids, err := his.search(ctx, searchReqs, defaultCollectionID, []UniqueID{}, plan, Timestamp(0))
 		assert.Nil(t, res)
 		assert.Nil(t, ids)
 		assert.NoError(t, err)
@@ -181,7 +181,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.replica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, ids, err := his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
+		res, ids, err := his.search(ctx, searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
 		assert.Nil(t, res)
 		assert.Nil(t, ids)
 		assert.Error(t, err)

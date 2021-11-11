@@ -41,7 +41,8 @@ func TestStreaming_search(t *testing.T) {
 		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
 		assert.NoError(t, err)
 
-		res, err := streaming.search(searchReqs,
+		res, err := streaming.search(ctx,
+			searchReqs,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultVChannel,
@@ -59,7 +60,8 @@ func TestStreaming_search(t *testing.T) {
 		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
 		assert.NoError(t, err)
 
-		res, err := streaming.search(searchReqs,
+		res, err := streaming.search(ctx,
+			searchReqs,
 			defaultCollectionID,
 			[]UniqueID{},
 			defaultVChannel,
@@ -84,7 +86,8 @@ func TestStreaming_search(t *testing.T) {
 		err = streaming.replica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, err := streaming.search(searchReqs,
+		res, err := streaming.search(ctx,
+			searchReqs,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultVChannel,
@@ -109,7 +112,8 @@ func TestStreaming_search(t *testing.T) {
 		err = streaming.replica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		_, err = streaming.search(searchReqs,
+		_, err = streaming.search(ctx,
+			searchReqs,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultVChannel,
@@ -129,7 +133,8 @@ func TestStreaming_search(t *testing.T) {
 		err = streaming.replica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, err := streaming.search(searchReqs,
+		res, err := streaming.search(ctx,
+			searchReqs,
 			defaultCollectionID,
 			[]UniqueID{},
 			defaultVChannel,
@@ -152,7 +157,8 @@ func TestStreaming_search(t *testing.T) {
 
 		seg.segmentPtr = nil
 
-		_, err = streaming.search(searchReqs,
+		_, err = streaming.search(ctx,
+			searchReqs,
 			defaultCollectionID,
 			[]UniqueID{},
 			defaultVChannel,

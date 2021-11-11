@@ -25,6 +25,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
@@ -155,6 +156,15 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
+
+	}
+	var start int64
+	if len(fgMsg.insertMessages) > 0 {
+		start = time.Now().UnixNano()
+
+		log.Debug("benchmark-Insert-Datanode", zap.Int64("CollectionID", fgMsg.insertMessages[0].CollectionID),
+			zap.Int64("MsgID", fgMsg.insertMessages[0].ID()), zap.String("Step", "DataNode-Queue"),
+			zap.Int64("time", start))
 	}
 
 	// replace pchannel with vchannel
@@ -185,12 +195,23 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		}
 	}
 
+	bufferInsertMsgStartTime := time.Now().UnixNano()
+
 	// insert messages -> buffer
 	for _, msg := range fgMsg.insertMessages {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		msg.SetTraceCtx(ctx)
 		err := ibNode.bufferInsertMsg(msg, endPositions[0])
 		if err != nil {
 			log.Warn("msg to buffer failed", zap.Error(err))
 		}
+		sp.Finish()
+	}
+
+	if len(fgMsg.insertMessages) > 0 {
+		log.Debug("benchmark-Insert-DataNode", zap.Int64("CollectionID", fgMsg.insertMessages[0].CollectionID),
+			zap.Int64("MsgID", fgMsg.insertMessages[0].ID()), zap.String("Step", "InsertBufferNode-bufferInsertMsg"),
+			zap.Int64("time", time.Now().UnixNano()-bufferInsertMsgStartTime))
 	}
 
 	// Find and return the smaller input
@@ -300,6 +321,14 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	for _, sp := range spans {
 		sp.Finish()
+	}
+	if len(fgMsg.insertMessages) > 0 {
+		log.Debug("benchmark-Insert-DataNode", zap.Int64("CollectionID", fgMsg.insertMessages[0].CollectionID),
+			zap.Int64("MsgID", fgMsg.insertMessages[0].ID()), zap.String("Step", "InsertBufferNode-Operate"),
+			zap.Int64("time", time.Now().UnixNano()-start))
+		log.Debug("benchmark-Insert-DataNode", zap.Int64("CollectionID", fgMsg.insertMessages[0].CollectionID),
+			zap.Int64("MsgID", fgMsg.insertMessages[0].ID()), zap.String("Step", "Insert-End"),
+			zap.Int64("time", time.Now().UnixNano()))
 	}
 
 	// send delete msg to DeleteNode

@@ -21,6 +21,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
@@ -230,9 +231,11 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 }
 
 // search will search all the target segments in historical
-func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
+func (h *historical) search(ctx context.Context, searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []UniqueID, error) {
 
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "QuerNode-historical-search")
+	defer sp.Finish()
 	searchResults := make([]*SearchResult, 0)
 	searchSegmentIDs := make([]UniqueID, 0)
 

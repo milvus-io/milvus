@@ -476,6 +476,11 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
 			}
+			if tsMsg.ID() != 0 {
+				log.Debug("benchmark-Search-MsgStream", zap.Int64("CollectionID", 1),
+					zap.Int64("MsgID", tsMsg.ID()), zap.String("Step", "MsgStream-receive"),
+					zap.Int64("time", time.Now().UnixNano()))
+			}
 			pos := tsMsg.Position()
 			tsMsg.SetPosition(&MsgPosition{
 				ChannelName: pos.ChannelName,
@@ -785,6 +790,12 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
 			if err != nil {
 				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
+			}
+
+			if tsMsg.ID() != 0 {
+				log.Debug("benchmark-Insert-MsgStream", zap.Int64("CollectionID", 1),
+					zap.Int64("MsgID", tsMsg.ID()), zap.String("Step", "MsgStream-receive"),
+					zap.Int64("time", time.Now().UnixNano()))
 			}
 
 			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())

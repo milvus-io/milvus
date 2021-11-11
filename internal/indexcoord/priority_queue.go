@@ -19,6 +19,9 @@ package indexcoord
 import (
 	"container/heap"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 // PQItem is something we manage in a priority queue.
@@ -139,6 +142,7 @@ func (pq *PriorityQueue) Peek() UniqueID {
 	if pq.Len() == 0 {
 		return UniqueID(-1)
 	}
+	log.Debug("PriorityQueue", zap.Any("key", pq.items[0].key), zap.Any("priority", pq.items[0].priority))
 	return pq.items[0].key
 }
 
