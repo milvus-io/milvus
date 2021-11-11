@@ -73,6 +73,7 @@ func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasR
 	return s.rootCoord.CreateAlias(ctx, request)
 }
 
+// DropAlias drops the specified alias.
 func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	return s.rootCoord.DropAlias(ctx, request)
 }
