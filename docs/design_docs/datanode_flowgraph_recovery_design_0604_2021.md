@@ -27,15 +27,15 @@ D. DDL messages are now in DML Vchannels.
 
 When a flowgraph flushes a segment, we need to save these things:
 
-- current segment's binlog paths,
-- current segment positions,
-- all other segments' current positions from the replica (If a segment hasn't been flushed, save the position when datanode first meets it.)
+- current segment's binlog paths.
+- current segment positions.
+- all other segments' current positions from the replica (If a segment hasn't been flushed, save the position when datanode first meets it).
 
 Whether save successfully:
 
 - If succeeded, flowgraph updates all segments' positions to the replica
 - If not
-  - For a grpc failure( this failure will appear after many times retry internally), crush itself.
+  - For a grpc failure(this failure will appear after many times retry internally), crush itself.
   - For a normal failure, retry save 10 times, if still fails, crush itself.
 
 ### B. Recovery from a set of checkpoints
