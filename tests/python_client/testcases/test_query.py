@@ -10,8 +10,10 @@ from common.code_mapping import CollectionErrorMessage as clem
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 import utils.utils as ut
+
+log = test_log()
 
 prefix = "query"
 exp_res = "exp_res"

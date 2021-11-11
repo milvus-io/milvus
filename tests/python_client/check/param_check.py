@@ -3,7 +3,9 @@ import operator
 from common import common_type as ct
 
 sys.path.append("..")
-from utils.util_log import test_log as log
+from utils.util_log import test_log
+
+log = test_log()
 
 
 def ip_check(ip):

@@ -1,5 +1,5 @@
 import traceback
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 
 
 class Error:
@@ -9,6 +9,7 @@ class Error:
 
 
 log_row_length = 300
+log = test_log()
 
 
 def api_request_catch():
@@ -26,7 +27,9 @@ def api_request_catch():
                 log.error(traceback.format_exc())
                 log.error("(api_response) : %s" % log_e)
                 return Error(e), False
+
         return inner_wrapper
+
     return wrapper
 
 
@@ -44,4 +47,3 @@ def api_request(_list, **kwargs):
             log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__qualname__, log_arg, str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
-

@@ -10,11 +10,13 @@ from chaos.checker import (CreateChecker, InsertFlushChecker,
                            SearchChecker, QueryChecker, IndexChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from chaos import constants
 from delayed_assert import expect, assert_expectations
+
+log = test_log()
 
 
 def assert_statistic(checkers, expectations={}):

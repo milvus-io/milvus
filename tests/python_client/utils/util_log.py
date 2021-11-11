@@ -42,15 +42,19 @@ class TestLog:
             ch = logging.StreamHandler(sys.stdout)
             ch.setLevel(logging.DEBUG)
             ch.setFormatter(formatter)
-            self.log.addHandler(ch)
+            # self.log.addHandler(ch)
 
         except Exception as e:
             print("Can not use %s or %s or %s to log. error : %s" % (log_debug, log_file, log_err, str(e)))
 
 
 """All modules share this unified log"""
-log_debug = log_config.log_debug
-log_info = log_config.log_info
-log_err = log_config.log_err
-log_worker = log_config.log_worker
-test_log = TestLog('ci_test', log_debug, log_info, log_err, log_worker).log
+
+
+def test_log():
+    log_debug = log_config.log_debug
+    log_info = log_config.log_info
+    log_err = log_config.log_err
+    log_worker = log_config.log_worker
+    _test_log = TestLog('ci_test', log_debug, log_info, log_err, log_worker).log
+    return _test_log

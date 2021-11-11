@@ -3,10 +3,12 @@ import os
 from pymilvus import connections, Index
 
 from scale import constants
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from common import common_type as ct
+
+log = test_log()
 
 
 def get_milvus_chart_env_var(var=constants.MILVUS_CHART_ENV):

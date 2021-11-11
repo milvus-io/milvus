@@ -1,4 +1,4 @@
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from common import common_type as ct
 from common import common_func as cf
 from common.common_type import CheckTasks, Connect_Object_Name
@@ -6,6 +6,8 @@ from common.common_type import CheckTasks, Connect_Object_Name
 from pymilvus import Collection, Partition
 from utils.api_request import Error
 import check.param_check as pc
+
+log = test_log()
 
 
 class ResponseChecker:

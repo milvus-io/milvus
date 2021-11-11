@@ -10,7 +10,9 @@ from common import common_type as ct
 from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, reconnect
 from common.common_type import CaseLabel
 from chaos import constants
-from utils.util_log import test_log as log
+from utils.util_log import test_log
+
+log = test_log()
 
 
 def reboot_pod(chaos_yaml):

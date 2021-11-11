@@ -1,6 +1,6 @@
 import time
 from benedict import benedict
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 
 template_yaml = 'template/default.yaml'
@@ -8,6 +8,7 @@ MILVUS_GRP = 'milvus.io'
 MILVUS_VER = 'v1alpha1'
 MILVUS_PLURAL = 'milvusclusters'
 MILVUS_KIND = 'MilvusCluster'
+log = test_log()
 
 
 class MilvusOperator(object):

@@ -3,7 +3,9 @@ import threading
 import glob
 from chaos import constants
 from yaml import full_load
-from utils.util_log import test_log as log
+from utils.util_log import test_log
+
+log = test_log()
 
 
 def check_config(chaos_config):

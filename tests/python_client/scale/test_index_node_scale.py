@@ -8,8 +8,9 @@ from common.common_type import CaseLabel
 from scale.helm_env import HelmEnv
 from common import common_func as cf
 from common import common_type as ct
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 
+log = test_log()
 nb = 50000
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 128}}
 

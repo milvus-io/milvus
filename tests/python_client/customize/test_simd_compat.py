@@ -2,7 +2,7 @@ import pytest
 import time
 
 from pymilvus import connections
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from common import common_type as ct
@@ -13,9 +13,11 @@ from common.common_type import CaseLabel
 supported_simd_types = ["sse4_2", "avx", "avx2", "avx512"]
 namespace = 'chaos-testing'
 
+log = test_log()
+
 
 def _install_milvus(simd):
-    release_name = f"mil-{simd.replace('_','-')}-" + cf.gen_digits_by_length(6)
+    release_name = f"mil-{simd.replace('_', '-')}-" + cf.gen_digits_by_length(6)
     cus_configs = {'spec.components.image': 'milvusdb/milvus-dev:master-20211104-91be4b1',
                    'metadata.namespace': namespace,
                    'metadata.name': release_name,

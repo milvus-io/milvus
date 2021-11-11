@@ -2,12 +2,14 @@ import pytest
 from time import sleep
 
 from base.client_base import TestcaseBase
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.utils import *
 from common.constants import *
+
+log = test_log()
 
 prefix = "search_collection"
 search_num = 10

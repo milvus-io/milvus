@@ -9,9 +9,11 @@ from base.partition_wrapper import ApiPartitionWrapper
 from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from common import common_func as cf
 from common import common_type as ct
+
+log = test_log()
 
 
 class ParamInfo:
@@ -109,7 +111,8 @@ class TestcaseBase(Base):
         if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=name, schema=schema, shards_num=shards_num, check_task=check_task, check_items=check_items, **kwargs)
+        collection_w.init_collection(name=name, schema=schema, shards_num=shards_num, check_task=check_task,
+                                     check_items=check_items, **kwargs)
         self.collection_object_list.append(collection_w)
         return collection_w
 

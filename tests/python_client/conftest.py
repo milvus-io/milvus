@@ -6,7 +6,7 @@ import socket
 
 import common.common_type as ct
 import common.common_func as cf
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from base.client_base import param_info
 from check.param_check import ip_check, number_check
 from config.log_config import log_config
@@ -15,6 +15,7 @@ from utils.utils import get_milvus, gen_unique_str, gen_default_fields, gen_bina
 timeout = 60
 dimension = 128
 delete_timeout = 60
+log = test_log()
 
 
 def pytest_addoption(parser):

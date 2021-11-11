@@ -8,7 +8,9 @@ from common import common_type as ct
 from chaos import constants
 
 from common.common_type import CheckTasks
-from utils.util_log import test_log as log
+from utils.util_log import test_log
+
+log = test_log()
 
 
 class Op(Enum):
@@ -31,6 +33,7 @@ class Checker:
        a. check whether milvus is servicing
        b. count operations and success rate
     """
+
     def __init__(self):
         self._succ = 0
         self._fail = 0
@@ -40,7 +43,7 @@ class Checker:
                                     timeout=timeout)
         self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.ENTITIES_FOR_SEARCH),
                            timeout=timeout)
-        self.initial_entities = self.c_wrap.num_entities    # do as a flush
+        self.initial_entities = self.c_wrap.num_entities  # do as a flush
 
     def total(self):
         return self._succ + self._fail
@@ -55,19 +58,20 @@ class Checker:
 
 class SearchChecker(Checker):
     """check search operations in a dependent thread"""
+
     def __init__(self):
         super().__init__()
-        self.c_wrap.load()   # do load before search
+        self.c_wrap.load()  # do load before search
 
     def keep_running(self):
         while True:
             search_vec = cf.gen_vectors(5, ct.default_dim)
             _, result = self.c_wrap.search(
-                                data=search_vec,
-                                anns_field=ct.default_float_vec_field_name,
-                                param={"nprobe": 32},
-                                limit=1, timeout=timeout, check_task=CheckTasks.check_nothing
-                            )
+                data=search_vec,
+                anns_field=ct.default_float_vec_field_name,
+                param={"nprobe": 32},
+                limit=1, timeout=timeout, check_task=CheckTasks.check_nothing
+            )
             if result:
                 self._succ += 1
             else:
@@ -77,6 +81,7 @@ class SearchChecker(Checker):
 
 class InsertFlushChecker(Checker):
     """check Insert and flush operations in a dependent thread"""
+
     def __init__(self, flush=False):
         super().__init__()
         self._flush = flush
@@ -108,16 +113,17 @@ class InsertFlushChecker(Checker):
 
 class CreateChecker(Checker):
     """check create operations in a dependent thread"""
+
     def __init__(self):
         super().__init__()
 
     def keep_running(self):
         while True:
             _, result = self.c_wrap.init_collection(
-                                    name=cf.gen_unique_str("CreateChecker_"),
-                                    schema=cf.gen_default_collection_schema(),
-                                    timeout=timeout, check_task=CheckTasks.check_nothing
-                                )
+                name=cf.gen_unique_str("CreateChecker_"),
+                schema=cf.gen_default_collection_schema(),
+                timeout=timeout, check_task=CheckTasks.check_nothing
+            )
             if result:
                 self._succ += 1
                 self.c_wrap.drop(timeout=timeout)
@@ -128,11 +134,12 @@ class CreateChecker(Checker):
 
 class IndexChecker(Checker):
     """check Insert operations in a dependent thread"""
+
     def __init__(self):
         super().__init__()
-        self.c_wrap.insert(data=cf.gen_default_list_data(nb=5*constants.ENTITIES_FOR_SEARCH),
+        self.c_wrap.insert(data=cf.gen_default_list_data(nb=5 * constants.ENTITIES_FOR_SEARCH),
                            timeout=timeout)
-        log.debug(f"Index ready entities: {self.c_wrap.num_entities }")  # do as a flush before indexing
+        log.debug(f"Index ready entities: {self.c_wrap.num_entities}")  # do as a flush before indexing
 
     def keep_running(self):
         while True:
@@ -149,9 +156,10 @@ class IndexChecker(Checker):
 
 class QueryChecker(Checker):
     """check query operations in a dependent thread"""
+
     def __init__(self):
         super().__init__()
-        self.c_wrap.load()      # load before query
+        self.c_wrap.load()  # load before query
 
     def keep_running(self):
         while True:

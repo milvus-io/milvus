@@ -1,9 +1,11 @@
 import os
 
 from scale import constants
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from common import common_func as cf
 from scale import scale_common as sc
+
+log = test_log()
 
 
 class HelmEnv:

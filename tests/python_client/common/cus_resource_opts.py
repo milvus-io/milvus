@@ -1,11 +1,12 @@
 from __future__ import print_function
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 
 _GROUP = 'milvus.io'
 _VERSION = 'v1alpha1'
 _NAMESPACE = "default"
+log = test_log()
 
 
 class CustomResourceOperations(object):

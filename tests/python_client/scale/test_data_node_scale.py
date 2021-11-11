@@ -2,7 +2,7 @@ import pytest
 
 from base.collection_wrapper import ApiCollectionWrapper
 from common.common_type import CaseLabel
-from utils.util_log import test_log as log
+from utils.util_log import test_log
 from common import common_func as cf
 from common import common_type as ct
 from scale import constants
@@ -14,6 +14,7 @@ prefix = "data_scale"
 default_schema = cf.gen_default_collection_schema()
 default_search_exp = "int64 >= 0"
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+log = test_log()
 
 
 class TestDataNodeScale:
