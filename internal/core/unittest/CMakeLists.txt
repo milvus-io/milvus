@@ -35,6 +35,7 @@ set(MILVUS_TEST_FILES
         test_span.cpp
         test_timestamp_index.cpp
         test_reduce_c.cpp
+        test_conf_adapter_mgr.cpp
         )
 
 add_executable(all_tests
