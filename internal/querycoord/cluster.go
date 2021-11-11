@@ -69,6 +69,9 @@ type Cluster interface {
 	offlineNodes() (map[int64]Node, error)
 	hasNode(nodeID int64) bool
 
+	allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64) error
+	allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error
+
 	getSessionVersion() int64
 
 	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse
@@ -93,22 +96,26 @@ type queryNodeCluster struct {
 	sessionVersion int64
 
 	sync.RWMutex
-	clusterMeta Meta
-	nodes       map[int64]Node
-	newNodeFn   newQueryNodeFn
+	clusterMeta      Meta
+	nodes            map[int64]Node
+	newNodeFn        newQueryNodeFn
+	segmentAllocator SegmentAllocatePolicy
+	channelAllocator ChannelAllocatePolicy
 }
 
 func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQueryNodeFn, session *sessionutil.Session) (Cluster, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	nodes := make(map[int64]Node)
 	c := &queryNodeCluster{
-		ctx:         childCtx,
-		cancel:      cancel,
-		client:      kv,
-		session:     session,
-		clusterMeta: clusterMeta,
-		nodes:       nodes,
-		newNodeFn:   newNodeFn,
+		ctx:              childCtx,
+		cancel:           cancel,
+		client:           kv,
+		session:          session,
+		clusterMeta:      clusterMeta,
+		nodes:            nodes,
+		newNodeFn:        newNodeFn,
+		segmentAllocator: defaultSegAllocatePolicy(),
+		channelAllocator: defaultChannelAllocatePolicy(),
 	}
 	err := c.reloadFromKV()
 	if err != nil {
@@ -641,4 +648,12 @@ func (c *queryNodeCluster) getCollectionInfosByID(ctx context.Context, nodeID in
 	}
 
 	return nil
+}
+
+func (c *queryNodeCluster) allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64) error {
+	return c.segmentAllocator(ctx, reqs, c, wait, excludeNodeIDs)
+}
+
+func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error {
+	return c.channelAllocator(ctx, reqs, c, wait, excludeNodeIDs)
 }
