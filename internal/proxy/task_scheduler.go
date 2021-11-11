@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 
@@ -37,8 +38,10 @@ import (
 )
 
 const (
-	mergeSearchRequests = true
-	maxMergeNumber      = 4
+	mergeSearchRequests    = true
+	maxMergeNumber         = 4
+	waitDurationPerTask    = 10 * time.Millisecond
+	maxWaitDurationOfSched = 50 * time.Millisecond
 )
 
 type taskQueue interface {
@@ -527,6 +530,21 @@ func (sched *taskScheduler) scheduleDqTask() task {
 }
 
 func (sched *taskScheduler) scheduleMergedDqTask() (scheduled task, mergedTasks []task) {
+	sched.dqQueue.utLock.RLock()
+	utLen := sched.dqQueue.unissuedTasks.Len()
+	sched.dqQueue.utLock.RUnlock()
+	if utLen <= 1 {
+		sched.dqQueue.atLock.RLock()
+		atLen := len(sched.dqQueue.activeTasks)
+		sched.dqQueue.atLock.RUnlock()
+
+		waitDuration := time.Duration(atLen * int(waitDurationPerTask))
+		if waitDuration > maxWaitDurationOfSched {
+			waitDuration = maxWaitDurationOfSched
+		}
+		time.Sleep(waitDuration)
+	}
+
 	return sched.dqQueue.mergeSearchReqs()
 }
 
