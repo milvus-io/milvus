@@ -43,7 +43,7 @@ class TestLog:
             ch = logging.StreamHandler(sys.stdout)
             ch.setLevel(logging.DEBUG)
             ch.setFormatter(formatter)
-            self.log.addHandler(ch)
+            # self.log.addHandler(ch)
 
         except Exception as e:
             print("Can not use %s or %s or %s to log. error : %s" % (log_debug, log_file, log_err, str(e)))
