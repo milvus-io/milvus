@@ -3636,7 +3636,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total success of DataNode Watch dm channel operations",
+      "description": "Success count of watch_dm_channels requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
