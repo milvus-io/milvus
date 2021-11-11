@@ -148,7 +148,7 @@ def get_dataset(hdf5_file_path):
 
 
 def get_default_field_name(data_type=DataType.FLOAT_VECTOR):
-    """ Return fild name according to data type """
+    """ Return field name according to data type """
     if data_type == DataType.FLOAT_VECTOR:
         field_name = DEFAULT_F_FIELD_NAME
     elif data_type == DataType.BINARY_VECTOR:
