@@ -1,6 +1,6 @@
 # Drop Collection
 
-`Milvus 2.0` uses `Collection` to represent a set of data, like `Table` in traditional database. Users can create or drop `Collection`. 
+`Milvus 2.0` uses `Collection` to represent a set of data, like `Table` in traditional database. Users can create or drop `Collection`.
 This article introduces the execution path of `Drop Collection`. At the end of this article, you should know which components are involved in `Drop Collection`.
 
 The execution flow of `Drop Collection` is shown in the following figure:
@@ -19,9 +19,12 @@ service MilvusService {
 }
 
 message DropCollectionRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2;
-  string collection_name = 3; // must
+  // Required, the collection name in milvus
+  string collection_name = 3;
 }
 ```
 
