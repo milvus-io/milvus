@@ -471,7 +471,7 @@ type Segment struct {
 	vectorFieldMutex sync.RWMutex // guards vectorFieldInfos
 	vectorFieldInfos map[UniqueID]*VectorFieldInfo
 
-	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segmen
+	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
 }
 ```
 
