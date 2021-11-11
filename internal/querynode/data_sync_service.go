@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+// loadType is load collection or load partition
 type loadType = int32
 
 const (
