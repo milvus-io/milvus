@@ -1066,4 +1066,13 @@ type QueryCoordComponent interface {
 	// Return nil in status:
 	//     The rootCoord is not nil.
 	SetRootCoord(rootCoord RootCoord) error
+
+	// SetIndexCoord set IndexCoord for QueryCoord
+	// `IndexCoord` is a client of index coordinator.
+	//
+	// Return a generic error in status:
+	//     If the indexCoord is nil.
+	// Return nil in status:
+	//     The indexCoord is not nil.
+	SetIndexCoord(indexCoord IndexCoord) error
 }

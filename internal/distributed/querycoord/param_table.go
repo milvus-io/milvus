@@ -37,8 +37,9 @@ type ParamTable struct {
 	paramtable.BaseTable
 	Port int
 
-	RootCoordAddress string
-	DataCoordAddress string
+	RootCoordAddress  string
+	DataCoordAddress  string
+	IndexCoordAddress string
 
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
@@ -52,6 +53,7 @@ func (pt *ParamTable) Init() {
 		pt.initPort()
 		pt.initRootCoordAddress()
 		pt.initDataCoordAddress()
+		pt.initIndexCoordAddress()
 
 		pt.initServerMaxSendSize()
 		pt.initServerMaxRecvSize()
@@ -72,6 +74,14 @@ func (pt *ParamTable) initDataCoordAddress() {
 		panic(err)
 	}
 	pt.DataCoordAddress = ret
+}
+
+func (pt *ParamTable) initIndexCoordAddress() {
+	ret, err := pt.Load("_IndexCoordAddress")
+	if err != nil {
+		panic(err)
+	}
+	pt.IndexCoordAddress = ret
 }
 
 func (pt *ParamTable) initPort() {

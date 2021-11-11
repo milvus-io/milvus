@@ -78,8 +78,11 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 		return nil, err
 	}
 
+	indexCoord := newIndexCoordMock()
+
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
+	coord.SetIndexCoord(indexCoord)
 
 	err = coord.Register()
 	if err != nil {
