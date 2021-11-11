@@ -33,7 +33,7 @@ import (
 // flushManager defines a flush manager signature
 type flushManager interface {
 	// notify flush manager insert buffer data
-	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, pos *internalpb.MsgPosition) error
+	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error
 	// notify flush manager del buffer data
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
 	// injectFlush injects compaction or other blocking task before flush sync
@@ -48,6 +48,7 @@ type segmentFlushPack struct {
 	deltaLogs  []*DelDataBuf
 	pos        *internalpb.MsgPosition
 	flushed    bool
+	dropped    bool
 }
 
 // notifyMetaFunc notify meta to persistent flush result
@@ -139,8 +140,8 @@ func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInj
 }
 
 // enqueueInsertBuffer put insert buffer data into queue
-func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, pos *internalpb.MsgPosition) {
-	q.getFlushTaskRunner(pos).runFlushInsert(task, binlogs, statslogs, flushed, pos)
+func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
+	q.getFlushTaskRunner(pos).runFlushInsert(task, binlogs, statslogs, flushed, dropped, pos)
 }
 
 // enqueueDelBuffer put delete buffer data into queue
@@ -219,12 +220,12 @@ func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQu
 
 // notify flush manager insert buffer data
 func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool,
-	pos *internalpb.MsgPosition) error {
+	dropped bool, pos *internalpb.MsgPosition) error {
 
 	// empty flush
 	if data == nil || data.buffer == nil {
 		m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{},
-			map[UniqueID]string{}, map[UniqueID]string{}, flushed, pos)
+			map[UniqueID]string{}, map[UniqueID]string{}, flushed, dropped, pos)
 		return nil
 	}
 
@@ -292,7 +293,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{
 		BaseKV: m.BaseKV,
 		data:   kvs,
-	}, field2Insert, field2Stats, flushed, pos)
+	}, field2Insert, field2Stats, flushed, dropped, pos)
 	return nil
 }
 

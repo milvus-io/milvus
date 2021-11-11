@@ -622,67 +622,6 @@ func (m *CompactedRootCoord) DescribeCollection(ctx context.Context, in *milvusp
 	return m.RootCoord.DescribeCollection(ctx, in)
 }
 
-func TestInsertBufferNode_getCollMetaBySegID(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
-
-	testPath := "/test/datanode/root/meta"
-	err := clearEtcd(testPath)
-	require.NoError(t, err)
-	Params.MetaRootPath = testPath
-
-	Factory := &MetaFactory{}
-	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
-
-	rcf := &RootCoordFactory{}
-	mockRootCoord := &CompactedRootCoord{
-		RootCoord: rcf,
-		compactTs: 100,
-	}
-
-	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
-	assert.Nil(t, err)
-
-	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
-	require.NoError(t, err)
-
-	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
-	assert.Nil(t, err)
-
-	memkv := memkv.NewMemoryKV()
-
-	fm := NewRendezvousFlushManager(&allocator{}, memkv, replica, func(*segmentFlushPack) error {
-		return nil
-	})
-
-	flushChan := make(chan flushMsg, 100)
-	c := &nodeConfig{
-		replica:      replica,
-		msFactory:    msFactory,
-		allocator:    NewAllocatorFactory(),
-		vChannelName: "string",
-	}
-	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
-	require.NoError(t, err)
-
-	meta, err := iBNode.getCollMetabySegID(1, 101)
-	assert.Nil(t, err)
-	assert.Equal(t, collMeta.ID, meta.ID)
-
-	_, err = iBNode.getCollMetabySegID(2, 101)
-	assert.NotNil(t, err)
-
-	meta, err = iBNode.getCollMetabySegID(1, 99)
-	assert.NotNil(t, err)
-}
-
 func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -738,12 +677,6 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		msg.EndTimestamp = 101 // ts valid
 		err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})
 		assert.Nil(t, err)
-	}
-
-	for _, msg := range inMsg.insertMessages {
-		msg.EndTimestamp = 99 // ts invalid
-		err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})
-		assert.NotNil(t, err)
 	}
 
 	for _, msg := range inMsg.insertMessages {

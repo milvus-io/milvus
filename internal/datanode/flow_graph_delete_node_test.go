@@ -107,7 +107,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
-			dn, err := newDeleteNode(test.ctx, nil, test.config)
+			dn, err := newDeleteNode(test.ctx, nil, make(chan UniqueID, 1), test.config)
 			assert.Nil(t, err)
 
 			assert.NotNil(t, dn)
@@ -215,7 +215,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			vChannelName: chanName,
 		}
 
-		dn, err := newDeleteNode(context.Background(), fm, c)
+		dn, err := newDeleteNode(context.Background(), fm, make(chan UniqueID, 1), c)
 		assert.Nil(t, err)
 
 		results := dn.filterSegmentByPK(0, pks)
@@ -246,7 +246,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
-		delNode, err := newDeleteNode(ctx, fm, c)
+		delNode, err := newDeleteNode(ctx, fm, make(chan UniqueID, 1), c)
 		assert.Nil(te, err)
 
 		msg := genFlowGraphDeleteMsg(pks, chanName)
@@ -270,7 +270,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
-		delNode, err := newDeleteNode(ctx, fm, c)
+		delNode, err := newDeleteNode(ctx, fm, make(chan UniqueID, 1), c)
 		assert.Nil(te, err)
 
 		msg := genFlowGraphDeleteMsg(pks, chanName)

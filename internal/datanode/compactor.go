@@ -49,7 +49,9 @@ type iterator = storage.Iterator
 
 type compactor interface {
 	compact() error
+	stop()
 	getPlanID() UniqueID
+	getCollection() UniqueID
 }
 
 // make sure compactionTask implements compactor interface
@@ -65,12 +67,16 @@ type compactionTask struct {
 
 	dc   types.DataCoord
 	plan *datapb.CompactionPlan
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // check if compactionTask implements compactor
 var _ compactor = (*compactionTask)(nil)
 
 func newCompactionTask(
+	ctx context.Context,
 	dl downloader,
 	ul uploader,
 	replica Replica,
@@ -78,7 +84,12 @@ func newCompactionTask(
 	alloc allocatorInterface,
 	dc types.DataCoord,
 	plan *datapb.CompactionPlan) *compactionTask {
+
+	ctx1, cancel := context.WithCancel(ctx)
 	return &compactionTask{
+		ctx:    ctx1,
+		cancel: cancel,
+
 		downloader:         dl,
 		uploader:           ul,
 		Replica:            replica,
@@ -87,6 +98,10 @@ func newCompactionTask(
 		dc:                 dc,
 		plan:               plan,
 	}
+}
+
+func (t *compactionTask) stop() {
+	t.cancel()
 }
 
 func (t *compactionTask) getPlanID() UniqueID {
@@ -238,7 +253,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 }
 
 func (t *compactionTask) compact() error {
-	ctxTimeout, cancelAll := context.WithTimeout(context.Background(), time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
+	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
 	var targetSegID UniqueID
@@ -589,4 +604,8 @@ func (t *compactionTask) getSegmentMeta(segID UniqueID) (UniqueID, UniqueID, *et
 		Schema: sch,
 	}
 	return collID, partID, meta, nil
+}
+
+func (t *compactionTask) getCollection() UniqueID {
+	return t.getCollectionID()
 }

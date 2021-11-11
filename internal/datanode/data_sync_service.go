@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -47,6 +47,7 @@ type dataSyncService struct {
 
 	flushingSegCache *Cache       // a guarding cache stores currently flushing segment ids
 	flushManager     flushManager // flush manager handles flush process
+	blobKV           kv.BaseKV
 }
 
 func newDataSyncService(ctx context.Context,
@@ -58,6 +59,7 @@ func newDataSyncService(ctx context.Context,
 	clearSignal chan<- UniqueID,
 	dataCoord types.DataCoord,
 	flushingSegCache *Cache,
+	blobKV kv.BaseKV,
 
 ) (*dataSyncService, error) {
 
@@ -79,6 +81,7 @@ func newDataSyncService(ctx context.Context,
 		dataCoord:        dataCoord,
 		clearSignal:      clearSignal,
 		flushingSegCache: flushingSegCache,
+		blobKV:           blobKV,
 	}
 
 	if err := service.initNodes(vchan); err != nil {
@@ -141,23 +144,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	// MinIO
-	option := &miniokv.Option{
-		Address:           Params.MinioAddress,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSL,
-		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
-	}
-
-	minIOKV, err := miniokv.NewMinIOKV(dsService.ctx, option)
-	if err != nil {
-		return err
-	}
-
 	// initialize flush manager for DataSync Service
-	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, minIOKV, dsService.replica, func(pack *segmentFlushPack) error {
+	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica, func(pack *segmentFlushPack) error {
 		fieldInsert := []*datapb.FieldBinlog{}
 		fieldStats := []*datapb.FieldBinlog{}
 		deltaInfos := []*datapb.DeltaLogInfo{}
@@ -205,8 +193,9 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 			StartPositions: dsService.replica.listNewSegmentsStartPositions(),
 			Flushed:        pack.flushed,
+			Dropped:        pack.dropped,
 		}
-		rsp, err := dsService.dataCoord.SaveBinlogPaths(dsService.ctx, req)
+		rsp, err := dsService.dataCoord.SaveBinlogPaths(context.Background(), req)
 		if err != nil {
 			return fmt.Errorf(err.Error())
 		}
@@ -280,7 +269,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	var ddNode Node = newDDNode(dsService.ctx, dsService.clearSignal, dsService.collectionID, vchanInfo, dsService.msFactory)
+	var ddNode Node = newDDNode(dsService.ctx, dsService.collectionID, vchanInfo, dsService.msFactory)
 	var insertBufferNode Node
 	insertBufferNode, err = newInsertBufferNode(
 		dsService.ctx,
@@ -294,7 +283,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	var deleteNode Node
-	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, c)
+	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, dsService.clearSignal, c)
 	if err != nil {
 		return err
 	}

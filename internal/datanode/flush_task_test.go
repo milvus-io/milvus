@@ -44,7 +44,7 @@ func TestFlushTaskRunner(t *testing.T) {
 	assert.False(t, saveFlag)
 	assert.False(t, nextFlag)
 
-	task.runFlushInsert(&emptyFlushTask{}, nil, nil, false, nil)
+	task.runFlushInsert(&emptyFlushTask{}, nil, nil, false, false, nil)
 	task.runFlushDel(&emptyFlushTask{}, &DelDataBuf{})
 
 	assert.False(t, saveFlag)
@@ -102,7 +102,7 @@ func TestFlushTaskRunner_Injection(t *testing.T) {
 	assert.False(t, saveFlag)
 	assert.False(t, nextFlag)
 
-	task.runFlushInsert(&emptyFlushTask{}, nil, nil, false, nil)
+	task.runFlushInsert(&emptyFlushTask{}, nil, nil, false, false, nil)
 	task.runFlushDel(&emptyFlushTask{}, &DelDataBuf{})
 
 	assert.False(t, saveFlag)

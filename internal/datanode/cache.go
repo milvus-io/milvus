@@ -43,14 +43,14 @@ func (c *Cache) checkIfCached(key UniqueID) bool {
 	return ok
 }
 
-// Cache caches a specific segment ID into the cache
-func (c *Cache) Cache(segID UniqueID) {
-	c.cacheMap.Store(segID, struct{}{})
+// Cache caches a specific ID into the cache
+func (c *Cache) Cache(ID UniqueID) {
+	c.cacheMap.Store(ID, struct{}{})
 }
 
-// Remove removes a set of segment IDs from the cache
-func (c *Cache) Remove(segIDs ...UniqueID) {
-	for _, id := range segIDs {
+// Remove removes a set of IDs from the cache
+func (c *Cache) Remove(IDs ...UniqueID) {
+	for _, id := range IDs {
 		c.cacheMap.Delete(id)
 	}
 }

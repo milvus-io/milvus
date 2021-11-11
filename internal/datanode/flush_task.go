@@ -58,6 +58,7 @@ type flushTaskRunner struct {
 	deltaLogs  []*DelDataBuf
 	pos        *internalpb.MsgPosition
 	flushed    bool
+	dropped    bool
 }
 
 type taskInjection struct {
@@ -76,12 +77,13 @@ func (t *flushTaskRunner) init(f notifyMetaFunc, postFunc taskPostFunc, signal <
 }
 
 // runFlushInsert executei flush insert task with once and retry
-func (t *flushTaskRunner) runFlushInsert(task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, pos *internalpb.MsgPosition) {
+func (t *flushTaskRunner) runFlushInsert(task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
 	t.insertOnce.Do(func() {
 		t.insertLogs = binlogs
 		t.statsLogs = statslogs
 		t.flushed = flushed
 		t.pos = pos
+		t.dropped = dropped
 		go func() {
 			err := errStart
 			for err != nil {
@@ -150,6 +152,7 @@ func (t *flushTaskRunner) getFlushPack() *segmentFlushPack {
 		pos:        t.pos,
 		deltaLogs:  t.deltaLogs,
 		flushed:    t.flushed,
+		dropped:    t.dropped,
 	}
 
 	return pack

@@ -98,6 +98,7 @@ type DataNode struct {
 	Role   string
 	State  atomic.Value // internalpb.StateCode_Initializing
 
+	// TODO struct
 	chanMut           sync.RWMutex
 	vchan2SyncService map[string]*dataSyncService // vchannel name
 	vchan2FlushChs    map[string]chan flushMsg    // vchannel name to flush channels
@@ -116,6 +117,11 @@ type DataNode struct {
 	closer io.Closer
 
 	msFactory msgstream.Factory
+}
+
+type plan struct {
+	channelName string
+	cancel      context.CancelFunc
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -327,7 +333,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 
 	flushCh := make(chan flushMsg, 100)
 
-	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache)
+	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache, node.blobKv)
 	if err != nil {
 		return err
 	}
@@ -351,6 +357,7 @@ func (node *DataNode) BackGroundGC(collIDCh <-chan UniqueID) {
 		select {
 		case collID := <-collIDCh:
 			log.Info("GC collection", zap.Int64("ID", collID))
+			node.stopCompactionOfCollection(collID)
 			for _, vchanName := range node.getChannelNamesbyCollectionID(collID) {
 				node.ReleaseDataSyncService(vchanName)
 			}
@@ -725,6 +732,12 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	}, nil
 }
 
+func (node *DataNode) stopCompactionOfCollection(collID UniqueID) {
+	log.Debug("Stop compaction of collection", zap.Int64("collection ID", collID))
+
+	node.compactionExecutor.stopExecutingtaskByCollectionID(collID)
+}
+
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -739,6 +752,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 
 	binlogIO := &binlogIO{node.blobKv, ds.idAllocator}
 	task := newCompactionTask(
+		ctx,
 		binlogIO, binlogIO,
 		ds.replica,
 		ds.flushManager,
