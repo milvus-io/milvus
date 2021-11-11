@@ -290,11 +290,11 @@ func (p *ParamTable) initChannelWatchPrefix() {
 }
 
 func (p *ParamTable) initEnableCompaction() {
-	p.EnableCompaction = p.ParseBool("datacoord.enableCompaction", false)
+	p.EnableCompaction = p.ParseBool("dataCoord.enableCompaction", false)
 }
 
 func (p *ParamTable) initEnableGarbageCollection() {
-	p.EnableGarbageCollection = p.ParseBool("datacoord.enableGarbageCollection", false)
+	p.EnableGarbageCollection = p.ParseBool("dataCoord.enableGarbageCollection", false)
 }
 
 // --- MinIO ---
