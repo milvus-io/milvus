@@ -710,6 +710,8 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	resp.CompletedPlanNo = int64(completedCnt)
 	resp.TimeoutPlanNo = int64(timeoutCnt)
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	log.Debug("success to get compaction state", zap.Any("state", state), zap.Int("executing", executingCnt),
+		zap.Int("completed", completedCnt), zap.Int("timeout", timeoutCnt))
 	return resp, nil
 }
 
@@ -740,6 +742,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.State = state
+	log.Debug("success to get state with plans", zap.Any("state", state), zap.Any("merge infos", resp.MergeInfos))
 	return resp, nil
 }
 

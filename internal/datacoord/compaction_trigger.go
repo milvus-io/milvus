@@ -199,12 +199,12 @@ func (t *compactionTrigger) handleForceSignal(signal *compactionSignal) {
 	t1 := time.Now()
 
 	segments := t.meta.GetSegmentsOfCollection(signal.collectionID)
-	singleCompactionPlans := t.globalSingleCompaction(segments, true, signal.timetravel)
+	singleCompactionPlans := t.globalSingleCompaction(segments, true, signal)
 	if len(singleCompactionPlans) != 0 {
 		log.Debug("force single compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("planIDs", getPlanIDs(singleCompactionPlans)))
 	}
 
-	mergeCompactionPlans := t.globalMergeCompaction(signal.timetravel, true, signal.collectionID)
+	mergeCompactionPlans := t.globalMergeCompaction(signal, true, signal.collectionID)
 	if len(mergeCompactionPlans) != 0 {
 		log.Debug("force merge compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("planIDs", getPlanIDs(mergeCompactionPlans)))
 	}
@@ -230,7 +230,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		return
 	}
 	segments := t.meta.segments.GetSegments()
-	singleCompactionPlans := t.globalSingleCompaction(segments, false, signal.timetravel)
+	singleCompactionPlans := t.globalSingleCompaction(segments, false, signal)
 	if len(singleCompactionPlans) != 0 {
 		log.Debug("global single compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("plans", getPlanIDs(singleCompactionPlans)))
 	}
@@ -240,7 +240,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		return
 	}
 
-	mergeCompactionPlans := t.globalMergeCompaction(signal.timetravel, false)
+	mergeCompactionPlans := t.globalMergeCompaction(signal, false)
 	if len(mergeCompactionPlans) != 0 {
 		log.Debug("global merge compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("plans", getPlanIDs(mergeCompactionPlans)))
 	}
@@ -259,7 +259,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 
 	segment := t.meta.GetSegment(signal.segmentID)
-	singleCompactionPlan, err := t.singleCompaction(segment, signal.isForce, signal.timetravel)
+	singleCompactionPlan, err := t.singleCompaction(segment, signal.isForce, signal)
 	if err != nil {
 		log.Warn("failed to do single compaction", zap.Int64("segmentID", segment.ID), zap.Error(err))
 	} else {
@@ -277,7 +277,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 
 	segments := t.getCandidateSegments(channel, partitionID)
 
-	plans := t.mergeCompaction(segments, signal.timetravel, false)
+	plans := t.mergeCompaction(segments, signal, false)
 	if len(plans) != 0 {
 		log.Debug("merge compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("plans", getPlanIDs(plans)))
 	}
@@ -286,7 +286,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	// 	zap.String("channel", channel), zap.Int64("partitionID", partitionID))
 }
 
-func (t *compactionTrigger) globalMergeCompaction(timetravel *timetravel, isForce bool, collections ...UniqueID) []*datapb.CompactionPlan {
+func (t *compactionTrigger) globalMergeCompaction(signal *compactionSignal, isForce bool, collections ...UniqueID) []*datapb.CompactionPlan {
 	colls := make(map[int64]struct{})
 	for _, collID := range collections {
 		colls[collID] = struct{}{}
@@ -302,19 +302,19 @@ func (t *compactionTrigger) globalMergeCompaction(timetravel *timetravel, isForc
 		if !isForce && t.compactionHandler.isFull() {
 			return plans
 		}
-		mplans := t.mergeCompaction(segments.segments, timetravel, isForce)
+		mplans := t.mergeCompaction(segments.segments, signal, isForce)
 		plans = append(plans, mplans...)
 	}
 
 	return plans
 }
 
-func (t *compactionTrigger) mergeCompaction(segments []*SegmentInfo, timetravel *timetravel, isForce bool) []*datapb.CompactionPlan {
+func (t *compactionTrigger) mergeCompaction(segments []*SegmentInfo, signal *compactionSignal, isForce bool) []*datapb.CompactionPlan {
 	if !isForce && !t.shouldDoMergeCompaction(segments) {
 		return nil
 	}
 
-	plans := t.mergeCompactionPolicy.generatePlan(segments, timetravel)
+	plans := t.mergeCompactionPolicy.generatePlan(segments, signal.timetravel)
 	if len(plans) == 0 {
 		return nil
 	}
@@ -331,7 +331,7 @@ func (t *compactionTrigger) mergeCompaction(segments []*SegmentInfo, timetravel 
 		}
 
 		log.Debug("exec merge compaction plan", zap.Any("plan", plan))
-		if err := t.compactionHandler.execCompactionPlan(plan); err != nil {
+		if err := t.compactionHandler.execCompactionPlan(signal, plan); err != nil {
 			log.Warn("failed to execute compaction plan", zap.Error(err))
 			continue
 		}
@@ -396,13 +396,13 @@ func (t *compactionTrigger) shouldDoSingleCompaction(segment *SegmentInfo, timet
 	return float32(totalDeletedRows)/float32(segment.NumOfRows) >= singleCompactionRatioThreshold || totalDeleteLogSize > singleCompactionDeltaLogMaxSize
 }
 
-func (t *compactionTrigger) globalSingleCompaction(segments []*SegmentInfo, isForce bool, timetravel *timetravel) []*datapb.CompactionPlan {
+func (t *compactionTrigger) globalSingleCompaction(segments []*SegmentInfo, isForce bool, signal *compactionSignal) []*datapb.CompactionPlan {
 	plans := make([]*datapb.CompactionPlan, 0)
 	for _, segment := range segments {
 		if !isForce && t.compactionHandler.isFull() {
 			return plans
 		}
-		plan, err := t.singleCompaction(segment, isForce, timetravel)
+		plan, err := t.singleCompaction(segment, isForce, signal)
 		if err != nil {
 			log.Warn("failed to exec single compaction", zap.Error(err))
 			continue
@@ -415,16 +415,16 @@ func (t *compactionTrigger) globalSingleCompaction(segments []*SegmentInfo, isFo
 	return plans
 }
 
-func (t *compactionTrigger) singleCompaction(segment *SegmentInfo, isForce bool, timetravel *timetravel) (*datapb.CompactionPlan, error) {
+func (t *compactionTrigger) singleCompaction(segment *SegmentInfo, isForce bool, signal *compactionSignal) (*datapb.CompactionPlan, error) {
 	if segment == nil {
 		return nil, nil
 	}
 
-	if !isForce && !t.shouldDoSingleCompaction(segment, timetravel) {
+	if !isForce && !t.shouldDoSingleCompaction(segment, signal.timetravel) {
 		return nil, nil
 	}
 
-	plan := t.singleCompactionPolicy.generatePlan(segment, timetravel)
+	plan := t.singleCompactionPolicy.generatePlan(segment, signal.timetravel)
 	if plan == nil {
 		return nil, nil
 	}
@@ -432,5 +432,5 @@ func (t *compactionTrigger) singleCompaction(segment *SegmentInfo, isForce bool,
 	if err := t.fillOriginPlan(plan); err != nil {
 		return nil, err
 	}
-	return plan, t.compactionHandler.execCompactionPlan(plan)
+	return plan, t.compactionHandler.execCompactionPlan(signal, plan)
 }
