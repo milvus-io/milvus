@@ -16,7 +16,7 @@
 
 | Hardware Type | Recommended Configuration                                                                                                |
 | ---- | --------------------------------------------------------------------------------------------------- |
-| CPU  | x86_64 architecture <br> Intel CPU Sandy Bridge or above<br> CPU Instruction Set<br> _ SSE42<br> _ AVX<br> _ AVX2<br> _ AVX512 |
+| CPU  | x86_64 architecture <br> Intel CPU Sandy Bridge or above<br> CPU Instruction Set<br> - SSE4_2<br> - AVX<br> - AVX2<br> - AVX512 |
 | Memory   | 16 GB or more                                                                                           |
 
 ##### Software
