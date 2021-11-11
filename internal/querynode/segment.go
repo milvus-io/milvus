@@ -302,12 +302,9 @@ func (s *Segment) search(plan *SearchPlan,
 	cPlaceHolderGroup := cPlaceholderGroups[0]
 
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
-	var status = C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult)
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("Search failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult)
+	if err := HandleCStatus(&status, "Search failed"); err != nil {
+		return nil, err
 	}
 
 	return &searchResult, nil
@@ -565,13 +562,8 @@ func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 	var offset int64
 	cOffset := (*C.long)(&offset)
 	status := C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)), cOffset)
-
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return 0, errors.New("PreInsert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if err := HandleCStatus(&status, "PreInsert failed"); err != nil {
+		return 0, err
 	}
 	return offset, nil
 }
@@ -634,7 +626,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	var cSizeofPerRow = C.int(sizeofPerRow)
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
 	log.Debug("QueryNode::Segment::InsertBegin", zap.Any("cNumOfRows", cNumOfRows))
-	var status = C.Insert(s.segmentPtr,
+	status := C.Insert(s.segmentPtr,
 		cOffset,
 		cNumOfRows,
 		cEntityIdsPtr,
@@ -642,15 +634,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		cRawDataVoidPtr,
 		cSizeofPerRow,
 		cNumOfRows)
-
-	errorCode := status.error_code
-	log.Debug("QueryNode::Segment::InsertEnd", zap.Any("errorCode", errorCode))
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		err := errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-		log.Debug("QueryNode::Segment::InsertEnd failed", zap.Error(err))
+	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
 
@@ -682,14 +666,9 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
 
-	var status = C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
-
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("Delete failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	status := C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
+	if err := HandleCStatus(&status, "Delete failed"); err != nil {
+		return err
 	}
 
 	return nil
@@ -775,12 +754,9 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 		row_count: C.int64_t(rowCount),
 	}
 
-	var status = C.LoadFieldData(s.segmentPtr, loadInfo)
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("LoadFieldData failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	status := C.LoadFieldData(s.segmentPtr, loadInfo)
+	if err := HandleCStatus(&status, "LoadFieldData failed"); err != nil {
+		return err
 	}
 
 	log.Debug("load field done",
@@ -810,12 +786,9 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []IntPrimaryKey, timestam
 		CStatus
 		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
 	*/
-	var status = C.LoadDeletedRecord(s.segmentPtr, loadInfo)
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("LoadDeletedRecord failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	status := C.LoadDeletedRecord(s.segmentPtr, loadInfo)
+	if err := HandleCStatus(&status, "LoadDeletedRecord failed"); err != nil {
+		return err
 	}
 
 	log.Debug("load deleted record done",
@@ -839,12 +812,9 @@ func (s *Segment) dropFieldData(fieldID int64) error {
 		return errors.New(errMsg)
 	}
 
-	var status = C.DropFieldData(s.segmentPtr, C.long(fieldID))
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("dropFieldData failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	status := C.DropFieldData(s.segmentPtr, C.long(fieldID))
+	if err := HandleCStatus(&status, "DropFieldData failed"); err != nil {
+		return err
 	}
 
 	log.Debug("dropFieldData done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
@@ -887,11 +857,8 @@ func (s *Segment) updateSegmentIndex(bytesIndex [][]byte, fieldID UniqueID) erro
 	}
 
 	status := C.UpdateSealedSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("updateSegmentIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if err := HandleCStatus(&status, "UpdateSealedSegmentIndex failed"); err != nil {
+		return err
 	}
 
 	s.setType(segmentTypeIndexing)
@@ -915,12 +882,9 @@ func (s *Segment) dropSegmentIndex(fieldID int64) error {
 		return errors.New(errMsg)
 	}
 
-	var status = C.DropSealedSegmentIndex(s.segmentPtr, C.long(fieldID))
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("dropSegmentIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	status := C.DropSealedSegmentIndex(s.segmentPtr, C.long(fieldID))
+	if err := HandleCStatus(&status, "DropSealedSegmentIndex failed"); err != nil {
+		return err
 	}
 
 	log.Debug("dropSegmentIndex done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
