@@ -1,7 +1,14 @@
 import pytest
+from pymilvus.client.types import State
 
 from base.client_base import TestcaseBase
-from common.common_type import CaseLabel
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
+
+prefix = "compact"
+tmp_nb = 100
 
 
 @pytest.mark.skip(reason="Waiting for development")
@@ -14,7 +21,15 @@ class TestCompactionParams(TestcaseBase):
         method: compact after remove connection
         expected: raise exception
         """
-        pass
+        # init collection with tmp_nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+
+        # remove connection and delete
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
+        collection_w.compact(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_twice(self):
@@ -23,7 +38,15 @@ class TestCompactionParams(TestcaseBase):
         method: compact twice
         expected: No exception
         """
-        pass
+        # init collection with tmp_nb default data
+        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0:4]
+        collection_w.delete(f'{ct.default_int64_field_name} in {ids}')
+
+        collection_w.compact()
+        c_plans1 = collection_w.get_compaction_plans()[0]
+
+        collection_w.compact()
+        c_plans2 = collection_w.get_compaction_plans()[0]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_partition(self):
@@ -51,7 +74,13 @@ class TestCompactionParams(TestcaseBase):
         method: compact an empty collection
         expected: No exception
         """
-        pass
+        # init collection and empty
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+
+        # compact
+        collection_w.compact()
+        c_plans, _ = collection_w.get_compaction_plans()
+        assert len(c_plans.plans) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_after_delete_single(self):
@@ -62,7 +91,21 @@ class TestCompactionParams(TestcaseBase):
                 2.compact
         expected: Verify compact result todo
         """
-        pass
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        single_expr = f'{ct.default_int64_field_name} in {[0]}'
+        collection_w.delete(single_expr)
+
+        collection_w.compact()
+        while True:
+            c_state = collection_w.get_compaction_state()
+            if c_state.state == State.Completed:
+                log.debug(f'state: {c_state.state}')
+                break
+        c_plans = collection_w.get_compaction_plans()[0]
+        for plan in c_plans.plans:
+            assert len(plan.sources) == 1
+
+        self.utility_wrap.get_query_segment_info(collection_w.name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_after_delete_half(self):
@@ -74,7 +117,28 @@ class TestCompactionParams(TestcaseBase):
                 4.compact
         expected: collection num_entities decrease
         """
-        pass
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        res, _ = collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb
+        # delete half
+        half_expr = f'{ct.default_int64_field_name} in {res.primary_keys[:tmp_nb // 2]}'
+        collection_w.delete(half_expr)
+
+        collection_w.compact()
+        while True:
+            c_state = collection_w.get_compaction_state()
+            if c_state.state == State.Completed:
+                log.debug(f'state: {c_state.state}')
+                break
+        c_plans = collection_w.get_compaction_plans()[0]
+        for plan in c_plans.plans:
+            assert len(plan.sources) == 1
+
+        collection_w.load()
+        log.debug(collection_w.num_entities)
+
+        self.utility_wrap.get_query_segment_info(collection_w.name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_after_delete_all(self):
@@ -85,7 +149,18 @@ class TestCompactionParams(TestcaseBase):
                 3.compact
         expected: collection num_entities is close to 0
         """
-        pass
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        df = cf.gen_default_dataframe_data()
+        res, _ = collection_w.insert(df)
+
+        assert collection_w.num_entities == ct.default_nb
+
+        expr = f'{ct.default_int64_field_name} in {res.primary_keys}'
+        collection_w.delete(expr)
+
+        # assert collection_w.num_entities == ct.default_nb
+        collection_w.compact()
+        log.debug(collection_w.num_entities)
 
 
 @pytest.mark.skip(reason="Waiting for development")
@@ -184,7 +259,20 @@ class TestCompactionOperation(TestcaseBase):
                 5.search
         expected: Verify segments are merged
         """
-        pass
+        half = ct.default_nb // 2
+        # create collection
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        df = cf.gen_default_dataframe_data()
+        res, _ = collection_w.insert(df[:half])
+        log.debug(collection_w.num_entities)
+
+        collection_w.insert(df[half:])
+        log.debug(collection_w.num_entities)
+
+        collection_w.compact()
+
+        state, _ = collection_w.get_compaction_state()
+        plan, _ = collection_w.get_compaction_plans()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_no_merge(self):
