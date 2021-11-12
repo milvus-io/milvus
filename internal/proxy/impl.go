@@ -1081,6 +1081,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 	return dit.result, nil
 }
 
+// DropIndex drop the index of collection.
 func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
