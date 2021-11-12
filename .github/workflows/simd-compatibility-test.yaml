@@ -2,6 +2,8 @@ name: SIMD Compatibility Test
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "30 18 * * 0"
 
 jobs:
   test-simd-compatibility:
@@ -9,12 +11,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        simd_type: ["sse4_2", "avx", "avx2", "avx512"]   
+        simd_type: ["sse4_2", "avx", "avx2", "avx512"]
     steps:
-      
+
       - name: Creating kind cluster
         uses: helm/kind-action@v1.2.0
-      
+
       - name: Print cluster information
         run: |
           kubectl config view
@@ -37,7 +39,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install --upgrade protobuf
-      
+
       - name: install milvus operator and milvus cluster
         shell: bash
         working-directory: tests/python_client/customize/template
@@ -76,11 +78,10 @@ jobs:
           kubectl port-forward service/my-release-milvus 19530 >/dev/null 2>&1 &
           sleep 20s
           # check whether port-forward success
-          nc -vz 127.0.0.1 19530    
-      
+          nc -vz 127.0.0.1 19530
+
       - name: Run E2E test
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
           python scripts/hello_milvus.py
-          
