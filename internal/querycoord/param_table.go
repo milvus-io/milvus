@@ -93,7 +93,6 @@ func (p *ParamTable) InitOnce() {
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 
-	p.initQueryCoordAddress()
 	p.initRoleName()
 
 	// --- Channels ---
@@ -129,14 +128,6 @@ func (p *ParamTable) Init() {
 	p.initOverloadedMemoryThresholdPercentage()
 	p.initBalanceIntervalSeconds()
 	p.initMemoryUsageMaxDifferencePercentage()
-}
-
-func (p *ParamTable) initQueryCoordAddress() {
-	url, err := p.Load("_QueryCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.Address = url
 }
 
 func (p *ParamTable) initClusterMsgChannelPrefix() {

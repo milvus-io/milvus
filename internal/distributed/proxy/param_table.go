@@ -33,11 +33,6 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	RootCoordAddress  string
-	IndexCoordAddress string
-	DataCoordAddress  string
-	QueryCoordAddress string
-
 	IP      string
 	Port    int
 	Address string
@@ -56,13 +51,7 @@ func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initParams()
-
-		pt.loadFromEnv()
-		pt.loadFromArgs()
 		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
-
-		pt.initServerMaxSendSize()
-		pt.initServerMaxRecvSize()
 	})
 }
 
@@ -71,51 +60,15 @@ func (pt *ParamTable) loadFromArgs() {
 }
 
 func (pt *ParamTable) loadFromEnv() {
-	Params.IP = funcutil.GetLocalIP()
+	pt.IP = funcutil.GetLocalIP()
 }
 
 func (pt *ParamTable) initParams() {
+	pt.loadFromEnv()
+	pt.loadFromArgs()
 	pt.initPort()
-	pt.initRootCoordAddress()
-	pt.initIndexCoordAddress()
-	pt.initDataCoordAddress()
-	pt.initQueryCoordAddress()
-}
-
-// todo remove and use load from env
-func (pt *ParamTable) initIndexCoordAddress() {
-	ret, err := pt.Load("_IndexCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.IndexCoordAddress = ret
-}
-
-// todo remove and use load from env
-func (pt *ParamTable) initRootCoordAddress() {
-	ret, err := pt.Load("_RootCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.RootCoordAddress = ret
-}
-
-// todo remove and use load from env
-func (pt *ParamTable) initDataCoordAddress() {
-	ret, err := pt.Load("_DataCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.DataCoordAddress = ret
-}
-
-// todo remove and use load from env
-func (pt *ParamTable) initQueryCoordAddress() {
-	ret, err := pt.Load("_QueryCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.QueryCoordAddress = ret
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
 func (pt *ParamTable) initPort() {

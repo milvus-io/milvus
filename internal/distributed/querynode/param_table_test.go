@@ -30,18 +30,6 @@ import (
 func TestParamTable(t *testing.T) {
 	Params.Init()
 
-	assert.NotEqual(t, Params.IndexCoordAddress, "")
-	t.Logf("IndexCoordAddress:%s", Params.IndexCoordAddress)
-
-	assert.NotEqual(t, Params.DataCoordAddress, "")
-	t.Logf("DataCoordAddress:%s", Params.DataCoordAddress)
-
-	assert.NotEqual(t, Params.RootCoordAddress, "")
-	t.Logf("RootCoordAddress:%s", Params.RootCoordAddress)
-
-	assert.NotEqual(t, Params.QueryCoordAddress, "")
-	t.Logf("QueryCoordAddress:%s", Params.QueryCoordAddress)
-
 	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
 	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
 
@@ -54,5 +42,5 @@ func TestParamTable(t *testing.T) {
 	assert.Equal(t, Params.ServerMaxRecvSize, grpcconfigs.DefaultServerMaxRecvSize)
 
 	Params.LoadFromEnv()
-	assert.Equal(t, Params.QueryNodeIP, funcutil.GetLocalIP())
+	assert.Equal(t, Params.IP, funcutil.GetLocalIP())
 }

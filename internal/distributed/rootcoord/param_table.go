@@ -22,9 +22,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
 	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 )
 
 // Params is a package scoped variable of type ParamTable.
@@ -36,12 +36,9 @@ var once sync.Once
 type ParamTable struct {
 	paramtable.BaseTable
 
-	Address string // ip:port
+	IP      string
 	Port    int
-
-	IndexCoordAddress string
-	QueryCoordAddress string
-	DataCoordAddress  string
+	Address string
 
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
@@ -49,62 +46,43 @@ type ParamTable struct {
 
 // Init is an override method of BaseTable's Init. It mainly calls the
 // Init of BaseTable and do some other initialization.
-func (p *ParamTable) Init() {
+func (pt *ParamTable) Init() {
 	once.Do(func() {
-		p.BaseTable.Init()
-		p.initAddress()
-		p.initPort()
-		p.initIndexCoordAddress()
-		p.initQueryCoordAddress()
-		p.initDataCoordAddress()
-
-		p.initServerMaxSendSize()
-		p.initServerMaxRecvSize()
+		pt.BaseTable.Init()
+		pt.initParams()
+		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
 	})
 }
 
-func (p *ParamTable) initAddress() {
-	ret, err := p.Load("_RootCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.Address = ret
+// initParams initializes params of the configuration items.
+func (pt *ParamTable) initParams() {
+	pt.LoadFromEnv()
+	pt.LoadFromArgs()
+	pt.initPort()
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
-func (p *ParamTable) initPort() {
-	p.Port = p.ParseInt("rootCoord.port")
+// LoadFromEnv is used to initialize configuration items from env.
+func (pt *ParamTable) LoadFromEnv() {
+	pt.IP = funcutil.GetLocalIP()
 }
 
-func (p *ParamTable) initIndexCoordAddress() {
-	ret, err := p.Load("_IndexCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.IndexCoordAddress = ret
+// LoadFromArgs is used to initialize configuration items from args.
+func (pt *ParamTable) LoadFromArgs() {
+
 }
 
-func (p *ParamTable) initQueryCoordAddress() {
-	ret, err := p.Load("_QueryCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.QueryCoordAddress = ret
+func (pt *ParamTable) initPort() {
+	pt.Port = pt.ParseInt("rootCoord.port")
 }
 
-func (p *ParamTable) initDataCoordAddress() {
-	ret, err := p.Load("_DataCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.DataCoordAddress = ret
-}
-
-func (p *ParamTable) initServerMaxSendSize() {
+func (pt *ParamTable) initServerMaxSendSize() {
 	var err error
 
-	valueStr, err := p.Load("rootCoord.grpc.serverMaxSendSize")
+	valueStr, err := pt.Load("rootCoord.grpc.serverMaxSendSize")
 	if err != nil { // not set
-		p.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
 	}
 
 	value, err := strconv.Atoi(valueStr)
@@ -113,21 +91,21 @@ func (p *ParamTable) initServerMaxSendSize() {
 			zap.String("rootCoord.grpc.serverMaxSendSize", valueStr),
 			zap.Error(err))
 
-		p.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
 	} else {
-		p.ServerMaxSendSize = value
+		pt.ServerMaxSendSize = value
 	}
 
 	log.Debug("initServerMaxSendSize",
-		zap.Int("rootCoord.grpc.serverMaxSendSize", p.ServerMaxSendSize))
+		zap.Int("rootCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
 }
 
-func (p *ParamTable) initServerMaxRecvSize() {
+func (pt *ParamTable) initServerMaxRecvSize() {
 	var err error
 
-	valueStr, err := p.Load("rootCoord.grpc.serverMaxRecvSize")
+	valueStr, err := pt.Load("rootCoord.grpc.serverMaxRecvSize")
 	if err != nil { // not set
-		p.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
 	}
 
 	value, err := strconv.Atoi(valueStr)
@@ -136,11 +114,11 @@ func (p *ParamTable) initServerMaxRecvSize() {
 			zap.String("rootCoord.grpc.serverMaxRecvSize", valueStr),
 			zap.Error(err))
 
-		p.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
 	} else {
-		p.ServerMaxRecvSize = value
+		pt.ServerMaxRecvSize = value
 	}
 
 	log.Debug("initServerMaxRecvSize",
-		zap.Int("rootCoord.grpc.serverMaxRecvSize", p.ServerMaxRecvSize))
+		zap.Int("rootCoord.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

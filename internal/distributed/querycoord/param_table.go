@@ -22,9 +22,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
 	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 )
 
 // Params is a package scoped variable of type ParamTable.
@@ -35,12 +35,10 @@ var once sync.Once
 // embedding paramtable.BaseTable. It is used to quickly and easily access the system configuration.
 type ParamTable struct {
 	paramtable.BaseTable
-	Port int
 
-	RootCoordAddress  string
-	DataCoordAddress  string
-	IndexCoordAddress string
-
+	IP                string
+	Port              int
+	Address           string
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
 }
@@ -50,42 +48,31 @@ type ParamTable struct {
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
-		pt.initPort()
-		pt.initRootCoordAddress()
-		pt.initDataCoordAddress()
-		pt.initIndexCoordAddress()
-
-		pt.initServerMaxSendSize()
-		pt.initServerMaxRecvSize()
+		pt.initParams()
+		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
 	})
 }
 
-func (pt *ParamTable) initRootCoordAddress() {
-	ret, err := pt.Load("_RootCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.RootCoordAddress = ret
-}
-
-func (pt *ParamTable) initDataCoordAddress() {
-	ret, err := pt.Load("_DataCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.DataCoordAddress = ret
-}
-
-func (pt *ParamTable) initIndexCoordAddress() {
-	ret, err := pt.Load("_IndexCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.IndexCoordAddress = ret
+// initParams initializes params of the configuration items.
+func (pt *ParamTable) initParams() {
+	pt.LoadFromEnv()
+	pt.LoadFromArgs()
+	pt.initPort()
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
 func (pt *ParamTable) initPort() {
 	pt.Port = pt.ParseInt("queryCoord.port")
+}
+
+func (pt *ParamTable) LoadFromEnv() {
+	pt.IP = funcutil.GetLocalIP()
+}
+
+// LoadFromArgs is used to initialize configuration items from args.
+func (pt *ParamTable) LoadFromArgs() {
+
 }
 
 func (pt *ParamTable) initServerMaxSendSize() {

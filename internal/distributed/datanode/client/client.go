@@ -78,6 +78,7 @@ func (c *Client) getGrpcClientFunc() (datapb.DataNodeClient, error) {
 	// if we return nil here, then we should check if client is nil outside,
 	err := c.connect(retry.Attempts(20))
 	if err != nil {
+		log.Debug("DatanodeClient try reconnect failed", zap.Error(err))
 		return nil, err
 	}
 

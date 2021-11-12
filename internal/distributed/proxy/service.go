@@ -148,8 +148,6 @@ func (s *Server) init() error {
 	proxy.Params.IP = Params.IP
 
 	proxy.Params.NetworkAddress = Params.Address
-	// for purpose of ID Allocator
-	proxy.Params.RootCoordAddress = Params.RootCoordAddress
 
 	closer := trace.InitTracing(fmt.Sprintf("proxy ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
@@ -173,9 +171,6 @@ func (s *Server) init() error {
 		return err
 	}
 
-	rootCoordAddr := Params.RootCoordAddress
-	log.Debug("Proxy", zap.String("RootCoord address", rootCoordAddr))
-
 	if s.rootCoordClient == nil {
 		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)
 		if err != nil {
@@ -196,9 +191,6 @@ func (s *Server) init() error {
 	s.proxy.SetRootCoordClient(s.rootCoordClient)
 	log.Debug("set rootcoord client ...")
 
-	dataCoordAddr := Params.DataCoordAddress
-	log.Debug("Proxy", zap.String("data coordinator address", dataCoordAddr))
-
 	if s.dataCoordClient == nil {
 		s.dataCoordClient, err = grpcdatacoordclient.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)
 		if err != nil {
@@ -215,9 +207,6 @@ func (s *Server) init() error {
 	s.proxy.SetDataCoordClient(s.dataCoordClient)
 	log.Debug("set data coordinator address ...")
 
-	indexCoordAddr := Params.IndexCoordAddress
-	log.Debug("Proxy", zap.String("index coordinator address", indexCoordAddr))
-
 	if s.indexCoordClient == nil {
 		s.indexCoordClient, err = grpcindexcoordclient.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)
 		if err != nil {
@@ -233,9 +222,6 @@ func (s *Server) init() error {
 
 	s.proxy.SetIndexCoordClient(s.indexCoordClient)
 	log.Debug("set index coordinator client ...")
-
-	queryCoordAddr := Params.QueryCoordAddress
-	log.Debug("Proxy", zap.String("query coordinator address", queryCoordAddr))
 
 	if s.queryCooedClient == nil {
 		s.queryCooedClient, err = grpcquerycoordclient.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)

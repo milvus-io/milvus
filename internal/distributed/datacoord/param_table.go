@@ -22,9 +22,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
 	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 )
 
 // ParamTable is a derived struct of paramtable.BaseTable. It achieves Composition by
@@ -32,9 +32,9 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	IP               string
-	Port             int
-	RootCoordAddress string
+	IP      string
+	Port    int
+	Address string
 
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
@@ -49,42 +49,31 @@ var once sync.Once
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
-		pt.initPort()
 		pt.initParams()
-		pt.loadFromEnv()
-
-		pt.initServerMaxSendSize()
-		pt.initServerMaxRecvSize()
+		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
 	})
 }
 
 func (pt *ParamTable) initParams() {
-	pt.initRootCoordAddress()
-	pt.initDataCoordAddress()
+	pt.loadFromEnv()
+	pt.loadFromArgs()
+	pt.initPort()
+
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
 func (pt *ParamTable) loadFromEnv() {
+	Params.IP = funcutil.GetLocalIP()
+}
+
+// LoadFromArgs is used to initialize configuration items from args.
+func (pt *ParamTable) loadFromArgs() {
 
 }
 
 func (pt *ParamTable) initPort() {
 	pt.Port = pt.ParseInt("dataCoord.port")
-}
-
-func (pt *ParamTable) initRootCoordAddress() {
-	ret, err := pt.Load("_RootCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.RootCoordAddress = ret
-}
-
-func (pt *ParamTable) initDataCoordAddress() {
-	ret, err := pt.Load("_DataCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.IP = ret
 }
 
 func (pt *ParamTable) initServerMaxSendSize() {
