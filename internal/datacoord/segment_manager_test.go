@@ -538,6 +538,35 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 			},
 			[]UniqueID{2},
 		},
+		{
+			"test drop segments with dropped segment",
+			fields{
+				meta: &meta{
+					segments: &SegmentsInfo{
+						segments: map[int64]*SegmentInfo{
+							1: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:            1,
+									InsertChannel: "ch1",
+									State:         commonpb.SegmentState_Dropped,
+								},
+							},
+							2: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:            2,
+									InsertChannel: "ch2",
+								},
+							},
+						},
+					},
+				},
+				segments: []UniqueID{1, 2, 3},
+			},
+			args{
+				"ch1",
+			},
+			[]UniqueID{2},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

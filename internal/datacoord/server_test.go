@@ -745,7 +745,6 @@ func (s *spySegmentManager) AllocSegment(ctx context.Context, collectionID Uniqu
 
 // DropSegment drops the segment from manager.
 func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
-	panic("not implemented") // TODO: Implement
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments

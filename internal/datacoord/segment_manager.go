@@ -493,8 +493,12 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 	validSegments := make([]int64, 0, len(s.segments))
 	for _, sid := range s.segments {
 		segment := s.meta.GetSegment(sid)
-		if segment != nil && segment.GetInsertChannel() != channel {
+		if segment == nil {
+			continue
+		}
+		if segment.GetInsertChannel() != channel {
 			validSegments = append(validSegments, sid)
+			continue
 		}
 		s.meta.SetAllocations(sid, nil)
 		for _, allocation := range segment.allocations {

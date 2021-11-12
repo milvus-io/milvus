@@ -395,6 +395,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		fpMut.Unlock()
 		colRep.listNewSegmentsStartPositions()
 		colRep.listSegmentsCheckPoints()
+		if pack.flushed || pack.dropped {
+			colRep.segmentFlushed(pack.segmentID)
+		}
 		wg.Done()
 		return nil
 	})
