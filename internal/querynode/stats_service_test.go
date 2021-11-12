@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"context"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -29,15 +30,18 @@ func TestStatsService_start(t *testing.T) {
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	msFactory.SetParams(m)
-	node.historical.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, nil, msFactory)
-	node.historical.statsService.start()
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, msFactory)
+	node.statsService.start()
 	node.Stop()
 }
 
 //NOTE: start pulsar before test
 func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
-	node := newQueryNodeMock()
-	initTestMeta(t, node, 0, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
 
 	const receiveBufSize = 1024
 	// start pulsar
@@ -48,7 +52,7 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 		"receiveBufSize": receiveBufSize,
 		"pulsarAddress":  Params.PulsarAddress,
 		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
+	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
 	statsStream, err := msFactory.NewMsgStream(node.queryNodeLoopCtx)
@@ -57,11 +61,11 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
-	node.historical.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, nil, msFactory)
-	node.historical.statsService.statsStream = statsMsgStream
-	node.historical.statsService.statsStream.Start()
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, msFactory)
+	node.statsService.statsStream = statsMsgStream
+	node.statsService.statsStream.Start()
 
 	// send stats
-	node.historical.statsService.publicStatistic(nil)
+	node.statsService.publicStatistic(nil)
 	node.Stop()
 }

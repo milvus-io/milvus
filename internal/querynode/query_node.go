@@ -87,6 +87,10 @@ type QueryNode struct {
 
 	// internal services
 	queryService *queryService
+	statsService *statsService
+
+	// segment loader
+	loader *segmentLoader
 
 	// clients
 	rootCoord  types.RootCoord
@@ -192,9 +196,6 @@ func (node *QueryNode) Init() error {
 
 		node.historical = newHistorical(node.queryNodeLoopCtx,
 			historicalReplica,
-			node.rootCoord,
-			node.indexCoord,
-			node.msFactory,
 			node.etcdKV,
 			node.tSafeReplica,
 		)
@@ -205,17 +206,33 @@ func (node *QueryNode) Init() error {
 			node.tSafeReplica,
 		)
 
+		node.loader = newSegmentLoader(node.queryNodeLoopCtx,
+			node.rootCoord,
+			node.indexCoord,
+			node.historical.replica,
+			node.streaming.replica,
+			node.etcdKV)
+
+		node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.msFactory)
 		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.msFactory)
 
 		node.InitSegcore()
 
 		if node.rootCoord == nil {
-			log.Error("null root coordinator detected")
+			initError = errors.New("null root coordinator detected when queryNode init")
+			return
 		}
 
 		if node.indexCoord == nil {
-			log.Error("null index coordinator detected")
+			initError = errors.New("null index coordinator detected when queryNode init")
+			return
 		}
+
+		log.Debug("query node init successfully",
+			zap.Any("queryNodeID", Params.QueryNodeID),
+			zap.Any("IP", Params.QueryNodeIP),
+			zap.Any("Port", Params.QueryNodePort),
+		)
 	})
 
 	return initError
@@ -246,11 +263,17 @@ func (node *QueryNode) Start() error {
 	// start services
 	go node.historical.start()
 	go node.watchChangeInfo()
+	go node.statsService.start()
 
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("query node start successfully",
+		zap.Any("queryNodeID", Params.QueryNodeID),
+		zap.Any("IP", Params.QueryNodeIP),
+		zap.Any("Port", Params.QueryNodePort),
+	)
 	return nil
 }
 
@@ -271,6 +294,9 @@ func (node *QueryNode) Stop() error {
 	}
 	if node.queryService != nil {
 		node.queryService.close()
+	}
+	if node.statsService != nil {
+		node.statsService.close()
 	}
 	return nil
 }

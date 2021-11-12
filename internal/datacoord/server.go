@@ -783,6 +783,12 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
 func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo {
 	segments := s.meta.GetSegmentsByChannel(channel)
+	log.Debug("GetSegmentsByChannel",
+		zap.Any("collectionID", collectionID),
+		zap.Any("channel", channel),
+		zap.Any("seekFromStartPosition", seekFromStartPosition),
+		zap.Any("numOfSegments", len(segments)),
+	)
 	flushed := make([]*datapb.SegmentInfo, 0)
 	unflushed := make([]*datapb.SegmentInfo, 0)
 	var seekPosition *internalpb.MsgPosition
@@ -799,7 +805,7 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 			continue
 		}
 
-		unflushed = append(unflushed, trimSegmentInfo(s.SegmentInfo))
+		unflushed = append(unflushed, s.SegmentInfo)
 
 		segmentPosition := s.DmlPosition
 		if seekFromStartPosition {

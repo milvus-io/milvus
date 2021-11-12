@@ -136,7 +136,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	historicalReplica := newCollectionReplica(etcdKV)
 	tsReplica := newTSafeReplica()
 	streamingReplica := newCollectionReplica(etcdKV)
-	historical := newHistorical(context.Background(), historicalReplica, nil, nil, factory, etcdKV, tsReplica)
+	historical := newHistorical(context.Background(), historicalReplica, etcdKV, tsReplica)
 
 	//add a segment to historical data
 	err = historical.replica.addCollection(0, schema)

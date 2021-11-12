@@ -195,9 +195,11 @@ func newQueryNodeMock() *QueryNode {
 	tsReplica := newTSafeReplica()
 	streamingReplica := newCollectionReplica(etcdKV)
 	historicalReplica := newCollectionReplica(etcdKV)
-	svr.historical = newHistorical(svr.queryNodeLoopCtx, historicalReplica, nil, nil, svr.msFactory, etcdKV, tsReplica)
+	svr.historical = newHistorical(svr.queryNodeLoopCtx, historicalReplica, etcdKV, tsReplica)
 	svr.streaming = newStreaming(ctx, streamingReplica, msFactory, etcdKV, tsReplica)
 	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, msFactory)
+	svr.statsService = newStatsService(ctx, svr.historical.replica, nil, msFactory)
+	svr.loader = newSegmentLoader(ctx, nil, nil, svr.historical.replica, svr.streaming.replica, etcdKV)
 	svr.etcdKV = etcdKV
 
 	return svr
@@ -275,7 +277,7 @@ func TestQueryNode_init(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = node.Init()
-	assert.NoError(t, err)
+	assert.Error(t, err)
 }
 
 func genSimpleQueryNodeToTestWatchChangeInfo(ctx context.Context) (*QueryNode, error) {
