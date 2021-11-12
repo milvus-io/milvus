@@ -58,6 +58,7 @@ type ddNode struct {
 
 	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
 	flushedSegments []*datapb.SegmentInfo
+	vchannelName    string
 
 	deltaMsgStream msgstream.MsgStream
 	dropMode       atomic.Value
@@ -91,7 +92,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	}
 
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
-		log.Debug("ddNode in dropMode")
+		log.Debug("ddNode in dropMode",
+			zap.String("vchannel name", ddn.vchannelName),
+			zap.Int64("collection ID", ddn.collectionID))
 		return []Msg{}
 	}
 
@@ -274,6 +277,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 		BaseNode:        baseNode,
 		collectionID:    collID,
 		flushedSegments: fs,
+		vchannelName:    vchanInfo.ChannelName,
 		deltaMsgStream:  deltaMsgStream,
 	}
 
