@@ -174,6 +174,7 @@ func (dsService *dataSyncService) startCollectionDeltaFlowGraph(collectionID Uni
 	return nil
 }
 
+// removeCollectionFlowGraph would remove the collection flow graph by collectionID
 func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueID) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
