@@ -31,7 +31,7 @@ RootCoord, it will first check whether the same index has been created according
 return the IndexBuildID of the existing task. Otherwise, it would assign a globally unique IndexBuildID to the task,
 record the task in the MetaTable, write the MetaTable to etcd, and then return the IndexBuildID to RootCoord.
 RootCoord confirms the index building was generated successfully by the IndexBuildID. At this time, the index construction
-is completed yet. IndexCoord starts a background process to find all the index tasks that need to be
+is not completed yet. IndexCoord starts a background process to find all the index tasks that need to be
 allocated periodically, and then allocates them to IndexNode for actual execution.
 
 When IndexCoord receives a request to delete an index from RootCoord, IndexCoord traverses the MetaTable,
