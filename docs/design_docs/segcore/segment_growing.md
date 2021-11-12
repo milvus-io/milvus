@@ -32,7 +32,7 @@ When `metric type` is specified in the schema, the default parameters will build
 
 ### SegcoreConfig
 
-1. Manage chunk_sizeand small index parateters
+1. Manage chunk_sizeand small index parameters
 2. `parse_from` can parse from yaml files（this function is not enabled by default）
    - refer to `${milvus}/internal/core/unittest/test_utils/test_segcore.yaml`
 3. `default_config` offers default parameters
