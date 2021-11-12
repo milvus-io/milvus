@@ -64,7 +64,7 @@ class TestDeleteParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
         collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
-    # Not MilvusException
+    # Not Milvus Exception
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_none(self):
         """
