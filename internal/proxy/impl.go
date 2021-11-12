@@ -1014,6 +1014,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	return cit.result, nil
 }
 
+// DescribeIndex get the meta information of index, such as index state, index id and etc.
 func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.DescribeIndexResponse{
