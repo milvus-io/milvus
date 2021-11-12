@@ -6,7 +6,6 @@ import pytest
 from base.collection_wrapper import ApiCollectionWrapper
 from common.common_type import CaseLabel
 from scale.helm_env import HelmEnv
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from scale import constants
