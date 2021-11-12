@@ -59,6 +59,12 @@ rootCoord:
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
+  dmlChannelNum: 256 # The number of dml channels created at system startup
+  maxPartitionNum: 4096 # Maximum number of partitions in a collection
+  minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
+  timeout: 3600 # time out, 5 seconds
+  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
+
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
   port: 19530
@@ -68,6 +74,23 @@ proxy:
     serverMaxSendSize: 2147483647 # math.MaxInt32
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
+  msgStream:
+    insert:
+      bufSize: 1024 # msgPack chan buffer size
+    search:
+      bufSize: 512
+    searchResult:
+      recvBufSize: 1024 # msgPack chan buffer size
+      pulsarBufSize: 1024 # pulsar chan buffer size
+    timeTick:
+      bufSize: 512
+  maxNameLength: 255  # max name length of collection or alias
+  maxFieldNum: 64     # max field number of a collection
+  maxDimension: 32768 # Maximum dimension of vector
+  maxShardNum: 256 # Maximum number of shards in a collection
+  maxTaskNum: 1024 # max task number of proxy task queue
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
@@ -96,6 +119,23 @@ queryNode:
     serverMaxSendSize: 2147483647 # math.MaxInt32
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+  stats:
+    publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
+  dataSync:
+    flowGraph:
+      maxQueueLength: 1024 # Maximum length of task queue in flowgraph
+      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
+  msgStream:
+    search:
+      recvBufSize: 512 # msgPack channel buffer size
+      pulsarBufSize: 512 # pulsar channel buffer size
+    searchResult:
+      recvBufSize: 64 # msgPack channel buffer size
+  # Segcore will divide a segment into multiple chunks.
+  segcore:
+    chunkRows: 32768 # The number of vectors in a chunk.
+
 
 indexCoord:
   address: localhost
@@ -128,6 +168,11 @@ dataCoord:
   enableCompaction: false
   enableGarbageCollection: false
 
+  segment:
+    maxSize: 512 # Maximum size of a segment in MB
+    sealProportion: 0.75 # It's the minimum proportion for a segment which can be sealed
+    assignmentExpiration: 2000 # ms
+
 dataNode:
   port: 21124
 
@@ -136,6 +181,14 @@ dataNode:
     serverMaxSendSize: 2147483647 # math.MaxInt32
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+  dataSync:
+    flowGraph:
+      maxQueueLength: 1024 # Maximum length of task queue in flowgraph
+      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
+  flush:
+    # Max buffer size to flush for a single segment.
+    insertBufSize: 16777216 # Bytes, 16 MB
 
 # Configure whether to store the vector and the local path when querying/searching in Querynode.
 localStorage:
