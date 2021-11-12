@@ -124,6 +124,7 @@ func (s *Server) setClient() {
 	}
 }
 
+// Run initializes and starts RootCoord's grpc service.
 func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
