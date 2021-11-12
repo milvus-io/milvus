@@ -10,13 +10,21 @@ from milvus_operator import MilvusOperator
 from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel
 
-supported_simd_types = ["sse4_2", "avx", "avx2", "avx512"]
+# sorted by the priority order of the simd
+# | configuration | possible returned SIMD |
+# |--------|----------|
+# | auto | avx512 / avx2 / sse4_2|
+# | avx512 | avx512 / avx2 / sse4_2|
+# | avx2 | avx2 / sse4_2|
+# | avx | sse4_2|
+# | sse4_2 | sse4_2|
+supported_simd_types = ["avx512", "avx2", "avx", "sse4_2"]
 namespace = 'chaos-testing'
 
 
 def _install_milvus(simd):
     release_name = f"mil-{simd.replace('_','-')}-" + cf.gen_digits_by_length(6)
-    cus_configs = {'spec.components.image': 'milvusdb/milvus-dev:master-20211104-91be4b1',
+    cus_configs = {'spec.components.image': 'milvusdb/milvus-dev:master-latest',
                    'metadata.namespace': namespace,
                    'metadata.name': release_name,
                    'spec.components.proxy.serviceType': 'LoadBalancer',
@@ -44,14 +52,15 @@ class TestSimdCompatibility:
         milvus_op.uninstall(self.release_name, namespace)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize('simd', supported_simd_types)
-    def test_simd_compat_e2e(self, simd):
+    @pytest.mark.parametrize('simd_id', [i for i in range(len(supported_simd_types))])
+    def test_simd_compat_e2e(self, simd_id):
         """
        steps
        1. [test_milvus_install]: set up milvus with customized simd configured
        2. [test_simd_compat_e2e]: verify milvus is working well
        4. [test_milvus_cleanup]: delete milvus instances in teardown
        """
+        simd = supported_simd_types[simd_id]
         log.info(f"start to install milvus with simd {simd}")
         release_name, host, port = _install_milvus(simd)
         self.release_name = release_name
@@ -61,7 +70,7 @@ class TestSimdCompatibility:
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
         log.info(f"milvus simdType: {mil.simd_type}")
-        assert str(mil.simd_type).lower() == simd.lower()
+        assert str(mil.simd_type).lower() in [simd_type.lower() for simd_type in supported_simd_types[simd_id:]]
 
         log.info(f"start to e2e verification: {simd}")
         # create
