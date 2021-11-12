@@ -32,8 +32,10 @@ import (
 )
 
 const (
-	defaultTotalmemPerNode = 6000000000
+	defaultTotalmemPerNode = 6000000
 )
+
+var GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
 
 type queryNodeServerMock struct {
 	querypb.QueryNodeServer
@@ -58,9 +60,9 @@ type queryNodeServerMock struct {
 	getSegmentInfos     func() (*querypb.GetSegmentInfoResponse, error)
 	getMetrics          func() (*milvuspb.GetMetricsResponse, error)
 
-	totalMem     uint64
-	memUsage     uint64
-	memUsageRate float64
+	segmentInfos map[UniqueID]*querypb.SegmentInfo
+
+	totalMem uint64
 }
 
 func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
@@ -81,9 +83,9 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 		getSegmentInfos:     returnSuccessGetSegmentInfoResult,
 		getMetrics:          returnSuccessGetMetricsResult,
 
-		totalMem:     defaultTotalmemPerNode,
-		memUsage:     uint64(0),
-		memUsageRate: float64(0),
+		segmentInfos: GlobalSegmentInfos,
+
+		totalMem: defaultTotalmemPerNode,
 	}
 }
 
@@ -194,12 +196,19 @@ func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.Lo
 	if err != nil {
 		return returnFailedResult()
 	}
-	totalNumRow := int64(0)
 	for _, info := range req.Infos {
-		totalNumRow += info.NumOfRows
+		segmentInfo := &querypb.SegmentInfo{
+			SegmentID:    info.SegmentID,
+			PartitionID:  info.PartitionID,
+			CollectionID: info.CollectionID,
+			NodeID:       qs.queryNodeID,
+			SegmentState: querypb.SegmentState_sealed,
+			MemSize:      info.NumOfRows * int64(sizePerRecord),
+			NumRows:      info.NumOfRows,
+		}
+		qs.segmentInfos[info.SegmentID] = segmentInfo
 	}
-	qs.memUsage += uint64(totalNumRow) * uint64(sizePerRecord)
-	qs.memUsageRate = float64(qs.memUsage) / float64(qs.totalMem)
+
 	return qs.loadSegment()
 }
 
@@ -215,8 +224,19 @@ func (qs *queryNodeServerMock) ReleaseSegments(ctx context.Context, req *querypb
 	return qs.releaseSegments()
 }
 
-func (qs *queryNodeServerMock) GetSegmentInfo(context.Context, *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	return qs.getSegmentInfos()
+func (qs *queryNodeServerMock) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	segmentInfos := make([]*querypb.SegmentInfo, 0)
+	for _, info := range qs.segmentInfos {
+		if info.CollectionID == req.CollectionID && info.NodeID == qs.queryNodeID {
+			segmentInfos = append(segmentInfos, info)
+		}
+	}
+
+	res, err := qs.getSegmentInfos()
+	if err == nil {
+		res.Infos = segmentInfos
+	}
+	return res, err
 }
 
 func (qs *queryNodeServerMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
@@ -227,13 +247,20 @@ func (qs *queryNodeServerMock) GetMetrics(ctx context.Context, req *milvuspb.Get
 	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, errors.New("query node do task failed")
 	}
+
+	totalMemUsage := uint64(0)
+	for _, info := range qs.segmentInfos {
+		if info.NodeID == qs.queryNodeID {
+			totalMemUsage += uint64(info.MemSize)
+		}
+	}
 	nodeInfos := metricsinfo.QueryNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, qs.queryNodeID),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:          qs.queryNodeIP,
 				Memory:      qs.totalMem,
-				MemoryUsage: qs.memUsage,
+				MemoryUsage: totalMemUsage,
 			},
 			Type: typeutil.QueryNodeRole,
 			ID:   qs.queryNodeID,

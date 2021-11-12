@@ -453,7 +453,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 
 	}
 
-	internalTasks, err := assignInternalTask(ctx, collectionID, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, watchDeltaChannelReqs, false, nil)
+	internalTasks, err := assignInternalTask(ctx, collectionID, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, watchDeltaChannelReqs, false, nil, nil)
 	if err != nil {
 		log.Warn("loadCollectionTask: assign child task failed", zap.Int64("collectionID", collectionID))
 		lct.setResultInfo(err)
@@ -783,7 +783,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 
 		}
 	}
-	internalTasks, err := assignInternalTask(ctx, collectionID, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmReqs, watchDeltaReqs, false, nil)
+	internalTasks, err := assignInternalTask(ctx, collectionID, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmReqs, watchDeltaReqs, false, nil, nil)
 	if err != nil {
 		log.Warn("loadPartitionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 		lpt.setResultInfo(err)
@@ -1082,7 +1082,7 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 	}
 	lst.excludeNodeIDs = append(lst.excludeNodeIDs, lst.DstNodeID)
 	//TODO:: wait or not according msgType
-	reScheduledTasks, err := assignInternalTask(ctx, collectionID, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, nil, false, lst.excludeNodeIDs)
+	reScheduledTasks, err := assignInternalTask(ctx, collectionID, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, nil, false, lst.excludeNodeIDs, nil)
 	if err != nil {
 		log.Error("loadSegment reschedule failed", zap.Int64s("excludeNodes", lst.excludeNodeIDs), zap.Error(err))
 		return nil, err
@@ -1257,7 +1257,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 	}
 	wdt.excludeNodeIDs = append(wdt.excludeNodeIDs, wdt.NodeID)
 	//TODO:: wait or not according msgType
-	reScheduledTasks, err := assignInternalTask(ctx, collectionID, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, nil, false, wdt.excludeNodeIDs)
+	reScheduledTasks, err := assignInternalTask(ctx, collectionID, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, nil, false, wdt.excludeNodeIDs, nil)
 	if err != nil {
 		log.Error("watchDmChannel reschedule failed", zap.Int64s("excludeNodes", wdt.excludeNodeIDs), zap.Error(err))
 		return nil, err
@@ -1557,7 +1557,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				ht.setResultInfo(err)
 				return err
 			}
-			internalTasks, err := assignInternalTask(ctx, collectionID, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{loadSegmentReq}, nil, watchDeltaChannelReqs, true, nil)
+			internalTasks, err := assignInternalTask(ctx, collectionID, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{loadSegmentReq}, nil, watchDeltaChannelReqs, true, nil, nil)
 			if err != nil {
 				log.Error("handoffTask: assign child task failed", zap.Any("segmentInfo", segmentInfo))
 				ht.setResultInfo(err)
@@ -1774,7 +1774,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					}
 				}
 
-				internalTasks, err := assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, watchDeltaChannelReqs, true, lbt.SourceNodeIDs)
+				internalTasks, err := assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, watchDeltaChannelReqs, true, lbt.SourceNodeIDs, lbt.DstNodeIDs)
 				if err != nil {
 					log.Warn("loadBalanceTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 					lbt.setResultInfo(err)
@@ -1925,7 +1925,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 			}
 
 			// TODO:: assignInternalTask with multi collection
-			internalTasks, err := assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, nil, watchDeltaChannelReqs, false, lbt.SourceNodeIDs)
+			internalTasks, err := assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, nil, watchDeltaChannelReqs, false, lbt.SourceNodeIDs, lbt.DstNodeIDs)
 			if err != nil {
 				log.Warn("loadBalanceTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 				lbt.setResultInfo(err)
@@ -2006,11 +2006,11 @@ func assignInternalTask(ctx context.Context,
 	loadSegmentRequests []*querypb.LoadSegmentsRequest,
 	watchDmChannelRequests []*querypb.WatchDmChannelsRequest,
 	watchDeltaChannelRequests []*querypb.WatchDeltaChannelsRequest,
-	wait bool, excludeNodeIDs []int64) ([]task, error) {
+	wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) ([]task, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	internalTasks := make([]task, 0)
-	err := cluster.allocateSegmentsToQueryNode(ctx, loadSegmentRequests, wait, excludeNodeIDs)
+	err := cluster.allocateSegmentsToQueryNode(ctx, loadSegmentRequests, wait, excludeNodeIDs, includeNodeIDs)
 	if err != nil {
 		log.Error("assignInternalTask: assign segment to node failed", zap.Any("load segments requests", loadSegmentRequests))
 		return nil, err

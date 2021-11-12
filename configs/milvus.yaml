@@ -74,6 +74,10 @@ queryCoord:
   address: localhost
   port: 19531
   autoHandoff: true
+  autoBalance: false
+  overloadedMemoryThresholdPercentage: 90
+  balanceIntervalSeconds: 60
+  memoryUsageMaxDifferencePercentage: 30
 
   grpc:
     serverMaxRecvSize: 2147483647 # math.MaxInt32

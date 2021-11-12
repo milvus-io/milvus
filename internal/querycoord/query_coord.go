@@ -14,6 +14,9 @@ package querycoord
 import (
 	"context"
 	"errors"
+	"math"
+	"sort"
+
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -183,6 +186,9 @@ func (qc *QueryCoord) Start() error {
 
 	qc.loopWg.Add(1)
 	go qc.watchHandoffSegmentLoop()
+
+	qc.loopWg.Add(1)
+	go qc.loadBalanceSegmentLoop()
 
 	go qc.session.LivenessCheck(qc.loopCtx, func() {
 		log.Error("Query Coord disconnected from etcd, process will exit", zap.Int64("Server Id", qc.session.ServerID))
@@ -562,4 +568,180 @@ func (qc *QueryCoord) processHandoffAfterIndexDone(ctx context.Context, indexedC
 			}
 		}
 	}
+}
+
+func (qc *QueryCoord) loadBalanceSegmentLoop() {
+	ctx, cancel := context.WithCancel(qc.loopCtx)
+	defer cancel()
+	defer qc.loopWg.Done()
+	log.Debug("query coordinator start load balance segment loop")
+
+	timer := time.NewTicker(time.Duration(Params.BalanceIntervalSeconds) * time.Second)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			onlineNodes, err := qc.cluster.onlineNodes()
+			if err != nil {
+				log.Warn("loadBalanceSegmentLoop: there are no online query node to balance")
+				continue
+			}
+			// get mem info of online nodes from cluster
+			nodeID2MemUsageRate := make(map[int64]float64)
+			nodeID2MemUsage := make(map[int64]uint64)
+			nodeID2TotalMem := make(map[int64]uint64)
+			nodeID2SegmentInfos := make(map[int64]map[UniqueID]*querypb.SegmentInfo)
+			onlineNodeIDs := make([]int64, 0)
+			for nodeID := range onlineNodes {
+				nodeInfo, err := qc.cluster.getNodeInfoByID(nodeID)
+				if err != nil {
+					log.Warn("loadBalanceSegmentLoop: get node info from query node failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					delete(onlineNodes, nodeID)
+					continue
+				}
+
+				updateSegmentInfoDone := true
+				leastSegmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
+				segmentInfos := qc.meta.getSegmentInfosByNode(nodeID)
+				for _, segmentInfo := range segmentInfos {
+					leastInfo, err := qc.cluster.getSegmentInfoByID(ctx, segmentInfo.SegmentID)
+					if err != nil {
+						log.Warn("loadBalanceSegmentLoop: get segment info from query node failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+						delete(onlineNodes, nodeID)
+						updateSegmentInfoDone = false
+						break
+					}
+					leastSegmentInfos[segmentInfo.SegmentID] = leastInfo
+				}
+				if updateSegmentInfoDone {
+					nodeID2MemUsageRate[nodeID] = nodeInfo.(*queryNode).memUsageRate
+					nodeID2MemUsage[nodeID] = nodeInfo.(*queryNode).memUsage
+					nodeID2TotalMem[nodeID] = nodeInfo.(*queryNode).totalMem
+					onlineNodeIDs = append(onlineNodeIDs, nodeID)
+					nodeID2SegmentInfos[nodeID] = leastSegmentInfos
+				}
+			}
+			log.Debug("loadBalanceSegmentLoop: memory usage rage of all online query node", zap.Any("mem rate", nodeID2MemUsageRate))
+			if len(onlineNodeIDs) <= 1 {
+				log.Warn("loadBalanceSegmentLoop: there are too few online query nodes to balance", zap.Int64s("onlineNodeIDs", onlineNodeIDs))
+				continue
+			}
+
+			// check which nodes need balance and determine which segments on these nodes need to be migrated to other nodes
+			memoryInsufficient := false
+			loadBalanceTasks := make([]*loadBalanceTask, 0)
+			for {
+				var selectedSegmentInfo *querypb.SegmentInfo = nil
+				sort.Slice(onlineNodeIDs, func(i, j int) bool {
+					return nodeID2MemUsageRate[onlineNodeIDs[i]] > nodeID2MemUsageRate[onlineNodeIDs[j]]
+				})
+
+				// the memoryUsageRate of the sourceNode is higher than other query node
+				sourceNodeID := onlineNodeIDs[0]
+				dstNodeID := onlineNodeIDs[len(onlineNodeIDs)-1]
+				memUsageRateDiff := nodeID2MemUsageRate[sourceNodeID] - nodeID2MemUsageRate[dstNodeID]
+				// if memoryUsageRate of source node is greater then 90%, and the max memUsageDiff is greater than 30%
+				// then migrate the segments on source node to other query nodes
+				if nodeID2MemUsageRate[sourceNodeID] > Params.OverloadedMemoryThresholdPercentage ||
+					memUsageRateDiff > Params.MemoryUsageMaxDifferencePercentage {
+					segmentInfos := nodeID2SegmentInfos[sourceNodeID]
+					// select the segment that needs balance on the source node
+					selectedSegmentInfo, err = chooseSegmentToBalance(sourceNodeID, dstNodeID, segmentInfos, nodeID2MemUsage, nodeID2TotalMem, nodeID2MemUsageRate)
+					if err == nil && selectedSegmentInfo != nil {
+						req := &querypb.LoadBalanceRequest{
+							Base: &commonpb.MsgBase{
+								MsgType: commonpb.MsgType_LoadBalanceSegments,
+							},
+							BalanceReason:    querypb.TriggerCondition_loadBalance,
+							SourceNodeIDs:    []UniqueID{sourceNodeID},
+							DstNodeIDs:       []UniqueID{dstNodeID},
+							SealedSegmentIDs: []UniqueID{selectedSegmentInfo.SegmentID},
+						}
+						baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_loadBalance)
+						balanceTask := &loadBalanceTask{
+							baseTask:           baseTask,
+							LoadBalanceRequest: req,
+							rootCoord:          qc.rootCoordClient,
+							dataCoord:          qc.dataCoordClient,
+							cluster:            qc.cluster,
+							meta:               qc.meta,
+						}
+						loadBalanceTasks = append(loadBalanceTasks, balanceTask)
+						nodeID2MemUsage[sourceNodeID] -= uint64(selectedSegmentInfo.MemSize)
+						nodeID2MemUsage[dstNodeID] += uint64(selectedSegmentInfo.MemSize)
+						nodeID2MemUsageRate[sourceNodeID] = float64(nodeID2MemUsage[sourceNodeID]) / float64(nodeID2TotalMem[sourceNodeID])
+						nodeID2MemUsageRate[dstNodeID] = float64(nodeID2MemUsage[dstNodeID]) / float64(nodeID2TotalMem[dstNodeID])
+						delete(nodeID2SegmentInfos[sourceNodeID], selectedSegmentInfo.SegmentID)
+						nodeID2SegmentInfos[dstNodeID][selectedSegmentInfo.SegmentID] = selectedSegmentInfo
+						continue
+					}
+				}
+				if err != nil {
+					// no enough memory on query nodes to balance, then notify proxy to stop insert
+					memoryInsufficient = true
+				}
+				// if memoryInsufficient == false
+				// all query node's memoryUsageRate is less than 90%, and the max memUsageDiff is less than 30%
+				// this balance loop is done
+				break
+			}
+			if !memoryInsufficient {
+				for _, t := range loadBalanceTasks {
+					qc.scheduler.Enqueue(t)
+					log.Debug("loadBalanceSegmentLoop: enqueue a loadBalance task", zap.Any("task", t))
+					err = t.waitToFinish()
+					if err != nil {
+						// if failed, wait for next balance loop
+						// it may be that the collection/partition of the balanced segment has been released
+						// it also may be other abnormal errors
+						log.Error("loadBalanceSegmentLoop: balance task execute failed", zap.Any("task", t))
+					} else {
+						log.Debug("loadBalanceSegmentLoop: balance task execute success", zap.Any("task", t))
+					}
+				}
+				log.Debug("loadBalanceSegmentLoop: load balance Done in this loop", zap.Any("tasks", loadBalanceTasks))
+			} else {
+				// no enough memory on query nodes to balance, then notify proxy to stop insert
+				//TODO:: xige-16
+				log.Error("loadBalanceSegmentLoop: query node has insufficient memory, stop inserting data")
+			}
+		}
+	}
+}
+
+func chooseSegmentToBalance(sourceNodeID int64, dstNodeID int64,
+	segmentInfos map[UniqueID]*querypb.SegmentInfo,
+	nodeID2MemUsage map[int64]uint64,
+	nodeID2TotalMem map[int64]uint64,
+	nodeID2MemUsageRate map[int64]float64) (*querypb.SegmentInfo, error) {
+	memoryInsufficient := true
+	minMemDiffPercentage := 1.0
+	var selectedSegmentInfo *querypb.SegmentInfo = nil
+	for _, info := range segmentInfos {
+		dstNodeMemUsageAfterBalance := nodeID2MemUsage[dstNodeID] + uint64(info.MemSize)
+		dstNodeMemUsageRateAfterBalance := float64(dstNodeMemUsageAfterBalance) / float64(nodeID2TotalMem[dstNodeID])
+		// if memUsageRate of dstNode is greater than OverloadedMemoryThresholdPercentage after balance, than can't balance
+		if dstNodeMemUsageRateAfterBalance < Params.OverloadedMemoryThresholdPercentage {
+			memoryInsufficient = false
+			sourceNodeMemUsageAfterBalance := nodeID2MemUsage[sourceNodeID] - uint64(info.MemSize)
+			sourceNodeMemUsageRateAfterBalance := float64(sourceNodeMemUsageAfterBalance) / float64(nodeID2TotalMem[sourceNodeID])
+			// assume all query node has same memory capacity
+			// if the memUsageRateDiff between the two nodes does not become smaller after balance, there is no need for balance
+			diffBeforBalance := nodeID2MemUsageRate[sourceNodeID] - nodeID2MemUsageRate[dstNodeID]
+			diffAfterBalance := dstNodeMemUsageRateAfterBalance - sourceNodeMemUsageRateAfterBalance
+			if diffAfterBalance < diffBeforBalance {
+				if math.Abs(diffAfterBalance) < minMemDiffPercentage {
+					selectedSegmentInfo = info
+				}
+			}
+		}
+	}
+
+	if memoryInsufficient {
+		return nil, errors.New("all query nodes has insufficient memory")
+	}
+
+	return selectedSegmentInfo, nil
 }

@@ -87,6 +87,9 @@ type ParamTable struct {
 
 	// recovery
 	skipQueryChannelRecovery bool
+
+	// memory limit
+	OverloadedMemoryThresholdPercentage float64
 }
 
 // Params is a package scoped variable of type ParamTable.
@@ -146,6 +149,7 @@ func (p *ParamTable) Init() {
 	p.initRoleName()
 
 	p.initSkipQueryChannelRecovery()
+	p.initOverloadedMemoryThresholdPercentage()
 }
 
 func (p *ParamTable) initCacheSize() {
@@ -345,4 +349,13 @@ func (p *ParamTable) initRoleName() {
 
 func (p *ParamTable) initSkipQueryChannelRecovery() {
 	p.skipQueryChannelRecovery = p.ParseBool("msgChannel.skipQueryChannelRecovery", false)
+}
+
+func (p *ParamTable) initOverloadedMemoryThresholdPercentage() {
+	overloadedMemoryThresholdPercentage := p.LoadWithDefault("queryCoord.overloadedMemoryThresholdPercentage", "90")
+	thresholdPercentage, err := strconv.ParseInt(overloadedMemoryThresholdPercentage, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.OverloadedMemoryThresholdPercentage = float64(thresholdPercentage) / 100
 }

@@ -43,6 +43,7 @@ func refreshParams() {
 	Params.MetaRootPath = Params.MetaRootPath + suffix
 	Params.DmlChannelPrefix = "Dml"
 	Params.DeltaChannelPrefix = "delta"
+	GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
 }
 
 func TestMain(m *testing.M) {
@@ -485,6 +486,76 @@ func TestHandoffSegmentLoop(t *testing.T) {
 
 		waitTaskFinalState(handoffTask, taskExpired)
 	})
+
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func TestLoadBalanceSegmentLoop(t *testing.T) {
+	refreshParams()
+	Params.BalanceIntervalSeconds = 10
+	baseCtx := context.Background()
+
+	queryCoord, err := startQueryCoord(baseCtx)
+	assert.Nil(t, err)
+	queryCoord.cluster.(*queryNodeCluster).segmentAllocator = shuffleSegmentsToQueryNode
+
+	queryNode1, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode1.queryNodeID)
+
+	loadCollectionTask := genLoadCollectionTask(baseCtx, queryCoord)
+	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadCollectionTask, taskExpired)
+
+	partitionID := defaultPartitionID
+	for {
+		req := &querypb.LoadPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadPartitions,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{partitionID},
+			Schema:       genCollectionSchema(defaultCollectionID, false),
+		}
+		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_grpcRequest)
+		loadPartitionTask := &loadPartitionTask{
+			baseTask:              baseTask,
+			LoadPartitionsRequest: req,
+			dataCoord:             queryCoord.dataCoordClient,
+			cluster:               queryCoord.cluster,
+			meta:                  queryCoord.meta,
+		}
+		err = queryCoord.scheduler.Enqueue(loadPartitionTask)
+		assert.Nil(t, err)
+		waitTaskFinalState(loadPartitionTask, taskExpired)
+		nodeInfo, err := queryCoord.cluster.getNodeInfoByID(queryNode1.queryNodeID)
+		assert.Nil(t, err)
+		if nodeInfo.(*queryNode).memUsageRate >= Params.OverloadedMemoryThresholdPercentage {
+			break
+		}
+		partitionID++
+	}
+
+	queryNode2, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode2.queryNodeID)
+
+	// if sealed has been balance to query node2, than balance work
+	for {
+		segmentInfos, err := queryCoord.cluster.getSegmentInfoByNode(baseCtx, queryNode2.queryNodeID, &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadBalanceSegments,
+			},
+			CollectionID: defaultCollectionID,
+		})
+		assert.Nil(t, err)
+		if len(segmentInfos) > 0 {
+			break
+		}
+	}
 
 	queryCoord.Stop()
 	err = removeAllSession()

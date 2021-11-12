@@ -25,6 +25,7 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -59,6 +60,7 @@ type Cluster interface {
 	releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error
 	getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
 	getSegmentInfoByNode(ctx context.Context, nodeID int64, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
+	getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error)
 
 	registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error
 	getNodeInfoByID(nodeID int64) (Node, error)
@@ -69,7 +71,7 @@ type Cluster interface {
 	offlineNodes() (map[int64]Node, error)
 	hasNode(nodeID int64) bool
 
-	allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64) error
+	allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
 	allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error
 
 	getSessionVersion() int64
@@ -381,6 +383,37 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 	return fmt.Errorf("ReleasePartitions: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
+func (c *queryNodeCluster) getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error) {
+	c.RLock()
+	defer c.RUnlock()
+
+	segmentInfo, err := c.clusterMeta.getSegmentInfoByID(segmentID)
+	if err != nil {
+		return nil, err
+	}
+	if node, ok := c.nodes[segmentInfo.NodeID]; ok {
+		res, err := node.getSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			CollectionID: segmentInfo.CollectionID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if res != nil {
+			for _, info := range res.Infos {
+				if info.SegmentID == segmentID {
+					return info, nil
+				}
+			}
+		}
+		return nil, fmt.Errorf("updateSegmentInfo: can't find segment %d on query node %d", segmentID, segmentInfo.NodeID)
+	}
+
+	return nil, fmt.Errorf("updateSegmentInfo: can't find query node by nodeID, nodeID = %d", segmentInfo.NodeID)
+}
+
 func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
 	c.RLock()
 	defer c.RUnlock()
@@ -650,8 +683,8 @@ func (c *queryNodeCluster) getCollectionInfosByID(ctx context.Context, nodeID in
 	return nil
 }
 
-func (c *queryNodeCluster) allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64) error {
-	return c.segmentAllocator(ctx, reqs, c, wait, excludeNodeIDs)
+func (c *queryNodeCluster) allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
+	return c.segmentAllocator(ctx, reqs, c, wait, excludeNodeIDs, includeNodeIDs)
 }
 
 func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error {

@@ -24,19 +24,17 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const MaxMemUsagePerNode = 0.9
-
 func defaultSegAllocatePolicy() SegmentAllocatePolicy {
 	return shuffleSegmentsToQueryNodeV2
 }
 
 // SegmentAllocatePolicy helper function definition to allocate Segment to queryNode
-type SegmentAllocatePolicy func(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error
+type SegmentAllocatePolicy func(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
 
 // shuffleSegmentsToQueryNode shuffle segments to online nodes
 // returned are noded id for each segment, which satisfies:
 //     len(returnedNodeIds) == len(segmentIDs) && segmentIDs[i] is assigned to returnedNodeIds[i]
-func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error {
+func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
 	if len(reqs) == 0 {
 		return nil
 	}
@@ -57,6 +55,10 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 
 		nodeID2NumSegemnt := make(map[int64]int)
 		for nodeID := range availableNodes {
+			if len(includeNodeIDs) > 0 && !nodeIncluded(nodeID, includeNodeIDs) {
+				delete(availableNodes, nodeID)
+				continue
+			}
 			numSegments, err := cluster.getNumSegments(nodeID)
 			if err != nil {
 				delete(availableNodes, nodeID)
@@ -87,7 +89,7 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 	}
 }
 
-func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error {
+func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
 	// key = offset, value = segmentSize
 	if len(reqs) == 0 {
 		return nil
@@ -118,6 +120,10 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			delete(availableNodes, id)
 		}
 		for nodeID := range availableNodes {
+			if len(includeNodeIDs) > 0 && !nodeIncluded(nodeID, includeNodeIDs) {
+				delete(availableNodes, nodeID)
+				continue
+			}
 			// statistic nodeInfo, used memory, memory usage of every query node
 			nodeInfo, err := cluster.getNodeInfoByID(nodeID)
 			if err != nil {
@@ -127,7 +133,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			}
 			queryNodeInfo := nodeInfo.(*queryNode)
 			// avoid allocate segment to node which memUsageRate is high
-			if queryNodeInfo.memUsageRate >= MaxMemUsagePerNode {
+			if queryNodeInfo.memUsageRate >= Params.OverloadedMemoryThresholdPercentage {
 				log.Debug("shuffleSegmentsToQueryNodeV2: queryNode memUsageRate large than MaxMemUsagePerNode", zap.Int64("nodeID", nodeID), zap.Float64("current rate", queryNodeInfo.memUsageRate))
 				delete(availableNodes, nodeID)
 				continue
@@ -152,7 +158,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 				for _, nodeID := range nodeIDSlice {
 					memUsageAfterLoad := memUsage[nodeID] + uint64(sizeOfReq)
 					memUsageRateAfterLoad := float64(memUsageAfterLoad) / float64(totalMem[nodeID])
-					if memUsageRateAfterLoad > MaxMemUsagePerNode {
+					if memUsageRateAfterLoad > Params.OverloadedMemoryThresholdPercentage {
 						continue
 					}
 					reqs[offset].DstNodeID = nodeID
@@ -180,4 +186,14 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			return errors.New("no queryNode to allocate")
 		}
 	}
+}
+
+func nodeIncluded(nodeID int64, includeNodeIDs []int64) bool {
+	for _, id := range includeNodeIDs {
+		if id == nodeID {
+			return true
+		}
+	}
+
+	return false
 }

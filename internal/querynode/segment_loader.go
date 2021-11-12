@@ -525,7 +525,6 @@ func (loader *segmentLoader) estimateSegmentSize(segment *Segment,
 }
 
 func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentSizes map[UniqueID]int64) error {
-	const thresholdFactor = 0.9
 	usedMem, err := getUsedMemory()
 	if err != nil {
 		return err
@@ -548,16 +547,16 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentSize
 			zap.Any("usedMem", usedMem),
 			zap.Any("segmentTotalSize", segmentTotalSize),
 			zap.Any("currentSegmentSize", size),
-			zap.Any("thresholdFactor", thresholdFactor),
+			zap.Any("thresholdFactor", Params.OverloadedMemoryThresholdPercentage),
 		)
-		if int64(usedMem)+segmentTotalSize+size > int64(float64(totalMem)*thresholdFactor) {
+		if int64(usedMem)+segmentTotalSize+size > int64(float64(totalMem)*Params.OverloadedMemoryThresholdPercentage) {
 			return errors.New(fmt.Sprintln("load segment failed, OOM if load, "+
 				"collectionID = ", collectionID, ", ",
 				"usedMem = ", usedMem, ", ",
 				"segmentTotalSize = ", segmentTotalSize, ", ",
 				"currentSegmentSize = ", size, ", ",
 				"totalMem = ", totalMem, ", ",
-				"thresholdFactor = ", thresholdFactor,
+				"thresholdFactor = ", Params.OverloadedMemoryThresholdPercentage,
 			))
 		}
 	}

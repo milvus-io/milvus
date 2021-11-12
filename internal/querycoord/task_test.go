@@ -694,7 +694,7 @@ func Test_AssignInternalTask(t *testing.T) {
 		loadSegmentRequests = append(loadSegmentRequests, req)
 	}
 
-	internalTasks, err := assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, nil, false, nil)
+	internalTasks, err := assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, nil, false, nil, nil)
 	assert.Nil(t, err)
 
 	assert.NotEqual(t, 1, len(internalTasks))
