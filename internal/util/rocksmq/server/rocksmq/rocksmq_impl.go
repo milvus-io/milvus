@@ -529,23 +529,14 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 			if err != nil {
 				return err
 			}
-
-			// Update message size to 0
-			err = rmq.kv.Save(msgSizeKey, strconv.FormatInt(0, 10))
-			if err != nil {
-				return err
-			}
 			curMsgSize = 0
 		} else {
 			curMsgSize += msgSize
-			// Update message size to current message size
-			err := rmq.kv.Save(msgSizeKey, strconv.FormatInt(curMsgSize, 10))
-			if err != nil {
-				return err
-			}
 		}
 	}
-	return nil
+	// Update message size to current message size
+	err = rmq.kv.Save(msgSizeKey, strconv.FormatInt(curMsgSize, 10))
+	return err
 }
 
 // Consume steps:
