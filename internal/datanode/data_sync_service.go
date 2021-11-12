@@ -168,12 +168,17 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			Position:  pack.pos,
 		})
 
+		startPos := dsService.replica.listNewSegmentsStartPositions()
+
 		log.Debug("SaveBinlogPath",
 			zap.Int64("SegmentID", pack.segmentID),
 			zap.Int64("CollectionID", dsService.collectionID),
+			zap.Bool("IsFlushed", pack.flushed),
+			zap.Bool("IsDropped", pack.dropped),
 			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 			zap.Int("Length of Field2Stats", len(fieldStats)),
 			zap.Int("Length of Field2Deltalogs", len(deltaInfos)),
+			zap.Any("Listed start positions", startPos),
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{
@@ -189,14 +194,15 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			Field2StatslogPaths: fieldStats,
 			Deltalogs:           deltaInfos,
 
-			CheckPoints: checkPoints,
+			CheckPoints:    checkPoints,
+			StartPositions: startPos,
 
-			StartPositions: dsService.replica.listNewSegmentsStartPositions(),
-			Flushed:        pack.flushed,
-			Dropped:        pack.dropped,
+			Flushed: pack.flushed,
+			Dropped: pack.dropped,
 		}
 		rsp, err := dsService.dataCoord.SaveBinlogPaths(context.Background(), req)
 		if err != nil {
+			log.Warn(err.Error())
 			return fmt.Errorf(err.Error())
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {

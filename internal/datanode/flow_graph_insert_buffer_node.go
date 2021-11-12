@@ -279,64 +279,62 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 				dropped:   true,
 			})
 		}
-		goto flush // Jump over the auto-flush and manual flush procedure
-	}
+	} else {
+		segmentsToFlush = make([]UniqueID, 0, len(seg2Upload)+1) //auto flush number + possible manual flush
+		flushTaskList = make([]flushTask, 0, len(seg2Upload)+1)
 
-	segmentsToFlush = make([]UniqueID, 0, len(seg2Upload)+1) //auto flush number + possible manual flush
-	flushTaskList = make([]flushTask, 0, len(seg2Upload)+1)
+		// Auto Flush
+		for _, segToFlush := range seg2Upload {
+			// If full, auto flush
+			if bd, ok := ibNode.insertBuffer.Load(segToFlush); ok && bd.(*BufferData).effectiveCap() <= 0 {
+				log.Warn("Auto flush", zap.Int64("segment id", segToFlush))
+				ibuffer := bd.(*BufferData)
 
-	// Auto Flush
-	for _, segToFlush := range seg2Upload {
-		// If full, auto flush
-		if bd, ok := ibNode.insertBuffer.Load(segToFlush); ok && bd.(*BufferData).effectiveCap() <= 0 {
-			log.Warn("Auto flush", zap.Int64("segment id", segToFlush))
-			ibuffer := bd.(*BufferData)
-
-			flushTaskList = append(flushTaskList, flushTask{
-				buffer:    ibuffer,
-				segmentID: segToFlush,
-				flushed:   false,
-				dropped:   false,
-			})
-		}
-	}
-
-	// Manual Flush
-	select {
-	case fmsg := <-ibNode.flushChan:
-
-		log.Debug(". Receiving flush message",
-			zap.Int64("segmentID", fmsg.segmentID),
-			zap.Int64("collectionID", fmsg.collectionID),
-		)
-		// merging auto&manual flush segment same segment id
-		dup := false
-		for i, task := range flushTaskList {
-			if task.segmentID == fmsg.segmentID {
-				flushTaskList[i].flushed = fmsg.flushed
-				dup = true
-				break
+				flushTaskList = append(flushTaskList, flushTask{
+					buffer:    ibuffer,
+					segmentID: segToFlush,
+					flushed:   false,
+					dropped:   false,
+				})
 			}
 		}
-		// if merged, skip load buffer and create task
-		if !dup {
-			currentSegID := fmsg.segmentID
-			bd, ok := ibNode.insertBuffer.Load(currentSegID)
-			var buf *BufferData
-			if ok {
-				buf = bd.(*BufferData)
+
+		// Manual Flush
+		select {
+		case fmsg := <-ibNode.flushChan:
+
+			log.Debug(". Receiving flush message",
+				zap.Int64("segmentID", fmsg.segmentID),
+				zap.Int64("collectionID", fmsg.collectionID),
+			)
+			// merging auto&manual flush segment same segment id
+			dup := false
+			for i, task := range flushTaskList {
+				if task.segmentID == fmsg.segmentID {
+					flushTaskList[i].flushed = fmsg.flushed
+					dup = true
+					break
+				}
 			}
-			flushTaskList = append(flushTaskList, flushTask{
-				buffer:    buf,
-				segmentID: currentSegID,
-				flushed:   fmsg.flushed,
-				dropped:   false,
-			})
+			// if merged, skip load buffer and create task
+			if !dup {
+				currentSegID := fmsg.segmentID
+				bd, ok := ibNode.insertBuffer.Load(currentSegID)
+				var buf *BufferData
+				if ok {
+					buf = bd.(*BufferData)
+				}
+				flushTaskList = append(flushTaskList, flushTask{
+					buffer:    buf,
+					segmentID: currentSegID,
+					flushed:   fmsg.flushed,
+					dropped:   false,
+				})
+			}
+		default:
 		}
-	default:
 	}
 
-flush:
 	for _, task := range flushTaskList {
 		err := ibNode.flushManager.flushBufferData(task.buffer, task.segmentID, task.flushed, task.dropped, endPositions[0])
 		if err != nil {
