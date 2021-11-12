@@ -13,6 +13,7 @@
 
 # Exit immediately for non zero status
 set -e
+# Print commands
 set -x
 
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
