@@ -574,7 +574,7 @@ The policy of _scheduleDmTask()_ should target on throughput, not tasks' time or
 
 The policy of _scheduleDqTask()_ should target on throughput. It should also take visibility into consideration. For example, if an insert task and a query arrive in a same time tick and the query comes after insert, the query should be scheduled in the next tick thus the query can see the insert.
 
-_TaskDoneTest(ts Timestamp)_ will check all the three task queues. If no task found before _ts_, then the function returns _true_, indicates that all the tasks before _ts_ are completed.
+_TaskDoneTest(ts Timestamp)_ will check all the three task queues. If no task is found before _ts_, then the function returns _true_, indicates that all the tasks before _ts_ are completed.
 
 - Statistics
 
