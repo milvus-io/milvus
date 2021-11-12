@@ -1,7 +1,6 @@
 import time
 import pdb
 import logging
-import threading
 import traceback
 import grpc
 import numpy as np
