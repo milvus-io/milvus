@@ -52,6 +52,7 @@ lib/
 *.pyc
 *.log
 
+# macOS generated files & other irrelevant files
 .DS_Store
 *.sw[po]
 cwrapper_build
