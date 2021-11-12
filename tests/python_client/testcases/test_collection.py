@@ -3027,7 +3027,7 @@ class TestReleaseAdvanced:
         """
         target: test release collection during inserting
         method: load collection, do release collection during inserting
-        expected:
+        expected: raise exception
         """
         connect.insert(collection, cons.default_entities)
         connect.flush([collection])
