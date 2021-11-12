@@ -32,8 +32,9 @@ type ParamTable struct {
 
 	NodeID int64
 
-	IP   string
-	Port int
+	IP      string
+	Port    int
+	Address string
 
 	// --- ETCD ---
 	EtcdEndpoints           []string

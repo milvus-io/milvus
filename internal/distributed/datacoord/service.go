@@ -84,6 +84,7 @@ func (s *Server) init() error {
 	datacoord.Params.InitOnce()
 	datacoord.Params.IP = Params.IP
 	datacoord.Params.Port = Params.Port
+	datacoord.Params.Address = Params.Address
 
 	err := s.dataCoord.Register()
 	if err != nil {

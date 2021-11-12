@@ -76,8 +76,8 @@ func (s *Server) init() error {
 	Params.Init()
 
 	indexcoord.Params.InitOnce()
-	indexcoord.Params.Address = Params.ServiceAddress
-	indexcoord.Params.Port = Params.ServicePort
+	indexcoord.Params.Address = Params.Address
+	indexcoord.Params.Port = Params.Port
 
 	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
@@ -88,7 +88,7 @@ func (s *Server) init() error {
 	}
 
 	s.loopWg.Add(1)
-	go s.startGrpcLoop(Params.ServicePort)
+	go s.startGrpcLoop(indexcoord.Params.Port)
 	// wait for grpc IndexCoord loop start
 	if err := <-s.grpcErrChan; err != nil {
 		log.Error("IndexCoord", zap.Any("init error", err))
@@ -181,7 +181,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
 
-	log.Debug("IndexCoord", zap.String("network address", Params.ServiceAddress), zap.Int("network port", grpcPort))
+	log.Debug("IndexCoord", zap.String("network address", Params.IP), zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("IndexCoord", zap.String("GrpcServer:failed to listen", err.Error()))

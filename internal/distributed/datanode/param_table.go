@@ -40,10 +40,8 @@ type ParamTable struct {
 
 	IP       string
 	Port     int
+	Address  string
 	listener net.Listener
-
-	RootCoordAddress string
-	DataCoordAddress string
 
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
@@ -54,16 +52,25 @@ type ParamTable struct {
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
-		pt.initRootCoordAddress()
-		pt.initDataCoordAddress()
-		pt.initPort()
+		pt.initParams()
+		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
 
-		pt.loadFromEnv()
-		pt.loadFromArgs()
-
-		pt.initServerMaxSendSize()
-		pt.initServerMaxRecvSize()
+		listener, err := net.Listen("tcp", pt.Address)
+		if err != nil {
+			panic(err)
+		}
+		pt.listener = listener
 	})
+}
+
+// initParams initializes params of the configuration items.
+func (pt *ParamTable) initParams() {
+	pt.loadFromEnv()
+	pt.loadFromArgs()
+
+	pt.initPort()
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
 func (pt *ParamTable) loadFromArgs() {
@@ -75,31 +82,12 @@ func (pt *ParamTable) loadFromEnv() {
 }
 
 func (pt *ParamTable) initPort() {
-
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		panic(err)
+	port := pt.ParseInt("dataNode.port")
+	pt.Port = port
+	if !funcutil.CheckPortAvailable(pt.Port) {
+		pt.Port = funcutil.GetAvailablePort()
+		log.Warn("DataNode init", zap.Any("Port", pt.Port))
 	}
-
-	pt.Port = listener.Addr().(*net.TCPAddr).Port
-	pt.listener = listener
-	log.Info("DataNode", zap.Int("port", pt.Port))
-}
-
-func (pt *ParamTable) initRootCoordAddress() {
-	ret, err := pt.Load("_RootCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.RootCoordAddress = ret
-}
-
-func (pt *ParamTable) initDataCoordAddress() {
-	ret, err := pt.Load("_DataCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.DataCoordAddress = ret
 }
 
 func (pt *ParamTable) initServerMaxSendSize() {

@@ -208,7 +208,7 @@ func (s *Server) Register() error {
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	s.session.Init(typeutil.DataCoordRole, Params.IP, true)
+	s.session.Init(typeutil.DataCoordRole, Params.Address, true)
 	Params.NodeID = s.session.ServerID
 	Params.SetLogger(typeutil.UniqueID(-1))
 	return nil

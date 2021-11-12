@@ -72,6 +72,7 @@ func (c *Client) getGrpcClient() (indexpb.IndexCoordClient, error) {
 	// if we return nil here, then we should check if client is nil outside,
 	err := c.connect(retry.Attempts(20))
 	if err != nil {
+		log.Debug("IndexcoordClient try reconnect failed", zap.Error(err))
 		return nil, err
 	}
 

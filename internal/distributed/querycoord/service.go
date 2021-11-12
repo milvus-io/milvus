@@ -101,6 +101,7 @@ func (s *Server) init() error {
 	Params.Init()
 
 	qc.Params.InitOnce()
+	qc.Params.Address = Params.Address
 	qc.Params.Port = Params.Port
 
 	closer := trace.InitTracing("querycoord")
@@ -119,8 +120,6 @@ func (s *Server) init() error {
 	}
 
 	// --- Master Server Client ---
-	log.Debug("QueryCoord try to new RootCoord client", zap.Any("RootCoordAddress", Params.RootCoordAddress))
-
 	if s.rootCoord == nil {
 		s.rootCoord, err = rcc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints)
 		if err != nil {
@@ -152,8 +151,6 @@ func (s *Server) init() error {
 	log.Debug("QueryCoord report RootCoord ready")
 
 	// --- Data service client ---
-	log.Debug("QueryCoord try to new DataCoord client", zap.Any("DataCoordAddress", Params.DataCoordAddress))
-
 	if s.dataCoord == nil {
 		s.dataCoord, err = dsc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints)
 		if err != nil {
@@ -182,7 +179,6 @@ func (s *Server) init() error {
 	log.Debug("QueryCoord report DataCoord ready")
 
 	// --- IndexCoord ---
-	log.Debug("QueryCoord try to new IndexCoord client", zap.Any("IndexCoordAddress", Params.IndexCoordAddress))
 	if s.indexCoord == nil {
 		s.indexCoord, err = isc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints)
 		if err != nil {

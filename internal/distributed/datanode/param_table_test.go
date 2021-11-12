@@ -39,12 +39,6 @@ func TestParamTable(t *testing.T) {
 	assert.NotNil(t, Params.listener)
 	t.Logf("DataNode listener:%d", Params.listener)
 
-	assert.NotEqual(t, Params.DataCoordAddress, "")
-	t.Logf("DataCoordAddress:%s", Params.DataCoordAddress)
-
-	assert.NotEqual(t, Params.RootCoordAddress, "")
-	t.Logf("RootCoordAddress:%s", Params.RootCoordAddress)
-
 	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
 	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
 

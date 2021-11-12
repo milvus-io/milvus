@@ -156,7 +156,7 @@ func (qc *QueryCoord) Init() error {
 
 		qc.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	})
-
+	log.Debug("query coordinator init success")
 	return initError
 }
 

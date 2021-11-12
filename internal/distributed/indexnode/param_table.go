@@ -32,8 +32,6 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	IndexCoordAddress string
-
 	IP      string
 	Port    int
 	Address string
@@ -51,16 +49,6 @@ func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initParams()
-
-		pt.initServerMaxSendSize()
-		pt.initServerMaxRecvSize()
-
-		if !funcutil.CheckPortAvailable(pt.Port) {
-			pt.Port = funcutil.GetAvailablePort()
-			log.Warn("IndexNode init", zap.Any("Port", pt.Port))
-		}
-		pt.LoadFromEnv()
-		pt.LoadFromArgs()
 	})
 }
 
@@ -75,22 +63,20 @@ func (pt *ParamTable) LoadFromEnv() {
 }
 
 func (pt *ParamTable) initParams() {
+	pt.LoadFromEnv()
+	pt.LoadFromArgs()
 	pt.initPort()
-	pt.initIndexCoordAddress()
-}
-
-// todo remove and use load from env
-func (pt *ParamTable) initIndexCoordAddress() {
-	ret, err := pt.Load("_IndexCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.IndexCoordAddress = ret
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
 func (pt *ParamTable) initPort() {
 	port := pt.ParseInt("indexNode.port")
 	pt.Port = port
+	if !funcutil.CheckPortAvailable(pt.Port) {
+		pt.Port = funcutil.GetAvailablePort()
+		log.Warn("IndexNode init", zap.Any("Port", pt.Port))
+	}
 }
 
 func (pt *ParamTable) initServerMaxSendSize() {

@@ -32,9 +32,6 @@ func TestParamTable(t *testing.T) {
 	assert.NotEqual(t, Params.Port, 0)
 	t.Logf("DataCoord Port:%d", Params.Port)
 
-	assert.NotEqual(t, Params.RootCoordAddress, "")
-	t.Logf("RootCoordAddress:%s", Params.RootCoordAddress)
-
 	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
 	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
 

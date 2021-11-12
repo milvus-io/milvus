@@ -182,7 +182,7 @@ func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error)
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
-	log.Debug("Session Register Begin")
+	log.Debug("Session Register Begin " + s.ServerName)
 	registerFn := func() error {
 		resp, err := s.etcdCli.Grant(s.ctx, DefaultTTL)
 		if err != nil {
@@ -274,7 +274,6 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 	if err != nil {
 		return nil, 0, err
 	}
-	log.Debug("SessionUtil GetSessions", zap.Any("prefix", prefix), zap.Any("resp", resp))
 	for _, kv := range resp.Kvs {
 		session := &Session{}
 		err = json.Unmarshal(kv.Value, session)
@@ -282,6 +281,9 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 			return nil, 0, err
 		}
 		_, mapKey := path.Split(string(kv.Key))
+		log.Debug("SessionUtil GetSessions ", zap.Any("prefix", prefix),
+			zap.String("key", mapKey),
+			zap.Any("address", session.Address))
 		res[mapKey] = session
 	}
 	return res, resp.Header.Revision, nil

@@ -37,14 +37,10 @@ var once sync.Once
 type ParamTable struct {
 	paramtable.BaseTable
 
-	QueryNodeIP   string
-	QueryNodePort int
-	QueryNodeID   UniqueID
-
-	RootCoordAddress  string
-	IndexCoordAddress string
-	DataCoordAddress  string
-	QueryCoordAddress string
+	IP          string
+	Port        int
+	Address     string
+	QueryNodeID UniqueID
 
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
@@ -54,18 +50,18 @@ type ParamTable struct {
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
-		pt.initPort()
-		pt.initRootCoordAddress()
-		pt.initIndexCoordAddress()
-		pt.initDataCoordAddress()
-		pt.initQueryCoordAddress()
-
-		pt.LoadFromEnv()
-		pt.LoadFromArgs()
-
-		pt.initServerMaxSendSize()
-		pt.initServerMaxRecvSize()
+		pt.initParams()
+		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
 	})
+}
+
+// initParams initializes params of the configuration items.
+func (pt *ParamTable) initParams() {
+	pt.LoadFromEnv()
+	pt.LoadFromArgs()
+	pt.initPort()
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
 // LoadFromArgs is used to initialize configuration items from args.
@@ -75,44 +71,16 @@ func (pt *ParamTable) LoadFromArgs() {
 
 // LoadFromEnv is used to initialize configuration items from env.
 func (pt *ParamTable) LoadFromEnv() {
-	Params.QueryNodeIP = funcutil.GetLocalIP()
-}
-
-func (pt *ParamTable) initRootCoordAddress() {
-	ret, err := pt.Load("_RootCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.RootCoordAddress = ret
-}
-
-func (pt *ParamTable) initIndexCoordAddress() {
-	ret, err := pt.Load("_IndexCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.IndexCoordAddress = ret
-}
-
-func (pt *ParamTable) initDataCoordAddress() {
-	ret, err := pt.Load("_DataCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.DataCoordAddress = ret
-}
-
-func (pt *ParamTable) initQueryCoordAddress() {
-	ret, err := pt.Load("_QueryCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.QueryCoordAddress = ret
+	pt.IP = funcutil.GetLocalIP()
 }
 
 func (pt *ParamTable) initPort() {
 	port := pt.ParseInt("queryNode.port")
-	pt.QueryNodePort = port
+	pt.Port = port
+	if !funcutil.CheckPortAvailable(pt.Port) {
+		pt.Port = funcutil.GetAvailablePort()
+		log.Warn("QueryNode init", zap.Any("Port", pt.Port))
+	}
 }
 
 func (pt *ParamTable) initServerMaxSendSize() {

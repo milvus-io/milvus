@@ -22,17 +22,18 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
 	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 )
 
 // ParamTable is used to record configuration items.
 type ParamTable struct {
 	paramtable.BaseTable
 
-	ServiceAddress string
-	ServicePort    int
+	IP      string
+	Port    int
+	Address string
 
 	ServerMaxSendSize int
 	ServerMaxRecvSize int
@@ -47,30 +48,38 @@ func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initParams()
+		pt.Address = pt.IP + ":" + strconv.FormatInt(int64(pt.Port), 10)
 	})
 }
 
 // initParams initializes params of the configuration items.
 func (pt *ParamTable) initParams() {
-	pt.initServicePort()
-	pt.initServiceAddress()
+	pt.LoadFromEnv()
+	pt.LoadFromArgs()
 
+	pt.initPort()
 	pt.initServerMaxSendSize()
 	pt.initServerMaxRecvSize()
 }
 
 // initServicePort initializes the port of IndexCoord service.
-func (pt *ParamTable) initServicePort() {
-	pt.ServicePort = pt.ParseInt("indexCoord.port")
+func (pt *ParamTable) initPort() {
+	pt.Port = pt.ParseInt("indexCoord.port")
 }
 
 // initServiceAddress initializes the address of IndexCoord service.
-func (pt *ParamTable) initServiceAddress() {
-	ret, err := pt.Load("_IndexCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.ServiceAddress = ret
+func (pt *ParamTable) LoadFromEnv() {
+	Params.IP = funcutil.GetLocalIP()
+}
+
+// LoadFromArgs is used to initialize configuration items from args.
+func (pt *ParamTable) loadFromArgs() {
+
+}
+
+// LoadFromArgs is used to initialize configuration items from args.
+func (pt *ParamTable) LoadFromArgs() {
+
 }
 
 // initServerMaxSendSize initializes the max send size of IndexCoord service.

@@ -44,10 +44,9 @@ type ParamTable struct {
 
 	Alias string
 
-	EtcdEndpoints    []string
-	MetaRootPath     string
-	RootCoordAddress string
-	PulsarAddress    string
+	EtcdEndpoints []string
+	MetaRootPath  string
+	PulsarAddress string
 
 	RocksmqPath string // not used in Proxy
 
