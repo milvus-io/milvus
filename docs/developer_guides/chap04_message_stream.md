@@ -192,7 +192,7 @@ func (mudf *MemUDFactory) NewUnmarshalDispatcher() *UnmarshalDispatcher
 ```
 
 ```go
-// MsgStream
+// MsgStream is an interface that can be used to produce and consume message on message queue
 
 // Interface
 type MsgStream interface {
