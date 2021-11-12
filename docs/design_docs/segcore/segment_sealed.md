@@ -3,7 +3,7 @@ SegmentSealed has an extra interface rather than segment_inferface:
 
 1. `LoadIndex(loadIndexInfo)`: load the index. indexInfo contains
     1. `FieldId`
-    2. `IndexParams`: index paramters in KV structure KV
+    2. `IndexParams`: index parameters in KV structure KV
     3. `VecIndex`: vector index
 2. `LoadFieldData(loadFieldDataInfo)`: load column data, could be either scalar column or vector column
     1. Note: indexes and vector data for the same column may coexist. Indexes are prioritized in search
