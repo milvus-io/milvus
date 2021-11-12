@@ -211,18 +211,12 @@ func (pt *ParamTable) initMaxDimension() {
 }
 
 func (pt *ParamTable) initDefaultPartitionName() {
-	name, err := pt.Load("common.defaultPartitionName")
-	if err != nil {
-		panic(err)
-	}
+	name := pt.LoadWithDefault("common.defaultPartitionName", "_default")
 	pt.DefaultPartitionName = name
 }
 
 func (pt *ParamTable) initDefaultIndexName() {
-	name, err := pt.Load("common.defaultIndexName")
-	if err != nil {
-		panic(err)
-	}
+	name := pt.LoadWithDefault("common.defaultIndexName", "_default_idx")
 	pt.DefaultIndexName = name
 }
 

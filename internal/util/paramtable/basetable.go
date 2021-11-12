@@ -116,7 +116,6 @@ func (gp *BaseTable) loadFromComponentYaml() bool {
 		}
 		return true
 	}
-	log.Debug("failed to find component.yaml in config, skip..")
 	return false
 }
 
@@ -128,7 +127,6 @@ func (gp *BaseTable) loadFromCommonYaml() bool {
 		}
 		return true
 	}
-	log.Debug("failed to find common.yaml in config, skip..")
 	return false
 }
 
