@@ -1,5 +1,4 @@
 import time
-import pdb
 import copy
 import logging
 from milvus_benchmark import parser
