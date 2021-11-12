@@ -343,9 +343,6 @@ flush:
 			log.Warn("failed to invoke flushBufferData", zap.Error(err))
 		} else {
 			segmentsToFlush = append(segmentsToFlush, task.segmentID)
-			if task.flushed {
-				ibNode.replica.segmentFlushed(task.segmentID)
-			}
 			ibNode.insertBuffer.Delete(task.segmentID)
 		}
 	}
