@@ -377,3 +377,210 @@ func TestEstimateMemorySize_cannot_convert_original_size_to_int(t *testing.T) {
 	_, err := EstimateMemorySize(mockKV, key)
 	assert.Error(t, err)
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+func TestCheckTsField(t *testing.T) {
+	data := &InsertData{
+		Data: make(map[FieldID]FieldData),
+	}
+	assert.False(t, checkTsField(data))
+
+	data.Data[common.TimeStampField] = &BoolFieldData{}
+	assert.False(t, checkTsField(data))
+
+	data.Data[common.TimeStampField] = &Int64FieldData{}
+	assert.True(t, checkTsField(data))
+}
+
+func TestCheckRowIDField(t *testing.T) {
+	data := &InsertData{
+		Data: make(map[FieldID]FieldData),
+	}
+	assert.False(t, checkRowIDField(data))
+
+	data.Data[common.RowIDField] = &BoolFieldData{}
+	assert.False(t, checkRowIDField(data))
+
+	data.Data[common.RowIDField] = &Int64FieldData{}
+	assert.True(t, checkRowIDField(data))
+}
+
+func TestCheckNumRows(t *testing.T) {
+	assert.True(t, checkNumRows())
+
+	f1 := &Int64FieldData{
+		NumRows: nil,
+		Data:    []int64{1, 2, 3},
+	}
+	f2 := &Int64FieldData{
+		NumRows: nil,
+		Data:    []int64{1, 2, 3},
+	}
+	f3 := &Int64FieldData{
+		NumRows: nil,
+		Data:    []int64{1, 2, 3, 4},
+	}
+
+	assert.True(t, checkNumRows(f1, f2))
+	assert.False(t, checkNumRows(f1, f3))
+	assert.False(t, checkNumRows(f2, f3))
+	assert.False(t, checkNumRows(f1, f2, f3))
+}
+
+func TestSortFieldDataList(t *testing.T) {
+	f1 := &Int16FieldData{
+		NumRows: nil,
+		Data:    []int16{1, 2, 3},
+	}
+	f2 := &Int32FieldData{
+		NumRows: nil,
+		Data:    []int32{4, 5, 6},
+	}
+	f3 := &Int64FieldData{
+		NumRows: nil,
+		Data:    []int64{7, 8, 9},
+	}
+
+	ls := fieldDataList{
+		IDs:   []FieldID{1, 3, 2},
+		datas: []FieldData{f1, f3, f2},
+	}
+
+	assert.Equal(t, 3, ls.Len())
+	sortFieldDataList(ls)
+	assert.ElementsMatch(t, []FieldID{1, 2, 3}, ls.IDs)
+	assert.ElementsMatch(t, []FieldData{f1, f2, f3}, ls.datas)
+}
+
+func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
+	var err error
+
+	data := &InsertData{
+		Data: make(map[FieldID]FieldData),
+	}
+
+	// no ts
+	_, _, _, err = TransferColumnBasedInsertDataToRowBased(data)
+	assert.Error(t, err)
+
+	tss := &Int64FieldData{
+		Data: []int64{1, 2, 3},
+	}
+	data.Data[common.TimeStampField] = tss
+
+	// no row ids
+	_, _, _, err = TransferColumnBasedInsertDataToRowBased(data)
+	assert.Error(t, err)
+
+	rowIdsF := &Int64FieldData{
+		Data: []int64{1, 2, 3, 4},
+	}
+	data.Data[common.RowIDField] = rowIdsF
+
+	// row num mismatch
+	_, _, _, err = TransferColumnBasedInsertDataToRowBased(data)
+	assert.Error(t, err)
+
+	data.Data[common.RowIDField] = &Int64FieldData{
+		Data: []int64{1, 2, 3},
+	}
+
+	f1 := &BoolFieldData{
+		Data: []bool{true, false, true},
+	}
+	f2 := &Int8FieldData{
+		Data: []int8{0, 0xf, 0x1f},
+	}
+	f3 := &Int16FieldData{
+		Data: []int16{0, 0xff, 0x1fff},
+	}
+	f4 := &Int32FieldData{
+		Data: []int32{0, 0xffff, 0x1fffffff},
+	}
+	f5 := &Int64FieldData{
+		Data: []int64{0, 0xffffffff, 0x1fffffffffffffff},
+	}
+	f6 := &FloatFieldData{
+		Data: []float32{0, 0, 0},
+	}
+	f7 := &DoubleFieldData{
+		Data: []float64{0, 0, 0},
+	}
+	// maybe we cannot support string now, no matter what the length of string is fixed or not.
+	// f8 := &StringFieldData{
+	// 	Data: []string{"1", "2", "3"},
+	// }
+	f9 := &BinaryVectorFieldData{
+		Dim:  8,
+		Data: []byte{1, 2, 3},
+	}
+	f10 := &FloatVectorFieldData{
+		Dim:  1,
+		Data: []float32{0, 0, 0},
+	}
+
+	data.Data[101] = f1
+	data.Data[102] = f2
+	data.Data[103] = f3
+	data.Data[104] = f4
+	data.Data[105] = f5
+	data.Data[106] = f6
+	data.Data[107] = f7
+	// data.Data[108] = f8
+	data.Data[109] = f9
+	data.Data[110] = f10
+
+	utss, rowIds, rows, err := TransferColumnBasedInsertDataToRowBased(data)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []uint64{1, 2, 3}, utss)
+	assert.ElementsMatch(t, []int64{1, 2, 3}, rowIds)
+	assert.Equal(t, 3, len(rows))
+	// b := []byte("1")[0]
+	if common.Endian == binary.LittleEndian {
+		// low byte in high address
+
+		assert.ElementsMatch(t,
+			[]byte{
+				1,    // true
+				0,    // 0
+				0, 0, // 0
+				0, 0, 0, 0, // 0
+				0, 0, 0, 0, 0, 0, 0, 0, // 0
+				0, 0, 0, 0, // 0
+				0, 0, 0, 0, 0, 0, 0, 0, // 0
+				// b + 1, // "1"
+				1,          // 1
+				0, 0, 0, 0, // 0
+			},
+			rows[0].Value)
+		assert.ElementsMatch(t,
+			[]byte{
+				0,       // false
+				0xf,     // 0xf
+				0, 0xff, // 0xff
+				0, 0, 0xff, 0xff, // 0xffff
+				0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, // 0xffffffff
+				0, 0, 0, 0, // 0
+				0, 0, 0, 0, 0, 0, 0, 0, // 0
+				// b + 2, // "2"
+				2,          // 2
+				0, 0, 0, 0, // 0
+			},
+			rows[1].Value)
+		assert.ElementsMatch(t,
+			[]byte{
+				1,          // false
+				0x1f,       // 0x1f
+				0xff, 0x1f, // 0x1fff
+				0xff, 0xff, 0xff, 0x1f, // 0x1fffffff
+				0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1f, // 0x1fffffffffffffff
+				0, 0, 0, 0, // 0
+				0, 0, 0, 0, 0, 0, 0, 0, // 0
+				// b + 3, // "3"
+				3,          // 3
+				0, 0, 0, 0, // 0
+			},
+			rows[2].Value)
+	}
+}

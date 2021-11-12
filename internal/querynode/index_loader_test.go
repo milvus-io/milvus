@@ -25,29 +25,31 @@ func TestIndexLoader_setIndexInfo(t *testing.T) {
 	defer cancel()
 
 	t.Run("test setIndexInfo", func(t *testing.T) {
-		tSafe := newTSafeReplica()
-		historical, err := genSimpleHistorical(ctx, tSafe)
+		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
 
 		segment, err := genSimpleSealedSegment()
 		assert.NoError(t, err)
 
-		historical.loader.indexLoader.rootCoord = newMockRootCoord()
-		historical.loader.indexLoader.indexCoord = newMockIndexCoord()
+		loader.indexLoader.rootCoord = newMockRootCoord()
+		loader.indexLoader.indexCoord = newMockIndexCoord()
 
-		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
+		err = loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
 		assert.NoError(t, err)
 	})
 
 	t.Run("test nil root and index", func(t *testing.T) {
-		tSafe := newTSafeReplica()
-		historical, err := genSimpleHistorical(ctx, tSafe)
+		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
 
 		segment, err := genSimpleSealedSegment()
 		assert.NoError(t, err)
 
-		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
+		err = loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
 		assert.NoError(t, err)
 	})
 }
@@ -57,23 +59,25 @@ func TestIndexLoader_getIndexBinlog(t *testing.T) {
 	defer cancel()
 
 	t.Run("test getIndexBinlog", func(t *testing.T) {
-		tSafe := newTSafeReplica()
-		historical, err := genSimpleHistorical(ctx, tSafe)
+		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
 
 		paths, err := generateIndex(defaultSegmentID)
 		assert.NoError(t, err)
 
-		_, _, _, err = historical.loader.indexLoader.getIndexBinlog(paths)
+		_, _, _, err = loader.indexLoader.getIndexBinlog(paths)
 		assert.NoError(t, err)
 	})
 
 	t.Run("test invalid path", func(t *testing.T) {
-		tSafe := newTSafeReplica()
-		historical, err := genSimpleHistorical(ctx, tSafe)
+		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
 
-		_, _, _, err = historical.loader.indexLoader.getIndexBinlog([]string{""})
+		_, _, _, err = loader.indexLoader.getIndexBinlog([]string{""})
 		assert.Error(t, err)
 	})
 }
@@ -82,9 +86,10 @@ func TestIndexLoader_printIndexParams(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tSafe := newTSafeReplica()
-	historical, err := genSimpleHistorical(ctx, tSafe)
+	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
+	loader := node.loader
+	assert.NotNil(t, loader)
 
 	indexKV := []*commonpb.KeyValuePair{
 		{
@@ -92,7 +97,7 @@ func TestIndexLoader_printIndexParams(t *testing.T) {
 			Value: "test-value-0",
 		},
 	}
-	historical.loader.indexLoader.printIndexParams(indexKV)
+	loader.indexLoader.printIndexParams(indexKV)
 }
 
 func TestIndexLoader_loadIndex(t *testing.T) {
@@ -100,38 +105,40 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 	defer cancel()
 
 	t.Run("test loadIndex", func(t *testing.T) {
-		tSafe := newTSafeReplica()
-		historical, err := genSimpleHistorical(ctx, tSafe)
+		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
 
 		segment, err := genSimpleSealedSegment()
 		assert.NoError(t, err)
 
-		historical.loader.indexLoader.rootCoord = newMockRootCoord()
-		historical.loader.indexLoader.indexCoord = newMockIndexCoord()
+		loader.indexLoader.rootCoord = newMockRootCoord()
+		loader.indexLoader.indexCoord = newMockIndexCoord()
 
-		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, simpleVecField.id)
+		err = loader.indexLoader.setIndexInfo(defaultCollectionID, segment, simpleVecField.id)
 		assert.NoError(t, err)
 
-		err = historical.loader.indexLoader.loadIndex(segment, simpleVecField.id)
+		err = loader.indexLoader.loadIndex(segment, simpleVecField.id)
 		assert.NoError(t, err)
 	})
 
 	t.Run("test set indexinfo with empty indexFilePath", func(t *testing.T) {
-		tSafe := newTSafeReplica()
-		historical, err := genSimpleHistorical(ctx, tSafe)
+		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
 
 		segment, err := genSimpleSealedSegment()
 		assert.NoError(t, err)
 
-		historical.loader.indexLoader.rootCoord = newMockRootCoord()
+		loader.indexLoader.rootCoord = newMockRootCoord()
 		ic := newMockIndexCoord()
 		ic.idxFileInfo.IndexFilePaths = []string{}
 
-		historical.loader.indexLoader.indexCoord = ic
+		loader.indexLoader.indexCoord = ic
 
-		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, simpleVecField.id)
+		err = loader.indexLoader.setIndexInfo(defaultCollectionID, segment, simpleVecField.id)
 		assert.Error(t, err)
 
 	})
@@ -151,22 +158,23 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 	//})
 
 	t.Run("test checkIndexReady failed", func(t *testing.T) {
-		tSafe := newTSafeReplica()
-		historical, err := genSimpleHistorical(ctx, tSafe)
+		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
 
 		segment, err := genSimpleSealedSegment()
 		assert.NoError(t, err)
 
-		historical.loader.indexLoader.rootCoord = newMockRootCoord()
-		historical.loader.indexLoader.indexCoord = newMockIndexCoord()
+		loader.indexLoader.rootCoord = newMockRootCoord()
+		loader.indexLoader.indexCoord = newMockIndexCoord()
 
-		err = historical.loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
+		err = loader.indexLoader.setIndexInfo(defaultCollectionID, segment, rowIDFieldID)
 		assert.NoError(t, err)
 
 		segment.indexInfos[rowIDFieldID].setReadyLoad(false)
 
-		err = historical.loader.indexLoader.loadIndex(segment, rowIDFieldID)
+		err = loader.indexLoader.loadIndex(segment, rowIDFieldID)
 		assert.Error(t, err)
 	})
 }

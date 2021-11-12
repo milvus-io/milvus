@@ -882,11 +882,15 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	return r, err
 }
 
-func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
-	fac, err := genFactory()
+func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface) (*segmentLoader, error) {
+	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
 	}
+	return newSegmentLoader(ctx, newMockRootCoord(), newMockIndexCoord(), historicalReplica, streamingReplica, kv), nil
+}
+
+func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
 	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
@@ -895,7 +899,7 @@ func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface
 	if err != nil {
 		return nil, err
 	}
-	h := newHistorical(ctx, replica, newMockRootCoord(), newMockIndexCoord(), fac, kv, tSafeReplica)
+	h := newHistorical(ctx, replica, kv, tSafeReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -909,7 +913,6 @@ func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface
 		return nil, err
 	}
 	h.replica = r
-	h.loader.historicalReplica = r
 	col, err := h.replica.getCollectionByID(defaultCollectionID)
 	if err != nil {
 		return nil, err
@@ -1325,6 +1328,12 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 
 	node.streaming = streaming
 	node.historical = historical
+
+	loader, err := genSimpleSegmentLoader(node.queryNodeLoopCtx, historical.replica, streaming.replica)
+	if err != nil {
+		return nil, err
+	}
+	node.loader = loader
 
 	// start task scheduler
 	go node.scheduler.Start()

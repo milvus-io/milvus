@@ -110,7 +110,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		iData.insertIDs[task.SegmentID] = append(iData.insertIDs[task.SegmentID], task.RowIDs...)
 		iData.insertTimestamps[task.SegmentID] = append(iData.insertTimestamps[task.SegmentID], task.Timestamps...)
 		iData.insertRecords[task.SegmentID] = append(iData.insertRecords[task.SegmentID], task.RowData...)
-		iData.insertPKs[task.SegmentID] = iNode.getPrimaryKeys(task)
+		iData.insertPKs[task.SegmentID] = getPrimaryKeys(task, iNode.streamingReplica)
 	}
 
 	// 2. do preInsert
@@ -305,14 +305,16 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
 }
 
-func (iNode *insertNode) getPrimaryKeys(msg *msgstream.InsertMsg) []int64 {
+// TODO: remove this function to proper file
+// TODO: why not return error?
+func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface) []int64 {
 	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
 		log.Warn("misaligned messages detected")
 		return nil
 	}
 	collectionID := msg.GetCollectionID()
 
-	collection, err := iNode.streamingReplica.getCollectionByID(collectionID)
+	collection, err := streamingReplica.getCollectionByID(collectionID)
 	if err != nil {
 		log.Warn(err.Error())
 		return nil

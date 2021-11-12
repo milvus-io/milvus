@@ -1281,7 +1281,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
-		assert.EqualValues(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
+		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
 	t.Run("test get binlogs", func(t *testing.T) {
