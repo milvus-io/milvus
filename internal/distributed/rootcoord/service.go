@@ -83,6 +83,7 @@ func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasReq
 	return s.rootCoord.AlterAlias(ctx, request)
 }
 
+// NewServer create a new RootCoord grpc server.
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &Server{
