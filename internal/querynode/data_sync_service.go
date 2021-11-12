@@ -138,6 +138,7 @@ func (dsService *dataSyncService) getCollectionDeltaFlowGraphs(collectionID Uniq
 	return tmpFGs, nil
 }
 
+// startCollectionFlowGraph starts the collection flow graph by collectionID
 func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
