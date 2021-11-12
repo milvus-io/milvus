@@ -87,6 +87,30 @@ Search(CSegmentInterface c_segment,
     }
 }
 
+void
+DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
+    std::free((void*)(retrieve_result->proto_blob));
+}
+
+CStatus
+Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, CRetrieveResult* result) {
+    try {
+        auto segment = (const milvus::segcore::SegmentInterface*)c_segment;
+        auto plan = (const milvus::query::RetrievePlan*)c_plan;
+        auto retrieve_result = segment->Retrieve(plan, timestamp);
+
+        auto size = retrieve_result->ByteSize();
+        void* buffer = malloc(size);
+        retrieve_result->SerializePartialToArray(buffer, size);
+
+        result->proto_blob = buffer;
+        result->proto_size = size;
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
@@ -235,17 +259,5 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
-    }
-}
-
-CProtoResult
-Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp) {
-    try {
-        auto segment = (const milvus::segcore::SegmentInterface*)c_segment;
-        auto plan = (const milvus::query::RetrievePlan*)c_plan;
-        auto result = segment->Retrieve(plan, timestamp);
-        return milvus::AllocCProtoResult(*result);
-    } catch (std::exception& e) {
-        return CProtoResult{milvus::FailureCStatus(UnexpectedError, e.what())};
     }
 }

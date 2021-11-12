@@ -16,14 +16,6 @@
 
 namespace milvus {
 
-inline CProtoResult
-AllocCProtoResult(const google::protobuf::Message& msg) {
-    auto size = msg.ByteSize();
-    void* buffer = malloc(size);
-    msg.SerializePartialToArray(buffer, size);
-    return CProtoResult{CStatus{Success}, CProto{buffer, size}};
-}
-
 inline CStatus
 SuccessCStatus() {
     return CStatus{Success, ""};

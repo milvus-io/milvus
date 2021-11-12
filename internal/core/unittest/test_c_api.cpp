@@ -24,6 +24,7 @@
 #include "index/knowhere/knowhere/index/vector_index/IndexIVFPQ.h"
 #include "pb/milvus.pb.h"
 #include "pb/plan.pb.h"
+#include "query/ExprImpl.h"
 #include "segcore/Collection.h"
 #include "segcore/reduce_c.h"
 #include "test_utils/DataGen.h"
@@ -347,6 +348,44 @@ TEST(CApiTest, SearchTestWithExpr) {
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(search_result);
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, RetrieveTestWithExpr) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, 0, Growing);
+
+    int N = 10000;
+    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+
+    // create retrieve plan "age in [0]"
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>();
+    term_expr->field_offset_ = FieldOffset(1);
+    term_expr->data_type_ = DataType::INT32;
+    term_expr->terms_.emplace_back(0);
+
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->predicate_ = std::move(term_expr);
+    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
+    plan->field_offsets_ = target_offsets;
+
+    CRetrieveResult retrieve_result;
+    auto res = Retrieve(segment, plan.release(), timestamps[0], &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    DeleteRetrievePlan(plan.release());
+    DeleteRetrieveResult(&retrieve_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
