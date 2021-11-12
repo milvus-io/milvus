@@ -2314,7 +2314,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total  success of RootCoord Create index operations",
+      "description": "Success count of create_index requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
