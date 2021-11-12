@@ -50,7 +50,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-const connEtcdMaxRetryTime = 100000
+const (
+	connEtcdMaxRetryTime = 100000
+	allPartitionID       = 0 // paritionID means no filtering
+)
 
 var (
 	// TODO: sunby put to config
@@ -781,7 +784,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 }
 
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
-func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo {
+func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo {
 	segments := s.meta.GetSegmentsByChannel(channel)
 	log.Debug("GetSegmentsByChannel",
 		zap.Any("collectionID", collectionID),
@@ -793,6 +796,11 @@ func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFr
 	unflushed := make([]*datapb.SegmentInfo, 0)
 	var seekPosition *internalpb.MsgPosition
 	for _, s := range segments {
+		// filter segment with parition id
+		if partitionID > allPartitionID && s.PartitionID != partitionID {
+			continue
+		}
+
 		if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
 			flushed = append(flushed, trimSegmentInfo(s.SegmentInfo))
 			if seekPosition == nil || (s.DmlPosition.Timestamp < seekPosition.Timestamp) {

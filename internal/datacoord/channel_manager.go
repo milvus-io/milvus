@@ -250,7 +250,7 @@ func (c *ChannelManager) Watch(ch *channel) error {
 
 func (c *ChannelManager) fillChannelPosition(update *ChannelOp) {
 	for _, ch := range update.Channels {
-		vchan := c.posProvider.GetVChanPositions(ch.Name, ch.CollectionID, false)
+		vchan := c.posProvider.GetVChanPositions(ch.Name, ch.CollectionID, allPartitionID, false)
 		info := &datapb.ChannelWatchInfo{
 			Vchan:   vchan,
 			StartTs: time.Now().Unix(),
