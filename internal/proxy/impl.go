@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
@@ -1272,6 +1273,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		segIDAssigner:  node.segAssigner,
 		chMgr:          node.chMgr,
 		chTicker:       node.chTicker,
+		startTime:      time.Now().UnixNano(),
 	}
 	var err error
 
@@ -1350,6 +1352,9 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		it.result.ErrIndex = errIndex
 	}
 	it.result.InsertCnt = int64(it.req.NumRows)
+	log.Debug("benchmark-Insert-Proxy", zap.Int64("CollectionID", it.CollectionID),
+		zap.Int64("MsgID", it.ID()), zap.String("Step", "Proxy-Insert-End"),
+		zap.Int64("time", time.Now().UnixNano()))
 	return it.result, nil
 }
 
@@ -1439,6 +1444,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
+	log.Debug("Proxy receive search request", zap.Any("time:", time.Now().UnixNano()))
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
 	defer sp.Finish()
 	qt := &searchTask{
@@ -1455,6 +1461,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		query:     request,
 		chMgr:     node.chMgr,
 		qc:        node.queryCoord,
+		start:     time.Now().UnixNano(),
 	}
 
 	log.Debug("Search enqueue",
@@ -1519,6 +1526,14 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			},
 		}, nil
 	}
+
+	log.Debug("benchmark-Search-Proxy", zap.Int64("CollectionID", qt.CollectionID),
+		zap.Int64("MsgID", qt.ID()), zap.String("Step", "Proxy-Send-Result"),
+		zap.Int64("time", time.Now().UnixNano()))
+
+	log.Debug("benchmark-Search-Proxy", zap.Int64("CollectionID", qt.CollectionID),
+		zap.Int64("MsgID", qt.ID()), zap.String("Step", "Search-cost"),
+		zap.Int64("time", time.Now().UnixNano()-qt.start))
 
 	return qt.result, nil
 }

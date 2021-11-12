@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -993,13 +994,18 @@ func divideSearchResults(result *schemapb.SearchResultData, nqs []int64) []*sche
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (q *queryCollection) search(msg queryMsg) error {
+	searchStart := time.Now().UnixNano()
+	log.Debug("benchmark-Search-Pulsar", zap.Int64("CollectionID", q.collectionID),
+		zap.Int64("MsgID", msg.ID()), zap.String("Step", "QueryNode-queue"),
+		zap.Int64("time", searchStart))
+
 	q.streaming.replica.queryRLock()
 	q.historical.replica.queryRLock()
 	defer q.historical.replica.queryRUnlock()
 	defer q.streaming.replica.queryRUnlock()
 
 	searchMsg := msg.(*msgstream.SearchMsg)
-	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
+	sp, ctx := trace.StartSpanFromContextWithOperationName(searchMsg.TraceCtx(), "QueryNode-search")
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
 	searchTimestamp := searchMsg.BeginTs()
@@ -1016,19 +1022,28 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 
 	var plan *SearchPlan
+	startPlan := time.Now().UnixNano()
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
+
+		sp2, _ := trace.StartSpanFromContextWithOperationName(ctx, "QueryNode-CreateSearchPlanByExpr")
 		plan, err = createSearchPlanByExpr(collection, expr)
+		sp2.Finish()
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
+		sp2, _ := trace.StartSpanFromContextWithOperationName(ctx, "QueryNode-CreateSearchPlan")
 		plan, err = createSearchPlan(collection, dsl)
+		sp2.Finish()
 		if err != nil {
 			return err
 		}
 	}
+	log.Debug("benchmark-Search-QueryNode", zap.Int64("CollectionID", searchMsg.CollectionID),
+		zap.Int64("MsgID", msg.ID()), zap.String("Step", "QueryNode-CreatePlan"),
+		zap.Int64("time", time.Now().UnixNano()-startPlan))
 	topK := plan.getTopK()
 	if topK == 0 {
 		return fmt.Errorf("limit must be greater than 0")
@@ -1067,20 +1082,27 @@ func (q *queryCollection) search(msg queryMsg) error {
 
 	searchResults := make([]*SearchResult, 0)
 
+	historicalSearchStart := time.Now().UnixNano()
+
 	// historical search
-	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
+	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(ctx, searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err1 != nil {
 		log.Warn(err1.Error())
 		return err1
 	}
 	searchResults = append(searchResults, hisSearchResults...)
 	tr.Record("historical search done")
+	log.Debug("benchmark-Search-QueryNode", zap.Int64("CollectionID", searchMsg.CollectionID),
+		zap.Int64("MsgID", msg.ID()), zap.String("Step", "historical-search"),
+		zap.Int64("time", time.Now().UnixNano()-historicalSearchStart))
+
+	streamingSearchStart := time.Now().UnixNano()
 
 	// streaming search
 	var err2 error
 	for _, channel := range collection.getVChannels() {
 		var strSearchResults []*SearchResult
-		strSearchResults, err2 = q.streaming.search(searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+		strSearchResults, err2 = q.streaming.search(ctx, searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
 		if err2 != nil {
 			log.Warn(err2.Error())
 			return err2
@@ -1088,6 +1110,10 @@ func (q *queryCollection) search(msg queryMsg) error {
 		searchResults = append(searchResults, strSearchResults...)
 	}
 	tr.Record("streaming search done")
+
+	log.Debug("benchmark-Search-QueryNode", zap.Int64("CollectionID", searchMsg.CollectionID),
+		zap.Int64("MsgID", msg.ID()), zap.String("Step", "streaming-search"),
+		zap.Int64("time", time.Now().UnixNano()-streamingSearchStart))
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {
@@ -1253,7 +1279,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 		//}
 		err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
 		if err != nil {
-			return err
+			log.Error(err.Error())
 		}
 		tr.Record("publish search result")
 	}
@@ -1265,6 +1291,9 @@ func (q *queryCollection) search(msg queryMsg) error {
 	plan.delete()
 	searchReq.delete()
 	tr.Elapse("all done")
+	log.Debug("benchmark-Search-QueryNode", zap.Int64("CollectionID", searchMsg.CollectionID),
+		zap.Int64("MsgID", msg.ID()), zap.String("Step", "QueryNode-search"),
+		zap.Int64("time", time.Now().UnixNano()-searchStart))
 	return nil
 }
 
@@ -1440,6 +1469,9 @@ func (q *queryCollection) publishQueryResult(msg msgstream.TsMsg, collectionID U
 	if err != nil {
 		log.Error(err.Error())
 	}
+	log.Debug("benchmark-Search-QueryNode", zap.Int64("CollectionID", collectionID),
+		zap.Int64("MsgID", msg.ID()), zap.String("Step", "Search-Send-Result"),
+		zap.Int64("time", time.Now().UnixNano()))
 
 	return err
 }

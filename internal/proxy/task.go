@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -126,6 +127,8 @@ type insertTask struct {
 	vChannels      []vChan
 	pChannels      []pChan
 	schema         *schemapb.CollectionSchema
+	startTime      int64
+	endTime        int64
 }
 
 func (it *insertTask) TraceCtx() context.Context {
@@ -748,10 +751,19 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	if err != nil {
+		return err
+	}
+	start := time.Now().UnixNano()
 	err = it.transferColumnBasedRequestToRowBasedData()
 	if err != nil {
 		return err
 	}
+
+	log.Debug("benchmark-Insert-Proxy", zap.Int64("CollectionID", collID),
+		zap.Int64("MsgID", it.ID()), zap.String("Step", "Insert-Row-To-Column"),
+		zap.Int64("time", time.Now().UnixNano()-start))
 
 	rowNum := len(it.RowData)
 	it.Timestamps = make([]uint64, rowNum)
@@ -779,7 +791,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	if err != nil {
 		return nil, err
 	}
-	log.Debug("_assignSemgentID, produceChannels:", zap.Any("Channels", channelNames))
+	log.Debug("_assignSegmentID, produceChannels:", zap.Any("Channels", channelNames))
 
 	for i, request := range tsMsgs {
 		if request.Type() != commonpb.MsgType_Insert {
@@ -996,6 +1008,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 	it.PartitionID = partitionID
 
+	log.Debug("benchmark-Insert-Proxy", zap.Int64("CollectionID", it.CollectionID),
+		zap.Int64("MsgID", it.ID()), zap.String("Step", "Proxy-Receive-Request"),
+		zap.Int64("time", it.startTime))
 	var tsMsg msgstream.TsMsg = &it.BaseInsertTask
 	it.BaseMsg.Ctx = ctx
 	msgPack := msgstream.MsgPack{
@@ -1029,6 +1044,13 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	it.endTime = time.Now().UnixNano()
+	log.Debug("benchmark-Insert-Proxy", zap.Int64("CollectionID", it.CollectionID),
+		zap.Int64("MsgID", it.ID()), zap.String("Step", "Proxy"),
+		zap.Int64("time", it.endTime-it.startTime))
+	log.Debug("benchmark-Insert-MsgStream", zap.Int64("CollectionID", it.CollectionID),
+		zap.Int64("MsgID", tsMsg.ID()), zap.String("Step", "MsgStream-send"),
+		zap.Int64("time", time.Now().UnixNano()))
 	err = stream.Produce(pack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -1320,6 +1342,8 @@ type searchTask struct {
 	qc         types.QueryCoord
 	merged     bool
 	skipReduce bool
+	start      int64
+	end        int64
 }
 
 func (st *searchTask) TraceCtx() context.Context {
@@ -1668,7 +1692,16 @@ func (st *searchTask) Execute(ctx context.Context) error {
 	}
 
 	if !st.merged {
+		log.Debug("benchmark-Search-Proxy", zap.Int64("CollectionID", st.CollectionID),
+			zap.Int64("MsgID", st.ID()), zap.String("Step", "Proxy-Receive-Request"),
+			zap.Int64("time", st.start))
+		log.Debug("benchmark-Search-Proxy", zap.Int64("CollectionID", st.CollectionID),
+			zap.Int64("MsgID", st.ID()), zap.String("Step", "Proxy"),
+			zap.Int64("time", time.Now().UnixNano()-st.start))
 		err = stream.Produce(&msgPack)
+		log.Debug("benchmark-Search-MsgStream", zap.Int64("CollectionID", st.CollectionID),
+			zap.Int64("MsgID", st.ID()), zap.String("Step", "MsgStream-send"),
+			zap.Int64("time", time.Now().UnixNano()))
 		if err != nil {
 			log.Debug("proxy", zap.String("send search request failed", err.Error()))
 		}
@@ -1887,12 +1920,21 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 	log.Debug("searchTask.PostExecute, waiting for search results",
 		zap.Int64("id", st.ID()))
 
+	startCollResult := time.Now().UnixNano()
 	for {
 		select {
 		case <-st.TraceCtx().Done():
 			log.Debug("Proxy", zap.Int64("searchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
 			return fmt.Errorf("searchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
+			log.Debug("Proxy Search PostExecute", zap.Any("time:", time.Now().UnixNano()))
+			log.Debug("benchmark-Search-Proxy", zap.Int64("CollectionID", st.CollectionID),
+				zap.Int64("MsgID", st.ID()), zap.String("Step", "Search-Receive-Result"),
+				zap.Int64("time", time.Now().UnixNano()))
+			log.Debug("benchmark-Search-Proxy", zap.Int64("CollectionID", st.CollectionID),
+				zap.Int64("MsgID", st.ID()), zap.String("Step", "Proxy-CollectResult"),
+				zap.Int64("time", time.Now().UnixNano()-startCollResult))
+			// fmt.Println("searchResults: ", searchResults)
 			filterSearchResults := make([]*internalpb.SearchResults, 0)
 			var filterReason string
 			for _, partialSearchResult := range searchResults {
@@ -1941,10 +1983,14 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 				return nil
 			}
 
+			reduceStart := time.Now().UnixNano()
 			st.result, err = reduceSearchResultData(validSearchResults, searchResults[0].NumQueries, searchResults[0].TopK, searchResults[0].MetricType)
 			if err != nil {
 				return err
 			}
+			log.Debug("benchmark-Search-Proxy", zap.Int64("CollectionID", st.CollectionID),
+				zap.Int64("MsgID", st.ID()), zap.String("Step", "Proxy-Reduce"),
+				zap.Int64("time", time.Now().UnixNano()-reduceStart))
 
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, st.query.CollectionName)
 			if err != nil {
@@ -1961,6 +2007,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 					}
 				}
 			}
+			log.Debug("Proxy Search PostExecute ending", zap.Any("time:", time.Now().UnixNano()))
 			return nil
 		}
 	}

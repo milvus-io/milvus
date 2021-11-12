@@ -16,6 +16,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
+
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -106,9 +109,11 @@ func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *Retrieve
 }
 
 // search will search all the target segments in streaming
-func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
+func (s *streaming) search(ctx context.Context, searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
 	plan *SearchPlan, searchTs Timestamp) ([]*SearchResult, error) {
 
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "QueryNode-streaming-search")
+	defer sp.Finish()
 	searchResults := make([]*SearchResult, 0)
 
 	// get streaming partition ids
@@ -185,6 +190,7 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 			return searchResults, err
 		}
 		for _, segID := range segIDs {
+			sp2, _ := trace.StartSpanFromContextWithOperationName(ctx, "QueryNode-streaming-search-segment", opentracing.Tags{"segID": segID})
 			seg, err := s.replica.getSegmentByID(segID)
 			if err != nil {
 				log.Warn(err.Error())
@@ -216,6 +222,7 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 				return searchResults, err
 			}
 			searchResults = append(searchResults, searchResult)
+			sp2.Finish()
 		}
 	}
 
