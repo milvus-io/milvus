@@ -282,6 +282,10 @@ type DataNode interface {
 
 	WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
+  // GetMetrics gets the metrics about DataNode.
+	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error)
 }
 ```
 
