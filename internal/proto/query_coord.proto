@@ -81,6 +81,7 @@ message LoadCollectionRequest {
   int64 dbID = 2;
   int64 collectionID = 3;
   schema.CollectionSchema schema = 4;
+  bool seek_to_latest = 5;
 }
 
 message ReleaseCollectionRequest {
@@ -96,6 +97,7 @@ message LoadPartitionsRequest {
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
   schema.CollectionSchema schema = 5;
+  bool seek_to_latest = 6;
 }
 
 message ReleasePartitionsRequest {
@@ -210,6 +212,7 @@ message WatchDmChannelsRequest {
   repeated data.VchannelInfo infos = 5;
   schema.CollectionSchema schema = 6;
   repeated data.SegmentInfo exclude_infos = 7;
+  bool seek_to_latest = 8;
 }
 
 enum TriggerCondition {

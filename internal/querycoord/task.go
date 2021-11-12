@@ -422,6 +422,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 					PartitionID:  partitionID,
 					Infos:        []*datapb.VchannelInfo{info},
 					Schema:       lct.Schema,
+					SeekToLatest: lct.SeekToLatest,
 				}
 				channelsToWatch = append(channelsToWatch, channel)
 				watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
@@ -725,6 +726,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 				PartitionID:  partitionID,
 				Infos:        []*datapb.VchannelInfo{info},
 				Schema:       lpt.Schema,
+				SeekToLatest: lpt.SeekToLatest,
 			}
 			channelsToWatch = append(channelsToWatch, channel)
 			watchDmReqs = append(watchDmReqs, watchDmRequest)
@@ -1259,6 +1261,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 				Infos:        infos,
 				Schema:       wdt.Schema,
 				ExcludeInfos: wdt.ExcludeInfos,
+				SeekToLatest: wdt.SeekToLatest,
 			},
 			meta:           wdt.meta,
 			cluster:        wdt.cluster,

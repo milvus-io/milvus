@@ -2226,6 +2226,7 @@ class LoadCollectionRequest :
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
+    kSeekToLatestFieldNumber = 4,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -2257,6 +2258,11 @@ class LoadCollectionRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // bool seek_to_latest = 4;
+  void clear_seek_to_latest();
+  bool seek_to_latest() const;
+  void set_seek_to_latest(bool value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.LoadCollectionRequest)
  private:
   class _Internal;
@@ -2265,6 +2271,7 @@ class LoadCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
+  bool seek_to_latest_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -3762,6 +3769,7 @@ class LoadPartitionsRequest :
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
+    kSeekToLatestFieldNumber = 5,
   };
   // repeated string partition_names = 4;
   int partition_names_size() const;
@@ -3810,6 +3818,11 @@ class LoadPartitionsRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // bool seek_to_latest = 5;
+  void clear_seek_to_latest();
+  bool seek_to_latest() const;
+  void set_seek_to_latest(bool value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.LoadPartitionsRequest)
  private:
   class _Internal;
@@ -3819,6 +3832,7 @@ class LoadPartitionsRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
+  bool seek_to_latest_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -13578,6 +13592,20 @@ inline void LoadCollectionRequest::set_allocated_collection_name(std::string* co
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.LoadCollectionRequest.collection_name)
 }
 
+// bool seek_to_latest = 4;
+inline void LoadCollectionRequest::clear_seek_to_latest() {
+  seek_to_latest_ = false;
+}
+inline bool LoadCollectionRequest::seek_to_latest() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.LoadCollectionRequest.seek_to_latest)
+  return seek_to_latest_;
+}
+inline void LoadCollectionRequest::set_seek_to_latest(bool value) {
+  
+  seek_to_latest_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.LoadCollectionRequest.seek_to_latest)
+}
+
 // -------------------------------------------------------------------
 
 // ReleaseCollectionRequest
@@ -15203,6 +15231,20 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 LoadPartitionsRequest::mutable_partition_names() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.LoadPartitionsRequest.partition_names)
   return &partition_names_;
+}
+
+// bool seek_to_latest = 5;
+inline void LoadPartitionsRequest::clear_seek_to_latest() {
+  seek_to_latest_ = false;
+}
+inline bool LoadPartitionsRequest::seek_to_latest() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.LoadPartitionsRequest.seek_to_latest)
+  return seek_to_latest_;
+}
+inline void LoadPartitionsRequest::set_seek_to_latest(bool value) {
+  
+  seek_to_latest_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.LoadPartitionsRequest.seek_to_latest)
 }
 
 // -------------------------------------------------------------------

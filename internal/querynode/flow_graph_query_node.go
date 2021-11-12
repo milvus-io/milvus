@@ -15,6 +15,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/milvus-io/milvus/internal/util/mqclient"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -140,6 +142,15 @@ func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosi
 		zap.Any("channel", position.ChannelName),
 	)
 	return err
+}
+
+func (q *queryNodeFlowGraph) seekQueryNodeFlowGraphToLatest(position *internalpb.MsgPosition) {
+	q.dmlStream.AsConsumerWithPosition([]string{position.ChannelName}, position.MsgGroup, mqclient.SubscriptionPositionLatest)
+	log.Debug("query node flow graph consume from pChannel latest",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", position.ChannelName),
+		zap.String("MsgGroup", position.MsgGroup),
+	)
 }
 
 func (q *queryNodeFlowGraph) close() {
