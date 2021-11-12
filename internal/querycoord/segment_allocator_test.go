@@ -70,7 +70,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	reqs := []*querypb.LoadSegmentsRequest{firstReq, secondReq}
 
 	t.Run("Test shuffleSegmentsWithoutQueryNode", func(t *testing.T) {
-		err = shuffleSegmentsToQueryNode(baseCtx, reqs, cluster, false, nil)
+		err = shuffleSegmentsToQueryNode(baseCtx, reqs, cluster, false, nil, nil)
 		assert.NotNil(t, err)
 	})
 
@@ -82,7 +82,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	waitQueryNodeOnline(cluster, node1ID)
 
 	t.Run("Test shuffleSegmentsToQueryNode", func(t *testing.T) {
-		err = shuffleSegmentsToQueryNode(baseCtx, reqs, cluster, false, nil)
+		err = shuffleSegmentsToQueryNode(baseCtx, reqs, cluster, false, nil, nil)
 		assert.Nil(t, err)
 
 		assert.Equal(t, node1ID, firstReq.DstNodeID)
@@ -98,7 +98,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	cluster.stopNode(node1ID)
 
 	t.Run("Test shuffleSegmentsToQueryNodeV2", func(t *testing.T) {
-		err = shuffleSegmentsToQueryNodeV2(baseCtx, reqs, cluster, false, nil)
+		err = shuffleSegmentsToQueryNodeV2(baseCtx, reqs, cluster, false, nil, nil)
 		assert.Nil(t, err)
 
 		assert.Equal(t, node2ID, firstReq.DstNodeID)

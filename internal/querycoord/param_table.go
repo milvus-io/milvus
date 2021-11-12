@@ -70,6 +70,12 @@ type ParamTable struct {
 
 	//---- Handoff ---
 	AutoHandoff bool
+
+	//---- Balance ---
+	AutoBalance                         bool
+	OverloadedMemoryThresholdPercentage float64
+	BalanceIntervalSeconds              int64
+	MemoryUsageMaxDifferencePercentage  float64
 }
 
 // Params are variables of the ParamTable type
@@ -117,6 +123,12 @@ func (p *ParamTable) Init() {
 
 	p.initDmlChannelName()
 	p.initDeltaChannelName()
+
+	//---- Balance ---
+	p.initAutoBalance()
+	p.initOverloadedMemoryThresholdPercentage()
+	p.initBalanceIntervalSeconds()
+	p.initMemoryUsageMaxDifferencePercentage()
 }
 
 func (p *ParamTable) initQueryCoordAddress() {
@@ -269,6 +281,42 @@ func (p *ParamTable) initAutoHandoff() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (p *ParamTable) initAutoBalance() {
+	balanceStr := p.LoadWithDefault("queryCoord.autoBalance", "false")
+	autoBalance, err := strconv.ParseBool(balanceStr)
+	if err != nil {
+		panic(err)
+	}
+	p.AutoBalance = autoBalance
+}
+
+func (p *ParamTable) initOverloadedMemoryThresholdPercentage() {
+	overloadedMemoryThresholdPercentage := p.LoadWithDefault("queryCoord.overloadedMemoryThresholdPercentage", "90")
+	thresholdPercentage, err := strconv.ParseInt(overloadedMemoryThresholdPercentage, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.OverloadedMemoryThresholdPercentage = float64(thresholdPercentage) / 100
+}
+
+func (p *ParamTable) initBalanceIntervalSeconds() {
+	balanceInterval := p.LoadWithDefault("queryCoord.balanceIntervalSeconds", "60")
+	interval, err := strconv.ParseInt(balanceInterval, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.BalanceIntervalSeconds = interval
+}
+
+func (p *ParamTable) initMemoryUsageMaxDifferencePercentage() {
+	maxDiff := p.LoadWithDefault("queryCoord.memoryUsageMaxDifferencePercentage", "30")
+	diffPercentage, err := strconv.ParseInt(maxDiff, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MemoryUsageMaxDifferencePercentage = float64(diffPercentage) / 100
 }
 
 func (p *ParamTable) initDmlChannelName() {
