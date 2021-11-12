@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
@@ -177,6 +178,7 @@ func (s *streaming) search(ctx context.Context, searchReqs []*searchRequest, col
 	)
 	s.replica.printReplica()
 
+	var err2 error
 	for _, partID := range searchPartIDs {
 		segIDs, err := s.replica.getSegmentIDsByVChannel(partID, vChannel)
 		log.Debug("get segmentIDs by vChannel",
@@ -189,40 +191,53 @@ func (s *streaming) search(ctx context.Context, searchReqs []*searchRequest, col
 			log.Warn(err.Error())
 			return searchResults, err
 		}
+
+		var wg sync.WaitGroup
 		for _, segID := range segIDs {
-			sp2, _ := trace.StartSpanFromContextWithOperationName(ctx, "QueryNode-streaming-search-segment", opentracing.Tags{"segID": segID})
-			seg, err := s.replica.getSegmentByID(segID)
-			if err != nil {
-				log.Warn(err.Error())
-				return searchResults, err
-			}
+			segID2 := segID
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sp2, _ := trace.StartSpanFromContextWithOperationName(ctx, "QueryNode-streaming-search-segment", opentracing.Tags{"segID": segID2})
+				seg, err := s.replica.getSegmentByID(segID2)
+				if err != nil {
+					log.Warn(err.Error())
+					err2 = err
+					return
+				}
 
-			// TSafe less than searchTs means this vChannel is not available
-			//ts := s.tSafeReplica.getTSafe(seg.vChannelID)
-			//gracefulTimeInMilliSecond := Params.GracefulTime
-			//if gracefulTimeInMilliSecond > 0 {
-			//	gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
-			//	ts += gracefulTime
-			//}
-			//tsp, _ := tsoutil.ParseTS(ts)
-			//stp, _ := tsoutil.ParseTS(searchTs)
-			//log.Debug("timestamp check in streaming search",
-			//	zap.Any("collectionID", collID),
-			//	zap.Any("serviceTime_l", ts),
-			//	zap.Any("searchTime_l", searchTs),
-			//	zap.Any("serviceTime_p", tsp),
-			//	zap.Any("searchTime_p", stp),
-			//)
-			//if ts < searchTs {
-			//	continue
-			//}
+				// TSafe less than searchTs means this vChannel is not available
+				//ts := s.tSafeReplica.getTSafe(seg.vChannelID)
+				//gracefulTimeInMilliSecond := Params.GracefulTime
+				//if gracefulTimeInMilliSecond > 0 {
+				//	gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
+				//	ts += gracefulTime
+				//}
+				//tsp, _ := tsoutil.ParseTS(ts)
+				//stp, _ := tsoutil.ParseTS(searchTs)
+				//log.Debug("timestamp check in streaming search",
+				//	zap.Any("collectionID", collID),
+				//	zap.Any("serviceTime_l", ts),
+				//	zap.Any("searchTime_l", searchTs),
+				//	zap.Any("serviceTime_p", tsp),
+				//	zap.Any("searchTime_p", stp),
+				//)
+				//if ts < searchTs {
+				//	continue
+				//}
 
-			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
-			if err != nil {
-				return searchResults, err
-			}
-			searchResults = append(searchResults, searchResult)
-			sp2.Finish()
+				searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
+				if err != nil {
+					err2 = err
+					return
+				}
+				searchResults = append(searchResults, searchResult)
+				sp2.Finish()
+			}()
+		}
+		wg.Wait()
+		if err2 != nil {
+			return searchResults, err2
 		}
 	}
 
