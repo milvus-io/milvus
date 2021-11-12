@@ -279,7 +279,11 @@ func (rc *rootCoordMock) ReleaseDQLMessageStream(ctx context.Context, in *proxyp
 }
 
 func (rc *rootCoordMock) DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
-	return nil, errors.New("describeSegment fail")
+	return &milvuspb.DescribeSegmentResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
 }
 
 type dataCoordMock struct {
@@ -400,5 +404,9 @@ func newIndexCoordMock() *indexCoordMock {
 }
 
 func (c *indexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	return nil, errors.New("get index file path fail")
+	return &indexpb.GetIndexFilePathsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
 }
