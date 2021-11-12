@@ -224,9 +224,7 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
 
-    for (auto& seg_offset : retrieve_results.result_offsets_) {
-        results->add_offset(seg_offset);
-    }
+    results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(), retrieve_results.result_offsets_.end());
 
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
@@ -238,9 +236,8 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
         fields_data->AddAllocated(col_data);
         if (pk_offset.has_value() && pk_offset.value() == field_offset) {
             auto int_ids = ids->mutable_int_id();
-            for (int j = 0; j < col_data->scalars().long_data().data_size(); ++j) {
-                int_ids->add_data(col_data->scalars().long_data().data(j));
-            }
+            auto src_data = col_data->scalars().long_data();
+            int_ids->mutable_data()->Add(src_data.data().begin(), src_data.data().end());
         }
     }
     return results;
