@@ -22,7 +22,7 @@ import (
 
 // positionProvider provides vchannel pair related position pairs
 type positionProvider interface {
-	GetVChanPositions(channel string, collectionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo
+	GetVChanPositions(channel string, collectionID UniqueID, paritionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo
 }
 
 var _ positionProvider = (*dummyPosProvider)(nil)
@@ -30,7 +30,7 @@ var _ positionProvider = (*dummyPosProvider)(nil)
 type dummyPosProvider struct{}
 
 //GetVChanPositions implements positionProvider
-func (dp dummyPosProvider) GetVChanPositions(channel string, collectionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo {
+func (dp dummyPosProvider) GetVChanPositions(channel string, collectionID UniqueID, paritionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo {
 	return &datapb.VchannelInfo{
 		CollectionID: collectionID,
 		ChannelName:  channel,
