@@ -181,9 +181,10 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadSegments,
 		},
-		DstNodeID: nodeID,
-		Schema:    schema,
-		Infos:     []*querypb.SegmentLoadInfo{segmentInfo},
+		DstNodeID:    nodeID,
+		Schema:       schema,
+		Infos:        []*querypb.SegmentLoadInfo{segmentInfo},
+		CollectionID: defaultCollectionID,
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
 	baseTask.taskID = 100
@@ -594,6 +595,7 @@ func Test_RescheduleSegmentWithWatchQueryChannel(t *testing.T) {
 
 	node1.loadSegment = returnFailedResult
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
+	loadSegmentTask.meta.setDeltaChannel(defaultCollectionID, []*datapb.VchannelInfo{})
 	loadCollectionTask := loadSegmentTask.parentTask
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 

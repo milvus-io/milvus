@@ -412,6 +412,16 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Check if the same deltaChannel has been watched
+	for _, dstChan := range vDeltaChannels {
+		for _, srcChan := range hCol.vDeltaChannels {
+			if dstChan == srcChan {
+				return nil
+			}
+		}
+	}
+
 	hCol.addVDeltaChannels(vDeltaChannels)
 	hCol.addPDeltaChannels(pDeltaChannels)
 

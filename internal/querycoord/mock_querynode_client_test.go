@@ -20,6 +20,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -38,6 +39,7 @@ type queryNodeClientMock struct {
 func newQueryNodeTest(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
 	collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
 	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
+	watchedDeltaChannels := make(map[UniqueID][]*datapb.VchannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
 	client, err := newQueryNodeClientMock(childCtx, address)
 	if err != nil {
@@ -53,6 +55,7 @@ func newQueryNodeTest(ctx context.Context, address string, id UniqueID, kv *etcd
 		kvClient:             kv,
 		collectionInfos:      collectionInfo,
 		watchedQueryChannels: watchedChannels,
+		watchedDeltaChannels: watchedDeltaChannels,
 	}
 
 	return node, nil
