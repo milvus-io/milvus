@@ -179,6 +179,8 @@ message LoadCollectionRequest {
   string db_name = 2;
   // The collection name you want to load
   string collection_name = 3;
+
+  bool seek_to_latest = 4;
 }
 
 /**
@@ -314,6 +316,8 @@ message LoadPartitionsRequest {
   string collection_name = 3;
   // The partition names you want to load
   repeated string partition_names = 4;
+
+  bool seek_to_latest = 5;
 }
 
 /*

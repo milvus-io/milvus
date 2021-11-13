@@ -281,11 +281,15 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 				pos.MsgGroup = consumeSubName
 				// use pChannel to seek
 				pos.ChannelName = VPChannels[fg.channel]
-				err := fg.seekQueryNodeFlowGraph(pos)
-				if err != nil {
-					errMsg := "msgStream seek error :" + err.Error()
-					log.Warn(errMsg)
-					return errors.New(errMsg)
+				if w.req.SeekToLatest {
+					fg.seekQueryNodeFlowGraphToLatest(pos)
+				} else {
+					err := fg.seekQueryNodeFlowGraph(pos)
+					if err != nil {
+						errMsg := "msgStream seek error :" + err.Error()
+						log.Warn(errMsg)
+						return errors.New(errMsg)
+					}
 				}
 			}
 		}

@@ -79,3 +79,35 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 	err = fg.seekQueryNodeFlowGraph(position)
 	assert.Error(t, err)
 }
+
+func TestQueryNodeFlowGraph_seekQueryNodeFlowGraphToLatest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	streaming, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
+
+	historicalReplica, err := genSimpleReplica()
+	assert.NoError(t, err)
+
+	fac, err := genFactory()
+	assert.NoError(t, err)
+
+	fg := newQueryNodeFlowGraph(ctx,
+		loadTypeCollection,
+		defaultCollectionID,
+		defaultPartitionID,
+		streaming.replica,
+		historicalReplica,
+		streaming.tSafeReplica,
+		defaultVChannel,
+		fac)
+
+	position := &internalpb.MsgPosition{
+		ChannelName: defaultVChannel,
+		MsgID:       []byte{},
+		MsgGroup:    defaultSubName,
+		Timestamp:   0,
+	}
+	fg.seekQueryNodeFlowGraphToLatest(position)
+}

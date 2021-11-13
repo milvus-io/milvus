@@ -4237,6 +4237,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		DbID:         0,
 		CollectionID: collID,
 		Schema:       collSchema,
+		SeekToLatest: lct.LoadCollectionRequest.SeekToLatest,
 	}
 	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", Params.RoleName), zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
 		zap.Any("schema", request.Schema))
@@ -4424,6 +4425,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		CollectionID: collID,
 		PartitionIDs: partitionIDs,
 		Schema:       collSchema,
+		SeekToLatest: lpt.LoadPartitionsRequest.SeekToLatest,
 	}
 	lpt.result, err = lpt.queryCoord.LoadPartitions(ctx, request)
 	return err
