@@ -154,6 +154,7 @@ type NotifyBuildIndexRequest struct {
 ```go
 type IndexNode interface {
 	Component
+	// TimeTickProvider is the interface all services implement
 	TimeTickProvider
 
 	// CreateIndex receives requests from IndexCoordinator to build an index.
