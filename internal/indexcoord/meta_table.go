@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/retry"
-
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -32,6 +32,15 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+)
+
+const (
+	metricTaskUnissued   = "unissued"
+	metricTaskInProgress = "in_progress"
+	metricTaskFinished   = "finished"
+	metricTaskFailed     = "failed"
+	metricTaskRecycled   = "recycled"
+	metricTaskDelete     = "deleted"
 )
 
 // Meta is used to record the state of the index.
@@ -155,7 +164,11 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 		},
 		revision: 0,
 	}
-	return mt.saveIndexMeta(meta)
+	err := mt.saveIndexMeta(meta)
+	if err == nil {
+		metrics.IndexCoordTaskCounterVec.WithLabelValues(metricTaskUnissued).Inc()
+	}
+	return err
 }
 
 func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
@@ -196,7 +209,7 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 			return err2
 		}
 	}
-
+	metrics.IndexCoordTaskCounterVec.WithLabelValues(metricTaskInProgress).Inc()
 	return nil
 }
 
@@ -265,7 +278,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 			}
 		}
 	}
-
+	metrics.IndexCoordTaskCounterVec.WithLabelValues(metricTaskDelete).Inc()
 	return nil
 }
 
@@ -354,6 +367,7 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 			return err2
 		}
 	}
+	metrics.IndexCoordTaskCounterVec.WithLabelValues(metricTaskRecycled).Inc()
 
 	return nil
 }

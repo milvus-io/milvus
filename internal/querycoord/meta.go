@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -292,9 +293,10 @@ func (m *MetaReplica) addCollection(collectionID UniqueID, schema *schemapb.Coll
 		}
 		m.collectionMu.Lock()
 		m.collectionInfos[collectionID] = newCollection
+		collectionCnt := len(m.collectionInfos)
 		m.collectionMu.Unlock()
+		metrics.QueryCoordCollectionGauge.Set(float64(collectionCnt))
 	}
-
 	return nil
 }
 
@@ -750,8 +752,9 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 
 	m.collectionMu.Lock()
 	delete(m.collectionInfos, collectionID)
+	collectionCnt := len(m.collectionInfos)
 	m.collectionMu.Unlock()
-
+	metrics.QueryCoordCollectionGauge.Set(float64(collectionCnt))
 	return nil
 }
 

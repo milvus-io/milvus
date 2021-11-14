@@ -22,10 +22,8 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -35,10 +33,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
 )
 
 type queryMsg interface {
@@ -63,7 +64,7 @@ type queryCollection struct {
 	tSafeUpdate     bool
 	watcherCond     *sync.Cond
 
-	serviceableTimeMutex sync.Mutex // guards serviceableTime
+	serviceableTimeMutex sync.RWMutex // guards serviceableTime
 	serviceableTime      Timestamp
 
 	queryMsgStream       msgstream.MsgStream
@@ -239,26 +240,25 @@ func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
 }
 
 func (q *queryCollection) getServiceableTime() Timestamp {
-	q.serviceableTimeMutex.Lock()
-	defer q.serviceableTimeMutex.Unlock()
-	return q.serviceableTime
+	gracefulTimeInMilliSecond := Params.GracefulTime
+	gracefulTime := typeutil.ZeroTimestamp
+	if gracefulTimeInMilliSecond > 0 {
+		gracefulTime = tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
+	}
+	q.serviceableTimeMutex.RLock()
+	defer q.serviceableTimeMutex.RUnlock()
+	return q.serviceableTime + gracefulTime
 }
 
-func (q *queryCollection) setServiceableTime(t Timestamp) {
+func (q *queryCollection) setServiceableTime(t Timestamp) Timestamp {
 	q.serviceableTimeMutex.Lock()
 	defer q.serviceableTimeMutex.Unlock()
 
-	if t < q.serviceableTime {
-		return
+	if t <= q.serviceableTime {
+		return q.serviceableTime
 	}
-
-	gracefulTimeInMilliSecond := Params.GracefulTime
-	if gracefulTimeInMilliSecond > 0 {
-		gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
-		q.serviceableTime = t + gracefulTime
-	} else {
-		q.serviceableTime = t
-	}
+	q.serviceableTime = t
+	return q.serviceableTime
 }
 
 func (q *queryCollection) consumeQuery() {
@@ -394,9 +394,13 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 		)
 		return err
 	}
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
+	collectionIDStr := funcutil.MakeSourceIDString(collectionID)
+	metrics.QueryNodeSearchReqCounterVec.WithLabelValues(nodeIDStr, collectionIDStr, "total").Inc()
 	guaranteeTs := msg.GuaranteeTs()
 	if guaranteeTs >= collection.getReleaseTime() {
 		err = fmt.Errorf("retrieve failed, collection has been released, msgID = %d, collectionID = %d", msg.ID(), collectionID)
+		metrics.QueryNodeSearchReqCounterVec.WithLabelValues(nodeIDStr, collectionIDStr, "failed").Inc()
 		publishErr := q.publishFailedQueryResult(msg, err.Error())
 		if publishErr != nil {
 			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
@@ -422,6 +426,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 			zap.Any("msgID", msg.ID()),
 			zap.String("msgType", msgTypeStr),
 		)
+		metrics.QueryNodeSearchReqCounterVec.WithLabelValues(nodeIDStr, collectionIDStr, "wait_for_resolve").Inc()
 		q.addToUnsolvedMsg(msg)
 		sp.LogFields(
 			oplog.String("send to unsolved buffer", "send to unsolved buffer"),
@@ -454,6 +459,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	tr.Record("operation done")
 
 	if err != nil {
+		metrics.QueryNodeSearchReqCounterVec.WithLabelValues(nodeIDStr, collectionIDStr, "failed").Inc()
 		publishErr := q.publishFailedQueryResult(msg, err.Error())
 		if publishErr != nil {
 			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
@@ -466,6 +472,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 		)
 		return err
 	}
+	metrics.QueryNodeSearchReqCounterVec.WithLabelValues(nodeIDStr, collectionIDStr, "success").Inc()
 	log.Debug("do query done in receiveQueryMsg",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("msgID", msg.ID()),
@@ -478,6 +485,8 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 
 func (q *queryCollection) doUnsolvedQueryMsg() {
 	log.Debug("starting doUnsolvedMsg...", zap.Any("collectionID", q.collectionID))
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
+	collectionIDStr := funcutil.MakeSourceIDString(q.collectionID)
 	for {
 		select {
 		case <-q.releaseCtx.Done():
@@ -494,13 +503,13 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			//log.Debug("get tSafe from flow graph",
 			//	zap.Int64("collectionID", q.collectionID),
 			//	zap.Any("tSafe", st))
-
-			q.setServiceableTime(serviceTime)
+			newT := q.setServiceableTime(serviceTime)
 			//log.Debug("query node::doUnsolvedMsg: setServiceableTime", zap.Any("serviceTime", st))
-
+			metrics.QueryNodeServiceTime.WithLabelValues(nodeIDStr, collectionIDStr).Set(float64(newT))
 			unSolvedMsg := make([]queryMsg, 0)
 			tempMsg := q.popAllUnsolvedMsg()
-
+			unResolvedCnt := len(tempMsg)
+			metrics.QueryNodeUnResolveSearchGaugeVec.WithLabelValues(nodeIDStr, collectionIDStr).Set(float64(unResolvedCnt))
 			for _, m := range tempMsg {
 				guaranteeTs := m.GuaranteeTs()
 				gt, _ := tsoutil.ParseTS(guaranteeTs)
@@ -998,7 +1007,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 	log.Debug("benchmark-Search-Pulsar", zap.Int64("CollectionID", q.collectionID),
 		zap.Int64("MsgID", msg.ID()), zap.String("Step", "QueryNode-queue"),
 		zap.Int64("time", searchStart))
-
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
+	collectionIDStr := fmt.Sprintf("collection_%v", q.collectionID)
 	q.streaming.replica.queryRLock()
 	q.historical.replica.queryRLock()
 	defer q.historical.replica.queryRUnlock()
@@ -1091,11 +1101,11 @@ func (q *queryCollection) search(msg queryMsg) error {
 		return err1
 	}
 	searchResults = append(searchResults, hisSearchResults...)
-	tr.Record("historical search done")
+	trSpan := tr.Record("historical search done")
 	log.Debug("benchmark-Search-QueryNode", zap.Int64("CollectionID", searchMsg.CollectionID),
 		zap.Int64("MsgID", msg.ID()), zap.String("Step", "historical-search"),
 		zap.Int64("time", time.Now().UnixNano()-historicalSearchStart))
-
+	metrics.QueryNodeSearchGaugeVec.WithLabelValues(nodeIDStr, collectionIDStr, "historical_search").Set(float64(trSpan.Milliseconds()))
 	streamingSearchStart := time.Now().UnixNano()
 
 	// streaming search
@@ -1109,7 +1119,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 		}
 		searchResults = append(searchResults, strSearchResults...)
 	}
-	tr.Record("streaming search done")
+	trSpan = tr.Record("streaming search done")
+	metrics.QueryNodeSearchGaugeVec.WithLabelValues(nodeIDStr, collectionIDStr, "streaming_search").Set(float64(trSpan.Milliseconds()))
 
 	log.Debug("benchmark-Search-QueryNode", zap.Int64("CollectionID", searchMsg.CollectionID),
 		zap.Int64("MsgID", msg.ID()), zap.String("Step", "streaming-search"),
@@ -1179,9 +1190,11 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
-	tr.Record("reduce result done")
+	trSpan = tr.Record("reduce result done")
+	metrics.QueryNodeSearchGaugeVec.WithLabelValues(nodeIDStr, collectionIDStr, "reduce").Set(float64(trSpan.Milliseconds()))
 
 	var offset int64 = 0
+	publishAllSpan := time.Duration(0)
 	for index := range searchRequests {
 		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
 		if err != nil {
@@ -1281,9 +1294,10 @@ func (q *queryCollection) search(msg queryMsg) error {
 		if err != nil {
 			log.Error(err.Error())
 		}
-		tr.Record("publish search result")
+		sepSpan := tr.Record("publish search result")
+		publishAllSpan += sepSpan
 	}
-
+	metrics.QueryNodeSearchGaugeVec.WithLabelValues(nodeIDStr, collectionIDStr, "publish").Set(float64(publishAllSpan.Milliseconds()))
 	sp.LogFields(oplog.String("statistical time", "before free c++ memory"))
 	deleteSearchResults(searchResults)
 	deleteMarshaledHits(marshaledHits)

@@ -42,6 +42,7 @@ type streaming struct {
 
 func newStreaming(ctx context.Context, factory msgstream.Factory, etcdKV *etcdkv.EtcdKV, historicalReplica ReplicaInterface) *streaming {
 	replica := newCollectionReplica(etcdKV)
+	replica.setLabel("streaming")
 	tReplica := newTSafeReplica()
 	newDS := newDataSyncService(ctx, replica, historicalReplica, tReplica, factory)
 

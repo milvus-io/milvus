@@ -18,18 +18,19 @@ import (
 	"path"
 	"strconv"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"go.uber.org/zap"
 )
 
 const (
@@ -53,7 +54,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest) error
 	if len(req.Infos) == 0 {
 		return nil
 	}
-
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
 	newSegments := make(map[UniqueID]*Segment)
 	segmentGC := func() {
 		for _, s := range newSegments {
@@ -124,6 +125,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest) error
 			segmentGC()
 			return err
 		}
+		metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "historical", "segment").Inc()
 	}
 	return nil
 }
@@ -133,6 +135,10 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 	indexFieldIDs []FieldID,
 	segmentLoadInfo *querypb.SegmentLoadInfo) error {
 	log.Debug("loading insert...")
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
+	collectionIDStr := funcutil.MakeSourceIDString(segment.collectionID)
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", segment.collectionID))
+
 	err := loader.loadSegmentFieldsData(segment, fieldBinLogs)
 	if err != nil {
 		return err
@@ -166,7 +172,8 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 			return err
 		}
 	}
-
+	trSpan := tr.Record("loadSegment internal load done")
+	metrics.QueryNodeLoadCounterVec.WithLabelValues(nodeIDStr, collectionIDStr).Add(trSpan.Seconds())
 	return nil
 }
 

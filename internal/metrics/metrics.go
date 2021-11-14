@@ -11,11 +11,15 @@ import (
 )
 
 const (
-	milvusNamespace    = "milvus"
-	subSystemRootCoord = "rootcoord"
-	subSystemDataCoord = "dataCoord"
-	subSystemDataNode  = "dataNode"
-	subSystemProxy     = "proxy"
+	milvusNamespace     = "milvus"
+	subSystemRootCoord  = "rootcoord"
+	subSystemDataCoord  = "dataCoord"
+	subSystemDataNode   = "dataNode"
+	subSystemProxy      = "proxy"
+	subSystemIndexCoord = "indexCoord"
+	subSystemIndexNode  = "indexNode"
+	subSystemQueryCoord = "queryCoord"
+	subSystemQueryNode  = "queryNode"
 )
 
 var (
@@ -571,14 +575,107 @@ func RegisterProxy() {
 	prometheus.MustRegister(ProxyDmlChannelTimeTick)
 }
 
+var (
+	QueryCoordLoadCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryCoord,
+			Name:      "querycoord_load_counter",
+			Help:      "Counter of requests of load collection",
+		}, []string{"type"})
+
+	QueryCoordReleaseCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryCoord,
+			Name:      "querycoord_release_counter",
+			Help:      "Counter of requests of release collection",
+		}, []string{"type"})
+
+	QueryCoordCollectionGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryCoord,
+			Name:      "num_collection_loaded",
+			Help:      "number of loaded collection",
+		})
+
+	QueryCoordQueryNodeLister = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryCoord,
+			Name:      "list_of_query_node",
+			Help:      "List of QueryNode nodes which have registered with etcd",
+		}, []string{"client_id"})
+)
+
 //RegisterQueryCoord register QueryCoord metrics
 func RegisterQueryCoord() {
+	prometheus.MustRegister(QueryCoordLoadCounter)
+	prometheus.MustRegister(QueryCoordReleaseCounter)
+	prometheus.MustRegister(QueryCoordCollectionGauge)
+	prometheus.MustRegister(QueryCoordQueryNodeLister)
 
 }
 
+var (
+	QueryNodeObjGaugeVec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryNode,
+			Name:      "query_node_obj_gauge",
+			Help:      "Gauge of objects in query node",
+		}, []string{"client_id", "category", "type"})
+
+	QueryNodeSearchGaugeVec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryNode,
+			Name:      "query_node_search_time",
+			Help:      "Time duration cost in separate stage of search",
+		}, []string{"client_id", "collection_id", "stage"})
+
+	QueryNodeLoadCounterVec = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryNode,
+			Name:      "query_node_load_time",
+			Help:      "Time duration cost in load collection historical segments",
+		}, []string{"client_id", "collection_id"})
+
+	QueryNodeSearchReqCounterVec = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryNode,
+			Name:      "node_search_req",
+			Help:      "Total number of search req for collection",
+		}, []string{"client_id", "collection_id", "type"})
+
+	QueryNodeUnResolveSearchGaugeVec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryNode,
+			Name:      "node_unresolved_search",
+			Help:      "Number of collection current unresolved search req",
+		}, []string{"client_id", "collection_id"})
+
+	QueryNodeServiceTime = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemQueryNode,
+			Name:      "node_service_time",
+			Help:      "Collection service time",
+		}, []string{"client_id", "collection_id"})
+)
+
 //RegisterQueryNode register QueryNode metrics
 func RegisterQueryNode() {
-
+	prometheus.MustRegister(QueryNodeObjGaugeVec)
+	prometheus.MustRegister(QueryNodeSearchGaugeVec)
+	prometheus.MustRegister(QueryNodeSearchReqCounterVec)
+	prometheus.MustRegister(QueryNodeUnResolveSearchGaugeVec)
+	prometheus.MustRegister(QueryNodeServiceTime)
+	prometheus.MustRegister(QueryNodeLoadCounterVec)
 }
 
 var (
@@ -624,14 +721,61 @@ func RegisterDataNode() {
 	prometheus.MustRegister(DataNodeWatchDmChannelsCounter)
 }
 
+var (
+	IndexCoordBuildIndexCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemIndexCoord,
+			Name:      "build_index_req_total",
+			Help:      "Counter of requests of building index",
+		}, []string{"type"})
+
+	IndexCoordIndexNodeLister = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemIndexCoord,
+			Name:      "list_of_index_node",
+			Help:      "List of IndexNode nodes which have registered with etcd",
+		}, []string{"client_id"})
+
+	IndexCoordTaskCounterVec = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemIndexCoord,
+			Name:      "index_task_counter",
+			Help:      "Counter for different type tasks recorded in meta",
+		}, []string{"type"})
+)
+
 //RegisterIndexCoord register IndexCoord metrics
 func RegisterIndexCoord() {
-
+	prometheus.MustRegister(IndexCoordBuildIndexCounter)
+	prometheus.MustRegister(IndexCoordIndexNodeLister)
+	prometheus.MustRegister(IndexCoordTaskCounterVec)
 }
+
+var (
+	IndexNodeReqCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemIndexNode,
+			Name:      "index_node_req",
+			Help:      "Counter of requests of building index",
+		}, []string{"client_id", "type"})
+
+	IndexNodePipelineStageGaugeVec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemIndexNode,
+			Name:      "index_node_stage",
+			Help:      "Time duration cost in separate stage of index node executing pipeline",
+		}, []string{"client_id", "stage"})
+)
 
 //RegisterIndexNode register IndexNode metrics
 func RegisterIndexNode() {
-
+	prometheus.MustRegister(IndexNodeReqCounter)
+	prometheus.MustRegister(IndexNodePipelineStageGaugeVec)
 }
 
 //RegisterMsgStreamCoord register MsgStreamCoord metrics

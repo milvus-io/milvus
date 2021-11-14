@@ -95,6 +95,7 @@ type ReplicaInterface interface {
 	getSegmentsMemSize() int64
 	freeAll()
 	printReplica()
+	setLabel(label string)
 }
 
 // collectionReplica is the data replication of memory data in query node.
@@ -109,6 +110,12 @@ type collectionReplica struct {
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
 	etcdKV *etcdkv.EtcdKV
+
+	label string // for paper testing
+}
+
+func (colReplica *collectionReplica) setLabel(label string) {
+	colReplica.label = label
 }
 
 func (colReplica *collectionReplica) queryLock() {

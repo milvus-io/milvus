@@ -25,6 +25,8 @@ import "C"
 import (
 	"context"
 	"errors"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"io"
 	"math/rand"
 	"strconv"
@@ -57,6 +59,12 @@ type UniqueID = typeutil.UniqueID
 
 // make sure IndexNode implements types.IndexNode
 var _ types.IndexNode = (*IndexNode)(nil)
+
+const (
+	metricTotal   = "total"
+	metricSuccess = "success"
+	metricFailed  = "failed"
+)
 
 // IndexNode is a component that executes the task of building indexes.
 type IndexNode struct {
@@ -245,6 +253,8 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
 
+	nodeIDStr := funcutil.MakeSourceIDString(Params.NodeID)
+	metrics.IndexNodeReqCounter.WithLabelValues(nodeIDStr, metricTotal).Inc()
 	sp, ctx2 := trace.StartSpanFromContextWithOperationName(i.loopCtx, "IndexNode-CreateIndex")
 	defer sp.Finish()
 	sp.SetTag("IndexBuildID", strconv.FormatInt(request.IndexBuildID, 10))
@@ -267,12 +277,13 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 	err := i.sched.IndexBuildQueue.Enqueue(t)
 	if err != nil {
 		log.Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", request.IndexBuildID), zap.Error(err))
+		metrics.IndexNodeReqCounter.WithLabelValues(nodeIDStr, metricFailed).Inc()
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
 		return ret, nil
 	}
 	log.Info("IndexNode successfully scheduled", zap.Int64("indexBuildID", request.IndexBuildID))
-
+	metrics.IndexNodeReqCounter.WithLabelValues(nodeIDStr, metricSuccess).Inc()
 	return ret, nil
 }
 
