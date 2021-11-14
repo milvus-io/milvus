@@ -232,3 +232,22 @@ class ApiCollectionWrapper:
         res, check = api_request([self.collection.delete, expr, partition_name, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
+
+    def compact(self, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.compact, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def get_compaction_state(self, timeout=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        res = self.collection.get_compaction_state(timeout, **kwargs)
+        return res
+
+    def get_compaction_plans(self, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.get_compaction_plans, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
