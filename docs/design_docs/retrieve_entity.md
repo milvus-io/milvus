@@ -35,7 +35,7 @@ Once DataNode receives a Flush command from DataCoord, it sorts the data in the 
 
 QueryNode maintains mapping from primary key to entities in each segment. This mapping updates every time an insert request is processed.
 
-After receiving the Get request from the client, the Proxy writes the request to the `search` channel and waits for the result returned from the `searchResult` channel.
+After receiving the Get request from the client, the Proxy sends the request to the `search` channel and waits for the result returned from the `searchResult` channel.
 
 The processing flow after QueryNode reads the Get request from `search` channel:
 
