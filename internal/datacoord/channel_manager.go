@@ -182,13 +182,11 @@ func (c *ChannelManager) AddNode(nodeID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	channels := c.store.GetChannels()
 	c.store.Add(nodeID)
 
 	updates := c.registerPolicy(c.store, nodeID)
 	log.Debug("register node",
 		zap.Int64("registered node", nodeID),
-		zap.Any("channels before registry", channels),
 		zap.Array("updates", updates))
 
 	for _, v := range updates {
@@ -204,12 +202,9 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	channels := c.store.GetChannels()
-
 	updates := c.deregisterPolicy(c.store, nodeID)
 	log.Debug("deregister node",
 		zap.Int64("unregistered node", nodeID),
-		zap.Any("channels before deregistery", channels),
 		zap.Array("updates", updates))
 
 	for _, v := range updates {
@@ -229,15 +224,12 @@ func (c *ChannelManager) Watch(ch *channel) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	channels := c.store.GetChannels()
-
 	updates := c.assignPolicy(c.store, []*channel{ch})
 	if len(updates) == 0 {
 		return nil
 	}
 	log.Debug("watch channel",
 		zap.Any("channel", ch),
-		zap.Any("channels before watching", channels),
 		zap.Array("updates", updates))
 
 	for _, v := range updates {
