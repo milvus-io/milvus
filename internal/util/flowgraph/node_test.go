@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	"github.com/stretchr/testify/assert"
 )
 
