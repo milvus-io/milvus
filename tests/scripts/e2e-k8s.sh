@@ -292,6 +292,7 @@ if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
   export MILVUS_IMAGE_TAG="${TAG}"
 
   pushd "${ROOT}"
+    # Build Milvus Docker Image
     trace "build milvus image" "${ROOT}/build/build_image.sh"
     trace "push milvus image" docker push "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}"
   popd
