@@ -1,8 +1,8 @@
 # Segment Overview
 
-There are currently two types of Segment
+There are currently two types of Segments
 1. Growing segment, dynamic insert is allowed, but can not load index for fast retrieving
-2. Sealed segment, dynamic insert is disabled, load vector index is supported
+2. Sealed segment, dynamic insert is disabled, loading vector index is supported
 
 Both Segment types share the same interface, based on `SegmentInterface`, External callers only need to care about the behaviour of the following interface as function declarations and corresponding constructor:
 
