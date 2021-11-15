@@ -834,7 +834,6 @@ class TestIndexBase:
         method: create collection and add entities in it, create index, call drop index
         expected: return code 0, and default index param
         """
-        # result = connect.insert(collection, entities)
         connect.create_index(collection, field_name, get_simple_index)
         connect.drop_index(collection, field_name)
         index = connect.describe_index(collection, "")
