@@ -415,6 +415,8 @@ class TestPartitionOperations(TestcaseBase):
             check_items={ct.err_code: 1,
                          ct.err_msg: "maximum partition's number should be limit to 4096"})
 
+        # TODO: Try to verify load collection with a large number of partitions. #11651
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_partition_drop_default_partition(self):
         """
