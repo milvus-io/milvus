@@ -32,18 +32,16 @@ func newGlobalSealedSegmentManager(collectionID UniqueID) *globalSealedSegmentMa
 	}
 }
 
-func (g *globalSealedSegmentManager) addGlobalSegmentInfo(segmentInfo *querypb.SegmentInfo) error {
+func (g *globalSealedSegmentManager) addGlobalSegmentInfo(segmentInfo *querypb.SegmentInfo) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if segmentInfo.CollectionID != g.collectionID {
-		log.Debug("mismatch collectionID when addGlobalSegmentInfo",
+		log.Warn("Find mismatch collectionID when addGlobalSegmentInfo",
 			zap.Any("manager collectionID", g.collectionID),
 			zap.Any("segmentInfo collectionID", segmentInfo.CollectionID),
 		)
-		return nil
 	}
 	g.globalSealedSegments[segmentInfo.SegmentID] = segmentInfo
-	return nil
 }
 
 func (g *globalSealedSegmentManager) getGlobalSegmentIDs() []UniqueID {
@@ -70,14 +68,14 @@ func (g *globalSealedSegmentManager) getGlobalSegmentIDsByPartitionIds(partition
 	return resIDs
 }
 
-func (g *globalSealedSegmentManager) hasGlobalSegment(segmentID UniqueID) bool {
+func (g *globalSealedSegmentManager) hasGlobalSealedSegment(segmentID UniqueID) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	_, ok := g.globalSealedSegments[segmentID]
 	return ok
 }
 
-func (g *globalSealedSegmentManager) removeGlobalSegmentInfo(segmentID UniqueID) {
+func (g *globalSealedSegmentManager) removeGlobalSealedSegmentInfo(segmentID UniqueID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	delete(g.globalSealedSegments, segmentID)

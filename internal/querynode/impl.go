@@ -165,14 +165,7 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 
 	// init global sealed segments
 	for _, segment := range in.GlobalSealedSegments {
-		err = sc.globalSegmentManager.addGlobalSegmentInfo(segment)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}
-			return status, err
-		}
+		sc.globalSegmentManager.addGlobalSegmentInfo(segment)
 	}
 
 	// start queryCollection, message stream need to asConsumer before start

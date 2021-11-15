@@ -558,12 +558,6 @@ func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) er
 	partition.removeSegmentID(segmentID)
 	delete(colReplica.segments, segmentID)
 	deleteSegment(segment)
-	key := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
-	err = colReplica.etcdKV.Remove(key)
-	if err != nil {
-		log.Warn("error when remove segment info from etcd")
-	}
-
 	return nil
 }
 

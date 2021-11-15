@@ -29,13 +29,10 @@ func TestGlobalSealedSegmentManager(t *testing.T) {
 		PartitionID:  defaultPartitionID,
 	}
 
-	err := manager.addGlobalSegmentInfo(segmentInfo)
-	assert.NoError(t, err)
+	manager.addGlobalSegmentInfo(segmentInfo)
 
 	segmentInfo.CollectionID = 1000
-	err = manager.addGlobalSegmentInfo(segmentInfo)
-	assert.NoError(t, err)
-
+	manager.addGlobalSegmentInfo(segmentInfo)
 	ids := manager.getGlobalSegmentIDs()
 	assert.Len(t, ids, 1)
 	assert.Equal(t, segmentInfo.SegmentID, ids[0])
@@ -49,19 +46,17 @@ func TestGlobalSealedSegmentManager(t *testing.T) {
 	assert.Len(t, ids, 0)
 
 	segmentInfo.CollectionID = defaultCollectionID
-	err = manager.addGlobalSegmentInfo(segmentInfo)
-	assert.NoError(t, err)
+	manager.addGlobalSegmentInfo(segmentInfo)
 
-	manager.removeGlobalSegmentInfo(defaultSegmentID)
+	manager.removeGlobalSealedSegmentInfo(defaultSegmentID)
 	ids = manager.getGlobalSegmentIDs()
 	assert.Len(t, ids, 0)
 
-	has := manager.hasGlobalSegment(defaultSegmentID)
+	has := manager.hasGlobalSealedSegment(defaultSegmentID)
 	assert.False(t, has)
 
 	segmentInfo.CollectionID = defaultCollectionID
-	err = manager.addGlobalSegmentInfo(segmentInfo)
-	assert.NoError(t, err)
+	manager.addGlobalSegmentInfo(segmentInfo)
 
 	manager.close()
 	ids = manager.getGlobalSegmentIDs()

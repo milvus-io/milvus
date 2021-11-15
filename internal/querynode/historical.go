@@ -28,10 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
-)
-
-const (
-	segmentMetaPrefix = "queryCoord-segmentMeta"
+	"github.com/milvus-io/milvus/internal/util"
 )
 
 // historical is in charge of historical data in query node
@@ -73,7 +70,7 @@ func (h *historical) close() {
 
 func (h *historical) watchGlobalSegmentMeta() {
 	log.Debug("query node watchGlobalSegmentMeta start")
-	watchChan := h.etcdKV.WatchWithPrefix(segmentMetaPrefix)
+	watchChan := h.etcdKV.WatchWithPrefix(util.SegmentMetaPrefix)
 
 	for {
 		select {

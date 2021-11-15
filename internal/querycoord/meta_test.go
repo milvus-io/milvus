@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util"
 )
 
 func successResult() error { return nil }
@@ -329,7 +330,7 @@ func TestReloadMetaFromKV(t *testing.T) {
 	}
 	segmentBlobs, err := proto.Marshal(segmentInfo)
 	assert.Nil(t, err)
-	segmentKey := fmt.Sprintf("%s/%d", segmentMetaPrefix, defaultSegmentID)
+	segmentKey := fmt.Sprintf("%s/%d", util.SegmentMetaPrefix, defaultSegmentID)
 	kvs[segmentKey] = string(segmentBlobs)
 
 	queryChannelInfo := &querypb.QueryChannelInfo{

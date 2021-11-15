@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
@@ -1289,7 +1290,7 @@ func saveChangeInfo(key string, value string) error {
 		return err
 	}
 
-	key = changeInfoMetaPrefix + "/" + key
+	key = util.ChangeInfoMetaPrefix + "/" + key
 
 	return kv.Save(key, value)
 }
