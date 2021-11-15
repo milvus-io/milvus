@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 
 	"github.com/go-basic/ipv4"
@@ -184,4 +185,8 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 	}
 
 	return "", errors.New("key " + key + " not found")
+}
+
+func MakeSourceIDString(sourceID typeutil.UniqueID) string {
+	return fmt.Sprintf("client_%d", sourceID)
 }

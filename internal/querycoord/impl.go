@@ -15,14 +15,20 @@ import (
 	"context"
 	"errors"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"go.uber.org/zap"
+)
+
+const (
+	metricTotal   = "total"
+	metricSuccess = "success"
+	metricFailed  = "failed"
 )
 
 // GetComponentStates return information about whether the coord is healthy
@@ -144,7 +150,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		log.Debug("load collection end with query coordinator not healthy")
 		return status, err
 	}
-
+	metrics.QueryCoordLoadCounter.WithLabelValues(metricTotal).Inc()
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
 	loadCollectionTask := &loadCollectionTask{
 		baseTask:              baseTask,
@@ -156,6 +162,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	}
 	err := qc.scheduler.Enqueue(loadCollectionTask)
 	if err != nil {
+		metrics.QueryCoordLoadCounter.WithLabelValues(metricFailed).Inc()
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
 		return status, err
@@ -163,11 +170,12 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 
 	err = loadCollectionTask.waitToFinish()
 	if err != nil {
+		metrics.QueryCoordLoadCounter.WithLabelValues(metricFailed).Inc()
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
 		return status, err
 	}
-
+	metrics.QueryCoordLoadCounter.WithLabelValues(metricSuccess).Inc()
 	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
 	return status, nil
 }
@@ -187,9 +195,11 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		log.Debug("release collection end with query coordinator not healthy")
 		return status, err
 	}
+	metrics.QueryCoordReleaseCounter.WithLabelValues(metricTotal).Inc()
 
 	hasCollection := qc.meta.hasCollection(collectionID)
 	if !hasCollection {
+		metrics.QueryCoordReleaseCounter.WithLabelValues(metricSuccess).Inc()
 		log.Warn("release collection end, query coordinator don't have the log of", zap.Int64("collectionID", collectionID))
 		return status, nil
 	}
@@ -204,6 +214,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	}
 	err := qc.scheduler.Enqueue(releaseCollectionTask)
 	if err != nil {
+		metrics.QueryCoordReleaseCounter.WithLabelValues(metricFailed).Inc()
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
 		return status, err
@@ -211,11 +222,12 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 
 	err = releaseCollectionTask.waitToFinish()
 	if err != nil {
+		metrics.QueryCoordReleaseCounter.WithLabelValues(metricFailed).Inc()
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
 		return status, err
 	}
-
+	metrics.QueryCoordReleaseCounter.WithLabelValues(metricSuccess).Inc()
 	log.Debug("ReleaseCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
 	//qc.MetaReplica.printMeta()
 	//qc.cluster.printMeta()

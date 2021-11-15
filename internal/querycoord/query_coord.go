@@ -14,7 +14,6 @@ package querycoord
 import (
 	"context"
 	"errors"
-
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -23,6 +22,8 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
@@ -307,6 +308,8 @@ func (qc *QueryCoord) watchNodeLoop() {
 				if err != nil {
 					log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 				}
+				nodeIDStr := funcutil.MakeSourceIDString(serverID)
+				metrics.QueryCoordQueryNodeLister.WithLabelValues(nodeIDStr).Set(1)
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
@@ -318,6 +321,8 @@ func (qc *QueryCoord) watchNodeLoop() {
 				}
 
 				qc.cluster.stopNode(serverID)
+				nodeIDStr := funcutil.MakeSourceIDString(serverID)
+				metrics.QueryCoordQueryNodeLister.WithLabelValues(nodeIDStr).Set(0)
 				loadBalanceSegment := &querypb.LoadBalanceRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_LoadBalanceSegments,

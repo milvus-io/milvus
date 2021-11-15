@@ -19,13 +19,14 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"go.uber.org/zap"
 )
 
 type task interface {
@@ -110,6 +111,7 @@ func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
 }
 
 func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
 	collectionID := w.req.CollectionID
 	partitionID := w.req.PartitionID
 	// if no partitionID is specified, load type is load collection
@@ -180,12 +182,14 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "streaming", "partition").Inc()
 		}
 		if hasPartitionInHistorical := w.node.historical.replica.hasPartition(partitionID); !hasPartitionInHistorical {
 			err := w.node.historical.replica.addPartition(collectionID, partitionID)
 			if err != nil {
 				return err
 			}
+			metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "historical", "partition").Inc()
 		}
 	}
 	log.Debug("watchDMChannel, init replica done", zap.Any("collectionID", collectionID))
@@ -534,6 +538,7 @@ func (r *releasePartitionsTask) PreExecute(ctx context.Context) error {
 }
 
 func (r *releasePartitionsTask) Execute(ctx context.Context) error {
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
 	log.Debug("Execute release partition task",
 		zap.Any("collectionID", r.req.CollectionID),
 		zap.Any("partitionIDs", r.req.PartitionIDs))
@@ -583,6 +588,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 				// not return, try to release all partitions
 				log.Warn(errMsg + err.Error())
 			}
+			metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "historical", "partition").Dec()
 		}
 		hasPartitionInStreaming := r.node.streaming.replica.hasPartition(id)
 		if hasPartitionInStreaming {
@@ -591,6 +597,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 				// not return, try to release all partitions
 				log.Warn(errMsg + err.Error())
 			}
+			metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "streaming", "partition").Dec()
 		}
 
 		// add released partition record

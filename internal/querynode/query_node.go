@@ -28,6 +28,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -360,7 +362,7 @@ func (node *QueryNode) adjustByChangeInfo(segmentChangeInfos *querypb.SealedSegm
 		log.Error("waitChangeInfo failed", zap.Any("error", err.Error()))
 		return err
 	}
-
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
 	node.streaming.replica.queryLock()
 	node.historical.replica.queryLock()
 	defer node.streaming.replica.queryUnlock()
@@ -376,6 +378,7 @@ func (node *QueryNode) adjustByChangeInfo(segmentChangeInfos *querypb.SealedSegm
 
 					return err
 				}
+				metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "streaming", "segment").Dec()
 				log.Debug("remove growing segment in adjustByChangeInfo",
 					zap.Any("collectionID", segmentInfo.CollectionID),
 					zap.Any("segmentID", segmentInfo.SegmentID),
@@ -392,6 +395,7 @@ func (node *QueryNode) adjustByChangeInfo(segmentChangeInfos *querypb.SealedSegm
 				if err != nil {
 					return err
 				}
+				metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "historical", "segment").Dec()
 			}
 		}
 	}

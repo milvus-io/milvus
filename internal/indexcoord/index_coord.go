@@ -26,27 +26,34 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.uber.org/zap"
+)
+
+const (
+	metricTotal   = "total"
+	metricSuccess = "success"
+	metricFailed  = "failed"
 )
 
 // make sure IndexCoord implements types.IndexCoord
@@ -354,10 +361,12 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		zap.Strings("DataPath = ", req.DataPaths),
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams))
+	metrics.IndexCoordBuildIndexCounter.WithLabelValues(metricTotal).Inc()
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
 	defer sp.Finish()
 	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
 	if hasIndex {
+		metrics.IndexCoordBuildIndexCounter.WithLabelValues(metricSuccess).Inc()
 		log.Debug("IndexCoord", zap.Int64("hasIndex true", indexBuildID), zap.Strings("data paths", req.DataPaths))
 		return &indexpb.BuildIndexResponse{
 			Status: &commonpb.Status{
@@ -396,6 +405,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 	}
 	err := fn()
 	if err != nil {
+		metrics.IndexCoordBuildIndexCounter.WithLabelValues(metricFailed).Inc()
 		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
 		return ret, nil
@@ -404,10 +414,12 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 
 	err = t.WaitToFinish()
 	if err != nil {
+		metrics.IndexCoordBuildIndexCounter.WithLabelValues(metricFailed).Inc()
 		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
+	metrics.IndexCoordBuildIndexCounter.WithLabelValues(metricSuccess).Inc()
 	sp.SetTag("IndexCoord-IndexBuildID", strconv.FormatInt(t.indexBuildID, 10))
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	ret.IndexBuildID = t.indexBuildID
@@ -684,6 +696,7 @@ func (i *IndexCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
+				metricIDStr := funcutil.MakeSourceIDString(serverID)
 				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Int64("serverID", serverID),
 					zap.String("address", event.Session.Address))
 				go func() {
@@ -691,14 +704,17 @@ func (i *IndexCoord) watchNodeLoop() {
 					if err != nil {
 						log.Error("IndexCoord", zap.Any("Add IndexNode err", err))
 					}
+					metrics.IndexCoordIndexNodeLister.WithLabelValues(metricIDStr).Set(1)
 					log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
 				}()
 				i.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
+				metricIDStr := funcutil.MakeSourceIDString(serverID)
 				log.Debug("IndexCoord watchNodeLoop SessionDelEvent", zap.Int64("serverID", serverID))
 				i.nodeManager.RemoveNode(serverID)
 				i.metricsCacheManager.InvalidateSystemInfoMetrics()
+				metrics.IndexCoordIndexNodeLister.WithLabelValues(metricIDStr).Set(0)
 			}
 		}
 	}

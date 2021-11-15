@@ -19,8 +19,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -432,18 +433,23 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
 	for _, id := range in.SegmentIDs {
 		err := node.historical.replica.removeSegment(id)
 		if err != nil {
 			// not return, try to release all segments
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = err.Error()
+		} else {
+			metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "historical", "segment").Dec()
 		}
 		err = node.streaming.replica.removeSegment(id)
 		if err != nil {
 			// not return, try to release all segments
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = err.Error()
+		} else {
+			metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "streaming", "segment").Dec()
 		}
 	}
 	return status, nil

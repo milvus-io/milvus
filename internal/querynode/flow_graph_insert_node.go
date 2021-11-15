@@ -19,15 +19,16 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
 )
 
 type insertNode struct {
@@ -56,7 +57,7 @@ func (iNode *insertNode) Name() string {
 
 func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do insertNode operation")
-
+	nodeIDStr := funcutil.MakeSourceIDString(Params.QueryNodeID)
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in insertNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
@@ -96,6 +97,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Warn(err.Error())
 				continue
 			}
+			metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "streaming", "partition").Inc()
 		}
 
 		// check if segment exists, if not, create this segment
@@ -105,6 +107,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Warn(err.Error())
 				continue
 			}
+			metrics.QueryNodeObjGaugeVec.WithLabelValues(nodeIDStr, "streaming", "segment").Inc()
 		}
 
 		iData.insertIDs[task.SegmentID] = append(iData.insertIDs[task.SegmentID], task.RowIDs...)

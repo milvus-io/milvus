@@ -20,11 +20,10 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"go.uber.org/zap"
 )
 
 const (
@@ -40,6 +40,14 @@ const (
 
 	// IndexBuildTaskName is the name of the operation to add an index task.
 	IndexBuildTaskName = "IndexBuildTask"
+)
+
+const (
+	metricStageLoadData       = "load_data"
+	metricStageDeserialize    = "data_deserialize"
+	metricStageBuildIndex     = "index_building"
+	metricStageIndexSerialize = "index_serialize"
+	metricStageSaveIndex      = "index_save"
 )
 
 type task interface {
@@ -339,8 +347,9 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		return nil
 	}
 	log.Debug("IndexNode load data success", zap.Int64("buildId", it.req.IndexBuildID))
-	tr.Record("loadKey done")
-
+	nodeIDStr := funcutil.MakeSourceIDString(Params.NodeID)
+	trSpan := tr.Record("loadKey done")
+	metrics.IndexNodePipelineStageGaugeVec.WithLabelValues(nodeIDStr, metricStageLoadData).Set(trSpan.Seconds())
 	storageBlobs := getStorageBlobs(blobs)
 	var insertCodec storage.InsertCodec
 	defer insertCodec.Close()
@@ -351,7 +360,8 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	if len(insertData.Data) != 1 {
 		return errors.New("we expect only one field in deserialized insert data")
 	}
-	tr.Record("deserialize storage blobs done")
+	trSpan = tr.Record("deserialize storage blobs done")
+	metrics.IndexNodePipelineStageGaugeVec.WithLabelValues(nodeIDStr, metricStageDeserialize).Set(trSpan.Seconds())
 
 	for fieldID, value := range insertData.Data {
 		// TODO: BinaryVectorFieldData
@@ -362,7 +372,8 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 				log.Error("IndexNode BuildFloatVecIndexWithoutIds failed", zap.Error(err))
 				return err
 			}
-			tr.Record("build float vector index done")
+			trSpan = tr.Record("build float vector index done")
+			metrics.IndexNodePipelineStageGaugeVec.WithLabelValues(nodeIDStr, metricStageBuildIndex).Set(trSpan.Seconds())
 		}
 
 		binaryVectorFieldData, bOk := value.(*storage.BinaryVectorFieldData)
@@ -372,7 +383,8 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 				log.Error("IndexNode BuildBinaryVecIndexWithoutIds failed", zap.Error(err))
 				return err
 			}
-			tr.Record("build binary vector index done")
+			trSpan = tr.Record("build binary vector index done")
+			metrics.IndexNodePipelineStageGaugeVec.WithLabelValues(nodeIDStr, metricStageBuildIndex).Set(trSpan.Seconds())
 		}
 
 		if !fOk && !bOk {
@@ -384,8 +396,8 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 			log.Error("IndexNode index Serialize failed", zap.Error(err))
 			return err
 		}
-		tr.Record("serialize index done")
-
+		trSpan = tr.Record("serialize index done")
+		metrics.IndexNodePipelineStageGaugeVec.WithLabelValues(nodeIDStr, metricStageIndexSerialize).Set(trSpan.Seconds())
 		codec := storage.NewIndexFileBinlogCodec()
 		serializedIndexBlobs, err := codec.Serialize(
 			it.req.IndexBuildID,
@@ -403,7 +415,8 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 			return err
 		}
 		_ = codec.Close()
-		tr.Record("serialize index codec done")
+		trSpan = tr.Record("serialize index codec done")
+		metrics.IndexNodePipelineStageGaugeVec.WithLabelValues(nodeIDStr, metricStageSaveIndex).Set(trSpan.Seconds())
 
 		getSavePathByKey := func(key string) string {
 
