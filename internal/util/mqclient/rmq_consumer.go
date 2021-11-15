@@ -61,6 +61,11 @@ func (rc *RmqConsumer) Seek(id MessageID) error {
 	return rc.c.Seek(msgID)
 }
 
+// ConsumeAfterSeek defines rmq consumer should NOT consume after seek
+func (rc *RmqConsumer) ConsumeAfterSeek() bool {
+	return false
+}
+
 // Ack is used to ask a rocksmq message
 func (rc *RmqConsumer) Ack(message ConsumerMessage) {
 }
