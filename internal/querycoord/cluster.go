@@ -266,7 +266,7 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 	if node, ok := c.nodes[nodeID]; ok {
 		err := node.watchDmChannels(ctx, in)
 		if err != nil {
-			log.Debug("WatchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
+			log.Debug("watchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
 			return err
 		}
 		channels := make([]string, 0)
@@ -277,13 +277,13 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 		collectionID := in.CollectionID
 		err = c.clusterMeta.addDmChannel(collectionID, nodeID, channels)
 		if err != nil {
-			log.Debug("WatchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
+			log.Debug("watchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
 			return err
 		}
 
 		return nil
 	}
-	return fmt.Errorf("WatchDmChannels: Can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("watchDmChannels: Can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error {
