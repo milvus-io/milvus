@@ -59,6 +59,8 @@ type ParamTable struct {
 	MaxDimension             int64
 	DefaultPartitionName     string
 	DefaultIndexName         string
+	BufFlagExpireTime        time.Duration
+	BufFlagCleanupInterval   time.Duration
 
 	// --- Channels ---
 	ClusterChannelPrefix      string
@@ -112,6 +114,8 @@ func (pt *ParamTable) Init() {
 	pt.initPulsarMaxMessageSize()
 
 	pt.initMaxTaskNum()
+	pt.initBufFlagExpireTime()
+	pt.initBufFlagCleanupInterval()
 
 	pt.initRoleName()
 }
@@ -281,4 +285,14 @@ func (pt *ParamTable) initMetaRootPath() {
 
 func (pt *ParamTable) initMaxTaskNum() {
 	pt.MaxTaskNum = pt.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
+}
+
+func (pt *ParamTable) initBufFlagExpireTime() {
+	expireTime := pt.ParseInt64WithDefault("proxy.bufFlagExpireTime", 3600)
+	pt.BufFlagExpireTime = time.Duration(expireTime) * time.Second
+}
+
+func (pt *ParamTable) initBufFlagCleanupInterval() {
+	interval := pt.ParseInt64WithDefault("proxy.bufFlagCleanupInterval", 600)
+	pt.BufFlagCleanupInterval = time.Duration(interval) * time.Second
 }

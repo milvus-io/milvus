@@ -653,9 +653,9 @@ func (sched *taskScheduler) collectResultLoop() {
 	defer queryResultMsgStream.Close()
 
 	searchResultBufs := make(map[UniqueID]*searchResultBuf)
-	searchResultBufFlags := make(map[UniqueID]bool) // if value is true, we can ignore searchResult
+	searchResultBufFlags := newIDCache(Params.BufFlagExpireTime, Params.BufFlagCleanupInterval) // if value is true, we can ignore searchResult
 	queryResultBufs := make(map[UniqueID]*queryResultBuf)
-	queryResultBufFlags := make(map[UniqueID]bool) // if value is true, we can ignore queryResult
+	queryResultBufFlags := newIDCache(Params.BufFlagExpireTime, Params.BufFlagCleanupInterval) // if value is true, we can ignore queryResult
 
 	for {
 		select {
@@ -674,9 +674,9 @@ func (sched *taskScheduler) collectResultLoop() {
 				if searchResultMsg, srOk := tsMsg.(*msgstream.SearchResultMsg); srOk {
 					reqID := searchResultMsg.Base.MsgID
 					reqIDStr := strconv.FormatInt(reqID, 10)
-					ignoreThisResult, ok := searchResultBufFlags[reqID]
+					ignoreThisResult, ok := searchResultBufFlags.Get(reqID)
 					if !ok {
-						searchResultBufFlags[reqID] = false
+						searchResultBufFlags.Set(reqID, false)
 						ignoreThisResult = false
 					}
 					if ignoreThisResult {
@@ -688,7 +688,7 @@ func (sched *taskScheduler) collectResultLoop() {
 					if t == nil {
 						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(searchResultBufs, reqID)
-						searchResultBufFlags[reqID] = true
+						searchResultBufFlags.Set(reqID, true)
 						continue
 					}
 
@@ -696,7 +696,7 @@ func (sched *taskScheduler) collectResultLoop() {
 					if !ok {
 						log.Debug("Proxy collectResultLoop type assert t as searchTask failed", zap.Any("ReqID", reqID))
 						delete(searchResultBufs, reqID)
-						searchResultBufFlags[reqID] = true
+						searchResultBufFlags.Set(reqID, true)
 						continue
 					}
 
@@ -732,7 +732,7 @@ func (sched *taskScheduler) collectResultLoop() {
 
 					if resultBuf.readyToReduce() {
 						log.Debug("Proxy collectResultLoop readyToReduce and assign to reduce")
-						searchResultBufFlags[reqID] = true
+						searchResultBufFlags.Set(reqID, true)
 						st.resultBuf <- resultBuf.resultBuf
 						delete(searchResultBufs, reqID)
 					}
@@ -773,9 +773,9 @@ func (sched *taskScheduler) collectResultLoop() {
 
 					reqID := queryResultMsg.Base.MsgID
 					reqIDStr := strconv.FormatInt(reqID, 10)
-					ignoreThisResult, ok := queryResultBufFlags[reqID]
+					ignoreThisResult, ok := queryResultBufFlags.Get(reqID)
 					if !ok {
-						queryResultBufFlags[reqID] = false
+						queryResultBufFlags.Set(reqID, false)
 						ignoreThisResult = false
 					}
 					if ignoreThisResult {
@@ -787,7 +787,7 @@ func (sched *taskScheduler) collectResultLoop() {
 					if t == nil {
 						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(queryResultBufs, reqID)
-						queryResultBufFlags[reqID] = true
+						queryResultBufFlags.Set(reqID, true)
 						continue
 					}
 
@@ -795,7 +795,7 @@ func (sched *taskScheduler) collectResultLoop() {
 					if !ok {
 						log.Debug("Proxy collectResultLoop type assert t as queryTask failed")
 						delete(queryResultBufs, reqID)
-						queryResultBufFlags[reqID] = true
+						queryResultBufFlags.Set(reqID, true)
 						continue
 					}
 
@@ -831,7 +831,7 @@ func (sched *taskScheduler) collectResultLoop() {
 
 					if resultBuf.readyToReduce() {
 						log.Debug("Proxy collectResultLoop readyToReduce and assign to reduce")
-						queryResultBufFlags[reqID] = true
+						queryResultBufFlags.Set(reqID, true)
 						st.resultBuf <- resultBuf.resultBuf
 						delete(queryResultBufs, reqID)
 					}

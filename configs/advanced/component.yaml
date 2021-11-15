@@ -46,6 +46,8 @@ proxy:
   maxDimension: 32768 # Maximum dimension of vector
   maxShardNum: 256 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue
+  bufFlagExpireTime: 3600 # second, the time to expire bufFlag from cache in collectResultLoop
+  bufFlagCleanupInterval: 600 # second, the interval to clean bufFlag cache in collectResultLoop
 
 queryNode:
   stats:
