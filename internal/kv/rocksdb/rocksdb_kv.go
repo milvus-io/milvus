@@ -96,7 +96,7 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 // LoadWithPrefix returns a batch values of keys with a prefix
 func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	if key == "" {
-		return nil, nil, errors.New("Key is nil in LoadWithPrefix")
+		return nil, nil, errors.New("key is nil in LoadWithPrefix")
 	}
 	if kv.DB == nil {
 		return nil, nil, fmt.Errorf("Rocksdb instance is nil when load %s", key)
