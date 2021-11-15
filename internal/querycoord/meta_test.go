@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
@@ -311,6 +312,7 @@ func TestReloadMetaFromKV(t *testing.T) {
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
 		segmentInfos:      map[UniqueID]*querypb.SegmentInfo{},
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
+		deltaChannelInfos: map[UniqueID][]*datapb.VchannelInfo{},
 	}
 
 	kvs := make(map[string]string)
@@ -337,6 +339,18 @@ func TestReloadMetaFromKV(t *testing.T) {
 	assert.Nil(t, err)
 	queryChannelKey := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, defaultCollectionID)
 	kvs[queryChannelKey] = string(queryChannelBlobs)
+
+	deltaChannel1 := &datapb.VchannelInfo{CollectionID: defaultCollectionID, ChannelName: "delta-channel1"}
+	deltaChannel2 := &datapb.VchannelInfo{CollectionID: defaultCollectionID, ChannelName: "delta-channel2"}
+
+	infos := []*datapb.VchannelInfo{deltaChannel1, deltaChannel2}
+	for _, info := range infos {
+		infoBytes, err := proto.Marshal(info)
+		assert.Nil(t, err)
+
+		key := fmt.Sprintf("%s/%d/%s", deltaChannelMetaPrefix, defaultCollectionID, info.ChannelName)
+		kvs[key] = string(infoBytes)
+	}
 
 	err = kv.MultiSave(kvs)
 	assert.Nil(t, err)
