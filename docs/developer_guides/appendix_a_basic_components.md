@@ -443,6 +443,7 @@ type MetaKv interface {
 ###### A.7.4 MetaKv
 
 ```go
+// SnapShotKV is TxnKV for snapshot data. It must save timestamp.
 type SnapShotKV interface {
 	Save(key string, value string, ts typeutil.Timestamp) error
 	Load(key string, ts typeutil.Timestamp) (string, error)
