@@ -22,12 +22,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
-
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 )
 
 // UniqueID is the type of message ID
