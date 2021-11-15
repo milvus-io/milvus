@@ -6,7 +6,6 @@ import grpc
 import numpy as np
 
 from milvus_benchmark.env import get_env
-from milvus_benchmark import config
 from milvus_benchmark.client import MilvusClient
 from . import utils
 
