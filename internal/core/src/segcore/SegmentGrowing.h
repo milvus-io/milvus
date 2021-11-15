@@ -10,19 +10,19 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+
+#include <memory>
 #include <vector>
 
-#include "common/Types.h"
-#include "common/Schema.h"
-#include <memory>
-
-#include "query/deprecated/GeneralQuery.h"
-#include "query/Plan.h"
 #include "common/LoadInfo.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "query/Plan.h"
+#include "query/deprecated/GeneralQuery.h"
 #include "segcore/SegmentInterface.h"
 
-namespace milvus {
-namespace segcore {
+namespace milvus::segcore {
+
 using SearchResult = milvus::SearchResult;
 struct RowBasedRawData {
     void* raw_data;      // schema
@@ -82,5 +82,4 @@ CreateGrowingSegment(SchemaPtr schema) {
     return CreateGrowingSegment(schema, seg_conf);
 }
 
-}  // namespace segcore
-}  // namespace milvus
+}  // namespace milvus::segcore
