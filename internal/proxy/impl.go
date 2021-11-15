@@ -1380,6 +1380,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	return it.result, nil
 }
 
+// Delete delete records from collection, then these records cannot be searched.
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Delete")
 	defer sp.Finish()
