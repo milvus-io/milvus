@@ -674,7 +674,7 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 	}
 
 	if len(*entityIDs) != len(*timestamps) {
-		return errors.New("Length of entityIDs not equal to length of timestamps")
+		return errors.New("length of entityIDs not equal to length of timestamps")
 	}
 
 	var cOffset = C.long(offset)
