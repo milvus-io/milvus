@@ -20,9 +20,7 @@ package querynode
 */
 import "C"
 import (
-	"errors"
 	"path/filepath"
-	"strconv"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -38,12 +36,8 @@ type LoadIndexInfo struct {
 func newLoadIndexInfo() (*LoadIndexInfo, error) {
 	var cLoadIndexInfo C.CLoadIndexInfo
 	status := C.NewLoadIndexInfo(&cLoadIndexInfo)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("NewLoadIndexInfo failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if err := HandleCStatus(&status, "NewLoadIndexInfo failed"); err != nil {
+		return nil, err
 	}
 	return &LoadIndexInfo{cLoadIndexInfo: cLoadIndexInfo}, nil
 }
@@ -58,27 +52,13 @@ func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) er
 	cIndexValue := C.CString(indexValue)
 	defer C.free(unsafe.Pointer(cIndexValue))
 	status := C.AppendIndexParam(li.cLoadIndexInfo, cIndexKey, cIndexValue)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("AppendIndexParam failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-	return nil
+	return HandleCStatus(&status, "AppendIndexParam failed")
 }
 
 func (li *LoadIndexInfo) appendFieldInfo(fieldID FieldID) error {
 	cFieldID := C.long(fieldID)
 	status := C.AppendFieldInfo(li.cLoadIndexInfo, cFieldID)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("AppendFieldInfo failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-	return nil
+	return HandleCStatus(&status, "AppendFieldInfo failed")
 }
 
 func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) error {
@@ -86,11 +66,8 @@ func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) er
 	status := C.NewBinarySet(&cBinarySet)
 	defer C.DeleteBinarySet(cBinarySet)
 
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("newBinarySet failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if err := HandleCStatus(&status, "NewBinarySet failed"); err != nil {
+		return err
 	}
 
 	for i, byteIndex := range bytesIndex {
@@ -101,24 +78,11 @@ func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) er
 		indexKey := C.CString(binarySetKey)
 		status = C.AppendBinaryIndex(cBinarySet, indexPtr, indexLen, indexKey)
 		C.free(unsafe.Pointer(indexKey))
-		errorCode = status.error_code
-		if errorCode != 0 {
-			break
+		if err := HandleCStatus(&status, "AppendBinaryIndex failed"); err != nil {
+			return err
 		}
-	}
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("AppendBinaryIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
 	status = C.AppendIndex(li.cLoadIndexInfo, cBinarySet)
-	errorCode = status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("AppendIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-
-	return nil
+	return HandleCStatus(&status, "AppendIndex failed")
 }
