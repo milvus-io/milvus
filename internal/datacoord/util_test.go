@@ -1,4 +1,4 @@
-// Licensed to the LF AI & Data foundation under one
+// licensed to the lf ai & data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership. The ASF licenses this file
@@ -17,11 +17,14 @@
 package datacoord
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -106,4 +109,48 @@ func TestVerifyResponse(t *testing.T) {
 			assert.Equal(t, c.expected, r)
 		}
 	}
+}
+
+func Test_getTimetravelReverseTime(t *testing.T) {
+	Params.Init()
+	Params.CompactionRetentionDuration = 43200 // 5 days
+
+	tFixed := time.Date(2021, 11, 15, 0, 0, 0, 0, time.Local)
+	tBefore := tFixed.Add(-time.Duration(Params.CompactionRetentionDuration) * time.Second)
+
+	type args struct {
+		allocator allocator
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    *timetravel
+		wantErr bool
+	}{
+		{
+			"test get timetravel",
+			args{&fixedTSOAllocator{fixedTime: tFixed}},
+			&timetravel{tsoutil.ComposeTS(tBefore.UnixNano()/int64(time.Millisecond), 0)},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getTimetravelReverseTime(context.TODO(), tt.args.allocator)
+			assert.Equal(t, tt.wantErr, err != nil)
+			assert.EqualValues(t, tt.want, got)
+		})
+	}
+}
+
+type fixedTSOAllocator struct {
+	fixedTime time.Time
+}
+
+func (f *fixedTSOAllocator) allocTimestamp(_ context.Context) (Timestamp, error) {
+	return tsoutil.ComposeTS(f.fixedTime.UnixNano()/int64(time.Millisecond), 0), nil
+}
+
+func (f *fixedTSOAllocator) allocID(_ context.Context) (UniqueID, error) {
+	panic("not implemented") // TODO: Implement
 }

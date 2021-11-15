@@ -173,6 +173,9 @@ dataCoord:
     sealProportion: 0.75 # It's the minimum proportion for a segment which can be sealed
     assignmentExpiration: 2000 # ms
 
+  compaction:
+    retentionDuration: 432000 # 5 days in seconds
+
 dataNode:
   port: 21124
 
