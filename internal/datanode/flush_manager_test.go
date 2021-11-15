@@ -17,12 +17,15 @@
 package datanode
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"sync"
 	"testing"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
@@ -38,16 +41,25 @@ func (t *emptyFlushTask) flushDeleteData() error {
 	return nil
 }
 
+type errFlushTask struct{}
+
+func (t *errFlushTask) flushInsertData() error {
+	return errors.New("mocked error")
+}
+
+func (t *errFlushTask) flushDeleteData() error {
+	return errors.New("mocked error")
+}
+
 func TestOrderFlushQueue_Execute(t *testing.T) {
 	counter := atomic.Int64{}
 	finish := sync.WaitGroup{}
 
 	size := 1000
 	finish.Add(size)
-	q := newOrderFlushQueue(1, func(*segmentFlushPack) error {
+	q := newOrderFlushQueue(1, func(*segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
-		return nil
 	})
 
 	q.init()
@@ -86,11 +98,10 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 	size := 1000
 	finish.Add(size)
 	resultList := make([][]byte, 0, size)
-	q := newOrderFlushQueue(1, func(pack *segmentFlushPack) error {
+	q := newOrderFlushQueue(1, func(pack *segmentFlushPack) {
 		counter.Inc()
 		resultList = append(resultList, pack.pos.MsgID)
 		finish.Done()
-		return nil
 	})
 
 	q.init()
@@ -130,10 +141,9 @@ func TestRendezvousFlushManager(t *testing.T) {
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
-	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) error {
+	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
-		return nil
 	})
 
 	ids := make([][]byte, 0, size)
@@ -168,11 +178,10 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	finish := sync.WaitGroup{}
 	finish.Add(size)
 	packs := make([]*segmentFlushPack, 0, size+1)
-	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) error {
+	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
 		packs = append(packs, pack)
 		counter.Inc()
 		finish.Done()
-		return nil
 	})
 
 	injected := make(chan struct{})
@@ -253,8 +262,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 	memkv := memkv.NewMemoryKV()
 	replica := newMockReplica()
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), memkv, replica, func(*segmentFlushPack) error {
-		return nil
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), memkv, replica, func(*segmentFlushPack) {
 	})
 
 	// non exists segment
@@ -270,4 +278,57 @@ func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 	// injected get schema  error
 	_, _, _, err = fm.getSegmentMeta(1, &internalpb.MsgPosition{})
 	assert.Error(t, err)
+}
+
+func TestFlushNotifyFunc(t *testing.T) {
+	//	replica :=
+	//	rcf := &RootCoordFactory{}
+	ctx := context.Background()
+	rcf := &RootCoordFactory{}
+
+	replica, err := newReplica(ctx, rcf, 1)
+	require.NoError(t, err)
+
+	dataCoord := &DataCoordFactory{}
+	flushingCache := newCache()
+	dsService := &dataSyncService{
+		collectionID:     1,
+		replica:          replica,
+		dataCoord:        dataCoord,
+		flushingSegCache: flushingCache,
+	}
+	notifyFunc := flushNotifyFunc(dsService, retry.Attempts(1))
+
+	t.Run("normal run", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			notifyFunc(&segmentFlushPack{
+				insertLogs: map[UniqueID]string{1: "/dev/test/id"},
+				statsLogs:  map[UniqueID]string{1: "/dev/test/id-stats"},
+				deltaLogs:  []*DelDataBuf{{filePath: "/dev/test/del"}},
+				flushed:    true,
+			})
+		})
+	})
+
+	t.Run("pack has error", func(t *testing.T) {
+		assert.Panics(t, func() {
+			notifyFunc(&segmentFlushPack{
+				err: errors.New("mocked pack error"),
+			})
+		})
+	})
+
+	t.Run("datacoord Save fails", func(t *testing.T) {
+		dataCoord.SaveBinlogPathNotSuccess = true
+		assert.Panics(t, func() {
+			notifyFunc(&segmentFlushPack{})
+		})
+	})
+
+	t.Run("datacoord call error", func(t *testing.T) {
+		dataCoord.SaveBinlogPathError = true
+		assert.Panics(t, func() {
+			notifyFunc(&segmentFlushPack{})
+		})
+	})
 }

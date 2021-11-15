@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strconv"
@@ -24,9 +25,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.uber.org/zap"
 )
 
@@ -49,10 +53,11 @@ type segmentFlushPack struct {
 	pos        *internalpb.MsgPosition
 	flushed    bool
 	dropped    bool
+	err        error // task execution error, if not nil, notify func should stop datanode
 }
 
 // notifyMetaFunc notify meta to persistent flush result
-type notifyMetaFunc func(*segmentFlushPack) error
+type notifyMetaFunc func(*segmentFlushPack)
 
 // taskPostFunc clean up function after single flush task done
 type taskPostFunc func(pack *segmentFlushPack, postInjection postInjectionFunc)
@@ -402,5 +407,87 @@ func NewRendezvousFlushManager(allocator allocatorInterface, kv kv.BaseKV, repli
 		BaseKV:             kv,
 		notifyFunc:         f,
 		Replica:            replica,
+	}
+}
+
+func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMetaFunc {
+	return func(pack *segmentFlushPack) {
+		if pack.err != nil {
+			log.Warn("flush pack with error, data node quit now")
+			// TODO silverxia change to graceful stop datanode
+			panic(pack.err)
+		}
+		fieldInsert := []*datapb.FieldBinlog{}
+		fieldStats := []*datapb.FieldBinlog{}
+		deltaInfos := []*datapb.DeltaLogInfo{}
+		checkPoints := []*datapb.CheckPoint{}
+		for k, v := range pack.insertLogs {
+			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
+		}
+		for k, v := range pack.statsLogs {
+			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
+		}
+		for _, delData := range pack.deltaLogs {
+			deltaInfos = append(deltaInfos, &datapb.DeltaLogInfo{RecordEntries: uint64(delData.size), TimestampFrom: delData.tsFrom, TimestampTo: delData.tsTo, DeltaLogPath: delData.filePath, DeltaLogSize: delData.fileSize})
+		}
+
+		// only current segment checkpoint info,
+		updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
+		checkPoints = append(checkPoints, &datapb.CheckPoint{
+			SegmentID: pack.segmentID,
+			NumOfRows: updates.GetNumRows(),
+			Position:  pack.pos,
+		})
+
+		log.Debug("SaveBinlogPath",
+			zap.Int64("SegmentID", pack.segmentID),
+			zap.Int64("CollectionID", dsService.collectionID),
+			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
+			zap.Int("Length of Field2Stats", len(fieldStats)),
+			zap.Int("Length of Field2Deltalogs", len(deltaInfos)),
+		)
+
+		req := &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO msg type
+				MsgID:     0, //TODO msg id
+				Timestamp: 0, //TODO time stamp
+				SourceID:  Params.NodeID,
+			},
+			SegmentID:           pack.segmentID,
+			CollectionID:        dsService.collectionID,
+			Field2BinlogPaths:   fieldInsert,
+			Field2StatslogPaths: fieldStats,
+			Deltalogs:           deltaInfos,
+
+			CheckPoints: checkPoints,
+
+			StartPositions: dsService.replica.listNewSegmentsStartPositions(),
+			Flushed:        pack.flushed,
+			Dropped:        pack.dropped,
+		}
+		err := retry.Do(context.Background(), func() error {
+			rsp, err := dsService.dataCoord.SaveBinlogPaths(context.Background(), req)
+			// should be network issue, return error and retry
+			if err != nil {
+				return fmt.Errorf(err.Error())
+			}
+
+			// TODO should retry only when datacoord status is unhealthy
+			if rsp.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
+			}
+			return nil
+		}, opts...)
+		if err != nil {
+			log.Warn("failed to SaveBinlogPaths", zap.Error(err))
+			// TODO change to graceful stop
+			panic(err)
+		}
+
+		if pack.flushed || pack.dropped {
+			dsService.replica.segmentFlushed(pack.segmentID)
+		}
+		dsService.flushingSegCache.Remove(req.GetSegmentID())
 	}
 }
