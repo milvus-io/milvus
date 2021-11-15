@@ -29,7 +29,7 @@ func main() {
 	flag.Parse()
 	etcdkv, err := etcdkv.NewEtcdKV([]string{*etcdAddr}, *rootPath)
 	if err != nil {
-		log.Fatal("failed to connect to ected", zap.Error(err))
+		log.Fatal("failed to connect to etcd", zap.Error(err))
 	}
 
 	keys, values, err := etcdkv.LoadWithPrefix("/")
