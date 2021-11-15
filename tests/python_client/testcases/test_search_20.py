@@ -2282,7 +2282,7 @@ class TestSearchBase:
             assert check_id_result(res[0], ids[0])
         else:
             with pytest.raises(Exception) as e:
-                res = connect.search(collection, **query)
+                connect.search(collection, **query)
 
     @pytest.mark.skip("r0.3-test")
     def _test_search_field(self, connect, collection, get_top_k, get_nq):
