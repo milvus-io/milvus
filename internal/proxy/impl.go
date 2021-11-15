@@ -1269,6 +1269,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 	return dipt.result, nil
 }
 
+// Insert insert records into collection.
 func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
