@@ -529,7 +529,7 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 			return err
 		}
 		log.Debug("MsgStream seek finished", zap.Any("MessageID", messageID))
-		if _, ok := consumer.(*mqclient.PulsarConsumer); ok {
+		if consumer.ConsumeAfterSeek() {
 			log.Debug("MsgStream start to pop one message after seek")
 			msg, ok := <-consumer.Chan()
 			if !ok {
@@ -885,9 +885,9 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		// rmq seek behavior (position, ...)
 		// pulsar seek behavior [position, ...)
 		// skip one tt for pulsar
-		_, ok := consumer.(*mqclient.RmqConsumer)
+
 		runLoop := false
-		if !ok {
+		if consumer.ConsumeAfterSeek() {
 			runLoop = true
 		}
 		for runLoop {
