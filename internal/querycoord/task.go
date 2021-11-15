@@ -409,6 +409,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 						CollectionID: collectionID,
 						Infos:        []*datapb.VchannelInfo{info},
 						Schema:       lct.Schema,
+						SeekToLatest: lct.SeekToLatest,
 					}
 					channelsToWatch = append(channelsToWatch, channel)
 					watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)

@@ -286,8 +286,10 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 				// use pChannel to seek
 				pos.ChannelName = VPChannels[fg.channel]
 				if w.req.SeekToLatest {
+					log.Debug("watch dm channels, seek to latest")
 					fg.seekQueryNodeFlowGraphToLatest(pos)
 				} else {
+					log.Debug("watch dm channels, seek to earliest")
 					err := fg.seekQueryNodeFlowGraph(pos)
 					if err != nil {
 						errMsg := "msgStream seek error :" + err.Error()
