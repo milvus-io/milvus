@@ -30,6 +30,7 @@ package indexnode
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -69,11 +70,8 @@ func (index *CIndex) Serialize() ([]*Blob, error) {
 			C.DeleteCBinary(cBinary)
 		}
 	}()
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, fmt.Errorf("SerializeToSlicedBuffer failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
+	if err := HandleCStatus(&status, "SerializeToSlicedBuffer failed"); err != nil {
+		return nil, err
 	}
 
 	binarySize := C.GetCBinarySize(cBinary)
@@ -111,13 +109,7 @@ func (index *CIndex) Load(blobs []*Blob) error {
 		LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);
 	*/
 	status := C.LoadFromSlicedBuffer(index.indexPtr, (*C.char)(unsafe.Pointer(&datas[0])), (C.int32_t)(len(datas)))
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return fmt.Errorf("BuildFloatVecIndexWithoutIds failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
-	}
-	return nil
+	return HandleCStatus(&status, "LoadFromSlicedBuffer failed")
 }
 
 // BuildFloatVecIndexWithoutIds builds indexes for float vector.
@@ -128,14 +120,7 @@ func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {
 	*/
 	log.Debug("before BuildFloatVecIndexWithoutIds")
 	status := C.BuildFloatVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		log.Debug("indexnode", zap.String("BuildFloatVecIndexWithoutIds error msg: ", errorMsg))
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return fmt.Errorf("BuildFloatVecIndexWithoutIds failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
-	}
-	return nil
+	return HandleCStatus(&status, "BuildFloatVecIndexWithoutIds failed")
 }
 
 // BuildBinaryVecIndexWithoutIds builds indexes for binary vector.
@@ -145,13 +130,7 @@ func (index *CIndex) BuildBinaryVecIndexWithoutIds(vectors []byte) error {
 		BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* vectors);
 	*/
 	status := C.BuildBinaryVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return fmt.Errorf("BuildBinaryVecIndexWithoutIds failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
-	}
-	return nil
+	return HandleCStatus(&status, "BuildBinaryVecIndexWithoutIds failed")
 }
 
 // Delete removes the pointer to build the index in 'C'.
@@ -198,16 +177,31 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	var indexPtr C.CIndex
 	log.Debug("Start to create index ...", zap.String("params", indexParamsStr))
 	status := C.CreateIndex(typeParamsPointer, indexParamsPointer, &indexPtr)
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		log.Debug("indexnode", zap.String("create index error msg", errorMsg))
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, fmt.Errorf(" failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
+	if err := HandleCStatus(&status, "CreateIndex failed"); err != nil {
+		return nil, err
 	}
 	log.Debug("Successfully create index ...")
 
 	return &CIndex{
 		indexPtr: indexPtr,
 	}, nil
+}
+
+// HandleCStatus deal with the error returned from CGO
+func HandleCStatus(status *C.CStatus, extraInfo string) error {
+	if status.error_code == 0 {
+		return nil
+	}
+	errorCode := status.error_code
+	errorName, ok := commonpb.ErrorCode_name[int32(errorCode)]
+	if !ok {
+		errorName = "UnknownError"
+	}
+	errorMsg := C.GoString(status.error_msg)
+	defer C.free(unsafe.Pointer(status.error_msg))
+
+	finalMsg := fmt.Sprintf("[%s] %s", errorName, errorMsg)
+	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
+	log.Warn(logMsg)
+	return errors.New(finalMsg)
 }
