@@ -333,6 +333,7 @@ func (s *Server) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRe
 	return s.rootCoord.DropPartition(ctx, in)
 }
 
+// HasPartition checks whether a partition is created.
 func (s *Server) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	return s.rootCoord.HasPartition(ctx, in)
 }
