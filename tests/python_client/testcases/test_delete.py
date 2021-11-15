@@ -859,3 +859,33 @@ class TestDeleteOperation(TestcaseBase):
         expected: delete successfully
         """
         pass
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_delete_sealed_only(self):
+        """
+        target: test delete sealed-only
+        method: 1.deploy sealed-only: two dmlChannel and three queryNodes
+                2.create and insert with flush
+                3.load
+                4.delete all data
+                5.query
+        expected:
+        """
+        # init collection and insert data without flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=2)
+        # insert 3000 entities into 3 segments
+        segment_num = 3
+        segment_per_count = 2000
+        ids = []
+        for i in range(segment_num):
+            df = cf.gen_default_dataframe_data(nb=segment_per_count, start=(i * segment_per_count))
+            res, _ = collection_w.insert(df)
+            assert collection_w.num_entities == (i+1) * segment_per_count
+            ids.extend(res.primary_keys)
+
+        collection_w.load()
+
+        expr = f'{ct.default_int64_field_name} in {ids}'
+        collection_w.delete(expr)
+
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
