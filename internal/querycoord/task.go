@@ -372,8 +372,8 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				CollectionID: collectionID,
 				BinlogPaths:  segmentBingLog.FieldBinlogs,
 				NumOfRows:    segmentBingLog.NumOfRows,
-				Statslogs:    segmentBingLog.Statslogs,
-				Deltalogs:    segmentBingLog.Deltalogs,
+				StatsLogs:    segmentBingLog.Statslogs,
+				DeltaLogs:    segmentBingLog.Deltalogs,
 			}
 
 			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
@@ -728,8 +728,8 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 				CollectionID: collectionID,
 				BinlogPaths:  segmentBingLog.FieldBinlogs,
 				NumOfRows:    segmentBingLog.NumOfRows,
-				Statslogs:    segmentBingLog.Statslogs,
-				Deltalogs:    segmentBingLog.Deltalogs,
+				StatsLogs:    segmentBingLog.Statslogs,
+				DeltaLogs:    segmentBingLog.Deltalogs,
 			}
 
 			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
@@ -1709,8 +1709,8 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 							CollectionID: collectionID,
 							BinlogPaths:  segmentBingLog.FieldBinlogs,
 							NumOfRows:    segmentBingLog.NumOfRows,
-							Statslogs:    segmentBingLog.Statslogs,
-							Deltalogs:    segmentBingLog.Deltalogs,
+							StatsLogs:    segmentBingLog.Statslogs,
+							DeltaLogs:    segmentBingLog.Deltalogs,
 						}
 
 						msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
@@ -1905,8 +1905,8 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						CollectionID: collectionID,
 						BinlogPaths:  segmentBingLog.FieldBinlogs,
 						NumOfRows:    segmentBingLog.NumOfRows,
-						Statslogs:    segmentBingLog.Statslogs,
-						Deltalogs:    segmentBingLog.Deltalogs,
+						StatsLogs:    segmentBingLog.Statslogs,
+						DeltaLogs:    segmentBingLog.Deltalogs,
 					}
 
 					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)

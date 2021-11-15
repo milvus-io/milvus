@@ -179,7 +179,7 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 		log.Warn("segment primary key field doesn't exist when load segment")
 	} else {
 		log.Debug("loading bloom filter...")
-		pkStatsBinlogs := loader.filterPKStatsBinlogs(segmentLoadInfo.Statslogs, pkIDField)
+		pkStatsBinlogs := loader.filterPKStatsBinlogs(segmentLoadInfo.StatsLogs, pkIDField)
 		err = loader.loadSegmentBloomFilter(segment, pkStatsBinlogs)
 		if err != nil {
 			return err
@@ -187,7 +187,7 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 	}
 
 	log.Debug("loading delta...")
-	err = loader.loadDeltaLogs(segment, segmentLoadInfo.Deltalogs)
+	err = loader.loadDeltaLogs(segment, segmentLoadInfo.DeltaLogs)
 	if err != nil {
 		return err
 	}

@@ -242,8 +242,8 @@ message SegmentLoadInfo {
   int64 flush_time = 5;
   repeated data.FieldBinlog binlog_paths = 6;
   int64 num_of_rows = 7;
-  repeated data.FieldBinlog statslogs = 8;
-  repeated data.DeltaLogInfo deltalogs = 9;
+  repeated data.FieldBinlog stats_logs = 8;
+  repeated data.DeltaLogInfo delta_logs = 9;
   repeated int64 compactionFrom = 10; // segmentIDs compacted from
 }
 

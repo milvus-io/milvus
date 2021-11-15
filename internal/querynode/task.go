@@ -312,8 +312,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 				CollectionID: ufInfo.CollectionID,
 				BinlogPaths:  ufInfo.Binlogs,
 				NumOfRows:    ufInfo.NumOfRows,
-				Statslogs:    ufInfo.Statslogs,
-				Deltalogs:    ufInfo.Deltalogs,
+				StatsLogs:    ufInfo.Statslogs,
+				DeltaLogs:    ufInfo.Deltalogs,
 			})
 			unFlushedSegmentIDs = append(unFlushedSegmentIDs, ufInfo.ID)
 		}
