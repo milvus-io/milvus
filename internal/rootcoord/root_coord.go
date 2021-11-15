@@ -834,6 +834,8 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 
 // BuildIndex will check row num and call build index service
 func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) (typeutil.UniqueID, error) {
+	log.Debug("start build index", zap.String("index name", idxInfo.IndexName),
+		zap.String("field name", field.Name), zap.Int64("segment id", segID))
 	sp, ctx := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
@@ -855,9 +857,10 @@ func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *s
 		if err != nil {
 			return 0, err
 		}
+
+		log.Debug("CallBuildIndex finished", zap.String("index name", idxInfo.IndexName),
+			zap.String("field name", field.Name), zap.Int64("segment id", segID), zap.Int64("num rows", rows))
 	}
-	log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-		zap.String("field name", field.Name), zap.Int64("segment id", segID), zap.Int64("num rows", rows))
 	return bldID, nil
 }
 
