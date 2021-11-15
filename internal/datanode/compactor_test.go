@@ -242,7 +242,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		iblobs, err := getInsertBlobs(100, iData, meta)
 		require.NoError(t, err)
 
-		iitr, err := storage.NewInsertBinlogIterator(iblobs)
+		iitr, err := storage.NewInsertBinlogIterator(iblobs, 106)
 		require.NoError(t, err)
 
 		mitr := storage.NewMergeIterator([]iterator{iitr})
@@ -432,13 +432,13 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		require.True(t, replica.hasSegment(segID2, true))
 
 		meta := NewMetaFactory().GetCollectionMeta(collID, "test_compact_coll_name")
-		iData1 := genInsertDataWithRowIDs([2]int64{1, 2})
+		iData1 := genInsertDataWithPKs([2]int64{1, 2})
 		dData1 := &DeleteData{
 			Pks:      []UniqueID{1},
 			Tss:      []Timestamp{20000},
 			RowCount: 1,
 		}
-		iData2 := genInsertDataWithRowIDs([2]int64{9, 10})
+		iData2 := genInsertDataWithPKs([2]int64{9, 10})
 		dData2 := &DeleteData{
 			Pks:      []UniqueID{9},
 			Tss:      []Timestamp{30000},

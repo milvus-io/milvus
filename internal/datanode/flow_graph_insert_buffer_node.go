@@ -241,6 +241,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 		log.Debug("insert seg buffer status", zap.Int("No.", k),
 			zap.Int64("segmentID", segID),
+			zap.String("vchannel name", ibNode.channelName),
 			zap.Int64("buffer size", bd.(*BufferData).size),
 			zap.Int64("buffer limit", bd.(*BufferData).limit))
 	}
@@ -261,7 +262,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	if fgMsg.dropCollection {
 		segmentsToFlush := ibNode.replica.listAllSegmentIDs()
 		log.Debug("Recive drop collection req and flushing all segments",
-			zap.Any("segments", segmentsToFlush))
+			zap.Any("segments", segmentsToFlush),
+			zap.String("vchannel name", ibNode.channelName),
+		)
 		flushTaskList = make([]flushTask, 0, len(segmentsToFlush))
 
 		for _, seg2Flush := range segmentsToFlush {
@@ -287,7 +290,10 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		for _, segToFlush := range seg2Upload {
 			// If full, auto flush
 			if bd, ok := ibNode.insertBuffer.Load(segToFlush); ok && bd.(*BufferData).effectiveCap() <= 0 {
-				log.Warn("Auto flush", zap.Int64("segment id", segToFlush))
+				log.Info("Auto flush",
+					zap.Int64("segment id", segToFlush),
+					zap.String("vchannel name", ibNode.channelName),
+				)
 				ibuffer := bd.(*BufferData)
 
 				flushTaskList = append(flushTaskList, flushTask{
@@ -306,6 +312,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			log.Debug(". Receiving flush message",
 				zap.Int64("segmentID", fmsg.segmentID),
 				zap.Int64("collectionID", fmsg.collectionID),
+				zap.String("vchannel name", ibNode.channelName),
 			)
 			// merging auto&manual flush segment same segment id
 			dup := false
@@ -708,7 +715,6 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 //
 // Currently, the statistics includes segment ID and its total number of rows in memory.
 func (ibNode *insertBufferNode) uploadMemStates2Coord(segIDs []UniqueID) error {
-	log.Debug("Updating segments statistics...")
 	statsUpdates := make([]*internalpb.SegmentStatisticsUpdates, 0, len(segIDs))
 	for _, segID := range segIDs {
 		updates, err := ibNode.replica.getSegmentStatisticsUpdates(segID)
@@ -718,8 +724,10 @@ func (ibNode *insertBufferNode) uploadMemStates2Coord(segIDs []UniqueID) error {
 		}
 
 		log.Debug("Segment Statistics to Update",
-			zap.Int64("Segment ID", updates.GetSegmentID()),
-			zap.Int64("NumOfRows", updates.GetNumRows()),
+			zap.Int64("segment ID", updates.GetSegmentID()),
+			zap.Int64("collection ID", ibNode.replica.getCollectionID()),
+			zap.String("vchannel name", ibNode.channelName),
+			zap.Int64("numOfRows", updates.GetNumRows()),
 		)
 
 		statsUpdates = append(statsUpdates, updates)

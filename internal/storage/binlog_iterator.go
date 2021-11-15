@@ -38,6 +38,7 @@ type Iterator interface {
 // Value is the return value of HasNext
 type Value struct {
 	ID        int64
+	PK        int64
 	Timestamp int64
 	IsDeleted bool
 	Value     interface{}
@@ -45,14 +46,14 @@ type Value struct {
 
 // InsertBinlogIterator is the iterator of binlog
 type InsertBinlogIterator struct {
-	dispose int32 // 0: false, 1: true
-	data    *InsertData
-	fieldID int64
-	pos     int
+	dispose   int32 // 0: false, 1: true
+	data      *InsertData
+	PKfieldID int64
+	pos       int
 }
 
 // NewInsertBinlogIterator creates a new iterator
-func NewInsertBinlogIterator(blobs []*Blob) (*InsertBinlogIterator, error) {
+func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID) (*InsertBinlogIterator, error) {
 	// TODO: load part of file to read records other than loading all content
 	reader := NewInsertCodec(nil)
 
@@ -63,7 +64,7 @@ func NewInsertBinlogIterator(blobs []*Blob) (*InsertBinlogIterator, error) {
 		return nil, err
 	}
 
-	return &InsertBinlogIterator{data: serData}, nil
+	return &InsertBinlogIterator{data: serData, PKfieldID: PKfieldID}, nil
 }
 
 // HasNext returns true if the iterator have unread record
@@ -89,6 +90,7 @@ func (itr *InsertBinlogIterator) Next() (interface{}, error) {
 	v := &Value{
 		ID:        itr.data.Data[rootcoord.RowIDField].Get(itr.pos).(int64),
 		Timestamp: itr.data.Data[rootcoord.TimeStampField].Get(itr.pos).(int64),
+		PK:        itr.data.Data[itr.PKfieldID].Get(itr.pos).(int64),
 		IsDeleted: false,
 		Value:     m,
 	}
