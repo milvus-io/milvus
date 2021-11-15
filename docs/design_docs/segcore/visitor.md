@@ -14,7 +14,7 @@ Visitor Pattern is used in segcore for parse and execute Execution Plan.
 Currently , under `${core/query/visitors}` directory, there are following visitors
 1. `ShowPlanNodeVisitor` print PlanNode in json
 2. `ShowExprVisitor` Expr -> json
-3. `Verify...Visitor` validate ...
-4. `ExtractInfo...Visitor` extract info from... ，including involved_fields and else
-5. `ExecExprVisitor` Generate bitmask according to expression
-6. `ExecPlanNodeVistor` physical plan executor, for now only support ANNS node.
+3. `Verify...Visitor` validates ...
+4. `ExtractInfo...Visitor` extracts info from... ，including involved_fields and else
+5. `ExecExprVisitor` generates bitmask according to expression
+6. `ExecPlanNodeVistor` physical plan executor only supports ANNS node for now
