@@ -82,7 +82,7 @@ func (kv *RocksdbKV) GetName() string {
 // Load returns the value of specified key
 func (kv *RocksdbKV) Load(key string) (string, error) {
 	if kv.DB == nil {
-		return "", fmt.Errorf("Rocksdb instance is nil when load %s", key)
+		return "", fmt.Errorf("rocksdb instance is nil when load %s", key)
 	}
 
 	value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
