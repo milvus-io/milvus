@@ -107,6 +107,8 @@ Milvus 支持4种部署方式，请根据需求选择部署方式，PyMilvus 支
 
 [![img](https://github.com/milvus-io/milvus/raw/master/tests/python_client/graphs/module_call_diagram.jpg)](https://github.com/milvus-io/milvus/blob/master/tests/python_client/graphs/module_call_diagram.jpeg)
 
+<img src="graphs/sdk_test_flow_chart.jpg" alt="SDK Test Flow Chart" width="400"/>
+
 ### 工作目录及文件介绍
 
 - **base**：放置已封装好的 **PyMilvus 模块文件**，以及 Pytest 框架的 setup 和 teardown 处理等
