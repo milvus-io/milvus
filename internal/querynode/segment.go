@@ -186,9 +186,9 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		log.Warn("illegal segment type when create segment")
 		return nil
 	case segmentTypeSealed:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Sealed)
+		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed)
 	case segmentTypeGrowing:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Growing)
+		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing)
 	default:
 		log.Warn("illegal segment type when create segment")
 		return nil

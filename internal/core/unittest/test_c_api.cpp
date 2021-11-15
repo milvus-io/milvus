@@ -193,14 +193,14 @@ TEST(CApiTest, GetCollectionNameTest) {
 
 TEST(CApiTest, SegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, InsertTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -218,7 +218,7 @@ TEST(CApiTest, InsertTest) {
 
 TEST(CApiTest, DeleteTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     long delete_row_ids[] = {100000, 100001, 100002};
     unsigned long delete_timestamps[] = {0, 0, 0};
@@ -234,7 +234,7 @@ TEST(CApiTest, DeleteTest) {
 
 TEST(CApiTest, SearchTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -302,7 +302,7 @@ TEST(CApiTest, SearchTest) {
 
 TEST(CApiTest, SearchTestWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -354,7 +354,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 
 TEST(CApiTest, RetrieveTestWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -392,7 +392,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
 
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
     // std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
@@ -418,7 +418,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 
 TEST(CApiTest, GetDeletedCountTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     long delete_row_ids[] = {100000, 100001, 100002};
     unsigned long delete_timestamps[] = {0, 0, 0};
@@ -438,7 +438,7 @@ TEST(CApiTest, GetDeletedCountTest) {
 
 TEST(CApiTest, GetRowCountTest) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -464,7 +464,7 @@ TEST(CApiTest, GetRowCountTest) {
 //        "\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n";
 //
 //    auto collection = NewCollection(schema_string.data());
-//    auto segment = NewSegment(collection, 0, Growing);
+//    auto segment = NewSegment(collection, Growing);
 //    DeleteCollection(collection);
 //    DeleteSegment(segment);
 //}
@@ -534,7 +534,7 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -625,7 +625,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 
 TEST(CApiTest, Reduce) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -708,7 +708,7 @@ TEST(CApiTest, Reduce) {
 
 TEST(CApiTest, ReduceSearchWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -881,7 +881,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1005,7 +1005,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1124,7 +1124,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1262,7 +1262,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -1414,7 +1414,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1550,7 +1550,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -1695,7 +1695,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -1833,7 +1833,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1984,7 +1984,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2126,7 +2126,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Growing);
+    auto segment = NewSegment(collection, Growing);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2295,7 +2295,7 @@ TEST(CApiTest, SealedSegmentTest) {
                                   >
                                 >)";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0, Sealed);
+    auto segment = NewSegment(collection, Sealed);
 
     int N = 10000;
     std::default_random_engine e(67);
@@ -2322,7 +2322,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Sealed);
+    auto segment = NewSegment(collection, Sealed);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2474,7 +2474,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Sealed);
+    auto segment = NewSegment(collection, Sealed);
 
     auto N = ROW_COUNT;
     uint64_t ts_offset = 1000;
@@ -2568,7 +2568,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0, Sealed);
+    auto segment = NewSegment(collection, Sealed);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
