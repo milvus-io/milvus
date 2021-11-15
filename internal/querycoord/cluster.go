@@ -210,11 +210,15 @@ func (c *queryNodeCluster) getComponentInfos(ctx context.Context) ([]*internalpb
 }
 
 func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *querypb.LoadSegmentsRequest) error {
-	c.Lock()
-	defer c.Unlock()
-
+	c.RLock()
+	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
-		err := node.loadSegments(ctx, in)
+		targetNode = node
+	}
+	c.RUnlock()
+
+	if targetNode != nil {
+		err := targetNode.loadSegments(ctx, in)
 		if err != nil {
 			log.Debug("LoadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
@@ -222,19 +226,24 @@ func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *q
 
 		return nil
 	}
+
 	return errors.New("LoadSegments: Can't find query node by nodeID ")
 }
 
 func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in *querypb.ReleaseSegmentsRequest) error {
-	c.Lock()
-	defer c.Unlock()
-
+	c.RLock()
+	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
-		if !node.isOnline() {
+		targetNode = node
+	}
+	c.RUnlock()
+
+	if targetNode != nil {
+		if !targetNode.isOnline() {
 			return errors.New("node offline")
 		}
 
-		err := node.releaseSegments(ctx, in)
+		err := targetNode.releaseSegments(ctx, in)
 		if err != nil {
 			log.Debug("ReleaseSegments: queryNode release segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
@@ -247,11 +256,15 @@ func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in
 }
 
 func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error {
-	c.Lock()
-	defer c.Unlock()
-
+	c.RLock()
+	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
-		err := node.watchDmChannels(ctx, in)
+		targetNode = node
+	}
+	c.RUnlock()
+
+	if targetNode != nil {
+		err := targetNode.watchDmChannels(ctx, in)
 		if err != nil {
 			log.Debug("WatchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
 			return err
@@ -271,21 +284,27 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 
 		return nil
 	}
+
 	return errors.New("WatchDmChannels: Can't find query node by nodeID ")
 }
 
 func (c *queryNodeCluster) hasWatchedQueryChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	return c.nodes[nodeID].hasWatchedQueryChannel(collectionID)
 }
 
 func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in *querypb.AddQueryChannelRequest) error {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
-		err := node.addQueryChannel(ctx, in)
+		targetNode = node
+	}
+	c.RUnlock()
+
+	if targetNode != nil {
+		err := targetNode.addQueryChannel(ctx, in)
 		if err != nil {
 			log.Debug("AddQueryChannel: queryNode add query channel error", zap.String("error", err.Error()))
 			return err
@@ -296,11 +315,15 @@ func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in
 	return errors.New("AddQueryChannel: can't find query node by nodeID")
 }
 func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64, in *querypb.RemoveQueryChannelRequest) error {
-	c.Lock()
-	defer c.Unlock()
-
+	c.RLock()
+	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
-		err := node.removeQueryChannel(ctx, in)
+		targetNode = node
+	}
+	c.RUnlock()
+
+	if targetNode != nil {
+		err := targetNode.removeQueryChannel(ctx, in)
 		if err != nil {
 			log.Debug("RemoveQueryChannel: queryNode remove query channel error", zap.String("error", err.Error()))
 			return err
@@ -313,11 +336,15 @@ func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64,
 }
 
 func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error {
-	c.Lock()
-	defer c.Unlock()
-
+	c.RLock()
+	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
-		err := node.releaseCollection(ctx, in)
+		targetNode = node
+	}
+	c.RUnlock()
+
+	if targetNode != nil {
+		err := targetNode.releaseCollection(ctx, in)
 		if err != nil {
 			log.Debug("ReleaseCollection: queryNode release collection error", zap.String("error", err.Error()))
 			return err
@@ -334,11 +361,15 @@ func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, 
 }
 
 func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error {
-	c.Lock()
-	defer c.Unlock()
-
+	c.RLock()
+	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
-		err := node.releasePartitions(ctx, in)
+		targetNode = node
+	}
+	c.RUnlock()
+
+	if targetNode != nil {
+		err := targetNode.releasePartitions(ctx, in)
 		if err != nil {
 			log.Debug("ReleasePartitions: queryNode release partitions error", zap.String("error", err.Error()))
 			return err
@@ -505,8 +536,8 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 }
 
 func (c *queryNodeCluster) stopNode(nodeID int64) {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
 		node.stop()
@@ -557,8 +588,8 @@ func (c *queryNodeCluster) getOfflineNodes() (map[int64]Node, error) {
 }
 
 func (c *queryNodeCluster) isOnline(nodeID int64) (bool, error) {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
 		return node.isOnline(), nil

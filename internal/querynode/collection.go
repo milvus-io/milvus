@@ -42,6 +42,7 @@ type Collection struct {
 	id            UniqueID
 	partitionIDs  []UniqueID
 	schema        *schemapb.CollectionSchema
+	channelMu     sync.RWMutex
 	vChannels     []Channel
 	pChannels     []Channel
 
@@ -85,6 +86,8 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 
 // addVChannels add virtual channels to collection
 func (c *Collection) addVChannels(channels []Channel) {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
 OUTER:
 	for _, dstChan := range channels {
 		for _, srcChan := range c.vChannels {
@@ -106,11 +109,15 @@ OUTER:
 
 // getVChannels get virtual channels of collection
 func (c *Collection) getVChannels() []Channel {
+	c.channelMu.RLock()
+	defer c.channelMu.RUnlock()
 	return c.vChannels
 }
 
 // addPChannels add physical channels to physical channels of collection
 func (c *Collection) addPChannels(channels []Channel) {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
 OUTER:
 	for _, dstChan := range channels {
 		for _, srcChan := range c.pChannels {
@@ -132,6 +139,8 @@ OUTER:
 
 // getPChannels get physical channels of collection
 func (c *Collection) getPChannels() []Channel {
+	c.channelMu.RLock()
+	defer c.channelMu.RUnlock()
 	return c.pChannels
 }
 
