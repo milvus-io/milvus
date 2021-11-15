@@ -35,6 +35,8 @@ type DataCoord interface {
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
   // GetMetrics gets the metrics about DataCoord
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+  // CompleteCompaction completes a compaction with the result
+	CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error)
 }
 ```
 
