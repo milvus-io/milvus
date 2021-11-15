@@ -281,6 +281,7 @@ type DataNode interface {
 	Component
 
 	WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	// FlushSegments notifies DataNode to flush the segments req provids. The flush tasks are async to this rpc, DataNode will flush the segments in the background.
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
   // GetMetrics gets the metrics about DataNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
