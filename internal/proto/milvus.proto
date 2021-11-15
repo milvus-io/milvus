@@ -472,12 +472,20 @@ message DescribeIndexResponse {
   repeated IndexDescription index_descriptions = 2;
 }
 
+/*
+*  Get index building progress 
+*/
 message GetIndexBuildProgressRequest {
-  common.MsgBase base = 1; // must
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
   string db_name = 2 ;
-  string collection_name = 3; // must
+  // The collection name in milvus
+  string collection_name = 3;
+  // The vector field name in this collection
   string field_name = 4;
-  string index_name = 5; // must
+  // Not useful for now
+  string index_name = 5;
 }
 
 message GetIndexBuildProgressResponse {
