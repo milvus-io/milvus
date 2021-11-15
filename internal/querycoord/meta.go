@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -202,8 +203,8 @@ func (m *MetaReplica) reloadFromKV() error {
 		return nil
 	}
 	for index, value := range deltaChannelValues {
-		collectionIDString, _ := filepath.Split(deltaChannelKeys[index])
-		collectionID, err := strconv.ParseInt(collectionIDString, 10, 64)
+		pathStrings := strings.Split(deltaChannelKeys[index], "/")
+		collectionID, err := strconv.ParseInt(pathStrings[len(pathStrings)-2], 10, 64)
 		if err != nil {
 			return err
 		}
