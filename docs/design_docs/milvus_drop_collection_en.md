@@ -28,7 +28,7 @@ message DropCollectionRequest {
 }
 ```
 
-2. Once the `DropCollection` request is received, the `Proxy` would wrap this request into `DropCollectionTask`, and push this task into `DdTaskQueue` queue. After that, `Proxy` would call `WatiToFinish` method to wait until the task is finished.
+2. Once the `DropCollection` request is received, the `Proxy` would wrap this request into `DropCollectionTask`, and push this task into `DdTaskQueue` queue. After that, `Proxy` would call `WaitToFinish` method to wait until the task is finished.
 
 ```go
 type task interface {
