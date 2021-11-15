@@ -348,8 +348,9 @@ func (t *compactionTask) compact() error {
 
 		segID := s.GetSegmentID()
 		for _, d := range s.GetDeltalogs() {
+			path := d.GetDeltaLogPath()
 			g.Go(func() error {
-				bs, err := t.download(gCtx, []string{d.GetDeltaLogPath()})
+				bs, err := t.download(gCtx, []string{path})
 				if err != nil {
 					log.Warn("download deltalogs wrong")
 					return err
