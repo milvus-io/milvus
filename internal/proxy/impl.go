@@ -1206,6 +1206,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 	return gibpt.result, nil
 }
 
+// GetIndexState get the build-state of index.
 func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetIndexStateResponse{
