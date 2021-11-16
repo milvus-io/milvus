@@ -380,7 +380,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	ddCollReq.Base.Timestamp = ts
 	ddOpStr, err := EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
 	if err != nil {
-		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
+		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
