@@ -206,6 +206,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	assert.NoError(t, err)
 
 	channelName1 := "channel_dummy"
+	topicMu.Store(channelName1, new(sync.Mutex))
 	err = rmq.DestroyTopic(channelName1)
 	assert.NoError(t, err)
 
