@@ -88,6 +88,7 @@ Proxy also implements Milvus Service interface to receive client grpc call.
 
 ```go
 type MilvusService interface {
+  // CreateCollection creates a collection
 	CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
 	DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 	HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
