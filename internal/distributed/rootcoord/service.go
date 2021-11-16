@@ -285,6 +285,7 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// GetComponentStates gets the component states of RootCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.rootCoord.GetComponentStates(ctx)
 }
