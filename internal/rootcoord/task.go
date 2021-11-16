@@ -192,7 +192,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	ddCollReq.Base.Timestamp = ts
 	ddOpStr, err := EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
 	if err != nil {
-		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
+		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
@@ -293,7 +293,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	ddReq.Base.Timestamp = ts
 	ddOpStr, err := EncodeDdOperation(&ddReq, DropCollectionDDType)
 	if err != nil {
-		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
+		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
 	aliases := t.core.MetaTable.ListAliases(collMeta.ID)
@@ -533,7 +533,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	ddReq.Base.Timestamp = ts
 	ddOpStr, err := EncodeDdOperation(&ddReq, CreatePartitionDDType)
 	if err != nil {
-		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
+		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
@@ -629,7 +629,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	ddReq.Base.Timestamp = ts
 	ddOpStr, err := EncodeDdOperation(&ddReq, DropPartitionDDType)
 	if err != nil {
-		return fmt.Errorf("EncodeDdOperation fail, error = %w", err)
+		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released

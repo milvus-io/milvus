@@ -151,12 +151,12 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 		return nil
 	}
 	if len(in.Timestamps) != len(in.ChannelNames) {
-		return fmt.Errorf("Invalid TimeTickMsg")
+		return fmt.Errorf("invalid TimeTickMsg")
 	}
 
 	prev, ok := t.proxyTimeTick[in.Base.SourceID]
 	if !ok {
-		return fmt.Errorf("Skip ChannelTimeTickMsg from un-recognized proxy node %d", in.Base.SourceID)
+		return fmt.Errorf("skip ChannelTimeTickMsg from un-recognized proxy node %d", in.Base.SourceID)
 	}
 
 	// if ddl operation not finished, skip current ts update
