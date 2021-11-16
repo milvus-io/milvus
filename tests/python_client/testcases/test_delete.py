@@ -848,7 +848,8 @@ class TestDeleteOperation(TestcaseBase):
 
         # delete id 1 and query id 0 and 1
         collection_w.delete(expr=f'{ct.default_int64_field_name} in {[1]}')
-        collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, 1]}', check_task=CheckTasks.check_query_empty)
+        collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, 1]}',
+                           check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="TODO")
