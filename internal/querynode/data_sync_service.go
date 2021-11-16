@@ -224,6 +224,7 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 	}
 }
 
+// getPartitionFlowGraphs returns the partition flow graph by partitionID
 func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
