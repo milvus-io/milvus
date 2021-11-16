@@ -115,6 +115,8 @@ where `host` should be set as the IP address of the Milvus service, and `*.html`
 
 ![Module Overview](./graphs/module_call_diagram.jpg)
 
+<img src="graphs/sdk_test_flow_chart.jpg" alt="SDK Test Flow Chart" width="400"/>
+
 ### Working directories and files
 
 - **base**: stores the encapsulated **PyMilvus** **module** files, and setup & teardown functions for pytest framework.
