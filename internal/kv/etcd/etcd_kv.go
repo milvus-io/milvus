@@ -29,6 +29,7 @@ import (
 )
 
 const (
+	// RequestTimeout default timeout for etcd request.
 	RequestTimeout = 10 * time.Second
 )
 
@@ -56,6 +57,7 @@ func NewEtcdKV(etcdEndpoints []string, rootPath string) (*EtcdKV, error) {
 	return kv, nil
 }
 
+// NewEtcdKVWithClient creates a new etcd kv with a client.
 func NewEtcdKVWithClient(cli *clientv3.Client, rootPath string) *EtcdKV {
 	return &EtcdKV{
 		client:   cli,
@@ -63,14 +65,17 @@ func NewEtcdKVWithClient(cli *clientv3.Client, rootPath string) *EtcdKV {
 	}
 }
 
+// Close closes the connection to etcd.
 func (kv *EtcdKV) Close() {
 	kv.client.Close()
 }
 
+// GetPath returns the path of the key.
 func (kv *EtcdKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
 }
 
+// LoadWithPrefix returns all the the keys and values with the given prefix
 func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -91,6 +96,7 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+// LoadWithPrefix2 returns all the the keys,values and key versions with the given prefix
 func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -113,6 +119,7 @@ func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, erro
 	return keys, values, versions, nil
 }
 
+// Load returns value of the key.
 func (kv *EtcdKV) Load(key string) (string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -129,6 +136,7 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
+// MultiLoad gets the values of the keys in a transaction.
 func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(keys))
