@@ -1610,6 +1610,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	return ft.result, nil
 }
 
+// Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.QueryResults{
