@@ -17,6 +17,7 @@ set -e
 # Print commands
 set -x
 
+
 MILVUS_HELM_REPO="https://github.com/milvus-io/milvus-helm.git"
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
 MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
@@ -42,6 +43,11 @@ else
   MILVUS_SERVICE_TYPE="${MILVUS_SERVICE_TYPE:-ClusterIP}"
 fi
 
+if [[ -n "${DISABLE_KIND:-}" ]]; then
+  # Use cluster IP to deploy milvus when kinD cluster is removed
+  MILVUS_SERVICE_TYPE="ClusterIP"
+fi
+
 # Get Milvus Chart from git
 if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
   TMP_DIR="$(mktemp -d)"
@@ -52,6 +58,7 @@ fi
 # Create namespace when it does not exist
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true
 
+echo "[debug]  cluster type is ${MILVUS_SERVICE_TYPE}"
 if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
   helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
                                --set image.all.repository="${MILVUS_IMAGE_REPO}" \

@@ -33,6 +33,10 @@ setup_and_export_git_sha
 # shellcheck source=build/kind_provisioner.sh
 source "${ROOT}/build/kind_provisioner.sh"
 
+# shellcheck source=ci-util.sh
+source "${ROOT}/tests/scripts/ci-util.sh"
+
+
 TOPOLOGY=SINGLE_CLUSTER
 NODE_IMAGE="kindest/node:v1.20.2"
 KIND_CONFIG=""
@@ -95,6 +99,10 @@ while (( "$#" )); do
     ;;
     --skip-export-logs)
       SKIP_EXPORT_LOGS=true
+      shift
+    ;;
+    --disable-kind)
+      DISABLE_KIND=true
       shift
     ;;
     --manual)
@@ -164,6 +172,8 @@ Usage:
 
     --manual                    Manual Mode
 
+    --disable-kind              Remove KinD cluster
+
     -h or --help                Print help information
 
 
@@ -217,15 +227,6 @@ if [[ ! -d "${ARTIFACTS}" ]];then
   mkdir -p "${ARTIFACTS}"
 fi
 
-if [[ ! -x "$(command -v kind)" ]]; then
-  KIND_DIR="${KIND_DIR:-"${HOME}/tool_cache/kind"}"
-  KIND_VERSION="v0.11.1"
-
-  export PATH="${KIND_DIR}:${PATH}"
-  if [[ ! -x "$(command -v kind)" ]]; then
-    install_kind "${KIND_DIR}" "${KIND_VERSION}"
-  fi
-fi
 
 if [[ ! -x "$(command -v kubectl)" ]]; then
   KUBECTL_DIR="${KUBECTL_DIR:-"${HOME}/tool_cache/kubectl"}"
@@ -237,17 +238,20 @@ if [[ ! -x "$(command -v kubectl)" ]]; then
   fi
 fi
 
-if [[ ! -x "$(command -v helm)" ]]; then
-  HELM_DIR="${HELM_DIR:-"${HOME}/tool_cache/helm"}"
-  HELM_VERSION="v3.5.4"
+if [[  -z "${DISABLE_KIND:-}" ]];then
+  if [[ ! -x "$(command -v kind)" ]]; then
+    KIND_DIR="${KIND_DIR:-"${HOME}/tool_cache/kind"}"
+    KIND_VERSION="v0.11.1"
 
-  export PATH="${HELM_DIR}:${PATH}"
-  if [[ ! -x "$(command -v helm)" ]]; then
-    install_helm "${HELM_DIR}" "${HELM_VERSION}"
+    export PATH="${KIND_DIR}:${PATH}"
+    if [[ ! -x "$(command -v kind)" ]]; then
+      install_kind "${KIND_DIR}" "${KIND_VERSION}"
+    fi
   fi
 fi
 
 if [[ -z "${SKIP_SETUP:-}" ]]; then
+
   export DEFAULT_CLUSTER_YAML="${ROOT}/build/config/topology/trustworthy-jwt.yaml"
   export METRICS_SERVER_CONFIG_DIR="${ROOT}/build/config/metrics"
 
@@ -275,21 +279,37 @@ if [[ -z "${SKIP_SETUP:-}" ]]; then
 fi
 
 if [[ -z "${SKIP_BUILD:-}" ]]; then
-  trace "setup kind registry" setup_kind_registry
-  pushd "${ROOT}"
-    trace "build milvus" "${ROOT}/build/builder.sh" /bin/bash -c "${BUILD_COMMAND}"
-  popd
+  #If disable_kind exist, do not need kind registry
+  if [[ -n "${DISABLE_KIND:-}" ]]; then
+    echo "do not set up kind registry when disable_kind exist"
+  else
+    trace "setup kind registry" setup_kind_registry
+  fi 
+    pushd "${ROOT}"
+      trace "build milvus" "${ROOT}/build/builder.sh" /bin/bash -c "${BUILD_COMMAND}"
+    popd
+  
 fi
 
+export MILVUS_IMAGE_TAG="${TAG}"
+export MILVUS_IMAGE_REPO="${HUB}/milvus"
+
 if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
-  # If we're not intending to pull from an actual remote registry, use the local kind registry
-  running="$(docker inspect -f '{{.State.Running}}' "${KIND_REGISTRY_NAME}" 2>/dev/null || true)"
-  if [[ "${running}" == 'true' ]]; then
-    HUB="${KIND_REGISTRY}"
-    export HUB
+
+  #[remove-kind] if disable_kind exist, do not need kind registry
+  if [[ -n "${DISABLE_KIND:-}" ]]; then
+      trace "docker login in ci registry" docker_login_ci_registry
+  else
+    # If we're not intending to pull from an actual remote registry, use the local kind registry
+      running="$(docker inspect -f '{{.State.Running}}' "${KIND_REGISTRY_NAME}" 2>/dev/null || true)"
+      if [[ "${running}" == 'true' ]]; then
+        HUB="${KIND_REGISTRY}"
+        export HUB
+        export MILVUS_IMAGE_REPO="${HUB}/milvus"
+      fi
   fi
-  export MILVUS_IMAGE_REPO="${HUB}/milvus"
-  export MILVUS_IMAGE_TAG="${TAG}"
+  
+ 
 
   pushd "${ROOT}"
     # Build Milvus Docker Image
@@ -299,16 +319,38 @@ if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
 fi
 
 if [[ -z "${SKIP_INSTALL:-}" ]]; then
+  if [[ ! -x "$(command -v helm)" ]]; then
+    HELM_DIR="${HELM_DIR:-"${HOME}/tool_cache/helm"}"
+    HELM_VERSION="v3.5.4"
+
+    export PATH="${HELM_DIR}:${PATH}"
+    if [[ ! -x "$(command -v helm)" ]]; then
+      install_helm "${HELM_DIR}" "${HELM_VERSION}"
+    fi
+  fi
+  export MILVUS_HELM_RELEASE_NAME=$(./get_release_name.sh)
+  echo "[debug] helm install ${MILVUS_HELM_RELEASE_NAME}"
   trace "install milvus helm chart" "${ROOT}/tests/scripts/install_milvus.sh" "${INSTALL_EXTRA_ARG}"
 fi
 
 if [[ -z "${SKIP_TEST:-}" ]]; then
-  trace "prepare e2e test" "${ROOT}/tests/scripts/prepare_e2e.sh"
+# Prepare e2e test,install pytest requirements 
+  if [[ -n "${DISABLE_KIND:-}" ]]; then
+    trace "prepare e2e test"  install_pytest_requirements  
+  else
+    trace "prepare e2e test" "${ROOT}/tests/scripts/prepare_e2e.sh"
+  fi
+
   if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-    trace "e2e test" "timeout" "-v" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+    if [[ -n "${DISABLE_KIND:-}" ]]; then
+      trace "e2e test" "timeout" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+    else
+      trace "e2e test" "timeout" "-v" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+    fi
   else
     trace "e2e test" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
   fi
+
 fi
 
 # Check if the user is running the clusters in manual mode.

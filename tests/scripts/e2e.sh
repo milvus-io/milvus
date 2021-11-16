@@ -48,23 +48,40 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
     MILVUS_SERVICE_IP=$(kubectl get nodes --namespace "${MILVUS_HELM_NAMESPACE}" -o jsonpath='{.items[0].status.addresses[0].address}')
     MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].nodePort}')
   else
-    MILVUS_SERVICE_IP="127.0.0.1"
-    POD_NAME=$(kubectl get pods --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].metadata.name}')
-    MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
-    kubectl --namespace "${MILVUS_HELM_NAMESPACE}" port-forward "${POD_NAME}" "${MILVUS_SERVICE_PORT}" &
-    PORT_FORWARD_PID=$!
-    trap "kill -TERM ${PORT_FORWARD_PID}" EXIT
+    #[remove-kind] use service ip when disable kind to run ci test
+    if [[ -n "${DISABLE_KIND:-}" ]]; then
+      MILVUS_SERVICE_IP=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.clusterIP}')
+      MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
+    else
+      MILVUS_SERVICE_IP="127.0.0.1"
+      POD_NAME=$(kubectl get pods --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].metadata.name}')
+      MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
+      kubectl --namespace "${MILVUS_HELM_NAMESPACE}" port-forward "${POD_NAME}" "${MILVUS_SERVICE_PORT}" &
+      PORT_FORWARD_PID=$!
+      trap "kill -TERM ${PORT_FORWARD_PID}" EXIT
+    fi
   fi
 fi
-
-pushd "${ROOT}/tests/docker"
-  if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
-    export PRE_EXIST_NETWORK="true"
-    export PYTEST_NETWORK="kind"
+echo "[debug] DISABLE_KIND is ${DISABLE_KIND:-},PARALLEL_NUM is ${PARALLEL_NUM},MILVUS_SERVICE_IP is ${MILVUS_SERVICE_IP},MILVUS_SERVICE_PORT is ${MILVUS_SERVICE_PORT}"
+#[remove-kind] use pytest run in the krte when remove kinD cluster
+if [[ -n "${DISABLE_KIND:-}" ]]; then
+  cd ${ROOT}/tests/python_client
+  python3 -V
+  export CI_LOG_PATH=/tmp/ci_logs/test
+  if [ ! -d "${CI_LOG_PATH}" ]; then
+    mkdir -p ${CI_LOG_PATH}
   fi
+  pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
+                                            --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
+else
+  pushd "${ROOT}/tests/docker"
+    if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
+      export PRE_EXIST_NETWORK="true"
+      export PYTEST_NETWORK="kind"
+    fi
 
-  export MILVUS_SERVICE_IP="${MILVUS_SERVICE_IP:-127.0.0.1}"
-  export MILVUS_SERVICE_PORT="${MILVUS_SERVICE_PORT:-19530}"
+    export MILVUS_SERVICE_IP="${MILVUS_SERVICE_IP:-127.0.0.1}"
+    export MILVUS_SERVICE_PORT="${MILVUS_SERVICE_PORT:-19530}"
 
   if [[ "${MANUAL:-}" == "true" ]]; then
     docker-compose up -d
@@ -75,4 +92,5 @@ pushd "${ROOT}/tests/docker"
                                                    --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-}"
     fi
   fi
-popd
+  popd
+fi

@@ -16,8 +16,46 @@ set -e
 # Print commands
 set -x
 
+while (( "$#" )); do
+  case "$1" in
+
+    --release-name)
+      RELEASE_NAME=$2
+      shift 2
+    ;;
+  
+    -h|--help)
+      { set +x; } 2>/dev/null
+      HELP="
+Usage:
+  $0 [flags] [Arguments]
+
+    --release-name             Milvus helm release name
+
+    -h or --help                Print help information
+
+
+Use \"$0  --help\" for more information about a given command.
+"
+      echo -e "${HELP}" ; exit 0
+    ;;
+    -*)
+      echo "Error: Unsupported flag $1" >&2
+      exit 1
+      ;;
+    *) # preserve positional arguments
+      PARAMS+=("$1")
+      shift
+      ;;
+  esac
+done
+
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
 MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
+
+if [[ -n "${RELEASE_NAME:-}" ]]; then
+    MILVUS_HELM_RELEASE_NAME="${RELEASE_NAME}"
+fi
 
 # Uninstall Milvus Helm Release
 helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}"
