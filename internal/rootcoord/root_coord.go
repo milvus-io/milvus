@@ -188,7 +188,7 @@ func (c *Core) isHealthy() bool {
 
 func (c *Core) checkInit() error {
 	if c.MetaTable == nil {
-		return fmt.Errorf("MetaTable is nil")
+		return fmt.Errorf("metaTable is nil")
 	}
 	if c.IDAllocator == nil {
 		return fmt.Errorf("idAllocator is nil")
@@ -209,43 +209,43 @@ func (c *Core) checkInit() error {
 		return fmt.Errorf("kvBase is nil")
 	}
 	if c.SendDdCreateCollectionReq == nil {
-		return fmt.Errorf("SendDdCreateCollectionReq is nil")
+		return fmt.Errorf("sendDdCreateCollectionReq is nil")
 	}
 	if c.SendDdDropCollectionReq == nil {
-		return fmt.Errorf("SendDdDropCollectionReq is nil")
+		return fmt.Errorf("sendDdDropCollectionReq is nil")
 	}
 	if c.SendDdCreatePartitionReq == nil {
-		return fmt.Errorf("SendDdCreatePartitionReq is nil")
+		return fmt.Errorf("sendDdCreatePartitionReq is nil")
 	}
 	if c.SendDdDropPartitionReq == nil {
-		return fmt.Errorf("SendDdDropPartitionReq is nil")
+		return fmt.Errorf("sendDdDropPartitionReq is nil")
 	}
 	if c.CallGetBinlogFilePathsService == nil {
-		return fmt.Errorf("CallGetBinlogFilePathsService is nil")
+		return fmt.Errorf("callGetBinlogFilePathsService is nil")
 	}
 	if c.CallGetNumRowsService == nil {
-		return fmt.Errorf("CallGetNumRowsService is nil")
+		return fmt.Errorf("callGetNumRowsService is nil")
 	}
 	if c.CallBuildIndexService == nil {
-		return fmt.Errorf("CallBuildIndexService is nil")
+		return fmt.Errorf("callBuildIndexService is nil")
 	}
 	if c.CallDropIndexService == nil {
-		return fmt.Errorf("CallDropIndexService is nil")
+		return fmt.Errorf("callDropIndexService is nil")
 	}
 	if c.CallGetFlushedSegmentsService == nil {
-		return fmt.Errorf("CallGetFlushedSegments is nil")
+		return fmt.Errorf("callGetFlushedSegmentsService is nil")
 	}
 	if c.CallWatchChannels == nil {
-		return fmt.Errorf("WatchChannelReq is nil")
+		return fmt.Errorf("callWatchChannels is nil")
 	}
 	if c.NewProxyClient == nil {
-		return fmt.Errorf("NewProxyClient is nil")
+		return fmt.Errorf("newProxyClient is nil")
 	}
 	if c.CallReleaseCollectionService == nil {
-		return fmt.Errorf("CallReleaseCollectionService is nil")
+		return fmt.Errorf("callReleaseCollectionService is nil")
 	}
 	if c.CallReleasePartitionService == nil {
-		return fmt.Errorf("CallReleasePartitionService is nil")
+		return fmt.Errorf("callReleasePartitionService is nil")
 	}
 
 	return nil
@@ -425,15 +425,15 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 
 func (c *Core) setMsgStreams() error {
 	if Params.PulsarAddress == "" {
-		return fmt.Errorf("PulsarAddress is empty")
+		return fmt.Errorf("pulsarAddress is empty")
 	}
 	if Params.MsgChannelSubName == "" {
-		return fmt.Errorf("MsgChannelSubName is emptyr")
+		return fmt.Errorf("msgChannelSubName is empty")
 	}
 
 	// rootcoord time tick channel
 	if Params.TimeTickChannel == "" {
-		return fmt.Errorf("TimeTickChannel is empty")
+		return fmt.Errorf("timeTickChannel is empty")
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
@@ -603,7 +603,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 			return nil, err
 		}
 		if binlog.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return nil, fmt.Errorf("GetInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
+			return nil, fmt.Errorf("getInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
 		}
 		for i := range binlog.FieldIDs {
 			if binlog.FieldIDs[i] == fieldID {
@@ -637,7 +637,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 			return retRows, err
 		}
 		if segInfo.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return retRows, fmt.Errorf("GetSegmentInfo from data service failed, error = %s", segInfo.Status.Reason)
+			return retRows, fmt.Errorf("getSegmentInfo from data service failed, error = %s", segInfo.Status.Reason)
 		}
 		if len(segInfo.Infos) != 1 {
 			log.Debug("get segment info empty")
@@ -734,7 +734,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 			return retID, err
 		}
 		if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return retID, fmt.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
+			return retID, fmt.Errorf("buildIndex from index service failed, error = %s", rsp.Status.Reason)
 		}
 		return rsp.IndexBuildID, nil
 	}
@@ -798,7 +798,7 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 			return err
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
+			return fmt.Errorf("releaseCollection from query service failed, error = %s", rsp.Reason)
 		}
 		return nil
 	}
@@ -825,7 +825,7 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 			return err
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf("ReleasePartitions from query service failed, error = %s", rsp.Reason)
+			return fmt.Errorf("releasePartitions from query service failed, error = %s", rsp.Reason)
 		}
 		return nil
 	}
@@ -1103,7 +1103,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		}
 		invalidateCache = true
 	default:
-		return fmt.Errorf("Invalid DdOperation %s", ddOp.Type)
+		return fmt.Errorf("invalid DdOperation %s", ddOp.Type)
 	}
 
 	if invalidateCache {
