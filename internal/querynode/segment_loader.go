@@ -120,8 +120,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 		err = loader.loadSegmentInternal(newSegments[segmentID],
 			segmentFieldBinLogs[segmentID],
 			segmentIndexedFieldIDs[segmentID],
-			info,
-			segmentType)
+			info)
 		if err != nil {
 			segmentGC()
 			return err
@@ -157,16 +156,16 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 	fieldBinLogs []*datapb.FieldBinlog,
 	indexFieldIDs []FieldID,
-	segmentLoadInfo *querypb.SegmentLoadInfo,
-	segmentType segmentType) error {
+	segmentLoadInfo *querypb.SegmentLoadInfo) error {
+	segType := segment.getType()
 	log.Debug("loading insert...",
 		zap.Any("collectionID", segment.collectionID),
 		zap.Any("segmentID", segment.ID()),
-		zap.Any("segmentType", segmentType),
+		zap.Any("segmentType", segType),
 		zap.Any("fieldBinLogs", fieldBinLogs),
 		zap.Any("indexFieldIDs", indexFieldIDs),
 	)
-	err := loader.loadSegmentFieldsData(segment, fieldBinLogs, segmentType)
+	err := loader.loadSegmentFieldsData(segment, fieldBinLogs)
 	if err != nil {
 		return err
 	}
@@ -223,7 +222,7 @@ func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinl
 	return result
 }
 
-func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog, segmentType segmentType) error {
+func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
 	iCodec := storage.InsertCodec{}
 	defer func() {
 		err := iCodec.Close()
@@ -267,7 +266,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		)
 	}
 
-	switch segmentType {
+	switch segment.getType() {
 	case segmentTypeGrowing:
 		timestamps, ids, rowData, err := storage.TransferColumnBasedInsertDataToRowBased(insertData)
 		if err != nil {
