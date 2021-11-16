@@ -827,7 +827,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		channelName := channelNames[channelID]
 		if channelName == "" {
-			return nil, fmt.Errorf("Proxy, repack_func, can not found channelName")
+			return nil, fmt.Errorf("proxy, repack_func, can not found channelName")
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
@@ -1537,7 +1537,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			for _, field := range schema.Fields {
 				if field.Name == name {
 					if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
-						return errors.New("Search doesn't support vector field as output_fields")
+						return errors.New("search doesn't support vector field as output_fields")
 					}
 
 					st.SearchRequest.OutputFieldsId = append(st.SearchRequest.OutputFieldsId, field.FieldID)
@@ -1888,7 +1888,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 						Reason:    filterReason,
 					},
 				}
-				return fmt.Errorf("No Available Query node result, filter reason %s: id %d", filterReason, st.ID())
+				return fmt.Errorf("no Available Query node result, filter reason %s: id %d", filterReason, st.ID())
 			}
 
 			validSearchResults, err := decodeSearchResults(filterSearchResults)
@@ -4059,7 +4059,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 		}
 		resp, err := ft.dataCoord.Flush(ctx, flushReq)
 		if err != nil {
-			return fmt.Errorf("Failed to call flush to data coordinator: %s", err.Error())
+			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
 		}
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return errors.New(resp.Status.Reason)
