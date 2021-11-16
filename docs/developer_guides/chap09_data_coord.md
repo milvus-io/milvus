@@ -287,7 +287,7 @@ type DataNode interface {
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
   // GetMetrics gets the metrics about DataNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-
+	// Compaction will add a compaction task according to the request plan
 	Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error)
 }
 ```
