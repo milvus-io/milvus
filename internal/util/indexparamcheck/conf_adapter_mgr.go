@@ -24,15 +24,13 @@ type ConfAdapterMgr interface {
 
 // ConfAdapterMgrImpl implements ConfAdapter.
 type ConfAdapterMgrImpl struct {
-	init     bool
 	adapters map[IndexType]ConfAdapter
+	once     sync.Once
 }
 
 // GetAdapter gets the conf adapter by the index type.
 func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error) {
-	if !mgr.init {
-		mgr.registerConfAdapter()
-	}
+	mgr.once.Do(mgr.registerConfAdapter)
 
 	adapter, ok := mgr.adapters[indexType]
 	if ok {
@@ -42,8 +40,6 @@ func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error)
 }
 
 func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
-	mgr.init = true
-
 	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
 	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
 	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
@@ -63,7 +59,6 @@ func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 
 func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {
 	return &ConfAdapterMgrImpl{
-		init:     false,
 		adapters: make(map[IndexType]ConfAdapter),
 	}
 }
