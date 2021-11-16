@@ -327,13 +327,13 @@ func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in
 	if node, ok := c.nodes[nodeID]; ok {
 		err := node.addQueryChannel(ctx, in)
 		if err != nil {
-			log.Debug("AddQueryChannel: queryNode add query channel error", zap.String("error", err.Error()))
+			log.Debug("addQueryChannel: queryNode add query channel error", zap.String("error", err.Error()))
 			return err
 		}
 		return nil
 	}
 
-	return fmt.Errorf("AddQueryChannel: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("addQueryChannel: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64, in *querypb.RemoveQueryChannelRequest) error {
 	c.Lock()
