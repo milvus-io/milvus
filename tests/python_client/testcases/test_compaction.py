@@ -283,7 +283,20 @@ class TestCompactionOperation(TestcaseBase):
                 3.compact and search
         expected: No exception
         """
-        pass
+        # create collection
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb
+
+        collection_w.compact()
+        while True:
+            c_state = collection_w.get_compaction_state()
+            log.debug(c_state)
+            if c_state.state == State.Completed and c_state.in_timeout == 0:
+                break
+        c_plans, _ = collection_w.get_compaction_plans()
+        assert len(c_plans.plans) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_merge_multi_segments(self):
