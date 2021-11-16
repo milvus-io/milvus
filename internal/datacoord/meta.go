@@ -231,6 +231,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 
 	if dropped {
 		clonedSegment.State = commonpb.SegmentState_Dropped
+		clonedSegment.DroppedAt = uint64(time.Now().UnixNano())
 		modSegments[segmentID] = clonedSegment
 	}
 
@@ -334,19 +335,17 @@ func (m *meta) UpdateFlushSegmentsInfo(
 }
 
 // ListSegmentFiles lists all segment related file paths in valid & dropped list
-func (m *meta) ListSegmentFiles() ([]string, []string) {
+func (m *meta) ListSegmentFiles() (valid []string, dropped []string, droppedAt []uint64) {
 	m.RLock()
 	defer m.RUnlock()
-
-	var valid []string
-	var dropped []string
 
 	for _, segment := range m.segments.GetSegments() {
 		for _, binlog := range segment.GetBinlogs() {
 			if segment.State != commonpb.SegmentState_Dropped {
 				valid = append(valid, binlog.Binlogs...)
 			} else {
-				dropped = append(valid, binlog.Binlogs...)
+				dropped = append(dropped, binlog.Binlogs...)
+				droppedAt = append(droppedAt, segment.DroppedAt)
 			}
 		}
 
@@ -354,7 +353,8 @@ func (m *meta) ListSegmentFiles() ([]string, []string) {
 			if segment.State != commonpb.SegmentState_Dropped {
 				valid = append(valid, statLog.Binlogs...)
 			} else {
-				dropped = append(valid, statLog.Binlogs...)
+				dropped = append(dropped, statLog.Binlogs...)
+				droppedAt = append(droppedAt, segment.DroppedAt)
 			}
 		}
 
@@ -362,12 +362,13 @@ func (m *meta) ListSegmentFiles() ([]string, []string) {
 			if segment.State != commonpb.SegmentState_Dropped {
 				valid = append(valid, deltaLog.GetDeltaLogPath())
 			} else {
-				dropped = append(valid, deltaLog.GetDeltaLogPath())
+				dropped = append(dropped, deltaLog.GetDeltaLogPath())
+				droppedAt = append(droppedAt, segment.DroppedAt)
 			}
 
 		}
 	}
-	return valid, dropped
+	return valid, dropped, droppedAt
 }
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`

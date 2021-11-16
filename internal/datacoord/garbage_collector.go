@@ -106,14 +106,14 @@ func (gc *garbageCollector) close() {
 // if drop found or missing found, performs gc cleanup
 func (gc *garbageCollector) scan() {
 	var v, d, m, e int
-	valid, dropped := gc.meta.ListSegmentFiles()
+	valid, dropped, droppedAt := gc.meta.ListSegmentFiles()
 	vm := make(map[string]struct{})
-	dm := make(map[string]struct{})
+	dm := make(map[string]uint64)
 	for _, k := range valid {
 		vm[k] = struct{}{}
 	}
-	for _, k := range dropped {
-		dm[k] = struct{}{}
+	for i, k := range dropped {
+		dm[k] = droppedAt[i]
 	}
 
 	for info := range gc.option.cli.ListObjects(context.TODO(), gc.option.bucketName, minio.ListObjectsOptions{
@@ -127,11 +127,12 @@ func (gc *garbageCollector) scan() {
 			continue
 		}
 		// dropped
-		_, has = dm[info.Key]
+		droppedTs, has := dm[info.Key]
 		if has {
 			d++
+			droppedTime := time.Unix(0, int64(droppedTs))
 			// check file last modified time exceeds tolerance duration
-			if time.Since(info.LastModified) > gc.option.dropTolerance {
+			if time.Since(droppedTime) > gc.option.dropTolerance {
 				e++
 				// ignore error since it could be cleaned up next time
 				_ = gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, info.Key, minio.RemoveObjectOptions{})
