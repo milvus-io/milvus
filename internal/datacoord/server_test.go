@@ -1155,7 +1155,7 @@ func TestGetVChannelPos(t *testing.T) {
 			ChannelName: "ch1",
 			MsgID:       []byte{1, 2, 3},
 			MsgGroup:    "",
-			Timestamp:   0,
+			Timestamp:   1,
 		},
 	}
 	err = svr.meta.AddSegment(NewSegmentInfo(s2))
@@ -1175,29 +1175,28 @@ func TestGetVChannelPos(t *testing.T) {
 			ChannelName: "ch1",
 			MsgID:       []byte{11, 12, 13},
 			MsgGroup:    "",
-			Timestamp:   0,
+			Timestamp:   2,
 		},
 	}
 	err = svr.meta.AddSegment(NewSegmentInfo(s3))
 	assert.Nil(t, err)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
-		vchan := svr.GetVChanPositions("chx1", 0, allPartitionID, true)
+		vchan := svr.GetVChanPositions("chx1", 0, allPartitionID)
 		assert.Empty(t, vchan.UnflushedSegments)
 		assert.Empty(t, vchan.FlushedSegments)
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
-		vchan := svr.GetVChanPositions("ch1", 0, allPartitionID, true)
+		vchan := svr.GetVChanPositions("ch1", 0, allPartitionID)
 		assert.EqualValues(t, 1, len(vchan.FlushedSegments))
 		assert.EqualValues(t, 1, vchan.FlushedSegments[0].ID)
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegments))
-		assert.EqualValues(t, 2, vchan.UnflushedSegments[0].ID)
-		assert.EqualValues(t, []byte{1, 2, 3}, vchan.UnflushedSegments[0].DmlPosition.MsgID)
+		assert.EqualValues(t, []byte{1, 2, 3}, vchan.GetSeekPosition().GetMsgID())
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
-		infos := svr.GetVChanPositions("ch0_suffix", 1, allPartitionID, true)
+		infos := svr.GetVChanPositions("ch0_suffix", 1, allPartitionID)
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegments))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegments))
@@ -1205,11 +1204,11 @@ func TestGetVChannelPos(t *testing.T) {
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
-		infos := svr.GetVChanPositions("ch1", 0, 1, true)
+		infos := svr.GetVChanPositions("ch1", 0, 1)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegments))
 		assert.EqualValues(t, 1, len(infos.UnflushedSegments))
-		assert.EqualValues(t, []byte{8, 9, 10}, infos.SeekPosition.MsgID)
+		assert.EqualValues(t, []byte{11, 12, 13}, infos.SeekPosition.MsgID)
 	})
 }
 

@@ -784,42 +784,33 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 }
 
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
-func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo {
+func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := s.meta.GetSegmentsByChannel(channel)
 	log.Debug("GetSegmentsByChannel",
 		zap.Any("collectionID", collectionID),
 		zap.Any("channel", channel),
-		zap.Any("seekFromStartPosition", seekFromStartPosition),
 		zap.Any("numOfSegments", len(segments)),
 	)
-	flushed := make([]*datapb.SegmentInfo, 0)
-	unflushed := make([]*datapb.SegmentInfo, 0)
+	var flushed []*datapb.SegmentInfo
+	var unflushed []*datapb.SegmentInfo
 	var seekPosition *internalpb.MsgPosition
 	for _, s := range segments {
-		// filter segment with parition id
-		if partitionID > allPartitionID && s.PartitionID != partitionID {
+		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
+			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
 			continue
 		}
 
-		if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
+		if s.GetState() == commonpb.SegmentState_Flushing || s.GetState() == commonpb.SegmentState_Flushed {
 			flushed = append(flushed, trimSegmentInfo(s.SegmentInfo))
-			if seekPosition == nil || (s.DmlPosition.Timestamp < seekPosition.Timestamp) {
-				seekPosition = s.DmlPosition
-			}
-			continue
+		} else {
+			unflushed = append(unflushed, s.SegmentInfo)
 		}
 
-		if s.DmlPosition == nil { // segment position all nil
-			continue
-		}
-
-		unflushed = append(unflushed, s.SegmentInfo)
-
-		segmentPosition := s.DmlPosition
-		if seekFromStartPosition {
-			// need to use start position when load collection/partition, querynode does not support seek from checkpoint yet
-			// TODO silverxia remove seek from start logic after checkpoint supported in querynode
-			segmentPosition = s.StartPosition
+		var segmentPosition *internalpb.MsgPosition
+		if s.GetDmlPosition() != nil {
+			segmentPosition = s.GetDmlPosition()
+		} else {
+			segmentPosition = s.GetStartPosition()
 		}
 
 		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
