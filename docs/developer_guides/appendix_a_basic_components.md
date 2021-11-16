@@ -345,7 +345,7 @@ type Timestamp uint64
 ```go
 type timestampOracle struct {
 	key   string
-	txnkv kv.TxnBase
+	txnkv kv.TxnKV
 
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
