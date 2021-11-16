@@ -559,3 +559,5 @@ func (mfm *mockFlushManager) injectFlush(injection taskInjection, segments ...Un
 		<-injection.injectOver
 	}()
 }
+
+func (mfm *mockFlushManager) close() {}

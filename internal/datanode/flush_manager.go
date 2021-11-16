@@ -42,6 +42,8 @@ type flushManager interface {
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
 	// injectFlush injects compaction or other blocking task before flush sync
 	injectFlush(injection taskInjection, segments ...UniqueID)
+	// close handles resource clean up
+	close()
 }
 
 // segmentFlushPack contains result to save into meta
@@ -93,13 +95,13 @@ func newOrderFlushQueue(segID UniqueID, f notifyMetaFunc) *orderFlushQueue {
 		notifyFunc: f,
 		injectCh:   make(chan taskInjection, 100),
 	}
-	q.injectHandler = newInjectHandler(q)
 	return q
 }
 
 // init orderFlushQueue use once protect init, init tailCh
 func (q *orderFlushQueue) init() {
 	q.Once.Do(func() {
+		q.injectHandler = newInjectHandler(q)
 		// new queue acts like tailing task is done
 		q.tailCh = make(chan struct{})
 		close(q.tailCh)
@@ -214,12 +216,11 @@ type rendezvousFlushManager struct {
 
 // getFlushQueue
 func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQueue {
-	actual, loaded := m.dispatcher.LoadOrStore(segmentID, newOrderFlushQueue(segmentID, m.notifyFunc))
+	newQueue := newOrderFlushQueue(segmentID, m.notifyFunc)
+	actual, _ := m.dispatcher.LoadOrStore(segmentID, newQueue)
 	// all operation on dispatcher is private, assertion ok guaranteed
 	queue := actual.(*orderFlushQueue)
-	if !loaded {
-		queue.init()
-	}
+	queue.init()
 	return queue
 }
 
@@ -372,6 +373,20 @@ func (m *rendezvousFlushManager) getSegmentMeta(segmentID UniqueID, pos *interna
 		Schema: sch,
 	}
 	return collID, partID, meta, nil
+}
+
+// close cleans up all the left members
+func (m *rendezvousFlushManager) close() {
+	m.dispatcher.Range(func(k, v interface{}) bool {
+		//assertion ok
+		queue := v.(*orderFlushQueue)
+		queue.injectMut.Lock()
+		if queue.injectHandler != nil {
+			queue.injectHandler.close()
+		}
+		queue.injectMut.Unlock()
+		return true
+	})
 }
 
 type flushBufferInsertTask struct {
