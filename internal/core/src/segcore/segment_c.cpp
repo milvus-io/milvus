@@ -19,6 +19,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/segment_c.h"
+#include "segcore/SimilarityCorelation.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -67,7 +68,8 @@ Search(CSegmentInterface c_segment,
         auto plan = (milvus::query::Plan*)c_plan;
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(c_placeholder_group);
         *search_result = segment->Search(plan, *phg_ptr, timestamp);
-        if (plan->plan_node_->search_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
+        // if (plan->plan_node_->search_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
+        if (!milvus::segcore::PositivelyRelated(plan->plan_node_->search_info_.metric_type_)) {
             for (auto& dis : search_result->result_distances_) {
                 dis *= -1;
             }
