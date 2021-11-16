@@ -23,11 +23,15 @@ func (f singleCompactionFunc) generatePlan(segment *SegmentInfo, timetravel *tim
 }
 
 func chooseAllBinlogs(segment *SegmentInfo, timetravel *timetravel) *datapb.CompactionPlan {
-	deltaLogs := make([]*datapb.DeltaLogInfo, 0)
+	var deltaLogs []*datapb.DeltaLogInfo
 	for _, l := range segment.GetDeltalogs() {
 		if l.TimestampTo < timetravel.time {
 			deltaLogs = append(deltaLogs, l)
 		}
+	}
+
+	if len(deltaLogs) == 0 {
+		return nil
 	}
 
 	return &datapb.CompactionPlan{

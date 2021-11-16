@@ -108,3 +108,34 @@ func Test_greedyMergeCompaction(t *testing.T) {
 		})
 	}
 }
+
+func Test_chooseAllBinlogs(t *testing.T) {
+	type args struct {
+		segment    *SegmentInfo
+		timetravel *timetravel
+	}
+	tests := []struct {
+		name string
+		args args
+		want *datapb.CompactionPlan
+	}{
+		{
+			"test no delta logs",
+			args{
+				segment: &SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:        1,
+						Deltalogs: nil,
+					},
+				},
+			},
+			nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := chooseAllBinlogs(tt.args.segment, tt.args.timetravel)
+			assert.EqualValues(t, tt.want, got)
+		})
+	}
+}
