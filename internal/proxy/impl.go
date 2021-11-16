@@ -1466,6 +1466,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	return dt.result, nil
 }
 
+// Search search the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.SearchResults{
