@@ -42,6 +42,7 @@ type memoryKVItem struct {
 	key, value string
 }
 
+// Less returns true if the item is less than the given one.
 func (s memoryKVItem) Less(than btree.Item) bool {
 	return s.key < than.(memoryKVItem).key
 }
@@ -58,6 +59,7 @@ func (kv *MemoryKV) Load(key string) (string, error) {
 	return item.(memoryKVItem).value, nil
 }
 
+// LoadWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
 func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) string {
 	kv.RLock()
 	defer kv.RUnlock()
@@ -69,6 +71,7 @@ func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) string {
 	return item.(memoryKVItem).value
 }
 
+// LoadRange loads objects with range @startKey to @endKey with @limit number of objects.
 func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
