@@ -530,12 +530,6 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 				return err
 			}
 
-			// if pageInfo, ok := rmq.retentionInfo.pageInfo.Load(topicName); ok {
-			// 	pageInfo.(*topicPageInfo).pageEndID = append(pageInfo.(*topicPageInfo).pageEndID, pageEndID)
-			// 	pageInfo.(*topicPageInfo).pageMsgSize[pageEndID] = newPageSize
-			// 	rmq.retentionInfo.pageInfo.Store(topicName, pageInfo)
-			// }
-
 			// Update message size to 0
 			err = rmq.kv.Save(msgSizeKey, strconv.FormatInt(0, 10))
 			if err != nil {
@@ -638,10 +632,8 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	}
 
 	consumedIDs := make([]UniqueID, 0, len(consumerMessage))
-	msgSize := make([]int64, 0, len(consumerMessage))
 	for _, msg := range consumerMessage {
 		consumedIDs = append(consumedIDs, msg.MsgID)
-		msgSize = append(msgSize, int64(len(msg.Payload)))
 	}
 	newID := consumedIDs[len(consumedIDs)-1]
 	err = rmq.seek(topicName, groupName, newID)
@@ -650,7 +642,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		return nil, err
 	}
 
-	go rmq.updateAckedInfo(topicName, groupName, consumedIDs, msgSize)
+	go rmq.updateAckedInfo(topicName, groupName, consumedIDs)
 
 	return consumerMessage, nil
 }
@@ -771,7 +763,7 @@ func (rmq *rocksmq) Notify(topicName, groupName string) {
 }
 
 // updateAckedInfo update acked informations for retention after consume
-func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID, msgSize []int64) error {
+func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -786,24 +778,67 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID,
 	lock.Lock()
 	defer lock.Unlock()
 
+	firstID := ids[0]
 	lastID := ids[len(ids)-1]
 
 	fixedBeginIDKey, err := constructKey(BeginIDTitle, topicName)
 	if err != nil {
 		return err
 	}
-	// Update begin_id for the consumer_group
+
+	// 1. Update begin_id for the consumer_group
 	beginIDKey := fixedBeginIDKey + "/" + groupName
 	err = rmq.kv.Save(beginIDKey, strconv.FormatInt(lastID, 10))
 	if err != nil {
 		return err
 	}
 
-	// Update begin_id for topic
+	// 2. Try to get the page id between first ID and last ID of ids
+	pageMsgPrefix, err := constructKey(PageMsgSizeTitle, topicName)
+	if err != nil {
+		return err
+	}
+	readOpts := gorocksdb.NewDefaultReadOptions()
+	defer readOpts.Destroy()
+	readOpts.SetPrefixSameAsStart(true)
+	iter := rmq.kv.(*rocksdbkv.RocksdbKV).DB.NewIterator(readOpts)
+	defer iter.Close()
+
+	pageIDs := make([]UniqueID, 0)
+	pageMsgKey := pageMsgPrefix + "/" + strconv.FormatInt(firstID, 10)
+	for iter.Seek([]byte(pageMsgKey)); iter.Valid(); iter.Next() {
+		key := iter.Key()
+		pageID, err := strconv.ParseInt(string(key.Data())[FixedChannelNameLen+1:], 10, 64)
+		if key != nil {
+			key.Free()
+		}
+		if err != nil {
+			return err
+		}
+		if pageID <= lastID {
+			pageIDs = append(pageIDs, pageID)
+		} else {
+			break
+		}
+	}
+	if len(pageIDs) == 0 {
+		return nil
+	}
+
+	fixedAckedTsKey, err := constructKey(AckedTsTitle, topicName)
+	if err != nil {
+		return err
+	}
+
+	// 3. Update acked ts and acked size for pageIDs
 	if vals, ok := rmq.consumers.Load(topicName); ok {
 		var minBeginID int64 = math.MaxInt64
-		for _, v := range vals.([]*Consumer) {
-			curBeginIDKey := fixedBeginIDKey + "/" + v.GroupName
+		consumers, ok := vals.([]*Consumer)
+		if !ok || len(consumers) == 0 {
+			return nil
+		}
+		for _, v := range consumers {
+			curBeginIDKey := path.Join(fixedBeginIDKey, v.GroupName)
 			curBeginIDVal, err := rmq.kv.Load(curBeginIDKey)
 			if err != nil {
 				return err
@@ -816,51 +851,52 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID,
 				minBeginID = curBeginID
 			}
 		}
-		topicBeginIDKey := TopicBeginIDTitle + topicName
-		err = rmq.kv.Save(topicBeginIDKey, strconv.FormatInt(minBeginID, 10))
-		if err != nil {
-			return err
-		}
 
-		// Update acked info for msg of begin id
-		fixedAckedTsKey, err := constructKey(AckedTsTitle, topicName)
-		if err != nil {
-			return err
-		}
-
-		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		// current behavior is to ack all safe msgID(before minBeginID)
-		// TODO @silverxia @yukun ack only page separator msg id
-		ackMsgKvs := make(map[string]string)
+		nowTs := strconv.FormatInt(time.Now().Unix(), 10)
+		ackedTsKvs := make(map[string]string)
 		totalAckMsgSize := int64(0)
-		for i, id := range ids {
-			// depends on the ids are monotonically increasing
-			if id <= minBeginID {
-				totalAckMsgSize += msgSize[i]
-				key := path.Join(fixedAckedTsKey, strconv.FormatInt(id, 10))
-				ackMsgKvs[key] = ts
-			}
-		}
-		err = rmq.kv.MultiSave(ackMsgKvs)
+
+		fixedPageSizeKey, err := constructKey(PageMsgSizeTitle, topicName)
 		if err != nil {
 			return err
 		}
-		if minBeginID == lastID {
-			// Means the begin_id of topic update to newID, so needs to update acked size
-			ackedSizeKey := AckedSizeTitle + topicName
-			ackedSizeVal, err := rmq.kv.Load(ackedSizeKey)
-			if err != nil {
-				return err
+		for _, pID := range pageIDs {
+			if pID <= minBeginID {
+				// Update acked info for message pID
+				pageAckedTsKey := path.Join(fixedAckedTsKey, strconv.FormatInt(pID, 10))
+				ackedTsKvs[pageAckedTsKey] = nowTs
+
+				// get current page message size
+				pageMsgSizeKey := path.Join(fixedPageSizeKey, strconv.FormatInt(pID, 10))
+				pageMsgSizeVal, err := rmq.kv.Load(pageMsgSizeKey)
+				if err != nil {
+					return err
+				}
+				pageMsgSize, err := strconv.ParseInt(pageMsgSizeVal, 10, 64)
+				if err != nil {
+					return err
+				}
+				totalAckMsgSize += pageMsgSize
 			}
-			ackedSize, err := strconv.ParseInt(ackedSizeVal, 10, 64)
-			if err != nil {
-				return err
-			}
-			ackedSize += totalAckMsgSize
-			err = rmq.kv.Save(ackedSizeKey, strconv.FormatInt(ackedSize, 10))
-			if err != nil {
-				return err
-			}
+		}
+		err = rmq.kv.MultiSave(ackedTsKvs)
+		if err != nil {
+			return err
+		}
+
+		ackedSizeKey := AckedSizeTitle + topicName
+		ackedSizeVal, err := rmq.kv.Load(ackedSizeKey)
+		if err != nil {
+			return err
+		}
+		ackedSize, err := strconv.ParseInt(ackedSizeVal, 10, 64)
+		if err != nil {
+			return err
+		}
+		ackedSize += totalAckMsgSize
+		err = rmq.kv.Save(ackedSizeKey, strconv.FormatInt(ackedSize, 10))
+		if err != nil {
+			return err
 		}
 	}
 	return nil

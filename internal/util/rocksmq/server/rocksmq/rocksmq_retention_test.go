@@ -52,6 +52,7 @@ func genRandonName() string {
 func TestRmqRetention(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
+	atomic.StoreInt64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 	defer atomic.StoreInt64(&TickerTimeInSeconds, 6)
 	kvPath := retentionPath + kvPathSuffix

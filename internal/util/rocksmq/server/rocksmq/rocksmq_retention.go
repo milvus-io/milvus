@@ -12,7 +12,6 @@
 package rocksmq
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -52,32 +51,6 @@ type retentionInfo struct {
 	closeCh   chan struct{}
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
-}
-
-// Interface LoadWithPrefix() in rocksdbkv needs to close db instance first and then reopen,
-// which will cause crash when other goroutines operate the db instance. So here implement a
-// prefixLoad without reopen db instance.
-func prefixLoad(db *gorocksdb.DB, prefix string) ([]string, []string, error) {
-	if db == nil {
-		return nil, nil, errors.New("Rocksdb instance is nil when do prefixLoad")
-	}
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	defer readOpts.Destroy()
-	readOpts.SetPrefixSameAsStart(true)
-	iter := db.NewIterator(readOpts)
-	defer iter.Close()
-	keys := make([]string, 0)
-	values := make([]string, 0)
-	iter.Seek([]byte(prefix))
-	for ; iter.Valid(); iter.Next() {
-		key := iter.Key()
-		value := iter.Value()
-		keys = append(keys, string(key.Data()))
-		key.Free()
-		values = append(values, string(value.Data()))
-		value.Free()
-	}
-	return keys, values, nil
 }
 
 func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
@@ -163,9 +136,9 @@ func (ri *retentionInfo) Stop() {
 func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	var deletedAckedSize int64 = 0
-	var startID UniqueID
-	var endID UniqueID
+	var startID UniqueID = 0
 	var pageStartID UniqueID = 0
+	var pageEndID UniqueID = 0
 	var err error
 
 	fixedAckedTsKey, _ := constructKey(AckedTsTitle, topic)
@@ -203,7 +176,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 				return err
 			}
 			if msgTimeExpiredCheck(ackedTs) {
-				endID = pageID
+				pageEndID = pageID
 				pValue := pageIter.Value()
 				size, err := strconv.ParseInt(string(pValue.Data()), 10, 64)
 				if pValue != nil {
@@ -219,63 +192,62 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		}
 	}
 
-	pageEndID := endID
+	// TODO(yukun): Remove ackedTs expiredCheck one by one
+	// ackedReadOpts := gorocksdb.NewDefaultReadOptions()
+	// defer ackedReadOpts.Destroy()
+	// ackedReadOpts.SetPrefixSameAsStart(true)
+	// ackedIter := ri.kv.DB.NewIterator(ackedReadOpts)
+	// defer ackedIter.Close()
+	// if err != nil {
+	// 	return err
+	// }
+	// ackedIter.Seek([]byte(fixedAckedTsKey))
+	// if !ackedIter.Valid() {
+	// 	return nil
+	// }
 
-	ackedReadOpts := gorocksdb.NewDefaultReadOptions()
-	defer ackedReadOpts.Destroy()
-	ackedReadOpts.SetPrefixSameAsStart(true)
-	ackedIter := ri.kv.DB.NewIterator(ackedReadOpts)
-	defer ackedIter.Close()
-	if err != nil {
-		return err
-	}
-	ackedIter.Seek([]byte(fixedAckedTsKey))
-	if !ackedIter.Valid() {
-		return nil
-	}
+	// startID, err = strconv.ParseInt(string(ackedIter.Key().Data())[FixedChannelNameLen+1:], 10, 64)
+	// if err != nil {
+	// 	return err
+	// }
+	// if endID > startID {
+	// 	newPos := fixedAckedTsKey + "/" + strconv.FormatInt(endID, 10)
+	// 	ackedIter.Seek([]byte(newPos))
+	// }
 
-	startID, err = strconv.ParseInt(string(ackedIter.Key().Data())[FixedChannelNameLen+1:], 10, 64)
-	if err != nil {
-		return err
-	}
-	if endID > startID {
-		newPos := fixedAckedTsKey + "/" + strconv.FormatInt(endID, 10)
-		ackedIter.Seek([]byte(newPos))
-	}
+	// for ; ackedIter.Valid(); ackedIter.Next() {
+	// 	aKey := ackedIter.Key()
+	// 	aValue := ackedIter.Value()
+	// 	ackedTs, err := strconv.ParseInt(string(aValue.Data()), 10, 64)
+	// 	if aValue != nil {
+	// 		aValue.Free()
+	// 	}
+	// 	if err != nil {
+	// 		if aKey != nil {
+	// 			aKey.Free()
+	// 		}
+	// 		return err
+	// 	}
+	// 	if msgTimeExpiredCheck(ackedTs) {
+	// 		endID, err = strconv.ParseInt(string(aKey.Data())[FixedChannelNameLen+1:], 10, 64)
+	// 		if aKey != nil {
+	// 			aKey.Free()
+	// 		}
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 	} else {
+	// 		if aKey != nil {
+	// 			aKey.Free()
+	// 		}
+	// 		break
+	// 	}
+	// }
 
-	for ; ackedIter.Valid(); ackedIter.Next() {
-		aKey := ackedIter.Key()
-		aValue := ackedIter.Value()
-		ackedTs, err := strconv.ParseInt(string(aValue.Data()), 10, 64)
-		if aValue != nil {
-			aValue.Free()
-		}
-		if err != nil {
-			if aKey != nil {
-				aKey.Free()
-			}
-			return err
-		}
-		if msgTimeExpiredCheck(ackedTs) {
-			endID, err = strconv.ParseInt(string(aKey.Data())[FixedChannelNameLen+1:], 10, 64)
-			if aKey != nil {
-				aKey.Free()
-			}
-			if err != nil {
-				return err
-			}
-		} else {
-			if aKey != nil {
-				aKey.Free()
-			}
-			break
-		}
-	}
-
-	if endID == 0 {
+	if pageEndID == 0 {
 		log.Debug("All messages are not time expired")
 	}
-	log.Debug("Expired check by retention time", zap.Any("topic", topic), zap.Any("startID", startID), zap.Any("endID", endID), zap.Any("deletedAckedSize", deletedAckedSize))
+	log.Debug("Expired check by retention time", zap.Any("topic", topic), zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize))
 
 	ackedSizeKey := AckedSizeTitle + topic
 	totalAckedSizeVal, err := ri.kv.Load(ackedSizeKey)
@@ -303,21 +275,20 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		}
 		curDeleteSize := deletedAckedSize + size
 		if msgSizeExpiredCheck(curDeleteSize, totalAckedSize) {
-			endID, err = strconv.ParseInt(pKeyStr[FixedChannelNameLen+1:], 10, 64)
+			pageEndID, err = strconv.ParseInt(pKeyStr[FixedChannelNameLen+1:], 10, 64)
 			if err != nil {
 				return err
 			}
-			pageEndID = endID
 			deletedAckedSize += size
 		} else {
 			break
 		}
 	}
-	if endID == 0 {
+	if pageEndID == 0 {
 		log.Debug("All messages are not expired")
 		return nil
 	}
-	log.Debug("ExpiredCleanUp: ", zap.Any("topic", topic), zap.Any("startID", startID), zap.Any("endID", endID), zap.Any("deletedAckedSize", deletedAckedSize))
+	log.Debug("ExpiredCleanUp: ", zap.Any("topic", topic), zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize))
 
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
@@ -333,14 +304,11 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 
 	ackedStartIDKey := fixedAckedTsKey + "/" + strconv.Itoa(int(startID))
-	ackedEndIDKey := fixedAckedTsKey + "/" + strconv.Itoa(int(endID+1))
-	if startID > endID {
+	ackedEndIDKey := fixedAckedTsKey + "/" + strconv.Itoa(int(pageEndID+1))
+	if startID > pageEndID {
 		return nil
-	} else if startID == endID {
-		writeBatch.Delete([]byte(ackedStartIDKey))
-	} else {
-		writeBatch.DeleteRange([]byte(ackedStartIDKey), []byte(ackedEndIDKey))
 	}
+	writeBatch.DeleteRange([]byte(ackedStartIDKey), []byte(ackedEndIDKey))
 
 	ll, ok := topicMu.Load(topic)
 	if !ok {
@@ -363,7 +331,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	newAckedSize := currentAckedSize - deletedAckedSize
 	writeBatch.Put([]byte(ackedSizeKey), []byte(strconv.FormatInt(newAckedSize, 10)))
 
-	err = DeleteMessages(ri.db, topic, startID, endID)
+	err = DeleteMessages(ri.db, topic, startID, pageEndID)
 	if err != nil {
 		return err
 	}
