@@ -350,6 +350,7 @@ func (s *Server) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexReques
 	return s.rootCoord.CreateIndex(ctx, in)
 }
 
+// DropIndex drops the index.
 func (s *Server) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.rootCoord.DropIndex(ctx, in)
 }
