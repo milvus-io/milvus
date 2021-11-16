@@ -687,10 +687,9 @@ func (it *insertTask) checkFieldAutoIDAndHashPK() error {
 				Data: it.BaseInsertTask.RowIDs,
 			},
 		}
-
 		it.HashPK(it.BaseInsertTask.RowIDs)
 	} else {
-		it.HashPK(it.BaseInsertTask.RowIDs)
+		it.HashPK(primaryData)
 	}
 
 	sliceIndex := make([]uint32, rowNums)
