@@ -293,18 +293,18 @@ func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64,
 	if node, ok := c.nodes[nodeID]; ok {
 		err := node.watchDeltaChannels(ctx, in)
 		if err != nil {
-			log.Debug("WatchDeltaChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
+			log.Debug("watchDeltaChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
 			return err
 		}
 		err = c.clusterMeta.setDeltaChannel(in.CollectionID, in.Infos)
 		if err != nil {
-			log.Debug("WatchDeltaChannels: queryNode watch delta channel error", zap.String("error", err.Error()))
+			log.Debug("watchDeltaChannels: queryNode watch delta channel error", zap.String("error", err.Error()))
 			return err
 		}
 
 		return nil
 	}
-	return errors.New("WatchDeltaChannels: Can't find query node by nodeID ")
+	return errors.New("watchDeltaChannels: Can't find query node by nodeID ")
 }
 
 func (c *queryNodeCluster) hasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {
