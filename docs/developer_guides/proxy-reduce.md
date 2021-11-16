@@ -17,7 +17,7 @@ So the problem degenerates to how to get the maximum number of 10 (TOPK) results
 
 ## K-Way Merge Algorithm
 
-Pseudocode of this algorithm is shown below:
+The pseudocode of this algorithm is shown below:
 
 ```golang
 n = 4
