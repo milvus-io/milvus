@@ -330,6 +330,7 @@ func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartiti
 	return s.rootCoord.CreatePartition(ctx, in)
 }
 
+// DropPartition drops the specified partition.
 func (s *Server) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.DropPartition(ctx, in)
 }
