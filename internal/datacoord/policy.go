@@ -315,6 +315,7 @@ func AvgAssignUnregisteredChannels(store ROChannelStore, nodeID int64) ChannelOp
 	return opSet
 }
 
+// ConsistentHashDeregisterPolicy return a DeregisterPolicy that uses consistent hash
 func ConsistentHashDeregisterPolicy(hashring *consistent.Consistent) DeregisterPolicy {
 	return func(store ROChannelStore, nodeID int64) ChannelOpSet {
 		hashring.Set(formatNodeIDsWithFilter(store.GetNodes(), nodeID))
@@ -365,12 +366,15 @@ func ConsistentHashDeregisterPolicy(hashring *consistent.Consistent) DeregisterP
 	}
 }
 
+// ChannelReassignPolicy is a policy for reassigning channels
 type ChannelReassignPolicy func(store ROChannelStore, reassigns []*NodeChannelInfo) ChannelOpSet
 
+// EmptyReassignPolicy is a dummy reassign policy
 func EmptyReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) ChannelOpSet {
 	return nil
 }
 
+// AverageReassignPolicy is a reassign policy that evenly assign channels
 func AverageReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) ChannelOpSet {
 	channels := store.GetNodesChannels()
 	filterMap := make(map[int64]struct{})
