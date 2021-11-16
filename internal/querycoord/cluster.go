@@ -342,14 +342,14 @@ func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64,
 	if node, ok := c.nodes[nodeID]; ok {
 		err := node.removeQueryChannel(ctx, in)
 		if err != nil {
-			log.Debug("RemoveQueryChannel: queryNode remove query channel error", zap.String("error", err.Error()))
+			log.Debug("removeQueryChannel: queryNode remove query channel error", zap.String("error", err.Error()))
 			return err
 		}
 
 		return nil
 	}
 
-	return fmt.Errorf("RemoveQueryChannel: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("removeQueryChannel: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error {
