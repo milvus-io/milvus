@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Exit immediately for non zero status
 set -e
 
 # Ensure $HOME exists when starting
