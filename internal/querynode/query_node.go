@@ -28,14 +28,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"

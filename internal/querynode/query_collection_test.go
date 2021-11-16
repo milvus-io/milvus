@@ -470,7 +470,7 @@ func TestQueryCollection_serviceableTime(t *testing.T) {
 	st := Timestamp(1000)
 	queryCollection.setServiceableTime(st)
 
-	gracefulTimeInMilliSecond := Params.GracefulTime
+	gracefulTimeInMilliSecond := Params.getGracefulTime()
 	gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
 	resST := queryCollection.getServiceableTime()
 	assert.Equal(t, st+gracefulTime, resST)

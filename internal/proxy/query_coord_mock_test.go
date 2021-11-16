@@ -39,6 +39,8 @@ type QueryCoordMock struct {
 	showCollectionsFunc queryCoordShowCollectionsFuncType
 	getMetricsFunc      getMetricsFuncType
 
+	gracefulTime atomic.Value
+
 	statisticsChannel string
 	timeTickChannel   string
 }
@@ -302,6 +304,14 @@ func (coord *QueryCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 		},
 		Response:      "",
 		ComponentName: "",
+	}, nil
+}
+
+func (coord *QueryCoordMock) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	coord.gracefulTime.Store(req.GracefulTime)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
 	}, nil
 }
 

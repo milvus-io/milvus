@@ -108,6 +108,10 @@ func (m *MockQueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	return m.metricResp, m.err
 }
 
+func (m *MockQueryNode) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 func (m *MockQueryNode) UpdateStateCode(code internalpb.StateCode) {
 }
 

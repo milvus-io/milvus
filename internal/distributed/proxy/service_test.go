@@ -301,6 +301,10 @@ func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return nil, nil
 }
 
+func (m *MockQueryCoord) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
 	MockBase
@@ -546,6 +550,10 @@ func (m *MockProxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasRe
 }
 
 func (m *MockProxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 

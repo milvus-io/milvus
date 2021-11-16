@@ -2423,6 +2423,16 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	}, nil
 }
 
+func (node *Proxy) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	if node.queryCoord != nil {
+		return node.queryCoord.SetGracefulTime(ctx, req)
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "query coord not healthy",
+	}, nil
+}
+
 // checkHealthy checks proxy state is Healthy
 func (node *Proxy) checkHealthy() bool {
 	code := node.stateCode.Load().(internalpb.StateCode)

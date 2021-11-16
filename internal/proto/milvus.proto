@@ -51,6 +51,8 @@ service MilvusService {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
+
+  rpc SetGracefulTime(SetGracefulTimeRequest) returns (common.Status) {}
 }
 
 message CreateAliasRequest {
@@ -710,6 +712,11 @@ message GetMetricsResponse {
   common.Status status = 1;
   string response = 2;  // response is of jsonic format
   string component_name = 3; // metrics from which component
+}
+
+message SetGracefulTimeRequest {
+  common.MsgBase base = 1;
+  int64 graceful_time = 2;  // in milliseconds
 }
 
 service ProxyService {

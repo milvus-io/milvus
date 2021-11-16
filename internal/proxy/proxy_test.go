@@ -1372,6 +1372,34 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("SetGracefulTime", func(t *testing.T) {
+		defer wg.Done()
+
+		gTs := []int64{200, 500, 50, 100, 200}
+		var gWg sync.WaitGroup
+		for i := range gTs {
+			idx := i
+			gWg.Add(1)
+			go func() {
+				defer gWg.Done()
+
+				resp, err := proxy.SetGracefulTime(ctx, &milvuspb.SetGracefulTimeRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   0,
+						MsgID:     0,
+						Timestamp: 0,
+						SourceID:  0,
+					},
+					GracefulTime: gTs[idx],
+				})
+				assert.NoError(t, err)
+				assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+			}()
+		}
+		gWg.Wait()
+	})
+
+	wg.Add(1)
 	t.Run("release collection", func(t *testing.T) {
 		defer wg.Done()
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)

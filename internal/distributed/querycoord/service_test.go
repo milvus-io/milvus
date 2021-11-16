@@ -130,6 +130,10 @@ func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return m.metricResp, m.err
 }
 
+func (m *MockQueryCoord) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockRootCoord struct {
 	types.RootCoord

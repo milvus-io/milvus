@@ -637,3 +637,17 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		Response: "",
 	}, err
 }
+
+func (qc *QueryCoord) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	log.Debug("QueryCoord.SetGracefulTime",
+		zap.Int64("node_id", Params.QueryCoordID),
+		zap.Int64("gracefulTime", req.GracefulTime),
+	)
+
+	qc.cluster.setGracefulTime(ctx, req)
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}

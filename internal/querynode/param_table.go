@@ -75,8 +75,10 @@ type ParamTable struct {
 	// stats
 	StatsPublishInterval int
 
-	GracefulTime int64
-	SliceIndex   int
+	GracefulTime    int64
+	gracefulTimeMtx sync.RWMutex
+
+	SliceIndex int
 
 	// segcore
 	ChunkRows int64
@@ -324,7 +326,7 @@ func (p *ParamTable) initMetaRootPath() {
 }
 
 func (p *ParamTable) initGracefulTime() {
-	p.GracefulTime = p.ParseInt64("queryNode.gracefulTime")
+	p.setGracefulTime(p.ParseInt64("queryNode.gracefulTime"))
 }
 
 func (p *ParamTable) initSegcoreChunkRows() {
@@ -339,4 +341,18 @@ func (p *ParamTable) initKnowhereSimdType() {
 
 func (p *ParamTable) initRoleName() {
 	p.RoleName = "querynode"
+}
+
+func (p *ParamTable) getGracefulTime() int64 {
+	p.gracefulTimeMtx.RLock()
+	defer p.gracefulTimeMtx.RUnlock()
+
+	return p.GracefulTime
+}
+
+func (p *ParamTable) setGracefulTime(t int64) {
+	p.gracefulTimeMtx.Lock()
+	defer p.gracefulTimeMtx.Unlock()
+
+	p.GracefulTime = t
 }

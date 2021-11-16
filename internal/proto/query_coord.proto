@@ -29,6 +29,8 @@ service QueryCoord {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
+  rpc SetGracefulTime(milvus.SetGracefulTimeRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -47,6 +49,8 @@ service QueryNode {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
+  rpc SetGracefulTime(milvus.SetGracefulTimeRequest) returns (common.Status) {}
 }
 
 //--------------------query coordinator proto------------------

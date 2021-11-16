@@ -64,6 +64,8 @@ type Node interface {
 	getComponentInfo(ctx context.Context) *internalpb.ComponentInfo
 
 	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	setGracefulTime(ctx context.Context, in *milvuspb.SetGracefulTimeRequest)
 }
 
 type queryNode struct {
@@ -532,6 +534,17 @@ func (qn *queryNode) getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequ
 	}
 
 	return qn.client.GetMetrics(ctx, in)
+}
+
+func (qn *queryNode) setGracefulTime(ctx context.Context, in *milvuspb.SetGracefulTimeRequest) {
+	if !qn.isOnline() {
+		return
+	}
+
+	_, err := qn.client.SetGracefulTime(ctx, in)
+	log.Debug("qn.client.SetGracefulTime",
+		zap.Error(err),
+	)
 }
 
 func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error {

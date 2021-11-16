@@ -81,6 +81,10 @@ func (m *MockQueryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMe
 	return &milvuspb.GetMetricsResponse{}, m.err
 }
 
+func (m *MockQueryNodeClient) SetGracefulTime(ctx context.Context, in *milvuspb.SetGracefulTimeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.err
+}
+
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
 

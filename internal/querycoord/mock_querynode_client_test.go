@@ -146,3 +146,7 @@ func (client *queryNodeClientMock) GetSegmentInfo(ctx context.Context, req *quer
 func (client *queryNodeClientMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return client.grpcClient.GetMetrics(ctx, req)
 }
+
+func (client *queryNodeClientMock) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	return client.grpcClient.SetGracefulTime(ctx, req)
+}

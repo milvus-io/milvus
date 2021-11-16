@@ -53,7 +53,7 @@ struct TableStruct_milvus_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[67]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[68]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -237,6 +237,9 @@ extern SearchRequestDefaultTypeInternal _SearchRequest_default_instance_;
 class SearchResults;
 class SearchResultsDefaultTypeInternal;
 extern SearchResultsDefaultTypeInternal _SearchResults_default_instance_;
+class SetGracefulTimeRequest;
+class SetGracefulTimeRequestDefaultTypeInternal;
+extern SetGracefulTimeRequestDefaultTypeInternal _SetGracefulTimeRequest_default_instance_;
 class ShowCollectionsRequest;
 class ShowCollectionsRequestDefaultTypeInternal;
 extern ShowCollectionsRequestDefaultTypeInternal _ShowCollectionsRequest_default_instance_;
@@ -326,6 +329,7 @@ template<> ::milvus::proto::milvus::ReleaseCollectionRequest* Arena::CreateMaybe
 template<> ::milvus::proto::milvus::ReleasePartitionsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::ReleasePartitionsRequest>(Arena*);
 template<> ::milvus::proto::milvus::SearchRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::SearchRequest>(Arena*);
 template<> ::milvus::proto::milvus::SearchResults* Arena::CreateMaybeMessage<::milvus::proto::milvus::SearchResults>(Arena*);
+template<> ::milvus::proto::milvus::SetGracefulTimeRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::SetGracefulTimeRequest>(Arena*);
 template<> ::milvus::proto::milvus::ShowCollectionsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::ShowCollectionsRequest>(Arena*);
 template<> ::milvus::proto::milvus::ShowCollectionsResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::ShowCollectionsResponse>(Arena*);
 template<> ::milvus::proto::milvus::ShowPartitionsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::ShowPartitionsRequest>(Arena*);
@@ -11633,6 +11637,147 @@ class GetMetricsResponse :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
+// -------------------------------------------------------------------
+
+class SetGracefulTimeRequest :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.SetGracefulTimeRequest) */ {
+ public:
+  SetGracefulTimeRequest();
+  virtual ~SetGracefulTimeRequest();
+
+  SetGracefulTimeRequest(const SetGracefulTimeRequest& from);
+  SetGracefulTimeRequest(SetGracefulTimeRequest&& from) noexcept
+    : SetGracefulTimeRequest() {
+    *this = ::std::move(from);
+  }
+
+  inline SetGracefulTimeRequest& operator=(const SetGracefulTimeRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline SetGracefulTimeRequest& operator=(SetGracefulTimeRequest&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const SetGracefulTimeRequest& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const SetGracefulTimeRequest* internal_default_instance() {
+    return reinterpret_cast<const SetGracefulTimeRequest*>(
+               &_SetGracefulTimeRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    67;
+
+  friend void swap(SetGracefulTimeRequest& a, SetGracefulTimeRequest& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(SetGracefulTimeRequest* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline SetGracefulTimeRequest* New() const final {
+    return CreateMaybeMessage<SetGracefulTimeRequest>(nullptr);
+  }
+
+  SetGracefulTimeRequest* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<SetGracefulTimeRequest>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const SetGracefulTimeRequest& from);
+  void MergeFrom(const SetGracefulTimeRequest& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(SetGracefulTimeRequest* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.SetGracefulTimeRequest";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kBaseFieldNumber = 1,
+    kGracefulTimeFieldNumber = 2,
+  };
+  // .milvus.proto.common.MsgBase base = 1;
+  bool has_base() const;
+  void clear_base();
+  const ::milvus::proto::common::MsgBase& base() const;
+  ::milvus::proto::common::MsgBase* release_base();
+  ::milvus::proto::common::MsgBase* mutable_base();
+  void set_allocated_base(::milvus::proto::common::MsgBase* base);
+
+  // int64 graceful_time = 2;
+  void clear_graceful_time();
+  ::PROTOBUF_NAMESPACE_ID::int64 graceful_time() const;
+  void set_graceful_time(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.SetGracefulTimeRequest)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::int64 graceful_time_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
 // ===================================================================
 
 
@@ -22387,9 +22532,74 @@ inline void GetMetricsResponse::set_allocated_component_name(std::string* compon
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetMetricsResponse.component_name)
 }
 
+// -------------------------------------------------------------------
+
+// SetGracefulTimeRequest
+
+// .milvus.proto.common.MsgBase base = 1;
+inline bool SetGracefulTimeRequest::has_base() const {
+  return this != internal_default_instance() && base_ != nullptr;
+}
+inline const ::milvus::proto::common::MsgBase& SetGracefulTimeRequest::base() const {
+  const ::milvus::proto::common::MsgBase* p = base_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SetGracefulTimeRequest.base)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::MsgBase*>(
+      &::milvus::proto::common::_MsgBase_default_instance_);
+}
+inline ::milvus::proto::common::MsgBase* SetGracefulTimeRequest::release_base() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.SetGracefulTimeRequest.base)
+  
+  ::milvus::proto::common::MsgBase* temp = base_;
+  base_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::MsgBase* SetGracefulTimeRequest::mutable_base() {
+  
+  if (base_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::MsgBase>(GetArenaNoVirtual());
+    base_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.SetGracefulTimeRequest.base)
+  return base_;
+}
+inline void SetGracefulTimeRequest::set_allocated_base(::milvus::proto::common::MsgBase* base) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(base_);
+  }
+  if (base) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      base = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, base, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  base_ = base;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.SetGracefulTimeRequest.base)
+}
+
+// int64 graceful_time = 2;
+inline void SetGracefulTimeRequest::clear_graceful_time() {
+  graceful_time_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SetGracefulTimeRequest::graceful_time() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SetGracefulTimeRequest.graceful_time)
+  return graceful_time_;
+}
+inline void SetGracefulTimeRequest::set_graceful_time(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  graceful_time_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SetGracefulTimeRequest.graceful_time)
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
