@@ -5,6 +5,13 @@ image:
     repository: milvusdb/milvus-dev
     tag: master-latest
     pullPolicy: IfNotPresent
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    # Set this to `true` to create ServiceMonitor for Prometheus operator
+    enabled: true
+
 etcd:
   replicaCount: 1
 minio:
