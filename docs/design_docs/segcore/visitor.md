@@ -12,7 +12,7 @@ Visitor Pattern is used in segcore for parse and execute Execution Plan.
     5. `LogicalUnaryExpr` support not
 
 Currently, under `${core/query/visitors}` directory, there are following visitors:
-1. `ShowPlanNodeVisitor` print PlanNode in json
+1. `ShowPlanNodeVisitor` prints PlanNode in json
 2. `ShowExprVisitor` Expr -> json
 3. `Verify...Visitor` validates ...
 4. `ExtractInfo...Visitor` extracts info from... ，including involved_fields and else
