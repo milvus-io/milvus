@@ -44,6 +44,7 @@ def hello_milvus(host="127.0.0.1"):
     #  insert data
     nb = 3000
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+    t0 = time.time()
     collection.insert(
         [
             [i for i in range(nb)],
@@ -51,6 +52,8 @@ def hello_milvus(host="127.0.0.1"):
             vectors
         ]
     )
+    t1 = time.time()
+    print(f"\nInsert {nb} vectors cost {t1 - t0} seconds")
 
     print(f"\nGet collection entities...")
     print(collection.num_entities)
