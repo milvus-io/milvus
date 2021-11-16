@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -223,6 +224,9 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 	if err == nil {
 		return ret, nil
 	}
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return nil, err
+	}
 	log.Debug("RootCoord Client grpc error", zap.Error(err))
 
 	c.resetConnection()
@@ -241,7 +245,9 @@ func (c *GrpcClient) GetComponentStates(ctx context.Context) (*internalpb.Compon
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
@@ -257,7 +263,9 @@ func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRe
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -273,7 +281,9 @@ func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -289,7 +299,9 @@ func (c *GrpcClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCo
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.CreateCollection(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -305,7 +317,9 @@ func (c *GrpcClient) DropCollection(ctx context.Context, in *milvuspb.DropCollec
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.DropCollection(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -321,7 +335,9 @@ func (c *GrpcClient) HasCollection(ctx context.Context, in *milvuspb.HasCollecti
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.HasCollection(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -337,7 +353,9 @@ func (c *GrpcClient) DescribeCollection(ctx context.Context, in *milvuspb.Descri
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.DescribeCollection(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -353,7 +371,9 @@ func (c *GrpcClient) ShowCollections(ctx context.Context, in *milvuspb.ShowColle
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ShowCollections(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -369,7 +389,9 @@ func (c *GrpcClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePar
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.CreatePartition(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -385,7 +407,9 @@ func (c *GrpcClient) DropPartition(ctx context.Context, in *milvuspb.DropPartiti
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.DropPartition(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -401,7 +425,9 @@ func (c *GrpcClient) HasPartition(ctx context.Context, in *milvuspb.HasPartition
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.HasPartition(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -417,7 +443,9 @@ func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartit
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ShowPartitions(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -433,7 +461,9 @@ func (c *GrpcClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRe
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.CreateIndex(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -449,7 +479,9 @@ func (c *GrpcClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexReques
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.DropIndex(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -465,7 +497,9 @@ func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeInd
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.DescribeIndex(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -481,7 +515,9 @@ func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTi
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.AllocTimestamp(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -497,7 +533,9 @@ func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.AllocID(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -513,7 +551,9 @@ func (c *GrpcClient) UpdateChannelTimeTick(ctx context.Context, in *internalpb.C
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.UpdateChannelTimeTick(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -529,7 +569,9 @@ func (c *GrpcClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeS
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.DescribeSegment(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -545,7 +587,9 @@ func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegments
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ShowSegments(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -561,7 +605,9 @@ func (c *GrpcClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Re
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ReleaseDQLMessageStream(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -577,7 +623,9 @@ func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.Segme
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.SegmentFlushCompleted(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -593,7 +641,9 @@ func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequ
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetMetrics(ctx, in)
 	})
 	if err != nil || ret == nil {
@@ -609,7 +659,9 @@ func (c *GrpcClient) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasR
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.CreateAlias(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -625,7 +677,9 @@ func (c *GrpcClient) DropAlias(ctx context.Context, req *milvuspb.DropAliasReque
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.DropAlias(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -641,7 +695,9 @@ func (c *GrpcClient) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasReq
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.AlterAlias(ctx, req)
 	})
 	if err != nil || ret == nil {

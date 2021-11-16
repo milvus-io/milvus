@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
@@ -161,6 +162,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return nil, err
+	}
 	log.Debug("QueryNode Client grpc error", zap.Error(err))
 
 	c.resetConnection()
@@ -200,7 +204,9 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
@@ -216,7 +222,9 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -232,7 +240,9 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -248,7 +258,9 @@ func (c *Client) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChann
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.AddQueryChannel(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -264,7 +276,9 @@ func (c *Client) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQuer
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.RemoveQueryChannel(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -280,7 +294,9 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChanne
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.WatchDmChannels(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -296,7 +312,9 @@ func (c *Client) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDelta
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.WatchDeltaChannels(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -312,7 +330,9 @@ func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequ
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.LoadSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -328,7 +348,9 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ReleaseCollection(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -344,7 +366,9 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ReleasePartitions(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -360,7 +384,9 @@ func (c *Client) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmen
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ReleaseSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -376,7 +402,9 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetSegmentInfo(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -392,7 +420,9 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {

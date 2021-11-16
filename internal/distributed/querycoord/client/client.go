@@ -25,6 +25,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -195,6 +196,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return nil, err
+	}
 	log.Debug("QueryCoord Client grpc error", zap.Error(err))
 
 	c.resetConnection()
@@ -234,7 +238,9 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
@@ -250,7 +256,9 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -266,7 +274,9 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -282,7 +292,9 @@ func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ShowCollections(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -298,7 +310,9 @@ func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.LoadCollection(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -314,7 +328,9 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ReleaseCollection(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -330,7 +346,9 @@ func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ShowPartitions(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -346,7 +364,9 @@ func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.LoadPartitions(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -362,7 +382,9 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ReleasePartitions(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -378,7 +400,9 @@ func (c *Client) CreateQueryChannel(ctx context.Context, req *querypb.CreateQuer
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.CreateQueryChannel(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -394,7 +418,9 @@ func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetPartitionStates(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -410,7 +436,9 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetSegmentInfo(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -426,7 +454,9 @@ func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.LoadBalance(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -442,7 +472,9 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {

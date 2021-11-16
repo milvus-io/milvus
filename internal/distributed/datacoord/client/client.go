@@ -27,6 +27,7 @@ import (
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -192,14 +193,15 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return nil, err
+	}
+
 	log.Debug("DataCoord Client grpc error", zap.Error(err))
 
 	c.resetConnection()
 
 	ret, err = caller()
-	if err == nil {
-		return ret, nil
-	}
 	return ret, err
 }
 
@@ -229,7 +231,9 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
@@ -245,7 +249,9 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -261,7 +267,9 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -276,7 +284,9 @@ func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.Flush(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -304,7 +314,9 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.AssignSegmentID(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -328,7 +340,9 @@ func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetSegmentStates(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -351,7 +365,9 @@ func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetInsertBinlogPaths(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -374,7 +390,9 @@ func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetCollectionStatistics(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -397,7 +415,9 @@ func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetPartitionStatistics(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -414,7 +434,9 @@ func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -436,7 +458,9 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetSegmentInfo(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -483,7 +507,9 @@ func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetRecoveryInfo(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -506,7 +532,9 @@ func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetFlushedSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -522,7 +550,9 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -537,7 +567,9 @@ func (c *Client) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.CompleteCompaction(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -552,7 +584,9 @@ func (c *Client) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.ManualCompaction(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -567,7 +601,9 @@ func (c *Client) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetCompactionState(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -582,7 +618,9 @@ func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetCompactionStateWithPlans(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -597,7 +635,9 @@ func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.WatchChannels(ctx, req)
 	})
 	if err != nil || ret == nil {

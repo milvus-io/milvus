@@ -22,16 +22,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/retry"
-
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"google.golang.org/grpc/codes"
 
@@ -174,6 +174,10 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return nil, err
+	}
+
 	log.Debug("DataNode Client grpc error", zap.Error(err))
 
 	c.resetConnection()
@@ -214,7 +218,9 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
@@ -229,7 +235,9 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
@@ -244,7 +252,9 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.WatchDmChannels(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -267,7 +277,9 @@ func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.FlushSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -282,7 +294,9 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
@@ -297,7 +311,9 @@ func (c *Client) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*c
 		if err != nil {
 			return nil, err
 		}
-
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
 		return client.Compaction(ctx, req)
 	})
 	if err != nil || ret == nil {
