@@ -4,8 +4,8 @@
 
 In Milvus, one entity encapsulates multiple vectors and scalars.
 
-When creating a collection, you can specify using the primary key generated automatically, or using the user-provided primary key. 
-If a user sets to use the user-provided primary key, each entity inserted must contain the primary key field. Otherwise, the insertion fails. 
+When creating a collection, you can specify using the primary key generated automatically, or using the user-provided primary key.
+If a user sets to use the user-provided primary key, each entity inserted must contain the primary key field. Otherwise, the insertion fails.
 The primary keys will be returned after the insertion request is successful.
 
 Milvus currently only supports primary keys of int64 type.
