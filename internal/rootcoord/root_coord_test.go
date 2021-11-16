@@ -2715,3 +2715,17 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	err = core.Stop()
 	assert.Nil(t, err)
 }
+
+func TestCore_GetComponentStates(t *testing.T) {
+	n := &Core{}
+	n.stateCode.Store(internalpb.StateCode_Healthy)
+	resp, err := n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	n.session = &sessionutil.Session{}
+	n.session.UpdateRegistered(true)
+	resp, err = n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+}

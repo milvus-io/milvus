@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -58,6 +59,8 @@ type Session struct {
 	leaseID *clientv3.LeaseID
 
 	metaRoot string
+
+	registered atomic.Value
 }
 
 // NewSession is a helper to build Session object.
@@ -69,6 +72,8 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 		ctx:      ctx,
 		metaRoot: metaRoot,
 	}
+
+	session.UpdateRegistered(false)
 
 	connectEtcdFn := func() error {
 		log.Debug("Session try to connect to etcd")
@@ -112,6 +117,7 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 		panic(err)
 	}
 	s.liveCh = s.processKeepAliveResponse(ch)
+	s.UpdateRegistered(true)
 }
 
 func (s *Session) getServerID() (int64, error) {
@@ -402,4 +408,18 @@ func (s *Session) Revoke(timeout time.Duration) {
 	defer cancel()
 	// ignores resp & error, just do best effort to revoke
 	_, _ = s.etcdCli.Revoke(ctx, *s.leaseID)
+}
+
+// UpdateRegistered update the state of registered.
+func (s *Session) UpdateRegistered(b bool) {
+	s.registered.Store(b)
+}
+
+// Registered check if session was registered into etcd.
+func (s *Session) Registered() bool {
+	b, ok := s.registered.Load().(bool)
+	if !ok {
+		return false
+	}
+	return b
 }

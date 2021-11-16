@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
@@ -491,6 +493,12 @@ func TestGetSegmentInfo(t *testing.T) {
 
 func TestGetComponentStates(t *testing.T) {
 	svr := &Server{}
+	resp, err := svr.GetComponentStates(context.Background())
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	svr.session = &sessionutil.Session{}
+	svr.session.UpdateRegistered(true)
 	type testCase struct {
 		state ServerState
 		code  internalpb.StateCode

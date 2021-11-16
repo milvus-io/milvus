@@ -23,6 +23,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -65,8 +67,13 @@ func (node *Proxy) GetComponentStates(ctx context.Context) (*internalpb.Componen
 		}
 		return stats, errors.New(errMsg)
 	}
+	nodeID := common.NotRegisteredID
+	if node.session != nil && node.session.Registered() {
+		nodeID = node.session.ServerID
+	}
 	info := &internalpb.ComponentInfo{
-		NodeID:    Params.ProxyID,
+		// NodeID:    Params.ProxyID, // will race with Proxy.Register()
+		NodeID:    nodeID,
 		Role:      typeutil.ProxyRole,
 		StateCode: code,
 	}

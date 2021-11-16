@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/util/trace"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -384,9 +386,15 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	nodeID := common.NotRegisteredID
+	if s.session != nil && s.session.Registered() {
+		nodeID = s.session.ServerID // or Params.NodeID
+	}
+
 	resp := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
-			NodeID:    Params.NodeID,
+			// NodeID:    Params.NodeID, // will race with Server.Register()
+			NodeID:    nodeID,
 			Role:      "datacoord",
 			StateCode: 0,
 		},

@@ -49,6 +49,9 @@ const (
 
 	// InvalidFieldID indicates that the field does not exist . It will be set when the field is not found.
 	InvalidFieldID = int64(-1)
+
+	// NotRegisteredID means node is not registered into etcd.
+	NotRegisteredID = int64(-1)
 )
 
 // Endian is type alias of binary.LittleEndian.
