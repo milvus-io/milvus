@@ -246,9 +246,6 @@ class ResponseChecker:
         with_vec = check_items.get("with_vec", False)
         if exp_res and isinstance(query_res, list):
             assert pc.equal_entities_list(exp=exp_res, actual=query_res, with_vec=with_vec)
-            # assert len(exp_res) == len(query_res)
-            # for i in range(len(exp_res)):
-            #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])
 
     @staticmethod
     def check_query_empty(query_res, func_name):
