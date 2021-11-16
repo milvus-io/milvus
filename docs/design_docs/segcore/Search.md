@@ -6,13 +6,13 @@ update: 9.16.2021, by [xiaofan-luan](https://github.com/xiaofan-luan)
 
 ## Search
 
-Search now supports two modes: json DSL mode and Boolean Expr mode. We will talk about the later one in details because the former has been deprecated and is only used in test.
+Search now supports two modes: json DSL mode and Boolean Expr mode. We will talk about the latter one in details because the former has been deprecated and is only used in test.
 
 The execution mode of Boolean Expr works as follows:
 
 1. client packs search expr, topk and query vector into proto and sends to proxy node.
-2. proxynode unmarshals the proto, parses it to logical plan, makes static check, and generates protobuf IR.
-3. querynode unmarshals the plan, generates an executable plan AST, and queries in the segcore.
+2. proxy node unmarshals the proto, parses it to logical plan, makes static check, and generates protobuf IR.
+3. query node unmarshals the plan, generates an executable plan AST, and queries in the segcore.
 
 See details of expression usage at [expr_grammar.md](https://milvus.io/docs/v2.0.0/expression.md)
 
