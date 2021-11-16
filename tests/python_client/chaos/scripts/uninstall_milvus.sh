@@ -1,4 +1,5 @@
 
+# Exit immediately for non zero status
 set -e
 release=${1:-"milvus-chaos"}
 ns=${2:-"chaos-testing"}
