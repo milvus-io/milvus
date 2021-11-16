@@ -2,12 +2,10 @@ import pytest
 
 from base.collection_wrapper import ApiCollectionWrapper
 from common.common_type import CaseLabel
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from scale import constants
+from scale import constants, scale_common
 from scale.helm_env import HelmEnv
-from customize.milvus_operator import MilvusOperator
 from pymilvus import connections, utility
 
 prefix = "data_scale"
@@ -28,29 +26,8 @@ class TestDataNodeScale:
         expected: two collection create and insert op are both correctly
         """
         release_name = "scale-data"
+        milvusOp, host, port = scale_common.deploy_default_milvus(release_name)
 
-        # deploy cluster milvus with dataNode 1 replicas
-        default_config = {
-            'metadata.namespace': constants.NAMESPACE,
-            'metadata.name': release_name,
-            'spec.components.image': 'milvusdb/milvus-dev:master-20211020-b40513b',
-            'spec.components.proxy.serviceType': 'LoadBalancer',
-            'dependencies.etcd.inCluster.deletionPolicy': 'Delete',
-            'dependencies.etcd.inCluster.pvcDeletion': 'true',
-            'dependencies.pulsar.inCluster.deletionPolicy': 'Delete',
-            'dependencies.pulsar.inCluster.pvcDeletion': 'true',
-            'dependencies.storage.inCluster.deletionPolicy': 'Delete',
-            'dependencies.storage.inCluster.pvcDeletion': 'true',
-        }
-        milvusOp = MilvusOperator()
-        milvusOp.install(default_config)
-        if milvusOp.wait_for_healthy(release_name, namespace=constants.NAMESPACE):
-            endpoint = milvusOp.endpoint(release_name, constants.NAMESPACE)
-            endpoint = endpoint.split(':')
-            host = endpoint[0]
-            port = int(endpoint[-1])
-        else:
-            raise Exception(f"Failed to install {release_name}")
 
         # connect
         connections.add_connection(default={"host": host, "port": port})
@@ -60,11 +37,12 @@ class TestDataNodeScale:
         collection_w = ApiCollectionWrapper()
         collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
         # # insert
-        data = cf.gen_default_list_data(ct.default_nb)
+        data = cf.gen_default_list_data()
         mutation_res, _ = collection_w.insert(data)
         assert mutation_res.insert_count == ct.default_nb
         # scale dataNode to 2 pods
         milvusOp.upgrade(release_name, {'spec.components.dataNode.replicas': 2}, constants.NAMESPACE)
+        milvusOp.wait_for_healthy(release_name, constants.NAMESPACE)
 
         # after scale, assert data consistent
         assert utility.has_collection(c_name)

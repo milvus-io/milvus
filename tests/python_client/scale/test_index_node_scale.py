@@ -6,6 +6,8 @@ from pymilvus import connections
 from base.collection_wrapper import ApiCollectionWrapper
 from common.common_type import CaseLabel
 from scale.helm_env import HelmEnv
+from scale import constants
+from scale import scale_common
 from common import common_func as cf
 from common import common_type as ct
 from utils.util_log import test_log as log
@@ -27,11 +29,10 @@ class TestIndexNodeScale:
         expected: The cost of one indexNode is about twice that of two indexNodes
         """
         release_name = "scale-index"
-        env = HelmEnv(release_name=release_name)
-        host = env.helm_install_cluster_milvus()
+        milvusOp, host, port = scale_common.deploy_default_milvus(release_name)
 
         # connect
-        connections.add_connection(default={"host": host, "port": 19530})
+        connections.add_connection(default={"host": host, "port": port})
         connections.connect(alias='default')
 
         data = cf.gen_default_dataframe_data(nb)
@@ -59,7 +60,8 @@ class TestIndexNodeScale:
         assert not collection_w.has_index()[0]
 
         # expand indexNode from 1 to 2
-        env.helm_upgrade_cluster_milvus(indexNode=2)
+        milvusOp.upgrade(release_name, {'spec.components.indexNode.replicas': 2}, constants.NAMESPACE)
+        milvusOp.wait_for_healthy(release_name, constants.NAMESPACE)
 
         start = datetime.datetime.now()
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
@@ -68,6 +70,8 @@ class TestIndexNodeScale:
 
         log.debug(f't1: {t1}')
         assert round(t0 / t1) == 2
+
+        # milvusOp.uninstall(release_name, namespace=constants.NAMESPACE)
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_index_node(self):
