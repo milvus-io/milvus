@@ -229,13 +229,13 @@ func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *q
 	if node, ok := c.nodes[nodeID]; ok {
 		err := node.loadSegments(ctx, in)
 		if err != nil {
-			log.Debug("LoadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			log.Debug("loadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
 
 		return nil
 	}
-	return fmt.Errorf("LoadSegments: Can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("loadSegments: Can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in *querypb.ReleaseSegmentsRequest) error {
