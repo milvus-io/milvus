@@ -2,6 +2,7 @@ import os
 
 from pymilvus import connections, Index
 
+from customize.milvus_operator import MilvusOperator
 from scale import constants
 from utils.util_log import test_log as log
 from base.collection_wrapper import ApiCollectionWrapper
@@ -23,6 +24,31 @@ def get_milvus_chart_env_var(var=constants.MILVUS_CHART_ENV):
     # if not os.path.exists(milvus_helm_chart):
     #     raise Exception(f'milvus_helm_chart: {milvus_helm_chart} not exist')
     # return milvus_helm_chart
+
+
+def deploy_default_milvus(release_name, image_tag=None):
+    if image_tag is None:
+        image = f'{constants.IMAGE_REPO}:{constants.IMAGE_TAG}'
+    else:
+        image = f'{constants.IMAGE_REPO}:{image_tag}'
+    default_config = {
+        'metadata.namespace': constants.NAMESPACE,
+        'metadata.name': release_name,
+        'spec.components.image': image,
+        'spec.components.proxy.serviceType': 'LoadBalancer'
+    }
+
+    milvusOp = MilvusOperator()
+    milvusOp.install(default_config)
+
+    if milvusOp.wait_for_healthy(release_name, namespace=constants.NAMESPACE):
+        endpoint = milvusOp.endpoint(release_name, constants.NAMESPACE)
+        endpoint = endpoint.split(':')
+        host = endpoint[0]
+        port = int(endpoint[-1])
+        return milvusOp, host, port
+    else:
+        raise Exception(f"Failed to install {release_name}")
 
 
 def e2e_milvus(host, c_name, collection_exist=False):
