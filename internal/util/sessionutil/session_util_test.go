@@ -202,3 +202,39 @@ func TestSessionLivenessCheck(t *testing.T) {
 
 	assert.False(t, flag)
 }
+
+func TestSessionRevoke(t *testing.T) {
+	s := &Session{}
+	assert.NotPanics(t, func() {
+		s.Revoke(time.Second)
+	})
+
+	s = (*Session)(nil)
+	assert.NotPanics(t, func() {
+		s.Revoke(time.Second)
+	})
+
+	ctx := context.Background()
+	Params.Init()
+
+	endpoints, err := Params.Load("_EtcdEndpoints")
+	if err != nil {
+		panic(err)
+	}
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, metaRoot)
+	assert.NoError(t, err)
+	err = etcdKV.RemoveWithPrefix("")
+	assert.NoError(t, err)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	s = NewSession(ctx, metaRoot, etcdEndpoints)
+	s.Init("revoketest", "testAddr", false)
+	assert.NotPanics(t, func() {
+		s.Revoke(time.Second)
+	})
+}

@@ -711,6 +711,7 @@ func (s *Server) Stop() error {
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()
+	s.session.Revoke(time.Second)
 
 	if Params.EnableCompaction {
 		s.stopCompactionTrigger()

@@ -298,6 +298,7 @@ func (node *QueryNode) Stop() error {
 	if node.statsService != nil {
 		node.statsService.close()
 	}
+	node.session.Revoke(time.Second)
 	return nil
 }
 

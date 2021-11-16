@@ -1170,6 +1170,8 @@ func (c *Core) Stop() error {
 	c.cancel()
 	c.wg.Wait()
 	c.stateCode.Store(internalpb.StateCode_Abnormal)
+	// wait at most one second to revoke
+	c.session.Revoke(time.Second)
 	return nil
 }
 

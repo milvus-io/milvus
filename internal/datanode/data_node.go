@@ -639,6 +639,8 @@ func (node *DataNode) Stop() error {
 			return err
 		}
 	}
+
+	node.session.Revoke(time.Second)
 	return nil
 }
 

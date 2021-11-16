@@ -208,6 +208,7 @@ func (qc *QueryCoord) Stop() error {
 	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	qc.loopWg.Wait()
+	qc.session.Revoke(time.Second)
 	return nil
 }
 
