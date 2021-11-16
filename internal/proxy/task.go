@@ -30,6 +30,8 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/distance"
+
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -1831,7 +1833,8 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 	ret.Results.TopK = realTopK
 
-	if metricType != "IP" {
+	// if metricType != "IP" {
+	if !distance.PositivelyRelated(metricType) {
 		for k := range ret.Results.Scores {
 			ret.Results.Scores[k] *= -1
 		}

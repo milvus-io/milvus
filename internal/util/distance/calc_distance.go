@@ -26,6 +26,12 @@ const (
 	HAMMING = "HAMMING"
 	// TANIMOTO represents the tanimoto distance
 	TANIMOTO = "TANIMOTO"
+	// JACCARD
+	JACCARD = "JACCARD"
+	// SUPERSTRUCTURE
+	SUPERSTRUCTURE = "SUPERSTRUCTURE"
+	// SUBSTRUCTURE
+	SUBSTRUCTURE = "SUBSTRUCTURE"
 )
 
 // ValidateMetricType returns metric text or error

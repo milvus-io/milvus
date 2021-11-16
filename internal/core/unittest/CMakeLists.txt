@@ -36,6 +36,7 @@ set(MILVUS_TEST_FILES
         test_timestamp_index.cpp
         test_reduce_c.cpp
         test_conf_adapter_mgr.cpp
+        test_similarity_corelation.cpp
         )
 
 add_executable(all_tests
