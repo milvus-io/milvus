@@ -4418,7 +4418,7 @@
         "avg": false,
         "current": false,
         "max": false,
-        "min": false,
+        "min": "0",
         "show": true,
         "total": false,
         "values": false
