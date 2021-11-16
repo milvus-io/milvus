@@ -101,8 +101,6 @@ func (p *proxyManager) WatchProxy() error {
 		}
 		for _, s := range sessions {
 			metrics.RootCoordProxyLister.WithLabelValues(metricProxy(s.ServerID)).Set(1)
-		}
-		for _, s := range sessions {
 			log.Debug("Get proxy", zap.Int64("id", s.ServerID), zap.String("addr", s.Address), zap.String("name", s.ServerName))
 		}
 
@@ -140,6 +138,7 @@ func (p *proxyManager) WatchProxy() error {
 							}
 						}
 						p.lock.Lock()
+						log.Debug("watchProxy detect PUT event", zap.Int64("serverID", sess.ServerID))
 						for _, f := range p.addSessions {
 							f(sess)
 						}
@@ -153,6 +152,7 @@ func (p *proxyManager) WatchProxy() error {
 							continue
 						}
 						p.lock.Lock()
+						log.Debug("watchProxy detect DELETE event", zap.Int64("serverID", sess.ServerID))
 						for _, f := range p.delSessions {
 							f(sess)
 						}

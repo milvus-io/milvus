@@ -197,6 +197,7 @@ func (t *timetickSync) AddProxy(sess *sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.proxyTimeTick[sess.ServerID] = nil
+	log.Debug("Add proxy for timeticksync", zap.Int64("serverID", sess.ServerID))
 }
 
 func (t *timetickSync) DelProxy(sess *sessionutil.Session) {
@@ -204,6 +205,7 @@ func (t *timetickSync) DelProxy(sess *sessionutil.Session) {
 	defer t.lock.Unlock()
 	if _, ok := t.proxyTimeTick[sess.ServerID]; ok {
 		delete(t.proxyTimeTick, sess.ServerID)
+		log.Debug("Remove proxy from timeticksync", zap.Int64("serverID", sess.ServerID))
 		t.sendToChannel()
 	}
 }
