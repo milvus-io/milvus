@@ -85,7 +85,7 @@
 ### 2.10 Remove the code related to proxy service
 
 1. The `proxy service` related code will be removed
-2. The the job of time synchronization which done by the `proxy service` is partially simplified and handed over to the `RC` (subsection 2.8)
+2. The job of time synchronization which done by the `proxy service` is partially simplified and handed over to the `RC` (subsection 2.8)
 
 ### 2.11 Query collection meta based on timeline
 
