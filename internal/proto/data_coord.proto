@@ -211,6 +211,7 @@ message SegmentInfo {
   
   bool createdByCompaction = 14;
   repeated int64 compactionFrom = 15;
+  uint64 dropped_at = 16; // timestamp when segment marked drop
 }
 
 message SegmentStartPosition {

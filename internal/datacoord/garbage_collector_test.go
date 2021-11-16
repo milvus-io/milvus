@@ -87,7 +87,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
 	rootPath := `gc` + funcutil.RandomString(8)
 	//TODO change to Params
-	cli, files, err := initUtOSSEnv(bucketName, rootPath, 3)
+	cli, files, err := initUtOSSEnv(bucketName, rootPath, 6)
 	require.NoError(t, err)
 
 	mockAllocator := newMockAllocator()
@@ -106,13 +106,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 		})
 		gc.scan()
 
-		current := make([]string, 0, 3)
+		current := make([]string, 0, 6)
 		for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: rootPath, Recursive: true}) {
 			current = append(current, info.Key)
 		}
 		assert.ElementsMatch(t, files, current)
 	})
-	t.Run("all hit, no gc", func(t *testing.T) {
+	t.Run("hit, no gc", func(t *testing.T) {
 		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Flushed
 		segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{files[0]}}}
@@ -133,7 +133,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.start()
 		gc.scan()
 
-		current := make([]string, 0, 3)
+		current := make([]string, 0, 6)
 		for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: rootPath, Recursive: true}) {
 			current = append(current, info.Key)
 		}
@@ -144,6 +144,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 	t.Run("dropped gc one", func(t *testing.T) {
 		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Dropped
+		segment.DroppedAt = uint64(time.Now().Add(-time.Hour).UnixNano())
+		segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{files[0]}}}
+		segment.Statslogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{files[1]}}}
 		segment.Deltalogs = []*datapb.DeltaLogInfo{{DeltaLogPath: files[2]}}
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
@@ -164,7 +167,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: rootPath, Recursive: true}) {
 			current = append(current, info.Key)
 		}
-		assert.ElementsMatch(t, files[:2], current)
+		assert.ElementsMatch(t, files[3:], current)
 		gc.close()
 	})
 	t.Run("missing gc all", func(t *testing.T) {
