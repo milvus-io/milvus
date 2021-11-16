@@ -306,16 +306,19 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	unFlushedSegmentIDs := make([]UniqueID, 0)
 	for _, info := range w.req.Infos {
 		for _, ufInfo := range info.UnflushedSegments {
-			unFlushedSegments = append(unFlushedSegments, &queryPb.SegmentLoadInfo{
-				SegmentID:    ufInfo.ID,
-				PartitionID:  ufInfo.PartitionID,
-				CollectionID: ufInfo.CollectionID,
-				BinlogPaths:  ufInfo.Binlogs,
-				NumOfRows:    ufInfo.NumOfRows,
-				Statslogs:    ufInfo.Statslogs,
-				Deltalogs:    ufInfo.Deltalogs,
-			})
-			unFlushedSegmentIDs = append(unFlushedSegmentIDs, ufInfo.ID)
+			// unFlushed segment may not have binLogs, skip loading
+			if len(ufInfo.Binlogs) > 0 {
+				unFlushedSegments = append(unFlushedSegments, &queryPb.SegmentLoadInfo{
+					SegmentID:    ufInfo.ID,
+					PartitionID:  ufInfo.PartitionID,
+					CollectionID: ufInfo.CollectionID,
+					BinlogPaths:  ufInfo.Binlogs,
+					NumOfRows:    ufInfo.NumOfRows,
+					Statslogs:    ufInfo.Statslogs,
+					Deltalogs:    ufInfo.Deltalogs,
+				})
+				unFlushedSegmentIDs = append(unFlushedSegmentIDs, ufInfo.ID)
+			}
 		}
 	}
 	req := &queryPb.LoadSegmentsRequest{

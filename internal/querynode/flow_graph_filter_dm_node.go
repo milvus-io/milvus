@@ -215,6 +215,13 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil
 	}
 	for _, segmentInfo := range excludedSegments {
+		// unFlushed segment may not have checkPoint, so `segmentInfo.DmlPosition` may be nil
+		if segmentInfo.DmlPosition == nil {
+			log.Debug("filter unFlushed segment without checkPoint",
+				zap.Any("collectionID", msg.CollectionID),
+				zap.Any("partitionID", msg.PartitionID))
+			return nil
+		}
 		if msg.SegmentID == segmentInfo.ID && msg.EndTs() < segmentInfo.DmlPosition.Timestamp {
 			log.Debug("filter invalid insert message, segments are excluded segments",
 				zap.Any("collectionID", msg.CollectionID),
