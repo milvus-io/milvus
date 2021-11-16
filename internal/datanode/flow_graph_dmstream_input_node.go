@@ -22,9 +22,12 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.uber.org/zap"
 )
 
@@ -32,29 +35,42 @@ import (
 //  messages between two timeticks to the following flowgraph node. In DataNode, the following flow graph node is
 //  flowgraph ddNode.
 func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNodeConfig *nodeConfig) (*flowgraph.InputNode, error) {
-	// subName should be unique, since pchannelName is shared among several collections
-	//	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collID, 10)
-	consumeSubName := fmt.Sprintf("%s-%d", Params.MsgChannelSubName, dmNodeConfig.collectionID)
-	insertStream, err := dmNodeConfig.msFactory.NewTtMsgStream(ctx)
+	var insertStream msgstream.MsgStream
+	// Add retry logic for create and seek
+	// temp solution for #11148, will change pulsar implementation to reader to fix the root cause
+	err := retry.Do(ctx, func() error {
+		var err error
+		// subName should be unique, since pchannelName is shared among several collections
+		// add random suffix for retry
+		consumeSubName := fmt.Sprintf("%s-%d-%s", Params.MsgChannelSubName, dmNodeConfig.collectionID, funcutil.RandomString(8))
+
+		insertStream, err = dmNodeConfig.msFactory.NewTtMsgStream(ctx)
+		if err != nil {
+			return err
+		}
+
+		// MsgStream needs a physical channel name, but the channel name in seek position from DataCoord
+		//  is virtual channel name, so we need to convert vchannel name into pchannel neme here.
+		pchannelName := rootcoord.ToPhysicalChannel(dmNodeConfig.vChannelName)
+		insertStream.AsConsumer([]string{pchannelName}, consumeSubName)
+		log.Debug("datanode AsConsumer", zap.String("physical channel", pchannelName), zap.String("subName", consumeSubName))
+
+		if seekPos != nil {
+			seekPos.ChannelName = pchannelName
+			start := time.Now()
+			log.Debug("datanode begin to seek: " + seekPos.GetChannelName())
+			seekCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			err = insertStream.Seek(seekCtx, []*internalpb.MsgPosition{seekPos})
+			if err != nil {
+				return err
+			}
+			log.Debug("datanode Seek successfully: "+seekPos.GetChannelName(), zap.Int64("elapse ", time.Since(start).Milliseconds()))
+		}
+		return nil
+	}, retry.Attempts(10), retry.Sleep(10*time.Millisecond), retry.MaxSleepTime(20*time.Millisecond))
 	if err != nil {
 		return nil, err
-	}
-
-	// MsgStream needs a physical channel name, but the channel name in seek position from DataCoord
-	//  is virtual channel name, so we need to convert vchannel name into pchannel neme here.
-	pchannelName := rootcoord.ToPhysicalChannel(dmNodeConfig.vChannelName)
-	insertStream.AsConsumer([]string{pchannelName}, consumeSubName)
-	log.Debug("datanode AsConsumer", zap.String("physical channel", pchannelName), zap.String("subName", consumeSubName))
-
-	if seekPos != nil {
-		seekPos.ChannelName = pchannelName
-		start := time.Now()
-		log.Debug("datanode begin to seek: " + seekPos.GetChannelName())
-		err = insertStream.Seek([]*internalpb.MsgPosition{seekPos})
-		if err != nil {
-			return nil, err
-		}
-		log.Debug("datanode Seek successfully: "+seekPos.GetChannelName(), zap.Int64("elapse ", time.Since(start).Milliseconds()))
 	}
 
 	node := flowgraph.NewInputNode(insertStream, "dmInputNode", dmNodeConfig.maxQueueLength, dmNodeConfig.maxParallelism)

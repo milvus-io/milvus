@@ -93,7 +93,7 @@ func (mtm *mockTtMsgStream) BroadcastMark(*msgstream.MsgPack) (map[string][]msgs
 func (mtm *mockTtMsgStream) Consume() *msgstream.MsgPack {
 	return nil
 }
-func (mtm *mockTtMsgStream) Seek(offset []*internalpb.MsgPosition) error {
+func (mtm *mockTtMsgStream) Seek(_ context.Context, offset []*internalpb.MsgPosition) error {
 	return nil
 }
 

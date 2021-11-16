@@ -67,7 +67,7 @@ type MsgStream interface {
 	Broadcast(*MsgPack) error
 	BroadcastMark(*MsgPack) (map[string][]MessageID, error)
 	Consume() *MsgPack
-	Seek(offset []*MsgPosition) error
+	Seek(ctx context.Context, positions []*MsgPosition) error
 }
 
 // Factory is an interface that can be used to generate a new msgstream object

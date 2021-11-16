@@ -340,7 +340,7 @@ func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 					ChannelName: "b",
 				},
 			}
-			err = m.Seek(p)
+			err = m.Seek(context.TODO(), p)
 			assert.NotNil(t, err)
 		}(parameters[i].client)
 	}
@@ -1045,7 +1045,7 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream2.AsConsumer(consumerChannels, consumerSubName)
-	outputStream2.Seek([]*internalpb.MsgPosition{seekPosition})
+	outputStream2.Seek(context.TODO(), []*internalpb.MsgPosition{seekPosition})
 	outputStream2.Start()
 
 	for i := 6; i < 10; i++ {
@@ -1105,7 +1105,7 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 		outputStream2.Close()
 	}()
 
-	err = outputStream2.Seek(p)
+	err = outputStream2.Seek(context.TODO(), p)
 	assert.Error(t, err)
 }
 
@@ -1409,6 +1409,255 @@ func TestStream_ProduceMark(t *testing.T) {
 	outputStream.Close()
 }
 
+func Test_PulsarMqtt_Seek(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c1 := funcutil.RandomString(8)
+	//.	c2 := funcutil.RandomString(8)
+	producerChannels := []string{c1}
+
+	factory := ProtoUDFactory{}
+	pulsarClient, err := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+	producer, err := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	assert.Nil(t, err)
+
+	// add producer channels
+	producer.AsProducer(producerChannels)
+	producer.Start()
+
+	// prepare msgs
+	ids := []MessageID{}
+	for i := 0; i < 1000; i++ {
+		producedIds, _ := producer.BroadcastMark(getTimeTickMsgPack(int64(i)))
+		for c, id := range producedIds {
+			if c == c1 {
+				ids = append(ids, id...)
+			}
+		}
+	}
+	producer.Close()
+
+	t.Run("seek without as consumer", func(t *testing.T) {
+		consumer, err := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+		assert.Nil(t, err)
+
+		err = consumer.Seek(context.TODO(), []*internalpb.MsgPosition{
+			{
+				ChannelName: c1,
+				MsgID:       ids[rand.Intn(len(ids))].Serialize(),
+				MsgGroup:    "tt",
+			},
+		})
+		assert.Error(t, err)
+		consumer.Close()
+	})
+
+	t.Run("seek to nil consumer", func(t *testing.T) {
+		consumer, err := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+		assert.Nil(t, err)
+
+		consumer.addConsumer(nil, c1)
+
+		err = consumer.Seek(context.TODO(), []*internalpb.MsgPosition{
+			{
+				ChannelName: c1,
+				MsgID:       ids[rand.Intn(len(ids))].Serialize(),
+				MsgGroup:    "tt",
+			},
+		})
+		assert.Error(t, err)
+		consumer.Close()
+	})
+
+	t.Run("seek with invalid msg id", func(t *testing.T) {
+		consumer, err := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+		assert.Nil(t, err)
+
+		consumer.AsConsumer([]string{c1}, "PulsarSeek"+funcutil.RandomString(8))
+
+		err = consumer.Seek(context.TODO(), []*internalpb.MsgPosition{
+			{
+				ChannelName: c1,
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "tt",
+			},
+		})
+		assert.Error(t, err)
+
+		err = consumer.Seek(context.TODO(), []*internalpb.MsgPosition{
+			{
+				ChannelName: c1,
+				MsgID:       []byte{},
+				MsgGroup:    "tt",
+			},
+		})
+		assert.Error(t, err)
+		consumer.Close()
+	})
+
+	t.Run("seek with context done", func(t *testing.T) {
+		consumer, err := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+		assert.Nil(t, err)
+
+		consumer.AsConsumer([]string{c1}, "PulsarSeek"+funcutil.RandomString(8))
+
+		ctx := context.Background()
+		ctxDone, cancel := context.WithCancel(ctx)
+		cancel()
+
+		err = consumer.Seek(ctxDone, []*internalpb.MsgPosition{
+			{
+				ChannelName: c1,
+				MsgID:       ids[0].Serialize(),
+				MsgGroup:    "tt",
+			},
+		})
+		assert.Error(t, err)
+		consumer.Close()
+	})
+
+	t.Run("seek with ack timeout", func(t *testing.T) {
+		consumer, err := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+		assert.Nil(t, err)
+
+		consumer.AsConsumer([]string{c1}, "PulsarSeek"+funcutil.RandomString(8))
+		consumer.consumerLock.Lock()
+		c := consumer.consumers[c1]
+		mc := &mockConsumer{
+			Consumer: c,
+			ch:       make(chan struct{}),
+		}
+		consumer.consumers[c1] = mc
+		consumer.consumerLock.Unlock()
+
+		ctx := context.Background()
+		// seek consume some time
+		ctx, cancel := context.WithTimeout(ctx, time.Millisecond*500)
+		defer cancel()
+
+		err = consumer.Seek(ctx, []*internalpb.MsgPosition{
+			{
+				ChannelName: c1,
+				MsgID:       ids[0].Serialize(),
+				MsgGroup:    "tt",
+			},
+		})
+		t.Log(err)
+		assert.Error(t, err)
+		consumer.Close()
+		close(mc.ch)
+	})
+}
+
+type mockConsumer struct {
+	mqclient.Consumer
+	ch chan struct{}
+}
+
+func (c *mockConsumer) Ack(msg mqclient.ConsumerMessage) {
+	<-c.ch
+}
+
+func Test_PulsarMqtt_SeekMultiple(t *testing.T) {
+	t.Skip()
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c1 := funcutil.RandomString(8)
+	//.	c2 := funcutil.RandomString(8)
+	producerChannels := []string{c1}
+
+	factory := ProtoUDFactory{}
+	pulsarClient, err := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+	producer, err := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	assert.Nil(t, err)
+
+	// add producer channels
+	producer.AsProducer(producerChannels)
+	producer.Start()
+
+	ids := []MessageID{}
+	for i := 0; i < 1000; i++ {
+		producedIds, _ := producer.BroadcastMark(getTimeTickMsgPack(int64(i)))
+		for c, id := range producedIds {
+			if c == c1 {
+				ids = append(ids, id...)
+			}
+		}
+	}
+	producer.Close()
+
+	pulsarClient, err = mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+	var wg sync.WaitGroup
+	wg.Add(1000)
+	var m sync.Map
+	start := make(chan struct{})
+	for i := 0; i < 500; i++ {
+		go func() {
+			defer wg.Done()
+			consumer, err := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+			assert.Nil(t, err)
+			token := funcutil.RandomString(8)
+			m.Store(token, struct{}{})
+			defer func() {
+				m.Delete(token)
+			}()
+			consumer.AsConsumer([]string{c1}, "PmqSeekMultple"+token)
+			err = consumer.Seek(context.TODO(), []*internalpb.MsgPosition{
+				{
+					ChannelName: c1,
+					MsgID:       ids[rand.Intn(len(ids))].Serialize(),
+					MsgGroup:    "tt",
+				},
+			})
+			assert.NoError(t, err)
+			<-start
+			consumer.Close()
+		}()
+	}
+	for i := 0; i < 500; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			consumer, err := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+			assert.Nil(t, err)
+			token := funcutil.RandomString(8)
+			m.Store(token, struct{}{})
+			defer func() {
+				m.Delete(token)
+			}()
+			consumer.AsConsumer([]string{c1}, "PmqSeekMultple"+token)
+			err = consumer.Seek(context.TODO(), []*internalpb.MsgPosition{
+				{
+					ChannelName: c1,
+					MsgID:       ids[rand.Intn(len(ids))].Serialize(),
+					MsgGroup:    "tt",
+				},
+			})
+			assert.NoError(t, err)
+			consumer.Close()
+		}()
+	}
+	ch := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+	close(start)
+
+	timer := time.NewTimer(time.Second * 10)
+	select {
+	case <-timer.C:
+		t.Log("time out")
+		m.Range(func(k, v interface{}) bool {
+			t.Log("xxxxxxxxx", k)
+			return true
+		})
+	case <-ch:
+		t.Log("normal exit")
+	}
+}
+
 var _ TsMsg = (*MarshalFailTsMsg)(nil)
 
 type MarshalFailTsMsg struct {
@@ -1663,7 +1912,7 @@ func getPulsarTtOutputStreamAndSeek(pulsarAddress string, positions []*MsgPositi
 		consumerName = append(consumerName, c.ChannelName)
 	}
 	outputStream.AsConsumer(consumerName, positions[0].MsgGroup)
-	outputStream.Seek(positions)
+	outputStream.Seek(context.TODO(), positions)
 	outputStream.Start()
 	return outputStream
 }
@@ -1736,6 +1985,95 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	Close(rocksdbName, inputStream, outputStream, etcdKV)
 }
 
+type mockMqClient struct {
+}
+
+// Create a producer instance
+func (m *mockMqClient) CreateProducer(options mqclient.ProducerOptions) (mqclient.Producer, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Create a consumer instance and subscribe a topic
+func (m *mockMqClient) Subscribe(options mqclient.ConsumerOptions) (mqclient.Consumer, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Get the earliest MessageID
+func (m *mockMqClient) EarliestMessageID() mqclient.MessageID {
+	panic("not implemented") // TODO: Implement
+}
+
+// String to msg ID
+func (m *mockMqClient) StringToMsgID(_ string) (mqclient.MessageID, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Deserialize MessageId from a byte array
+func (m *mockMqClient) BytesToMsgID(_ []byte) (mqclient.MessageID, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Close the client and free associated resources
+func (m *mockMqClient) Close() {
+	panic("not implemented") // TODO: Implement
+}
+
+func TestStream_RmqTtMsgStream_SeekMultiple(t *testing.T) {
+	t.Skip()
+
+	producerChannels := []string{"insert1"}
+	consumerChannels := []string{"insert1"}
+	consumerSubName := "subInsert"
+
+	rocksdbName := "/tmp/rocksm_mqtt_seekmultiple"
+	etcdKV := initRmq(rocksdbName)
+	factory := ProtoUDFactory{}
+
+	rmqClient, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+
+	/*
+		otherInputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+		otherInputStream.AsProducer([]string{"root_timetick"})
+		otherInputStream.Start()
+		otherInputStream.Produce(getTimeTickMsgPack(999))*/
+
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
+	inputStream.Start()
+
+	ids := []MessageID{}
+
+	for i := 0; i < 1000; i++ {
+		producedIds, _ := inputStream.ProduceMark(getTimeTickMsgPack(int64(i)))
+		for _, id := range producedIds {
+			ids = append(ids, id...)
+		}
+	}
+
+	rmqClient2, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumerWithPosition(consumerChannels, consumerSubName, mqclient.SubscriptionPositionEarliest)
+
+	for c := 0; c < 100; c++ {
+
+		for i := range ids {
+			log.Println("seek", i)
+			outputStream.Seek(context.TODO(), []*internalpb.MsgPosition{
+				{
+					ChannelName: "insert1",
+					MsgID:       ids[len(ids)-i-1].Serialize(),
+				},
+			})
+		}
+	}
+
+	log.Println("before start")
+	outputStream.Start()
+
+	log.Println("before close")
+	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	log.Println("before quit")
+}
 func patchMessageID(mid *pulsar.MessageID, entryID int64) {
 	// use direct unsafe conversion
 	/* #nosec G103 */

@@ -202,7 +202,7 @@ func (q *queryNodeFlowGraph) consumerFlowGraph(channel Channel, subName ConsumeS
 
 func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {
 	q.dmlStream.AsConsumer([]string{position.ChannelName}, position.MsgGroup)
-	err := q.dmlStream.Seek([]*internalpb.MsgPosition{position})
+	err := q.dmlStream.Seek(q.ctx, []*internalpb.MsgPosition{position})
 	log.Debug("query node flow graph seeks from pChannel",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", position.ChannelName),

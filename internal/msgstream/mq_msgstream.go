@@ -512,7 +512,8 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 
 // Seek reset the subscription associated with this consumer to a specific position
 // User has to ensure mq_msgstream is not closed before seek, and the seek position is already written.
-func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
+func (ms *mqMsgStream) Seek(ctx context.Context, msgPositions []*internalpb.MsgPosition) error {
+	//timeout := time.NewTimer(time.Second * 10) // TODO silverxia maybe configurable later?
 	for _, mp := range msgPositions {
 		consumer, ok := ms.consumers[mp.ChannelName]
 		if !ok {
@@ -841,25 +842,26 @@ func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqclient.Consum
 	return 0, false
 }
 
-// Seek to the specified position
-func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
+// Seek to the specified position.
+func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*internalpb.MsgPosition) error {
 	var consumer mqclient.Consumer
 	var mp *MsgPosition
 	var err error
+
 	fn := func() error {
 		var ok bool
 		consumer, ok = ms.consumers[mp.ChannelName]
 		if !ok {
-			return fmt.Errorf("please subcribe the channel, channel name =%s", mp.ChannelName)
+			return retry.Unrecoverable(fmt.Errorf("please subcribe the channel, channel name = %s", mp.ChannelName))
 		}
 
 		if consumer == nil {
-			return fmt.Errorf("consumer is nil")
+			return retry.Unrecoverable(fmt.Errorf("consumer is nil"))
 		}
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
-			return err
+			return retry.Unrecoverable(err)
 		}
 		err = consumer.Seek(seekMsgID)
 		if err != nil {
@@ -875,7 +877,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	for idx := range msgPositions {
 		mp = msgPositions[idx]
 		if len(mp.MsgID) == 0 {
-			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
+			return retry.Unrecoverable(fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface"))
 		}
 		if err = retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200)); err != nil {
 			return fmt.Errorf("Failed to seek, error %s", err.Error())
@@ -892,13 +894,28 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		}
 		for runLoop {
 			select {
+			// msgstream context done
 			case <-ms.ctx.Done():
 				return nil
+			// seek context Done
+			case <-ctx.Done(): //
+				return fmt.Errorf("timeout for consume after seek")
 			case msg, ok := <-consumer.Chan():
 				if !ok {
 					return fmt.Errorf("consumer closed")
 				}
-				consumer.Ack(msg)
+
+				ch := make(chan struct{})
+				go func() {
+					consumer.Ack(msg)
+					close(ch)
+				}()
+
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("timeout for ack after seek")
+				case <-ch:
+				}
 
 				headerMsg := commonpb.MsgHeader{}
 				err := proto.Unmarshal(msg.Payload(), &headerMsg)

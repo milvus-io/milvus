@@ -146,7 +146,7 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 			log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 		} else {
 			// seek query channel
-			err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{in.SeekPosition})
+			err = sc.queryMsgStream.Seek(ctx, []*internalpb.MsgPosition{in.SeekPosition})
 			if err != nil {
 				status := &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,

@@ -358,7 +358,7 @@ func (ms *simpleMockMsgStream) Consume() *msgstream.MsgPack {
 	return <-ms.msgChan
 }
 
-func (ms *simpleMockMsgStream) Seek(offset []*msgstream.MsgPosition) error {
+func (ms *simpleMockMsgStream) Seek(_ context.Context, offset []*msgstream.MsgPosition) error {
 	return nil
 }
 
