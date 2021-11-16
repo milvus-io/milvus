@@ -11,29 +11,29 @@
 
 #pragma once
 
+#include <deque>
+#include <memory>
+#include <shared_mutex>
+#include <string>
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
-
-#include <shared_mutex>
-#include <knowhere/index/vector_index/VecIndex.h>
-#include <query/PlanNode.h>
+#include <vector>
+#include <utility>
 
 #include "AckResponder.h"
-#include "SealedIndexingRecord.h"
 #include "ConcurrentVector.h"
-#include "segcore/SegmentGrowing.h"
-#include "query/deprecated/GeneralQuery.h"
-#include "utils/Status.h"
-#include "segcore/DeletedRecord.h"
-#include "exceptions/EasyAssert.h"
+#include "DeletedRecord.h"
 #include "FieldIndexing.h"
 #include "InsertRecord.h"
-#include <utility>
-#include <memory>
-#include <string>
-#include <vector>
-#include <deque>
+#include "SealedIndexingRecord.h"
+#include "SegmentGrowing.h"
+
+#include "exceptions/EasyAssert.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "query/PlanNode.h"
+#include "query/deprecated/GeneralQuery.h"
+#include "utils/Status.h"
 
 namespace milvus::segcore {
 
