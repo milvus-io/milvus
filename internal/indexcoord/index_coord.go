@@ -285,6 +285,7 @@ func (i *IndexCoord) Stop() error {
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
+	i.session.Revoke(time.Second)
 	return nil
 }
 

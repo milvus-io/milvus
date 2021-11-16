@@ -367,6 +367,8 @@ func (node *Proxy) Stop() error {
 		cb()
 	}
 
+	node.session.Revoke(time.Second)
+
 	return nil
 }
 

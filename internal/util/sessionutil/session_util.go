@@ -55,7 +55,7 @@ type Session struct {
 
 	liveCh  <-chan bool
 	etcdCli *clientv3.Client
-	leaseID clientv3.LeaseID
+	leaseID *clientv3.LeaseID
 
 	metaRoot string
 }
@@ -189,7 +189,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			log.Error("register service", zap.Error(err))
 			return err
 		}
-		s.leaseID = resp.ID
+		s.leaseID = &resp.ID
 
 		sessionJSON, err := json.Marshal(s)
 		if err != nil {
@@ -387,4 +387,19 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 			return
 		}
 	}
+}
+
+// Revoke revokes the internal leaseID for the session key
+func (s *Session) Revoke(timeout time.Duration) {
+	if s == nil {
+		return
+	}
+	if s.etcdCli == nil || s.leaseID == nil {
+		return
+	}
+	// can NOT use s.ctx, it may be Done here
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	// ignores resp & error, just do best effort to revoke
+	_, _ = s.etcdCli.Revoke(ctx, *s.leaseID)
 }

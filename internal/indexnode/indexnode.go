@@ -217,6 +217,7 @@ func (i *IndexNode) Stop() error {
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
+	i.session.Revoke(time.Second)
 	log.Debug("Index node stopped.")
 	return nil
 }
