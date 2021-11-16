@@ -249,14 +249,14 @@ func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in
 
 		err := node.releaseSegments(ctx, in)
 		if err != nil {
-			log.Debug("ReleaseSegments: queryNode release segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			log.Debug("releaseSegments: queryNode release segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
 
 		return nil
 	}
 
-	return fmt.Errorf("ReleaseSegments: Can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releaseSegments: Can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error {
