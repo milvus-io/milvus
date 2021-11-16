@@ -127,7 +127,7 @@ func (mt *MetaTable) reloadFromKV() error {
 		tenantMeta := pb.TenantMeta{}
 		err := proto.Unmarshal([]byte(value), &tenantMeta)
 		if err != nil {
-			return fmt.Errorf("RootCoord Unmarshal pb.TenantMeta err:%w", err)
+			return fmt.Errorf("rootcoord Unmarshal pb.TenantMeta err:%w", err)
 		}
 		mt.tenantID2Meta[tenantMeta.ID] = tenantMeta
 	}
@@ -145,7 +145,7 @@ func (mt *MetaTable) reloadFromKV() error {
 		proxyMeta := pb.ProxyMeta{}
 		err = proto.Unmarshal([]byte(value), &proxyMeta)
 		if err != nil {
-			return fmt.Errorf("RootCoord Unmarshal pb.ProxyMeta err:%w", err)
+			return fmt.Errorf("rootcoord Unmarshal pb.ProxyMeta err:%w", err)
 		}
 		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
 	}
@@ -159,7 +159,7 @@ func (mt *MetaTable) reloadFromKV() error {
 		collInfo := pb.CollectionInfo{}
 		err = proto.Unmarshal([]byte(value), &collInfo)
 		if err != nil {
-			return fmt.Errorf("RootCoord Unmarshal pb.CollectionInfo err:%w", err)
+			return fmt.Errorf("rootcoord Unmarshal pb.CollectionInfo err:%w", err)
 		}
 		mt.collID2Meta[collInfo.ID] = collInfo
 		mt.collName2ID[collInfo.Schema.Name] = collInfo.ID
@@ -177,7 +177,7 @@ func (mt *MetaTable) reloadFromKV() error {
 		segmentIndexInfo := pb.SegmentIndexInfo{}
 		err = proto.Unmarshal([]byte(value), &segmentIndexInfo)
 		if err != nil {
-			return fmt.Errorf("RootCoord Unmarshal pb.SegmentIndexInfo err:%w", err)
+			return fmt.Errorf("rootcoord Unmarshal pb.SegmentIndexInfo err:%w", err)
 		}
 
 		// update partID2SegID
@@ -213,7 +213,7 @@ func (mt *MetaTable) reloadFromKV() error {
 		meta := pb.IndexInfo{}
 		err = proto.Unmarshal([]byte(value), &meta)
 		if err != nil {
-			return fmt.Errorf("RootCoord Unmarshal pb.IndexInfo err:%w", err)
+			return fmt.Errorf("rootcoord Unmarshal pb.IndexInfo err:%w", err)
 		}
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
@@ -226,7 +226,7 @@ func (mt *MetaTable) reloadFromKV() error {
 		aliasInfo := pb.CollectionInfo{}
 		err = proto.Unmarshal([]byte(value), &aliasInfo)
 		if err != nil {
-			return fmt.Errorf("RootCoord Unmarshal pb.AliasInfo err:%w", err)
+			return fmt.Errorf("rootcoord Unmarshal pb.AliasInfo err:%w", err)
 		}
 		mt.collAlias2ID[aliasInfo.Schema.Name] = aliasInfo.ID
 	}
@@ -285,7 +285,7 @@ func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestam
 	if len(coll.PartitionIDs) != len(coll.PartitionNames) ||
 		len(coll.PartitionIDs) != len(coll.PartitionCreatedTimestamps) ||
 		(len(coll.PartitionIDs) != 1 && len(coll.PartitionIDs) != 0) {
-		return fmt.Errorf("PartitionIDs, PartitionNames and PartitionCreatedTimestmaps' length mis-match when creating collection")
+		return fmt.Errorf("partition parameters' length mis-match when creating collection")
 	}
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
 		return fmt.Errorf("collection %s exist", coll.Schema.Name)
@@ -309,7 +309,7 @@ func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestam
 	if err != nil {
 		log.Error("MetaTable AddCollection saveColl Marshal fail",
 			zap.String("key", k1), zap.Error(err))
-		return fmt.Errorf("MetaTable AddCollection Marshal fail key:%s, err:%w", k1, err)
+		return fmt.Errorf("metaTable AddCollection Marshal fail key:%s, err:%w", k1, err)
 	}
 	meta := map[string]string{k1: string(v1)}
 
@@ -319,7 +319,7 @@ func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestam
 		if err != nil {
 			log.Error("MetaTable AddCollection Marshal fail", zap.String("key", k),
 				zap.String("IndexName", i.IndexName), zap.Error(err))
-			return fmt.Errorf("MetaTable AddCollection Marshal fail key:%s, err:%w", k, err)
+			return fmt.Errorf("metaTable AddCollection Marshal fail key:%s, err:%w", k, err)
 		}
 		meta[k] = string(v)
 	}
@@ -604,7 +604,7 @@ func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	if err != nil {
 		log.Error("MetaTable AddPartition saveColl Marshal fail",
 			zap.String("key", k1), zap.Error(err))
-		return fmt.Errorf("MetaTable AddPartition Marshal fail, k1:%s, err:%w", k1, err)
+		return fmt.Errorf("metaTable AddPartition Marshal fail, k1:%s, err:%w", k1, err)
 	}
 	meta := map[string]string{k1: string(v1)}
 	metaTxn := map[string]string{}
@@ -757,7 +757,7 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	if err != nil {
 		log.Error("MetaTable DeletePartition Marshal collectionMeta fail",
 			zap.String("key", k), zap.Error(err))
-		return 0, fmt.Errorf("MetaTable DeletePartition Marshal collectionMeta fail key:%s, err:%w", k, err)
+		return 0, fmt.Errorf("metaTable DeletePartition Marshal collectionMeta fail key:%s, err:%w", k, err)
 	}
 	var delMetaKeys []string
 	for _, idxInfo := range collMeta.FieldIndexes {
@@ -832,7 +832,7 @@ func (mt *MetaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) error {
 	if err != nil {
 		log.Error("MetaTable AddIndex Marshal segIdxInfo fail",
 			zap.String("key", k), zap.Error(err))
-		return fmt.Errorf("MetaTable AddIndex Marshal segIdxInfo fail key:%s, err:%w", k, err)
+		return fmt.Errorf("metaTable AddIndex Marshal segIdxInfo fail key:%s, err:%w", k, err)
 	}
 
 	err = mt.txn.Save(k, string(v))
@@ -896,7 +896,7 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	if err != nil {
 		log.Error("MetaTable DropIndex Marshal collMeta fail",
 			zap.String("key", k), zap.Error(err))
-		return 0, false, fmt.Errorf("MetaTable DropIndex Marshal collMeta fail key:%s, err:%w", k, err)
+		return 0, false, fmt.Errorf("metaTable DropIndex Marshal collMeta fail key:%s, err:%w", k, err)
 	}
 	saveMeta := map[string]string{k: string(v)}
 
@@ -1088,7 +1088,7 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 		if err != nil {
 			log.Error("MetaTable GetNotIndexedSegments Marshal collMeta fail",
 				zap.String("key", k1), zap.Error(err))
-			return nil, schemapb.FieldSchema{}, fmt.Errorf("MetaTable GetNotIndexedSegments Marshal collMeta fail key:%s, err:%w", k1, err)
+			return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal collMeta fail key:%s, err:%w", k1, err)
 		}
 
 		mt.indexID2Meta[idx.IndexID] = *idxInfo
@@ -1097,7 +1097,7 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 		if err != nil {
 			log.Error("MetaTable GetNotIndexedSegments Marshal idxInfo fail",
 				zap.String("key", k2), zap.Error(err))
-			return nil, schemapb.FieldSchema{}, fmt.Errorf("MetaTable GetNotIndexedSegments Marshal idxInfo fail key:%s, err:%w", k2, err)
+			return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal idxInfo fail key:%s, err:%w", k2, err)
 		}
 		meta := map[string]string{k1: string(v1), k2: string(v2)}
 
@@ -1110,7 +1110,7 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			if err != nil {
 				log.Error("MetaTable GetNotIndexedSegments Marshal dupInfo fail",
 					zap.String("key", k), zap.Error(err))
-				return nil, schemapb.FieldSchema{}, fmt.Errorf("MetaTable GetNotIndexedSegments Marshal dupInfo fail key:%s, err:%w", k, err)
+				return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal dupInfo fail key:%s, err:%w", k, err)
 			}
 			meta[k] = string(v)
 		}
@@ -1129,7 +1129,7 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			if err != nil {
 				log.Error("MetaTable GetNotIndexedSegments Marshal existInfo fail",
 					zap.String("key", k), zap.Error(err))
-				return nil, schemapb.FieldSchema{}, fmt.Errorf("MetaTable GetNotIndexedSegments Marshal existInfo fail key:%s, err:%w", k, err)
+				return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal existInfo fail key:%s, err:%w", k, err)
 			}
 			meta := map[string]string{k: string(v)}
 			if dupIdx != 0 {
@@ -1141,7 +1141,7 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 				if err != nil {
 					log.Error("MetaTable GetNotIndexedSegments Marshal dupInfo fail",
 						zap.String("key", k), zap.Error(err))
-					return nil, schemapb.FieldSchema{}, fmt.Errorf("MetaTable GetNotIndexedSegments Marshal dupInfo fail key:%s, err:%w", k, err)
+					return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal dupInfo fail key:%s, err:%w", k, err)
 				}
 				meta[k] = string(v)
 			}
@@ -1254,7 +1254,7 @@ func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts 
 	if err != nil {
 		log.Error("MetaTable AddAlias Marshal CollectionInfo fail",
 			zap.String("key", k), zap.Error(err))
-		return fmt.Errorf("MetaTable AddAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
+		return fmt.Errorf("metaTable AddAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
 	}
 
 	err = mt.snapshot.Save(k, string(v), ts)
@@ -1305,7 +1305,7 @@ func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, t
 	if err != nil {
 		log.Error("MetaTable AlterAlias Marshal CollectionInfo fail",
 			zap.String("key", k), zap.Error(err))
-		return fmt.Errorf("MetaTable AlterAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
+		return fmt.Errorf("metaTable AlterAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
 	}
 
 	err = mt.snapshot.Save(k, string(v), ts)
