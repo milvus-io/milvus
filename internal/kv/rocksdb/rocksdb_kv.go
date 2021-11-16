@@ -99,7 +99,7 @@ func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
 		return nil, nil, errors.New("key is nil in LoadWithPrefix")
 	}
 	if kv.DB == nil {
-		return nil, nil, fmt.Errorf("Rocksdb instance is nil when load %s", key)
+		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", key)
 	}
 	kv.ReadOptions.SetPrefixSameAsStart(true)
 	kv.DB.Close()
