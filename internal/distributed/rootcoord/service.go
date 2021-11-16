@@ -355,6 +355,7 @@ func (s *Server) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (
 	return s.rootCoord.DropIndex(ctx, in)
 }
 
+// DescribeIndex get the index information for the specified index name.
 func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	return s.rootCoord.DescribeIndex(ctx, in)
 }
