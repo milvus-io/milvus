@@ -110,7 +110,7 @@ type CreateCollectionReqTask struct {
 
 7. `RootCoord` would alloc a timestamp from `TSO` before writing `Collection`'s meta into `metaTable`, and this timestamp is considered as the point when the collection was created
 
-8. At last `RootCoord` will send a message of `CreateCollectionRequest` into `MsgStream`, and other components, who have subscribed to the `MsgStream`, would be notified. The `Proto` of `CreateCollectionRequest` is defined as follow:
+8. At last `RootCoord` will send a message of `CreateCollectionRequest` into `MsgStream`, and other components, who have subscribed to the `MsgStream`, would be notified. The `Proto` of `CreateCollectionRequest` is defined as follows:
 
 ```proto
 message CreateCollectionRequest {

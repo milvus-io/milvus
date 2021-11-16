@@ -30,7 +30,7 @@ Add a `dropped` flag in `SaveBinlogPathRequest` proto
 
 DN
 - Flush all segment in this vChannel, When Flush&Drop, set the `dropped` flag true.
-    - If fail, retry at most 10 times and restart
+    - If fails, retry at most 10 times and restart
 
 DC
 - DataCoord marks segmentInfo as `dropped`, doesn't remove segmentInfos from Etcd
