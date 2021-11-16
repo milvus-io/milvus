@@ -204,6 +204,7 @@ func (dsService *dataSyncService) removeCollectionDeltaFlowGraph(collectionID Un
 }
 
 // partition flow graph
+// addPartitionFlowGraph adds a partition flow graph to dataSyncService
 func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
