@@ -5,7 +5,7 @@ reviewers:
   - yanliang567
 
 approvers:
-  - pr-inspection
+  - maintainers
 
 labels:
 - area/test

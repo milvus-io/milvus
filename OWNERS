@@ -11,7 +11,7 @@ filters:
       - yanliang567
       - zwd1208
     approvers:
-      - pr-inspection
+      - maintainers
 
   # markdown files should be reviewed by authors
   "*\\.md$":
@@ -20,7 +20,7 @@ filters:
       - XuanYang-cn
       - xiaofan-luan
     approvers:
-      - pr-inspection
+      - maintainers
 
   # codecov.yml is the config file for CodeCov, changes should be reviewed by @wangting0128 or @yanliang567
   "codecov.yml$":
@@ -28,13 +28,13 @@ filters:
       - wangting0128
       - yanliang567
     approvers:
-      - pr-inspection
+      - maintainers
 
   # go.{mod,sum} files relate to go dependencies, and should be reviewed by @congqixia
   "go\\.(mod|sum)$":
     required_reviewers:
       - congqixia
     approvers:
-      - pr-inspection
+      - maintainers
     labels:
       - area/dependency

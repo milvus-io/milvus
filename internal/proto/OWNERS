@@ -10,16 +10,16 @@ filters:
       - bigsheeper
       - sunby
     approvers:
-      - pr-inspection
+      - maintainers
 
   "{common|milvus|schema}\\.proto":
     labels:
       - area/api
     approvers:
-      - pr-inspection
+      - maintainers
 
   "{data_coord|index_coord|internal|proxy|query_coord|root_coord}\\.proto":
     labels:
       - area/internal-api
     approvers:
-      - pr-inspection
+      - maintainers
