@@ -209,6 +209,7 @@ def equal_entities_list(exp, actual, with_vec=False):
     actual = [{"int": 1, "vec": [0.888888, 0.222222]}, {"int": 0, "vec": [0.999999, 0.111111]}]
     exp = actual
     """
+    exp = exp.copy()
     if len(exp) != len(actual):
         return False
 
