@@ -79,6 +79,8 @@ type ParamTable struct {
 
 	EnableCompaction        bool
 	EnableGarbageCollection bool
+
+	CompactionRetentionDuration int64
 }
 
 // Params is a package scoped variable of type ParamTable.
@@ -126,6 +128,8 @@ func (p *ParamTable) Init() {
 	p.initMinioUseSSL()
 	p.initMinioBucketName()
 	p.initMinioRootPath()
+
+	p.initCompactionRetentionDuration()
 }
 
 // InitOnce ensures param table is a singleton
@@ -344,5 +348,9 @@ func (p *ParamTable) initMinioRootPath() {
 	if err != nil {
 		panic(err)
 	}
-	Params.MinioRootPath = rootPath
+	p.MinioRootPath = rootPath
+}
+
+func (p *ParamTable) initCompactionRetentionDuration() {
+	p.CompactionRetentionDuration = p.ParseInt64WithDefault("dataCoord.compaction.retentionDuration", 432000)
 }

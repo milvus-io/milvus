@@ -19,7 +19,6 @@ const (
 	singleCompactionRatioThreshold  = 0.2
 	singleCompactionDeltaLogMaxSize = 10 * 1024 * 1024 //10MiB
 	globalCompactionInterval        = 60 * time.Second
-	timetravelRange                 = 5 * 24 * time.Hour
 )
 
 type timetravel struct {
