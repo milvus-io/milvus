@@ -340,6 +340,7 @@ func (s *Server) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequ
 	return s.rootCoord.HasPartition(ctx, in)
 }
 
+// ShowPartitions gets all partitions for the specified collection.
 func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return s.rootCoord.ShowPartitions(ctx, in)
 }
