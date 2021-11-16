@@ -5,7 +5,6 @@ from pymilvus import Collection
 sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
-from utils.util_log import test_log as log
 
 TIMEOUT = 20
 

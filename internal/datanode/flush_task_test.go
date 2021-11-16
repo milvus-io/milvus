@@ -19,6 +19,7 @@ package datanode
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,9 +31,8 @@ func TestFlushTaskRunner(t *testing.T) {
 	nextFlag := false
 	processed := make(chan struct{})
 
-	task.init(func(*segmentFlushPack) error {
+	task.init(func(*segmentFlushPack) {
 		saveFlag = true
-		return nil
 	}, func(pack *segmentFlushPack, i postInjectionFunc) {}, signal)
 
 	go func() {
@@ -55,6 +55,43 @@ func TestFlushTaskRunner(t *testing.T) {
 
 	assert.True(t, saveFlag)
 	assert.True(t, nextFlag)
+}
+
+func TestFlushTaskRunner_FailError(t *testing.T) {
+	task := newFlushTaskRunner(1, nil)
+	signal := make(chan struct{})
+
+	errFlag := false
+	nextFlag := false
+	processed := make(chan struct{})
+
+	task.init(func(pack *segmentFlushPack) {
+		if pack.err != nil {
+			errFlag = true
+		}
+	}, func(pack *segmentFlushPack, i postInjectionFunc) {}, signal)
+
+	go func() {
+		<-task.finishSignal
+		nextFlag = true
+		processed <- struct{}{}
+	}()
+
+	assert.False(t, errFlag)
+	assert.False(t, nextFlag)
+
+	task.runFlushInsert(&errFlushTask{}, nil, nil, false, false, nil, retry.Attempts(1))
+	task.runFlushDel(&errFlushTask{}, &DelDataBuf{}, retry.Attempts(1))
+
+	assert.False(t, errFlag)
+	assert.False(t, nextFlag)
+
+	close(signal)
+	<-processed
+
+	assert.True(t, errFlag)
+	assert.True(t, nextFlag)
+
 }
 
 func TestFlushTaskRunner_Injection(t *testing.T) {
@@ -83,10 +120,9 @@ func TestFlushTaskRunner_Injection(t *testing.T) {
 		injectOver <- true
 	}()
 
-	task.init(func(pack *segmentFlushPack) error {
+	task.init(func(pack *segmentFlushPack) {
 		assert.EqualValues(t, 2, pack.segmentID)
 		saveFlag = true
-		return nil
 	}, func(pack *segmentFlushPack, i postInjectionFunc) {
 		if i != nil {
 			i(pack)
@@ -113,5 +149,4 @@ func TestFlushTaskRunner_Injection(t *testing.T) {
 
 	assert.True(t, saveFlag)
 	assert.True(t, nextFlag)
-
 }

@@ -312,7 +312,7 @@ func Test_Run(t *testing.T) {
 
 	server.querynode = &MockQueryNode{}
 	server.indexCoord = &MockIndexCoord{}
-	server.rootCoord = &MockRootCoord{initErr: errors.New("Failed")}
+	server.rootCoord = &MockRootCoord{initErr: errors.New("failed")}
 	assert.Panics(t, func() { err = server.Run() })
 
 	server.rootCoord = &MockRootCoord{startErr: errors.New("Failed")}

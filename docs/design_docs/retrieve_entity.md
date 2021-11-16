@@ -4,8 +4,8 @@
 
 In Milvus, one entity encapsulates multiple vectors and scalars.
 
-When creating a collection, you can specify using the primary key generated automatically, or using the user-provided primary key. 
-If a user sets to use the user-provided primary key, each entity inserted must contain the primary key field. Otherwise, the insertion fails. 
+When creating a collection, you can specify using the primary key generated automatically, or using the user-provided primary key.
+If a user sets to use the user-provided primary key, each entity inserted must contain the primary key field. Otherwise, the insertion fails.
 The primary keys will be returned after the insertion request is successful.
 
 Milvus currently only supports primary keys of int64 type.
@@ -35,7 +35,7 @@ Once DataNode receives a Flush command from DataCoord, it sorts the data in the 
 
 QueryNode maintains mapping from primary key to entities in each segment. This mapping updates every time an insert request is processed.
 
-After receiving the Get request from the client, the Proxy writes the request to the `search` channel and waits for the result returned from the `searchResult` channel.
+After receiving the Get request from the client, the Proxy sends the request to the `search` channel and waits for the result returned from the `searchResult` channel.
 
 The processing flow after QueryNode reads the Get request from `search` channel:
 
@@ -98,7 +98,7 @@ In the newly created collection, insert a record with a primary key of 107, call
 
 ### Testcase 3
 
-In the newly created collection, insert the records with the primary keys of 105, 106, 107, call the Get interface to query the records with the primary keys of 101, 102, 103, 104, 105, 106, 107, the retrieved result only contains the primary keys of 105, 106 , 107 records.
+In the newly created collection, insert the records with the primary keys of 105, 106, 107, call the Get interface to query the records with the primary keys of 101, 102, 103, 104, 105, 106, 107, the retrieved result only contains the primary keys of 105, 106, 107 records.
 
 ### Testcase 4
 

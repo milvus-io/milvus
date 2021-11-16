@@ -85,6 +85,9 @@ type Consumer interface {
 	// Make sure that msg is received. Only used in pulsar
 	Ack(ConsumerMessage)
 
+	// ConsumeAfterSeek defines the behavior whether to consume after seeking is done
+	ConsumeAfterSeek() bool
+
 	// Close consumer
 	Close()
 }

@@ -22,14 +22,11 @@
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
-NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type) {
+NewSegment(CCollection collection, SegmentType seg_type) {
     auto col = (milvus::segcore::Collection*)collection;
 
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
-        case Invalid:
-            std::cout << "invalid segment type" << std::endl;
-            break;
         case Growing:
             segment = milvus::segcore::CreateGrowingSegment(col->get_schema());
             break;
@@ -38,10 +35,10 @@ NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type) {
             segment = milvus::segcore::CreateSealedSegment(col->get_schema());
             break;
         default:
-            std::cout << "invalid segment type" << std::endl;
+            LOG_SEGCORE_ERROR_ << "invalid segment type " << (int32_t)seg_type;
+            break;
     }
 
-    // std::cout << "create segment " << segment_id << std::endl;
     return (void*)segment.release();
 }
 

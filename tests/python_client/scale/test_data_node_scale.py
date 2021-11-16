@@ -27,10 +27,7 @@ class TestDataNodeScale:
                 3.verify collection a property and verify create and insert of new collection
         expected: two collection create and insert op are both correctly
         """
-        # deploy all nodes one pod cluster milvus with helm
         release_name = "scale-data"
-        # env = HelmEnv(release_name=release_name)
-        # host = env.helm_install_cluster_milvus()
 
         # deploy cluster milvus with dataNode 1 replicas
         default_config = {
@@ -68,7 +65,7 @@ class TestDataNodeScale:
         assert mutation_res.insert_count == ct.default_nb
         # scale dataNode to 2 pods
         milvusOp.upgrade(release_name, {'spec.components.dataNode.replicas': 2}, constants.NAMESPACE)
-        # env.helm_upgrade_cluster_milvus(dataNode=2)
+
         # after scale, assert data consistent
         assert utility.has_collection(c_name)
         assert collection_w.num_entities == ct.default_nb
@@ -86,7 +83,8 @@ class TestDataNodeScale:
 
         collection_w.drop()
         new_collection_w.drop()
-        # env.helm_uninstall_cluster_milvus()
+
+        # milvusOp.uninstall(release_name, namespace=constants.NAMESPACE)
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_data_node(self):

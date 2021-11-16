@@ -44,7 +44,7 @@ $ docker info
 
 -   Start the Docker Daemon if it is not already started.
 
--   To run Docker without `root` priveleges, create a user group labeled `docker`, then add a user to the group with `sudo usermod -aG docker $USER`. Log out and log back into the terminal for the changes to take effect. For more invormation, see the official Docker documentation for [Managing Docker as a Non-Root User](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
+-   To run Docker without `root` privileges, create a user group labeled `docker`, then add a user to the group with `sudo usermod -aG docker $USER`. Log out and log back into the terminal for the changes to take effect. For more information, see the official Docker documentation for [Managing Docker as a Non-Root User](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
 
   2. Check the version of Docker-Compose
 

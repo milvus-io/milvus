@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	rocksmq "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
+
 	"go.uber.org/zap"
 )
 

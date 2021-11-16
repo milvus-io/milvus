@@ -19,12 +19,10 @@ package datanode
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -145,76 +143,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	// initialize flush manager for DataSync Service
-	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica, func(pack *segmentFlushPack) error {
-		fieldInsert := []*datapb.FieldBinlog{}
-		fieldStats := []*datapb.FieldBinlog{}
-		deltaInfos := []*datapb.DeltaLogInfo{}
-		checkPoints := []*datapb.CheckPoint{}
-		for k, v := range pack.insertLogs {
-			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
-		}
-		for k, v := range pack.statsLogs {
-			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
-		}
-		for _, delData := range pack.deltaLogs {
-			deltaInfos = append(deltaInfos, &datapb.DeltaLogInfo{RecordEntries: uint64(delData.size), TimestampFrom: delData.tsFrom, TimestampTo: delData.tsTo, DeltaLogPath: delData.filePath, DeltaLogSize: delData.fileSize})
-		}
-
-		// only current segment checkpoint info,
-		updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
-		checkPoints = append(checkPoints, &datapb.CheckPoint{
-			SegmentID: pack.segmentID,
-			NumOfRows: updates.GetNumRows(),
-			Position:  pack.pos,
-		})
-
-		startPos := dsService.replica.listNewSegmentsStartPositions()
-
-		log.Debug("SaveBinlogPath",
-			zap.Int64("SegmentID", pack.segmentID),
-			zap.Int64("CollectionID", dsService.collectionID),
-			zap.Bool("IsFlushed", pack.flushed),
-			zap.Bool("IsDropped", pack.dropped),
-			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
-			zap.Int("Length of Field2Stats", len(fieldStats)),
-			zap.Int("Length of Field2Deltalogs", len(deltaInfos)),
-			zap.Any("Listed start positions", startPos),
-		)
-
-		req := &datapb.SaveBinlogPathsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO msg type
-				MsgID:     0, //TODO msg id
-				Timestamp: 0, //TODO time stamp
-				SourceID:  Params.NodeID,
-			},
-			SegmentID:           pack.segmentID,
-			CollectionID:        dsService.collectionID,
-			Field2BinlogPaths:   fieldInsert,
-			Field2StatslogPaths: fieldStats,
-			Deltalogs:           deltaInfos,
-
-			CheckPoints:    checkPoints,
-			StartPositions: startPos,
-
-			Flushed: pack.flushed,
-			Dropped: pack.dropped,
-		}
-		rsp, err := dsService.dataCoord.SaveBinlogPaths(context.Background(), req)
-		if err != nil {
-			log.Warn(err.Error())
-			return fmt.Errorf(err.Error())
-		}
-		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
-		}
-
-		if pack.flushed || pack.dropped {
-			dsService.replica.segmentFlushed(pack.segmentID)
-		}
-		dsService.flushingSegCache.Remove(req.GetSegmentID())
-		return nil
-	})
+	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica, flushNotifyFunc(dsService))
 
 	// recover segment checkpoints
 	for _, us := range vchanInfo.GetUnflushedSegments() {

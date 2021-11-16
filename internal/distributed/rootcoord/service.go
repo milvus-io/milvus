@@ -285,6 +285,7 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// GetComponentStates gets the component states of RootCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.rootCoord.GetComponentStates(ctx)
 }
@@ -329,10 +330,12 @@ func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartiti
 	return s.rootCoord.CreatePartition(ctx, in)
 }
 
+// DropPartition drops the specified partition.
 func (s *Server) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.DropPartition(ctx, in)
 }
 
+// HasPartition checks whether a partition is created.
 func (s *Server) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	return s.rootCoord.HasPartition(ctx, in)
 }

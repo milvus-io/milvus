@@ -30,9 +30,9 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
    
       if we need to use the sift/deep dataset as the raw data input, then mount NAS and update `RAW_DATA_DIR` in `config.py`, the example mount command:
    
-   ```bash
+      ```bash
       $ sudo mount -t cifs -o username=test,vers=1.0 //172.16.70.249/test /test
-   ```
+      ```
    
    3. Install requirements:
    

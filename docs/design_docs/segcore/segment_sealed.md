@@ -1,5 +1,5 @@
 # SegmentSealed
-SegmentSealed has an extra interface rather than segment_inferface:
+SegmentSealed has an extra interface rather than SegmentInterface:
 
 1. `LoadIndex(loadIndexInfo)`: load the index. indexInfo contains
     1. `FieldId`

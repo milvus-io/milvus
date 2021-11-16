@@ -17,11 +17,15 @@
 package datanode
 
 import (
+	"context"
 	"errors"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.uber.org/zap"
 )
 
 // errStart used for retry start
@@ -59,6 +63,9 @@ type flushTaskRunner struct {
 	pos        *internalpb.MsgPosition
 	flushed    bool
 	dropped    bool
+
+	insertErr error // task execution error
+	deleteErr error // task execution error
 }
 
 type taskInjection struct {
@@ -77,7 +84,8 @@ func (t *flushTaskRunner) init(f notifyMetaFunc, postFunc taskPostFunc, signal <
 }
 
 // runFlushInsert executei flush insert task with once and retry
-func (t *flushTaskRunner) runFlushInsert(task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
+func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
+	binlogs, statslogs map[UniqueID]string, flushed bool, dropped bool, pos *internalpb.MsgPosition, opts ...retry.Option) {
 	t.insertOnce.Do(func() {
 		t.insertLogs = binlogs
 		t.statsLogs = statslogs
@@ -85,9 +93,11 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask, binlogs, statslog
 		t.pos = pos
 		t.dropped = dropped
 		go func() {
-			err := errStart
-			for err != nil {
-				err = task.flushInsertData()
+			err := retry.Do(context.Background(), func() error {
+				return task.flushInsertData()
+			}, opts...)
+			if err != nil {
+				t.insertErr = err
 			}
 			t.Done()
 		}()
@@ -95,7 +105,7 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask, binlogs, statslog
 }
 
 // runFlushDel execute flush delete task with once and retry
-func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBuf) {
+func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBuf, opts ...retry.Option) {
 	t.deleteOnce.Do(func() {
 		if deltaLogs == nil {
 			t.deltaLogs = []*DelDataBuf{}
@@ -103,9 +113,11 @@ func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBu
 			t.deltaLogs = []*DelDataBuf{deltaLogs}
 		}
 		go func() {
-			err := errStart
-			for err != nil {
-				err = task.flushDeleteData()
+			err := retry.Do(context.Background(), func() error {
+				return task.flushDeleteData()
+			}, opts...)
+			if err != nil {
+				t.deleteErr = err
 			}
 			t.Done()
 		}()
@@ -135,10 +147,7 @@ func (t *flushTaskRunner) waitFinish(notifyFunc notifyMetaFunc, postFunc taskPos
 	postFunc(pack, postInjection)
 
 	// execution done, dequeue and make count --
-	err := errStart
-	for err != nil {
-		err = notifyFunc(pack)
-	}
+	notifyFunc(pack)
 
 	// notify next task
 	close(t.finishSignal)
@@ -153,6 +162,10 @@ func (t *flushTaskRunner) getFlushPack() *segmentFlushPack {
 		deltaLogs:  t.deltaLogs,
 		flushed:    t.flushed,
 		dropped:    t.dropped,
+	}
+	if t.insertErr != nil || t.deleteErr != nil {
+		log.Warn("flush task error detected", zap.Error(t.insertErr), zap.Error(t.deleteErr))
+		pack.err = errors.New("execution failed")
 	}
 
 	return pack

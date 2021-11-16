@@ -80,6 +80,11 @@ func (pc *PulsarConsumer) Seek(id MessageID) error {
 	return err
 }
 
+// ConsumeAfterSeek defines pulsar consumer SHOULD consume after seek
+func (pc *PulsarConsumer) ConsumeAfterSeek() bool {
+	return true
+}
+
 func (pc *PulsarConsumer) Ack(message ConsumerMessage) {
 	pm := message.(*pulsarMessage)
 	pc.c.Ack(pm.msg)

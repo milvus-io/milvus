@@ -29,7 +29,7 @@ typedef CProto CRetrieveResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
-NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
+NewSegment(CCollection collection, SegmentType seg_type);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
