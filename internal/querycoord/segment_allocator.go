@@ -21,7 +21,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func defaultSegAllocatePolicy() SegmentAllocatePolicy {
@@ -94,15 +93,12 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 	if len(reqs) == 0 {
 		return nil
 	}
+
 	dataSizePerReq := make([]int64, 0)
 	for _, req := range reqs {
-		sizePerRecord, err := typeutil.EstimateSizePerRecord(req.Schema)
+		sizeOfReq, err := cluster.estimateSegmentsSize(req)
 		if err != nil {
 			return err
-		}
-		sizeOfReq := int64(0)
-		for _, loadInfo := range req.Infos {
-			sizeOfReq += int64(sizePerRecord) * loadInfo.NumOfRows
 		}
 		dataSizePerReq = append(dataSizePerReq, sizeOfReq)
 	}

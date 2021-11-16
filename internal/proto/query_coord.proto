@@ -9,6 +9,7 @@ import "milvus.proto";
 import "internal.proto";
 import "schema.proto";
 import "data_coord.proto";
+import "index_coord.proto";
 
 service QueryCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
@@ -167,6 +168,8 @@ message SegmentInfo {
   repeated int64 compactionFrom = 11;
   bool createdByCompaction = 12;
   common.SegmentState state = 13;
+  bool enable_index = 14;
+  repeated index.IndexFilePathInfo index_path_infos = 15;
 }
 
 message GetSegmentInfoResponse {
@@ -245,6 +248,8 @@ message SegmentLoadInfo {
   repeated data.FieldBinlog statslogs = 8;
   repeated data.DeltaLogInfo deltalogs = 9;
   repeated int64 compactionFrom = 10; // segmentIDs compacted from
+  bool enable_index = 11;
+  repeated index.IndexFilePathInfo index_path_infos = 12;
 }
 
 message LoadSegmentsRequest {

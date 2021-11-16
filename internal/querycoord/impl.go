@@ -151,6 +151,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		LoadCollectionRequest: req,
 		rootCoord:             qc.rootCoordClient,
 		dataCoord:             qc.dataCoordClient,
+		indexCoord:            qc.indexCoordClient,
 		cluster:               qc.cluster,
 		meta:                  qc.meta,
 	}
@@ -341,7 +342,9 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	loadPartitionTask := &loadPartitionTask{
 		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
+		rootCoord:             qc.rootCoordClient,
 		dataCoord:             qc.dataCoordClient,
+		indexCoord:            qc.indexCoordClient,
 		cluster:               qc.cluster,
 		meta:                  qc.meta,
 	}
@@ -568,6 +571,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 		LoadBalanceRequest: req,
 		rootCoord:          qc.rootCoordClient,
 		dataCoord:          qc.dataCoordClient,
+		indexCoord:         qc.indexCoordClient,
 		cluster:            qc.cluster,
 		meta:               qc.meta,
 	}

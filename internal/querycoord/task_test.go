@@ -36,6 +36,7 @@ func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCol
 		LoadCollectionRequest: req,
 		rootCoord:             queryCoord.rootCoordClient,
 		dataCoord:             queryCoord.dataCoordClient,
+		indexCoord:            queryCoord.indexCoordClient,
 		cluster:               queryCoord.cluster,
 		meta:                  queryCoord.meta,
 	}
@@ -55,7 +56,9 @@ func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *loadPart
 	loadPartitionTask := &loadPartitionTask{
 		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
+		rootCoord:             queryCoord.rootCoordClient,
 		dataCoord:             queryCoord.dataCoordClient,
+		indexCoord:            queryCoord.indexCoordClient,
 		cluster:               queryCoord.cluster,
 		meta:                  queryCoord.meta,
 	}
@@ -159,6 +162,7 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 		LoadCollectionRequest: parentReq,
 		rootCoord:             queryCoord.rootCoordClient,
 		dataCoord:             queryCoord.dataCoordClient,
+		indexCoord:            queryCoord.indexCoordClient,
 		meta:                  queryCoord.meta,
 		cluster:               queryCoord.cluster,
 	}
@@ -211,6 +215,7 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 		LoadCollectionRequest: parentReq,
 		rootCoord:             queryCoord.rootCoordClient,
 		dataCoord:             queryCoord.dataCoordClient,
+		indexCoord:            queryCoord.indexCoordClient,
 		meta:                  queryCoord.meta,
 		cluster:               queryCoord.cluster,
 	}
@@ -825,10 +830,11 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 				SourceNodeIDs:    []int64{node1.queryNodeID},
 				SealedSegmentIDs: []UniqueID{defaultSegmentID},
 			},
-			rootCoord: queryCoord.rootCoordClient,
-			dataCoord: queryCoord.dataCoordClient,
-			cluster:   queryCoord.cluster,
-			meta:      queryCoord.meta,
+			rootCoord:  queryCoord.rootCoordClient,
+			dataCoord:  queryCoord.dataCoordClient,
+			indexCoord: queryCoord.indexCoordClient,
+			cluster:    queryCoord.cluster,
+			meta:       queryCoord.meta,
 		}
 		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 		assert.Nil(t, err)
@@ -846,10 +852,11 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 				SourceNodeIDs:    []int64{node1.queryNodeID},
 				SealedSegmentIDs: []UniqueID{defaultSegmentID + 100},
 			},
-			rootCoord: queryCoord.rootCoordClient,
-			dataCoord: queryCoord.dataCoordClient,
-			cluster:   queryCoord.cluster,
-			meta:      queryCoord.meta,
+			rootCoord:  queryCoord.rootCoordClient,
+			dataCoord:  queryCoord.dataCoordClient,
+			indexCoord: queryCoord.indexCoordClient,
+			cluster:    queryCoord.cluster,
+			meta:       queryCoord.meta,
 		}
 		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 		assert.Nil(t, err)
@@ -866,10 +873,11 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 				},
 				SourceNodeIDs: []int64{node1.queryNodeID},
 			},
-			rootCoord: queryCoord.rootCoordClient,
-			dataCoord: queryCoord.dataCoordClient,
-			cluster:   queryCoord.cluster,
-			meta:      queryCoord.meta,
+			rootCoord:  queryCoord.rootCoordClient,
+			dataCoord:  queryCoord.dataCoordClient,
+			indexCoord: queryCoord.indexCoordClient,
+			cluster:    queryCoord.cluster,
+			meta:       queryCoord.meta,
 		}
 		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 		assert.Nil(t, err)
@@ -885,10 +893,11 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 					MsgType: commonpb.MsgType_LoadBalanceSegments,
 				},
 			},
-			rootCoord: queryCoord.rootCoordClient,
-			dataCoord: queryCoord.dataCoordClient,
-			cluster:   queryCoord.cluster,
-			meta:      queryCoord.meta,
+			rootCoord:  queryCoord.rootCoordClient,
+			dataCoord:  queryCoord.dataCoordClient,
+			indexCoord: queryCoord.indexCoordClient,
+			cluster:    queryCoord.cluster,
+			meta:       queryCoord.meta,
 		}
 		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 		assert.Nil(t, err)
@@ -905,10 +914,11 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 				},
 				SourceNodeIDs: []int64{node1.queryNodeID + 100},
 			},
-			rootCoord: queryCoord.rootCoordClient,
-			dataCoord: queryCoord.dataCoordClient,
-			cluster:   queryCoord.cluster,
-			meta:      queryCoord.meta,
+			rootCoord:  queryCoord.rootCoordClient,
+			dataCoord:  queryCoord.dataCoordClient,
+			indexCoord: queryCoord.indexCoordClient,
+			cluster:    queryCoord.cluster,
+			meta:       queryCoord.meta,
 		}
 		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 		assert.Nil(t, err)

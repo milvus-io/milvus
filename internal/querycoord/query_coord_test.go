@@ -93,6 +93,7 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	if err != nil {
 		return nil, err
 	}
+	coord.cluster.(*queryNodeCluster).segSizeEstimator = segSizeEstimateForTest
 	err = coord.Start()
 	if err != nil {
 		return nil, err
@@ -229,6 +230,9 @@ func TestHandoffSegmentLoop(t *testing.T) {
 
 	queryCoord, err := startQueryCoord(baseCtx)
 	assert.Nil(t, err)
+	indexCoord := newIndexCoordMock()
+	indexCoord.returnIndexFile = true
+	queryCoord.indexCoordClient = indexCoord
 
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
@@ -524,7 +528,9 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		loadPartitionTask := &loadPartitionTask{
 			baseTask:              baseTask,
 			LoadPartitionsRequest: req,
+			rootCoord:             queryCoord.rootCoordClient,
 			dataCoord:             queryCoord.dataCoordClient,
+			indexCoord:            queryCoord.indexCoordClient,
 			cluster:               queryCoord.cluster,
 			meta:                  queryCoord.meta,
 		}

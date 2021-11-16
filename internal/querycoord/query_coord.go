@@ -33,9 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -72,6 +70,7 @@ type QueryCoord struct {
 	newNodeFn    newQueryNodeFn
 	scheduler    *TaskScheduler
 	idAllocator  func() (UniqueID, error)
+	indexChecker *IndexChecker
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -151,9 +150,16 @@ func (qc *QueryCoord) Init() error {
 		}
 
 		// init task scheduler
-		qc.scheduler, initError = NewTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.rootCoordClient, qc.dataCoordClient, qc.idAllocator)
+		qc.scheduler, initError = NewTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.rootCoordClient, qc.dataCoordClient, qc.indexCoordClient, qc.idAllocator)
 		if initError != nil {
 			log.Error("query coordinator init task scheduler failed", zap.Error(initError))
+			return
+		}
+
+		// init index checker
+		qc.indexChecker, initError = newIndexChecker(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.rootCoordClient, qc.indexCoordClient, qc.dataCoordClient)
+		if initError != nil {
+			log.Error("query coordinator init index checker failed", zap.Error(initError))
 			return
 		}
 
@@ -175,6 +181,9 @@ func (qc *QueryCoord) Start() error {
 	}
 	qc.scheduler.Start()
 	log.Debug("start scheduler ...")
+
+	qc.indexChecker.start()
+	log.Debug("start index checker ...")
 
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()
@@ -204,6 +213,8 @@ func (qc *QueryCoord) Start() error {
 func (qc *QueryCoord) Stop() error {
 	qc.scheduler.Close()
 	log.Debug("close scheduler ...")
+	qc.indexChecker.close()
+	log.Debug("close index checker ...")
 	qc.loopCancel()
 	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
 
@@ -299,6 +310,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			LoadBalanceRequest: loadBalanceSegment,
 			rootCoord:          qc.rootCoordClient,
 			dataCoord:          qc.dataCoordClient,
+			indexCoord:         qc.indexCoordClient,
 			cluster:            qc.cluster,
 			meta:               qc.meta,
 		}
@@ -350,6 +362,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 					LoadBalanceRequest: loadBalanceSegment,
 					rootCoord:          qc.rootCoordClient,
 					dataCoord:          qc.dataCoordClient,
+					indexCoord:         qc.indexCoordClient,
 					cluster:            qc.cluster,
 					meta:               qc.meta,
 				}
@@ -369,13 +382,7 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 	defer qc.loopWg.Done()
 	log.Debug("query coordinator start watch segment loop")
 
-	// TODO:: recover handoff task when coord down
-	watchChan := qc.kvClient.WatchWithPrefix(handoffSegmentPrefix)
-	unIndexedSegmentChan := make(chan *querypb.SegmentInfo, 1024)
-	indexSegmentChan := make(chan *querypb.SegmentInfo, 1024)
-
-	go qc.checkIndexLoop(ctx, unIndexedSegmentChan, indexSegmentChan)
-	go qc.processHandoffAfterIndexDone(ctx, indexSegmentChan)
+	watchChan := qc.kvClient.WatchWithRevision(handoffSegmentPrefix, qc.indexChecker.revision+1)
 
 	for {
 		select {
@@ -391,180 +398,21 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 				}
 				switch event.Type {
 				case mvccpb.PUT:
-					processDone := true
-					// if collection has not been loaded, then skip the segment
-					collectionInfo, err := qc.meta.getCollectionInfoByID(segmentInfo.CollectionID)
-					if err != nil {
-						log.Debug("watchHandoffSegmentLoop: collection has not been loaded into memory", zap.Int64("collectionID", segmentInfo.CollectionID))
+					if Params.AutoHandoff && qc.indexChecker.verifyHandoffReqValid(segmentInfo) {
+						qc.indexChecker.enqueueHandoffReq(segmentInfo)
+						log.Debug("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
 					} else {
-						// if partition has not been loaded or released, then skip handoff the segment
-						if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
-							for _, id := range collectionInfo.PartitionIDs {
-								if id == segmentInfo.PartitionID {
-									unIndexedSegmentChan <- segmentInfo
-									processDone = false
-									break
-								}
-							}
-						} else {
-							partitionReleased := false
-							for _, id := range collectionInfo.ReleasedPartitionIDs {
-								if id == segmentInfo.PartitionID {
-									partitionReleased = true
-								}
-							}
-							if !partitionReleased {
-								unIndexedSegmentChan <- segmentInfo
-								processDone = false
-							}
-						}
-					}
-
-					if processDone {
+						log.Debug("watchHandoffSegmentLoop: collection/partition has not been loaded or autoHandoff equal to false, remove req from etcd", zap.Any("segmentInfo", segmentInfo))
 						buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
 						err = qc.kvClient.Remove(buildQuerySegmentPath)
 						if err != nil {
 							log.Error("watchHandoffSegmentLoop: remove handoff segment from etcd failed", zap.Error(err))
+							panic(err)
 						}
 					}
 				default:
 					// do nothing
 				}
-			}
-		}
-	}
-}
-
-func (qc *QueryCoord) checkIndexLoop(ctx context.Context, unIndexedChan chan *querypb.SegmentInfo, indexedChan chan *querypb.SegmentInfo) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case segmentInfo := <-unIndexedChan:
-			processDone := true
-			// TODO:: check whether the index exists in parallel, in case indexCoord cannot create the index normally, and then block the loop
-			for {
-				// if the collection has been released, then skip handoff the segment
-				collectionInfo, err := qc.meta.getCollectionInfoByID(segmentInfo.CollectionID)
-				if err != nil {
-					break
-				}
-
-				//  if the partition has been released, then skip handoff the segment
-				partitionReleased := false
-				for _, id := range collectionInfo.ReleasedPartitionIDs {
-					if id == segmentInfo.PartitionID {
-						partitionReleased = true
-						break
-					}
-				}
-				if partitionReleased {
-					break
-				}
-
-				// check the buildID of the segment's index whether exist on rootCoord
-				req := &milvuspb.DescribeSegmentRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_DescribeSegment,
-					},
-					CollectionID: segmentInfo.CollectionID,
-					SegmentID:    segmentInfo.SegmentID,
-				}
-				response, err := qc.rootCoordClient.DescribeSegment(ctx, req)
-				if err != nil || response.Status.ErrorCode != commonpb.ErrorCode_Success {
-					continue
-				}
-
-				// if the segment.EnableIndex == false, then load the segment immediately
-				// only sealed segment can be balanced, so the handoff is needed
-				if !response.EnableIndex {
-					log.Debug("checkIndexLoop: segment's enableIndex equal to false, ready to handoff", zap.Int64("segmentID", segmentInfo.SegmentID))
-					indexedChan <- segmentInfo
-					processDone = false
-					break
-				}
-
-				indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
-					IndexBuildIDs: []UniqueID{response.BuildID},
-				}
-				// if index created done on indexNode, then handoff start
-				pathResponse, err := qc.indexCoordClient.GetIndexFilePaths(ctx, indexFilePathRequest)
-				if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-					continue
-				}
-
-				log.Debug("checkIndexLoop: create segment's index done, ready to handoff", zap.Int64("segmentID", segmentInfo.SegmentID))
-				indexedChan <- segmentInfo
-				processDone = false
-				break
-			}
-
-			if processDone {
-				buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
-				err := qc.kvClient.Remove(buildQuerySegmentPath)
-				if err != nil {
-					log.Error("watchHandoffSegmentLoop: remove handoff segment from etcd failed", zap.Error(err))
-				}
-			}
-		}
-	}
-}
-
-func (qc *QueryCoord) processHandoffAfterIndexDone(ctx context.Context, indexedChan chan *querypb.SegmentInfo) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case segmentInfo := <-indexedChan:
-			collectionID := segmentInfo.CollectionID
-			partitionID := segmentInfo.PartitionID
-			segmentID := segmentInfo.SegmentID
-			if Params.AutoHandoff {
-				log.Debug("processHandoffAfterIndexDone: handoff segment received",
-					zap.Int64("collectionID", collectionID),
-					zap.Int64("partitionID", partitionID),
-					zap.Int64("segmentID", segmentID),
-					zap.Any("segmentInfo", segmentInfo),
-				)
-				baseTask := newBaseTask(ctx, querypb.TriggerCondition_handoff)
-				handoffReq := &querypb.HandoffSegmentsRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_HandoffSegments,
-					},
-					SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
-				}
-				handoffTask := &handoffTask{
-					baseTask:               baseTask,
-					HandoffSegmentsRequest: handoffReq,
-					dataCoord:              qc.dataCoordClient,
-					cluster:                qc.cluster,
-					meta:                   qc.meta,
-				}
-				err := qc.scheduler.Enqueue(handoffTask)
-				if err != nil {
-					log.Error("processHandoffAfterIndexDone: handoffTask enqueue failed", zap.Error(err))
-					break
-				}
-
-				go func() {
-					err := handoffTask.waitToFinish()
-					if err != nil {
-						log.Error("processHandoffAfterIndexDone: handoffTask failed", zap.Error(err))
-					}
-				}()
-
-				log.Debug("processHandoffAfterIndexDone: handoffTask completed",
-					zap.Any("collectionID", collectionID),
-					zap.Any("partitionID", partitionID),
-					zap.Any("segmentID", segmentID),
-					zap.Any("channel", segmentInfo.ChannelID),
-				)
-			}
-
-			buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, collectionID, partitionID, segmentID)
-			err := qc.kvClient.Remove(buildQuerySegmentPath)
-			if err != nil {
-				log.Error("processHandoffAfterIndexDone: remove handoff segment from etcd failed", zap.Error(err))
 			}
 		}
 	}
@@ -665,6 +513,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 							LoadBalanceRequest: req,
 							rootCoord:          qc.rootCoordClient,
 							dataCoord:          qc.dataCoordClient,
+							indexCoord:         qc.indexCoordClient,
 							cluster:            qc.cluster,
 							meta:               qc.meta,
 						}
