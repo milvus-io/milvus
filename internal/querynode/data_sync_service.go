@@ -262,6 +262,7 @@ func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID, 
 	return nil
 }
 
+// removePartitionFlowGraph removes the partition flow graph from dataSyncService by partitionID
 func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
