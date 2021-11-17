@@ -823,6 +823,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, default_limit,
                             default_search_exp,
                             travel_timestamp=time_stamp,
+                            guarantee_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -1209,6 +1210,7 @@ class TestCollectionSearch(TestcaseBase):
         method: 1. search the collection
                 2. insert new data
                 3. search the collection without load again
+                4. Use guarantee_timestamp to guarantee data consistency
         expected: new data should be searched
         """
         # 1. initialize with data
@@ -1235,14 +1237,11 @@ class TestCollectionSearch(TestcaseBase):
                                                              auto_id=auto_id, dim=dim,
                                                              insert_offset=nb_old)
         insert_ids.extend(insert_ids_new)
-        # gracefulTime is default as 1s which allows data
-        # could not be searched instantly in gracefulTime
-        time.sleep(gracefulTime)
         # 4. search for new data without load
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp, _async=_async,
-                            travel_timestamp=time_stamp,
+                            guarantee_timestamp=time_stamp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
