@@ -697,6 +697,11 @@ type timetickSync struct {
 	lock          sync.Mutex
 	proxyTimeTick map[typeutil.UniqueID]*channelTimeTickMsg
 	sendChan      chan map[typeutil.UniqueID]*channelTimeTickMsg
+
+	// record ddl timetick info
+	ddlLock  sync.RWMutex
+	ddlMinTs typeutil.Timestamp
+	ddlTsSet map[typeutil.Timestamp]struct{}
 }
 
 func newTimeTickSync(core *Core) *timetickSync
