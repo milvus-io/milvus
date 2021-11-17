@@ -141,7 +141,7 @@ func (kv *RocksdbKV) ResetPrefixLength(len int) error {
 // MultiLoad load a batch of values by keys
 func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	if kv.DB == nil {
-		return nil, errors.New("Rocksdb instance is nil when do MultiLoad")
+		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
 	}
 	values := make([]string, 0, len(keys))
 	for _, key := range keys {
