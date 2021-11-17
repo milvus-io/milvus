@@ -62,7 +62,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 	log.Info("Produce done")
 }
 
-func VerifyMessage(t *testing.T, msg ConsumerMessage) {
+func VerifyMessage(t *testing.T, msg Message) {
 	pload := BytesToInt(msg.Payload())
 	log.Info("RECV", zap.Any("v", pload))
 	pm := msg.(*pulsarMessage)
@@ -92,7 +92,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	rand.Seed(time.Now().UnixNano())
 	cnt := 1 + rand.Int()%5
 
-	var msg ConsumerMessage
+	var msg Message
 	for i := 0; i < cnt; i++ {
 		select {
 		case <-ctx.Done():

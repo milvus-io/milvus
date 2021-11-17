@@ -16,11 +16,11 @@ import (
 )
 
 // Check rmqMessage implements ConsumerMessage
-var _ ConsumerMessage = (*rmqMessage)(nil)
+var _ Message = (*rmqMessage)(nil)
 
 // rmqMessage wraps the message for rocksmq
 type rmqMessage struct {
-	msg rocksmq.ConsumerMessage
+	msg rocksmq.Message
 }
 
 func (rm *rmqMessage) Topic() string {

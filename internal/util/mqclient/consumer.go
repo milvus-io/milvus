@@ -61,7 +61,7 @@ type ConsumerOptions struct {
 
 	// Message for this consumer
 	// When a message is received, it will be pushed to this channel for consumption
-	MessageChannel chan ConsumerMessage
+	MessageChannel chan Message
 
 	// Set receive channel size
 	BufSize int64
@@ -77,13 +77,13 @@ type Consumer interface {
 	Subscription() string
 
 	// Message channel
-	Chan() <-chan ConsumerMessage
+	Chan() <-chan Message
 
 	// Seek to the uniqueID position
 	Seek(MessageID) error //nolint:govet
 
 	// Make sure that msg is received. Only used in pulsar
-	Ack(ConsumerMessage)
+	Ack(Message)
 
 	// ConsumeAfterSeek defines the behavior whether to consume after seeking is done
 	ConsumeAfterSeek() bool

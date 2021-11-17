@@ -131,7 +131,7 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 			continue
 		}
 		fn := func() error {
-			receiveChannel := make(chan mqclient.ConsumerMessage, ms.bufSize)
+			receiveChannel := make(chan mqclient.Message, ms.bufSize)
 			pc, err := ms.client.Subscribe(mqclient.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
@@ -443,7 +443,7 @@ func (ms *mqMsgStream) Consume() *MsgPack {
 	}
 }
 
-func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg mqclient.ConsumerMessage) (TsMsg, error) {
+func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg mqclient.Message) (TsMsg, error) {
 	header := commonpb.MsgHeader{}
 	err := proto.Unmarshal(msg.Payload(), &header)
 	if err != nil {
@@ -619,7 +619,7 @@ func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName strin
 			continue
 		}
 		fn := func() error {
-			receiveChannel := make(chan mqclient.ConsumerMessage, ms.bufSize)
+			receiveChannel := make(chan mqclient.Message, ms.bufSize)
 			pc, err := ms.client.Subscribe(mqclient.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,

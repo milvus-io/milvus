@@ -147,7 +147,7 @@ func (c *client) consume(consumer *consumer) {
 					break
 				}
 				for _, msg := range msgs {
-					consumer.messageCh <- ConsumerMessage{
+					consumer.messageCh <- Message{
 						MsgID:   msg.MsgID,
 						Payload: msg.Payload,
 						Topic:   consumer.Topic(),
