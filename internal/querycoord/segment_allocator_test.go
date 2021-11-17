@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -33,14 +34,27 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
 	cluster := &queryNodeCluster{
-		ctx:         baseCtx,
-		cancel:      cancel,
-		client:      kv,
-		clusterMeta: meta,
-		nodes:       make(map[int64]Node),
-		newNodeFn:   newQueryNodeTest,
-		session:     clusterSession,
+		ctx:              baseCtx,
+		cancel:           cancel,
+		client:           kv,
+		clusterMeta:      meta,
+		nodes:            make(map[int64]Node),
+		newNodeFn:        newQueryNodeTest,
+		session:          clusterSession,
+		segSizeEstimator: segSizeEstimateForTest,
 	}
+
+	option := &minioKV.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
+	}
+
+	cluster.dataKV, err = minioKV.NewMinIOKV(baseCtx, option)
+	assert.Nil(t, err)
 
 	schema := genCollectionSchema(defaultCollectionID, false)
 	firstReq := &querypb.LoadSegmentsRequest{

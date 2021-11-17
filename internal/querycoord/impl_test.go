@@ -483,6 +483,7 @@ func TestLoadBalanceTask(t *testing.T) {
 		LoadBalanceRequest: loadBalanceSegment,
 		rootCoord:          queryCoord.rootCoordClient,
 		dataCoord:          queryCoord.dataCoordClient,
+		indexCoord:         queryCoord.indexCoordClient,
 		cluster:            queryCoord.cluster,
 		meta:               queryCoord.meta,
 	}

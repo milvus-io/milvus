@@ -244,10 +244,11 @@ func (bt *baseTask) rollBack(ctx context.Context) []task {
 type loadCollectionTask struct {
 	*baseTask
 	*querypb.LoadCollectionRequest
-	rootCoord types.RootCoord
-	dataCoord types.DataCoord
-	cluster   Cluster
-	meta      Meta
+	rootCoord  types.RootCoord
+	dataCoord  types.DataCoord
+	indexCoord types.IndexCoord
+	cluster    Cluster
+	meta       Meta
 }
 
 func (lct *loadCollectionTask) msgBase() *commonpb.MsgBase {
@@ -374,6 +375,15 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				NumOfRows:    segmentBingLog.NumOfRows,
 				Statslogs:    segmentBingLog.Statslogs,
 				Deltalogs:    segmentBingLog.Deltalogs,
+			}
+
+			indexInfo, err := getIndexInfo(ctx, &querypb.SegmentInfo{
+				CollectionID: collectionID,
+				SegmentID:    segmentID,
+			}, lct.rootCoord, lct.indexCoord)
+
+			if err == nil && indexInfo.enableIndex {
+				segmentLoadInfo.IndexPathInfos = indexInfo.infos
 			}
 
 			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
@@ -636,10 +646,12 @@ func (rct *releaseCollectionTask) rollBack(ctx context.Context) []task {
 type loadPartitionTask struct {
 	*baseTask
 	*querypb.LoadPartitionsRequest
-	dataCoord types.DataCoord
-	cluster   Cluster
-	meta      Meta
-	addCol    bool
+	rootCoord  types.RootCoord
+	dataCoord  types.DataCoord
+	indexCoord types.IndexCoord
+	cluster    Cluster
+	meta       Meta
+	addCol     bool
 }
 
 func (lpt *loadPartitionTask) msgBase() *commonpb.MsgBase {
@@ -730,6 +742,15 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 				NumOfRows:    segmentBingLog.NumOfRows,
 				Statslogs:    segmentBingLog.Statslogs,
 				Deltalogs:    segmentBingLog.Deltalogs,
+			}
+
+			indexInfo, err := getIndexInfo(ctx, &querypb.SegmentInfo{
+				CollectionID: collectionID,
+				SegmentID:    segmentID,
+			}, lpt.rootCoord, lpt.indexCoord)
+
+			if err == nil && indexInfo.enableIndex {
+				segmentLoadInfo.IndexPathInfos = indexInfo.infos
 			}
 
 			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
@@ -1534,6 +1555,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 						BinlogPaths:    segmentBinlogs.FieldBinlogs,
 						NumOfRows:      segmentBinlogs.NumOfRows,
 						CompactionFrom: segmentInfo.CompactionFrom,
+						IndexPathInfos: segmentInfo.IndexPathInfos,
 					}
 
 					msgBase := proto.Clone(ht.Base).(*commonpb.MsgBase)
@@ -1623,10 +1645,11 @@ func (ht *handoffTask) rollBack(ctx context.Context) []task {
 type loadBalanceTask struct {
 	*baseTask
 	*querypb.LoadBalanceRequest
-	rootCoord types.RootCoord
-	dataCoord types.DataCoord
-	cluster   Cluster
-	meta      Meta
+	rootCoord  types.RootCoord
+	dataCoord  types.DataCoord
+	indexCoord types.IndexCoord
+	cluster    Cluster
+	meta       Meta
 }
 
 func (lbt *loadBalanceTask) msgBase() *commonpb.MsgBase {
@@ -1711,6 +1734,14 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 							NumOfRows:    segmentBingLog.NumOfRows,
 							Statslogs:    segmentBingLog.Statslogs,
 							Deltalogs:    segmentBingLog.Deltalogs,
+						}
+						indexInfo, err := getIndexInfo(ctx, &querypb.SegmentInfo{
+							CollectionID: collectionID,
+							SegmentID:    segmentID,
+						}, lbt.rootCoord, lbt.indexCoord)
+
+						if err == nil && indexInfo.enableIndex {
+							segmentLoadInfo.IndexPathInfos = indexInfo.infos
 						}
 
 						msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
@@ -1907,6 +1938,15 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						NumOfRows:    segmentBingLog.NumOfRows,
 						Statslogs:    segmentBingLog.Statslogs,
 						Deltalogs:    segmentBingLog.Deltalogs,
+					}
+
+					indexInfo, err := getIndexInfo(ctx, &querypb.SegmentInfo{
+						CollectionID: collectionID,
+						SegmentID:    segmentID,
+					}, lbt.rootCoord, lbt.indexCoord)
+
+					if err == nil && indexInfo.enableIndex {
+						segmentLoadInfo.IndexPathInfos = indexInfo.infos
 					}
 
 					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)

@@ -129,8 +129,9 @@ type TaskScheduler struct {
 	client                   *etcdkv.EtcdKV
 	stopActivateTaskLoopChan chan int
 
-	rootCoord types.RootCoord
-	dataCoord types.DataCoord
+	rootCoord  types.RootCoord
+	dataCoord  types.DataCoord
+	indexCoord types.IndexCoord
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -144,6 +145,7 @@ func NewTaskScheduler(ctx context.Context,
 	kv *etcdkv.EtcdKV,
 	rootCoord types.RootCoord,
 	dataCoord types.DataCoord,
+	indexCoord types.IndexCoord,
 	idAllocator func() (UniqueID, error)) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
@@ -159,6 +161,7 @@ func NewTaskScheduler(ctx context.Context,
 		stopActivateTaskLoopChan: stopTaskLoopChan,
 		rootCoord:                rootCoord,
 		dataCoord:                dataCoord,
+		indexCoord:               indexCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
 
@@ -271,6 +274,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			LoadCollectionRequest: &loadReq,
 			rootCoord:             scheduler.rootCoord,
 			dataCoord:             scheduler.dataCoord,
+			indexCoord:            scheduler.indexCoord,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
 		}
@@ -284,7 +288,9 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		loadPartitionTask := &loadPartitionTask{
 			baseTask:              baseTask,
 			LoadPartitionsRequest: &loadReq,
+			rootCoord:             scheduler.rootCoord,
 			dataCoord:             scheduler.dataCoord,
+			indexCoord:            scheduler.indexCoord,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
 		}
@@ -398,6 +404,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			LoadBalanceRequest: &loadReq,
 			rootCoord:          scheduler.rootCoord,
 			dataCoord:          scheduler.dataCoord,
+			indexCoord:         scheduler.indexCoord,
 			cluster:            scheduler.cluster,
 			meta:               scheduler.meta,
 		}

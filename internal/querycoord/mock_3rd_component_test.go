@@ -283,6 +283,7 @@ func (rc *rootCoordMock) DescribeSegment(ctx context.Context, req *milvuspb.Desc
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
+		EnableIndex: true,
 	}, nil
 }
 
@@ -397,16 +398,28 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 
 type indexCoordMock struct {
 	types.IndexCoord
+	returnIndexFile bool
 }
 
 func newIndexCoordMock() *indexCoordMock {
-	return &indexCoordMock{}
+	return &indexCoordMock{
+		returnIndexFile: false,
+	}
 }
 
 func (c *indexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	return &indexpb.GetIndexFilePathsResponse{
+	res := &indexpb.GetIndexFilePathsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-	}, nil
+	}
+	if c.returnIndexFile {
+		indexPaths, _ := generateIndex(defaultSegmentID)
+		indexPathInfo := &indexpb.IndexFilePathInfo{
+			IndexFilePaths: indexPaths,
+		}
+		res.FilePaths = []*indexpb.IndexFilePathInfo{indexPathInfo}
+	}
+
+	return res, nil
 }
