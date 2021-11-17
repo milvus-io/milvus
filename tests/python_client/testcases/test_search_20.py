@@ -111,6 +111,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("9999999999 is valid for travel timestamp")
         yield request.param
 
+    @pytest.fixture(scope="function", params=ct.get_invalid_ints)
+    def get_invalid_guarantee_timestamp(self, request):
+        if request.param == 9999999999:
+            pytest.skip("9999999999 is valid for guarantee_timestamp")
+        yield request.param
+
     """
     ******************************************************************
     #  The followings are invalid cases
@@ -718,6 +724,27 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": "`travel_timestamp` value %s is illegal" % invalid_travel_time})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue 11985")
+    def test_search_param_invalid_guarantee_timestamp(self, get_invalid_guarantee_timestamp):
+        """
+        target: test search with invalid guarantee timestamp
+        method: search with invalid guarantee timestamp
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, 10)[0]
+        # 2. search with invalid travel timestamp
+        log.info("test_search_param_invalid_guarantee_timestamp: searching with invalid guarantee timestamp")
+        invalid_guarantee_time = get_invalid_guarantee_timestamp
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            guarantee_timestamp=invalid_guarantee_time,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "`guarantee_timestamp` value %s is illegal"
+                                                    % invalid_guarantee_time})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("round_decimal", [7, -2, 999, 1.0, None, [1], "string", {}])
