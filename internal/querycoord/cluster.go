@@ -69,6 +69,8 @@ type Cluster interface {
 	getSessionVersion() int64
 
 	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse
+
+	setGracefulTime(ctx context.Context, in *milvuspb.SetGracefulTimeRequest)
 }
 
 type newQueryNodeFn func(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error)
@@ -426,6 +428,16 @@ func (c *queryNodeCluster) getMetrics(ctx context.Context, in *milvuspb.GetMetri
 	}
 
 	return ret
+}
+
+func (c *queryNodeCluster) setGracefulTime(ctx context.Context, in *milvuspb.SetGracefulTimeRequest) {
+	c.RLock()
+	defer c.RUnlock()
+
+	log.Debug("QueryCoord set graceful time to querynode", zap.Int("queryNode number", len(c.nodes)))
+	for _, node := range c.nodes {
+		node.setGracefulTime(ctx, in)
+	}
 }
 
 func (c *queryNodeCluster) getNumDmChannels(nodeID int64) (int, error) {

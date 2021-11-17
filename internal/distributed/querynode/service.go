@@ -341,3 +341,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.querynode.GetMetrics(ctx, req)
 }
+
+func (s *Server) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	return s.querynode.SetGracefulTime(ctx, req)
+}

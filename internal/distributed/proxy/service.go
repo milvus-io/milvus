@@ -444,3 +444,11 @@ func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasReque
 func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	return s.proxy.AlterAlias(ctx, request)
 }
+
+func (s *Server) SetGracefulTime(ctx context.Context, request *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	return s.proxy.SetGracefulTime(ctx, request)
+}
+
+func (s *Server) SetTimeTickInterval(ctx context.Context, request *milvuspb.SetTimeTickIntervalRequest) (*commonpb.Status, error) {
+	return s.proxy.SetTimeTickInterval(ctx, request)
+}

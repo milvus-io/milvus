@@ -104,7 +104,7 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 		} else {
 			if stat.minTs > current {
 				ticker.minTsStatistics[pchan] = stat.minTs - 1
-				next := now + Timestamp(sendTimeTickMsgInterval)
+				next := now + Timestamp(SendTimeTickMsgInterval)
 				if next > stat.maxTs {
 					next = stat.maxTs
 				}
