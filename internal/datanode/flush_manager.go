@@ -454,9 +454,12 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			Position:  pack.pos,
 		})
 
+		startPos := dsService.replica.listNewSegmentsStartPositions()
+
 		log.Debug("SaveBinlogPath",
 			zap.Int64("SegmentID", pack.segmentID),
 			zap.Int64("CollectionID", dsService.collectionID),
+			zap.Any("startPos", startPos),
 			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 			zap.Int("Length of Field2Stats", len(fieldStats)),
 			zap.Int("Length of Field2Deltalogs", len(deltaInfos)),
@@ -477,7 +480,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 
 			CheckPoints: checkPoints,
 
-			StartPositions: dsService.replica.listNewSegmentsStartPositions(),
+			StartPositions: startPos,
 			Flushed:        pack.flushed,
 			Dropped:        pack.dropped,
 		}

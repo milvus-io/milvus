@@ -301,6 +301,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Bool("isFlush", req.GetFlushed()),
 		zap.Bool("isDropped", req.GetDropped()),
+		zap.Any("startPositions", req.GetStartPositions()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
 	// validate

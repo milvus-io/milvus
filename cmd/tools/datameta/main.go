@@ -83,7 +83,7 @@ func printSegmentInfo(info *datapb.SegmentInfo) {
 	}
 	if info.DmlPosition != nil {
 		dmlTime, _ := tsoutil.ParseTS(info.DmlPosition.Timestamp)
-		fmt.Printf("Dml Position ID: %v, time: %s\n", info.StartPosition.MsgID, dmlTime.Format(tsPrintFormat))
+		fmt.Printf("Dml Position ID: %v, time: %s\n", info.GetStartPosition().GetMsgID(), dmlTime.Format(tsPrintFormat))
 	} else {
 		fmt.Println("Dml Position: nil")
 	}
