@@ -106,4 +106,7 @@ parser = argparse.ArgumentParser(description='host ip')
 parser.add_argument('--host', type=str, default='127.0.0.1', help='host ip')
 args = parser.parse_args()
 
+# add time stamp
+import time
+print(f"\nStart time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
 hello_milvus(args.host)
