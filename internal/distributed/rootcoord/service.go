@@ -374,6 +374,7 @@ func (s *Server) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Chann
 	return s.rootCoord.UpdateChannelTimeTick(ctx, in)
 }
 
+// DescribeSegment gets meta info of the segment
 func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	return s.rootCoord.DescribeSegment(ctx, in)
 }
