@@ -301,6 +301,7 @@ func newDataSyncService(ctx context.Context,
 	}
 }
 
+// close would close and remove all flow graphs in dataSyncService
 func (dsService *dataSyncService) close() {
 	// close collection flow graphs
 	for _, nodeFGs := range dsService.collectionFlowGraphs {
