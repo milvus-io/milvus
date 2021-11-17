@@ -94,13 +94,13 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 	return kv, nil
 }
 
-// Exist check whether a key exists in MinIO.
+// Exist checks whether a key exists in MinIO.
 func (kv *MinIOKV) Exist(key string) bool {
 	_, err := kv.minioClient.StatObject(kv.ctx, kv.bucketName, key, minio.StatObjectOptions{})
 	return err == nil
 }
 
-// LoadWithPrefix load objects with the same prefix @key from minio .
+// LoadWithPrefix loads objects with the same prefix @key from minio .
 func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	objects := kv.minioClient.ListObjects(kv.ctx, kv.bucketName, minio.ListObjectsOptions{Prefix: key})
 
