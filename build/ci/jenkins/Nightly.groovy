@@ -145,7 +145,7 @@ pipeline {
                                                         --skip-cleanup \
                                                         --skip-setup \
                                                         --skip-build \
-                                                        --skip-build-image --test-extra-arg "--tags L0 L1 L2 --repeat-scope=session" \
+                                                        --skip-build-image --test-extra-arg "-n 4 --tags L0 L1 L2 --repeat-scope=session" \
                                                         --test-timeout ${e2e_timeout_seconds}
                                                         """
                                                     } else {
