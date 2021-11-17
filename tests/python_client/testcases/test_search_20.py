@@ -508,14 +508,10 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "limit": 0})
         # 4. search with data inserted but not load again
         data = cf.gen_default_dataframe_data(nb=2000)
-
-        insert_res, _ = collection_w.insert(data)
-
-        # TODO: remove sleep with search grantee_timestamp when issue #10101 fixed
-        sleep(1)
-
+        insert_res = collection_w.insert(data)[0]
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,
+                            guarantee_timestamp=insert_res.timestamp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_res.primary_keys,
