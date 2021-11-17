@@ -383,6 +383,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			}, lct.rootCoord, lct.indexCoord)
 
 			if err == nil && indexInfo.enableIndex {
+				segmentLoadInfo.EnableIndex = true
 				segmentLoadInfo.IndexPathInfos = indexInfo.infos
 			}
 
@@ -750,6 +751,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			}, lpt.rootCoord, lpt.indexCoord)
 
 			if err == nil && indexInfo.enableIndex {
+				segmentLoadInfo.EnableIndex = true
 				segmentLoadInfo.IndexPathInfos = indexInfo.infos
 			}
 
@@ -1555,6 +1557,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 						BinlogPaths:    segmentBinlogs.FieldBinlogs,
 						NumOfRows:      segmentBinlogs.NumOfRows,
 						CompactionFrom: segmentInfo.CompactionFrom,
+						EnableIndex:    segmentInfo.EnableIndex,
 						IndexPathInfos: segmentInfo.IndexPathInfos,
 					}
 
@@ -1741,6 +1744,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						}, lbt.rootCoord, lbt.indexCoord)
 
 						if err == nil && indexInfo.enableIndex {
+							segmentLoadInfo.EnableIndex = true
 							segmentLoadInfo.IndexPathInfos = indexInfo.infos
 						}
 
@@ -1946,6 +1950,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					}, lbt.rootCoord, lbt.indexCoord)
 
 					if err == nil && indexInfo.enableIndex {
+						segmentLoadInfo.EnableIndex = true
 						segmentLoadInfo.IndexPathInfos = indexInfo.infos
 					}
 
