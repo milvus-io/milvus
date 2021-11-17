@@ -125,6 +125,7 @@ func (dsService *dataSyncService) close() {
 	}
 
 	dsService.cancelFn()
+	dsService.flushManager.close()
 }
 
 // initNodes inits a TimetickedFlowGraph

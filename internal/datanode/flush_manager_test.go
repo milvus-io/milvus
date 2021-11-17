@@ -280,6 +280,43 @@ func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestRendezvousFlushManager_close(t *testing.T) {
+	kv := memkv.NewMemoryKV()
+
+	size := 1000
+	var counter atomic.Int64
+	finish := sync.WaitGroup{}
+	finish.Add(size)
+	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+		counter.Inc()
+		finish.Done()
+	})
+
+	ids := make([][]byte, 0, size)
+	for i := 0; i < size; i++ {
+		id := make([]byte, 10)
+		rand.Read(id)
+		ids = append(ids, id)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(size)
+	for i := 0; i < size; i++ {
+		m.flushDelData(nil, 1, &internalpb.MsgPosition{
+			MsgID: ids[i],
+		})
+		m.flushBufferData(nil, 1, true, false, &internalpb.MsgPosition{
+			MsgID: ids[i],
+		})
+		wg.Done()
+	}
+	wg.Wait()
+	finish.Wait()
+	m.close()
+
+	assert.EqualValues(t, size, counter.Load())
+}
+
 func TestFlushNotifyFunc(t *testing.T) {
 	//	replica :=
 	//	rcf := &RootCoordFactory{}
