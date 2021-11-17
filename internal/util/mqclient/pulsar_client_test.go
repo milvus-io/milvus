@@ -65,7 +65,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 func VerifyMessage(t *testing.T, msg Message) {
 	pload := BytesToInt(msg.Payload())
 	log.Info("RECV", zap.Any("v", pload))
-	pm := msg.(*pulsarMessage)
+	pm := msg.(*pulsarReaderMessage)
 	topic := pm.Topic()
 	assert.NotEmpty(t, topic)
 	log.Info("RECV", zap.Any("t", topic))
@@ -126,10 +126,6 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 
 	err = consumer.Seek(msgID)
 	assert.Nil(t, err)
-
-	// skip the last received message
-	mm := <-consumer.Chan()
-	consumer.Ack(mm)
 
 	log.Info("Consume2 start")
 

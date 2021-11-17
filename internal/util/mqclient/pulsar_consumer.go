@@ -101,15 +101,6 @@ func (pc *PulsarConsumer) Close() {
 // DON'T use elsewhere
 func patchEarliestMessageID(mid *pulsar.MessageID) {
 	// cannot use field.SetInt(), since partitionIdx is not exported
-
-	// this reflect+ unsafe solution is disable by go vet
-
-	//ifData := v.InterfaceData() // unwrap interface
-	//ifData[1] is the pointer to the exact struct
-	// 20 is the offset of paritionIdx of messageID
-	//lint:ignore unsafeptr: possible misuse of unsafe.Pointer (govet), hardcoded offset
-	//*(*int32)(unsafe.Pointer(v.InterfaceData()[1] + 20)) = 0
-
 	// use direct unsafe conversion
 	/* #nosec G103 */
 	r := (*iface)(unsafe.Pointer(mid))

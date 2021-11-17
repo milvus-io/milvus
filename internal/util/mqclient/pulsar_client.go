@@ -56,24 +56,13 @@ func (pc *pulsarClient) CreateProducer(options ProducerOptions) (Producer, error
 }
 
 func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
-	receiveChannel := make(chan pulsar.ConsumerMessage, options.BufSize)
-	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
-		Topic:                       options.Topic,
-		SubscriptionName:            options.SubscriptionName,
-		Type:                        pulsar.SubscriptionType(options.Type),
-		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
-		MessageChannel:              receiveChannel,
-	})
-	if err != nil {
-		return nil, err
+	pConsumer := &PulsarReader{
+		client:       pc.client,
+		topicName:    options.Topic,
+		readerName:   options.SubscriptionName,
+		initPosition: options.SubscriptionInitialPosition,
+		msgChannel:   make(chan Message, options.BufSize),
 	}
-
-	pConsumer := &PulsarConsumer{c: consumer, closeCh: make(chan struct{})}
-	// prevent seek to earliest patch applied when using latest position options
-	if options.SubscriptionInitialPosition == SubscriptionPositionLatest {
-		pConsumer.AtLatest = true
-	}
-
 	return pConsumer, nil
 }
 

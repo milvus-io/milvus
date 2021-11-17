@@ -39,3 +39,33 @@ func (pm *pulsarMessage) ID() MessageID {
 	pid := &pulsarID{messageID: id}
 	return pid
 }
+
+var _ = (*pulsarReaderMessage)(nil)
+
+type pulsarReaderMessage struct {
+	msg pulsar.Message
+}
+
+// Topic get the topic from which this message originated from
+func (m *pulsarReaderMessage) Topic() string {
+	return m.msg.Topic()
+}
+
+// Properties are application defined key/value pairs that will be attached to the message.
+// Return the properties attached to the message.
+func (m *pulsarReaderMessage) Properties() map[string]string {
+	return m.msg.Properties()
+}
+
+// Payload get the payload of the message
+func (m *pulsarReaderMessage) Payload() []byte {
+	return m.msg.Payload()
+}
+
+// ID get the unique message ID associated with this message.
+// The message id can be used to univocally refer to a message without having the keep the entire payload in memory.
+func (m *pulsarReaderMessage) ID() MessageID {
+	id := m.msg.ID()
+	pid := &pulsarID{messageID: id}
+	return pid
+}
