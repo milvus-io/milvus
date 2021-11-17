@@ -4718,22 +4718,27 @@ type CreateAliasTask struct {
 	result    *commonpb.Status
 }
 
+// TraceCtx returns the trace context of the task.
 func (c *CreateAliasTask) TraceCtx() context.Context {
 	return c.ctx
 }
 
+// ID return the id of the task
 func (c *CreateAliasTask) ID() UniqueID {
 	return c.Base.MsgID
 }
 
+// SetID sets the id of the task
 func (c *CreateAliasTask) SetID(uid UniqueID) {
 	c.Base.MsgID = uid
 }
 
+// Name returns the name of the task
 func (c *CreateAliasTask) Name() string {
 	return CreateAliasTaskName
 }
 
+// Type returns the type of the task
 func (c *CreateAliasTask) Type() commonpb.MsgType {
 	return c.Base.MsgType
 }
