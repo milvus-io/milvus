@@ -9,7 +9,7 @@ jobs:
   test-pod-kill-chaos:
    
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -53,8 +53,7 @@ jobs:
           helm repo add chaos-mesh https://charts.chaos-mesh.org
           helm search repo chaos-mesh
           kubectl create ns chaos-testing
-          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --version v2.0.3 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
-          sleep 60s
+          helm install --wait --timeout 360s chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --version v2.0.3 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
           kubectl get po -n chaos-testing
       
       - name: Deploy Milvus
@@ -89,14 +88,19 @@ jobs:
           timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 || echo "chaos test failed"
 
       - name: Milvus E2E Test
-        timeout-minutes: 5
+        timeout-minutes: 10
         if: ${{ always() }}
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
           kubectl get pod -n chaos-testing
+          # wait all pod to be ready
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s
+          kubectl get pod -n chaos-testing
           ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
           kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+
           sleep 20s
           nc -vz 127.0.0.1 19530
 
