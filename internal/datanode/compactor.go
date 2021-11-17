@@ -403,9 +403,14 @@ func (t *compactionTask) compact() error {
 		return err
 	}
 
-	cpaths.deltaInfo.DeltaLogSize = deltaBuf.size
-	cpaths.deltaInfo.TimestampFrom = deltaBuf.tsFrom
-	cpaths.deltaInfo.TimestampTo = deltaBuf.tsTo
+	var deltaLogs []*datapb.DeltaLogInfo
+	if len(cpaths.deltaInfo.GetDeltaLogPath()) > 0 {
+		cpaths.deltaInfo.DeltaLogSize = deltaBuf.size
+		cpaths.deltaInfo.TimestampFrom = deltaBuf.tsFrom
+		cpaths.deltaInfo.TimestampTo = deltaBuf.tsTo
+
+		deltaLogs = append(deltaLogs, cpaths.deltaInfo)
+	}
 
 	pack := &datapb.CompactionResult{
 		PlanID:              t.plan.GetPlanID(),
@@ -413,8 +418,7 @@ func (t *compactionTask) compact() error {
 		InsertLogs:          cpaths.inPaths,
 		Field2StatslogPaths: cpaths.statsPaths,
 		NumOfRows:           numRows,
-
-		Deltalogs: []*datapb.DeltaLogInfo{cpaths.deltaInfo},
+		Deltalogs:           deltaLogs,
 	}
 
 	status, err := t.dc.CompleteCompaction(ctxTimeout, pack)
@@ -446,7 +450,11 @@ func (t *compactionTask) compact() error {
 	}
 
 	ti.injectOver <- true
-	log.Info("compaction done", zap.Int64("planID", t.plan.GetPlanID()))
+	log.Info("compaction done", zap.Int64("planID", t.plan.GetPlanID()),
+		zap.Any("num of binlog paths", len(cpaths.inPaths)),
+		zap.Any("num of stats paths", len(cpaths.statsPaths)),
+		zap.Any("deltalog paths", cpaths.deltaInfo.GetDeltaLogPath()),
+	)
 	return nil
 }
 
