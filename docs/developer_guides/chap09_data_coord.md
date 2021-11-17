@@ -110,6 +110,7 @@ const (
 	SegmentState_Sealed           SegmentState = 3
 	SegmentState_Flushed          SegmentState = 4
 	SegmentState_Flushing         SegmentState = 5
+	SegmentState_Dropped          SegmentState = 6
 )
 
 type SegmentStateInfo struct {
