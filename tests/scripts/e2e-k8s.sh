@@ -291,12 +291,14 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   
 fi
 
-export MILVUS_IMAGE_TAG="${TAG}"
-export MILVUS_IMAGE_REPO="${HUB}/milvus"
+#If disable_kind exist, need image tag & image repo to install helm
+if [[ -n "${DISABLE_KIND:-}" ]]; then
+  export MILVUS_IMAGE_TAG="${TAG}"
+  export MILVUS_IMAGE_REPO="${HUB}/milvus"
+fi
 
 if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
-
-  #[remove-kind] if disable_kind exist, do not need kind registry
+  #If disable_kind exist, do not need kind registry
   if [[ -n "${DISABLE_KIND:-}" ]]; then
       trace "docker login in ci registry" docker_login_ci_registry
   else
@@ -308,9 +310,8 @@ if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
         export MILVUS_IMAGE_REPO="${HUB}/milvus"
       fi
   fi
-  
- 
-
+  export MILVUS_IMAGE_TAG="${TAG}"
+  export MILVUS_IMAGE_REPO="${HUB}/milvus"
   pushd "${ROOT}"
     # Build Milvus Docker Image
     trace "build milvus image" "${ROOT}/build/build_image.sh"
