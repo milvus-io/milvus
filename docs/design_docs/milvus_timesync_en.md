@@ -129,4 +129,4 @@ message ChannelTimeTickMsg {
 After inserting `Timetick`, the `Msgstream` should look like this:
 ![msgstream time tick](./graphs/timesync_msgtream_timetick.png)
 
-`MsgStream` will process the messages in batches according to `TimeTick`, and ensure that the output messages meet the requirements of timestamp. For more details, please refer to the `MsgStream` design detail.
+`MsgStream` will process the messages in batches according to `TimeTick`, and ensure that the output messages meet the requirements of timestamp. For more details, please refer to the `MsgStream` design details.
