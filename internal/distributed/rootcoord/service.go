@@ -378,6 +378,7 @@ func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegme
 	return s.rootCoord.DescribeSegment(ctx, in)
 }
 
+// ShowSegments gets all segments
 func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return s.rootCoord.ShowSegments(ctx, in)
 }
