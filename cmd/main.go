@@ -142,17 +142,14 @@ func stopPid(filename string, runtimeDir string) error {
 }
 
 func makeRuntimeDir(dir string) error {
-	st, err := os.Stat(dir)
-	if os.IsNotExist(err) {
-		err = os.Mkdir(dir, 0755)
-		if err != nil {
-			return fmt.Errorf("create runtime dir %s failed", dir)
-		}
-		return nil
+	perm := os.FileMode(0755)
+	// os.MkdirAll equal to `mkdir -p`
+	err := os.MkdirAll(dir, perm)
+	if err != nil {
+		// err will be raised only when dir exists and dir is a file instead of a directory.
+		return fmt.Errorf("create runtime dir %s failed, err: %s", dir, err.Error())
 	}
-	if !st.IsDir() {
-		return fmt.Errorf("%s is not directory", dir)
-	}
+
 	tmpFile, err := ioutil.TempFile(dir, "tmp")
 	if err != nil {
 		return err
