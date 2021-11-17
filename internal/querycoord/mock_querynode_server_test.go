@@ -15,6 +15,7 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -61,6 +62,7 @@ type queryNodeServerMock struct {
 	getMetrics          func() (*milvuspb.GetMetricsResponse, error)
 
 	segmentInfos map[UniqueID]*querypb.SegmentInfo
+	segmentMu    sync.RWMutex
 
 	totalMem uint64
 }
@@ -206,7 +208,9 @@ func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.Lo
 			MemSize:      info.NumOfRows * int64(sizePerRecord),
 			NumRows:      info.NumOfRows,
 		}
+		qs.segmentMu.Lock()
 		qs.segmentInfos[info.SegmentID] = segmentInfo
+		qs.segmentMu.Unlock()
 	}
 
 	return qs.loadSegment()
@@ -226,11 +230,13 @@ func (qs *queryNodeServerMock) ReleaseSegments(ctx context.Context, req *querypb
 
 func (qs *queryNodeServerMock) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
+	qs.segmentMu.RLock()
 	for _, info := range qs.segmentInfos {
 		if info.CollectionID == req.CollectionID && info.NodeID == qs.queryNodeID {
 			segmentInfos = append(segmentInfos, info)
 		}
 	}
+	qs.segmentMu.RUnlock()
 
 	res, err := qs.getSegmentInfos()
 	if err == nil {

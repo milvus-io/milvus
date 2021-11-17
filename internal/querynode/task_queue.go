@@ -35,7 +35,7 @@ type taskQueue interface {
 }
 
 type baseTaskQueue struct {
-	utMu          sync.Mutex // guards unissuedTasks
+	utMu          sync.RWMutex // guards unissuedTasks
 	unissuedTasks *list.List
 
 	atMu        sync.Mutex // guards activeTasks
@@ -58,20 +58,24 @@ func (queue *baseTaskQueue) utChan() <-chan int {
 }
 
 func (queue *baseTaskQueue) utEmpty() bool {
+	queue.utMu.RLock()
+	defer queue.utMu.RUnlock()
 	return queue.unissuedTasks.Len() == 0
 }
 
 func (queue *baseTaskQueue) utFull() bool {
+	queue.utMu.RLock()
+	defer queue.utMu.RUnlock()
 	return int64(queue.unissuedTasks.Len()) >= queue.maxTaskNum
 }
 
 func (queue *baseTaskQueue) addUnissuedTask(t task) error {
-	queue.utMu.Lock()
-	defer queue.utMu.Unlock()
-
 	if queue.utFull() {
 		return errors.New("task queue is full")
 	}
+
+	queue.utMu.Lock()
+	defer queue.utMu.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
 		queue.unissuedTasks.PushBack(t)
