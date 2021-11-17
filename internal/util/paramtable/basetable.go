@@ -61,9 +61,9 @@ func (gp *BaseTable) Init() {
 
 	gp.loadFromCommonYaml()
 
-	gp.loadFromMilvusYaml()
-
 	gp.loadFromComponentYaml()
+
+	gp.loadFromMilvusYaml()
 
 	gp.tryloadFromEnv()
 
