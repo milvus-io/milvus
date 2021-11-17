@@ -466,7 +466,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		tr.Record("save index file done")
 	}
 	log.Info("IndexNode CreateIndex successfully ", zap.Int64("collect", collectionID),
-		zap.Int64("partition", partitionID), zap.Int64("segment", partitionID))
+		zap.Int64("partition", partitionID), zap.Int64("segment", segmentID))
 	tr.Elapse("all done")
 	return nil
 }
