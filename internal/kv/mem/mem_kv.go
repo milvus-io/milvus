@@ -155,8 +155,8 @@ func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	kv.Lock()
 	defer kv.Unlock()
 
-	keys := make([]string, 0)
-	values := make([]string, 0)
+	var keys []string
+	var values []string
 
 	kv.tree.Ascend(func(i btree.Item) bool {
 		if strings.HasPrefix(i.(memoryKVItem).key, key) {
@@ -179,7 +179,7 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remova
 	kv.Lock()
 	defer kv.Unlock()
 
-	keys := make([]memoryKVItem, 0)
+	var keys []memoryKVItem
 	for _, key := range removals {
 		kv.tree.Ascend(func(i btree.Item) bool {
 			if strings.HasPrefix(i.(memoryKVItem).key, key) {
@@ -202,7 +202,7 @@ func (kv *MemoryKV) RemoveWithPrefix(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
 
-	keys := make([]btree.Item, 0)
+	var keys []btree.Item
 
 	kv.tree.Ascend(func(i btree.Item) bool {
 		if strings.HasPrefix(i.(memoryKVItem).key, key) {
