@@ -88,7 +88,7 @@ func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	return keys, values, nil
 }
 
-// Save object with @key to Minio. Object value is @value.
+// Save object with @key to btree. Object value is @value.
 func (kv *MemoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -96,7 +96,7 @@ func (kv *MemoryKV) Save(key, value string) error {
 	return nil
 }
 
-// Remove delete an object with @key.
+// Remove deletes an object with @key.
 func (kv *MemoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
