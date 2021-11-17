@@ -20,6 +20,7 @@ from pymilvus import (
 
 
 def hello_milvus(host="127.0.0.1"):
+    import time
     # create connection
     connections.connect(host=host, port="19530")
 
@@ -66,12 +67,14 @@ def hello_milvus(host="127.0.0.1"):
     print(f"\nCreate index...")
     collection.create_index(field_name="float_vector", index_params=default_index)
     print(f"\nload collection...")
+    t0 = time.time()
     collection.load()
+    t1 = time.time()
+    print(f"\nload collection cost {t1 - t0} seconds")
 
     # load and search
     topK = 5
     search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
-    import time
     start_time = time.time()
     print(f"\nSearch...")
     # define output_fields of search result
