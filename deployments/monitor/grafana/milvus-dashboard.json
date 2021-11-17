@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1636973441002,
+  "iteration": 1637148505037,
   "links": [],
   "panels": [
     {
@@ -4418,7 +4418,7 @@
         "avg": false,
         "current": false,
         "max": false,
-        "min": "0",
+        "min": false,
         "show": true,
         "total": false,
         "values": false
@@ -4578,7 +4578,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": 0,
+          "min": null,
           "show": false
         }
       ],
@@ -4667,7 +4667,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": 0,
+          "min": null,
           "show": true
         },
         {
@@ -4675,7 +4675,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": 0,
+          "min": null,
           "show": true
         }
       ],
@@ -6047,7 +6047,7 @@
         "allValue": null,
         "current": {
           "isNone": true,
-          "selected": false,
+          "selected": true,
           "text": "None",
           "value": ""
         },
@@ -6142,7 +6142,7 @@
     ]
   },
   "time": {
-    "from": "now-24h",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {
@@ -6175,5 +6175,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 164
+  "version": 166
 }
