@@ -244,6 +244,7 @@ type QueryNode interface {
 
 	// AddQueryChannel notifies QueryNode to subscribe a query channel and be a producer of a query result channel.
 	AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error)
+  // RemoveQueryChannel removes the query channel for QueryNode component.
 	RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error)
 	WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	// LoadSegments notifies QueryNode to load the sealed segments from storage. The load tasks are sync to this
