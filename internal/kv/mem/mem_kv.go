@@ -117,6 +117,7 @@ func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error) {
 	return result, nil
 }
 
+// MultiSave saves given key-value pairs in MemoryKV atomicly.
 func (kv *MemoryKV) MultiSave(kvs map[string]string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -126,6 +127,7 @@ func (kv *MemoryKV) MultiSave(kvs map[string]string) error {
 	return nil
 }
 
+// MultiRemove removes given @keys in MemoryKV atomicly.
 func (kv *MemoryKV) MultiRemove(keys []string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -135,6 +137,7 @@ func (kv *MemoryKV) MultiRemove(keys []string) error {
 	return nil
 }
 
+// MultiSaveAndRemove saves and removes given key-value pairs in MemoryKV atomicly.
 func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -147,7 +150,7 @@ func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []strin
 	return nil
 }
 
-// todo
+// LoadWithPrefix returns all keys & values with given prefix.
 func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	kv.Lock()
 	defer kv.Unlock()
@@ -165,6 +168,7 @@ func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+// Close dummy close
 func (kv *MemoryKV) Close() {
 }
 
