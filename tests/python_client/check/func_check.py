@@ -244,8 +244,14 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         exp_res = check_items.get("exp_res", None)
         with_vec = check_items.get("with_vec", False)
-        if exp_res and isinstance(query_res, list):
-            assert pc.equal_entities_list(exp=exp_res, actual=query_res, with_vec=with_vec)
+        if exp_res is not None:
+            if isinstance(query_res, list):
+                assert pc.equal_entities_list(exp=exp_res, actual=query_res, with_vec=with_vec)
+                return True
+            else:
+                log.error(f"Query result {query_res} is not list")
+                return False
+        log.warning(f'Expected query result is {exp_res}')
 
     @staticmethod
     def check_query_empty(query_res, func_name):
