@@ -51,6 +51,10 @@ service MilvusService {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
+
+  rpc SetGracefulTime(SetGracefulTimeRequest) returns (common.Status) {}
+
+  rpc SetTimeTickInterval(SetTimeTickIntervalRequest) returns (common.Status) {}
 }
 
 message CreateAliasRequest {
@@ -714,4 +718,14 @@ message GetMetricsResponse {
 
 service ProxyService {
   rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
+}
+
+message SetGracefulTimeRequest {
+  common.MsgBase base = 1;
+  int64 graceful_time = 2;  // in milliseconds
+}
+
+message SetTimeTickIntervalRequest {
+  common.MsgBase base = 1;
+  int64 time_tick_interval = 2; // in millisecond
 }

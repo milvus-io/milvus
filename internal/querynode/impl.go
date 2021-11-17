@@ -664,3 +664,17 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		Response: "",
 	}, nil
 }
+
+func (node *QueryNode) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	log.Debug("QueryNode receive requests to set graceful time",
+		zap.Int64("node_id", Params.QueryNodeID),
+		zap.Int64("gracefulTime", req.GracefulTime))
+
+	// TODO(dragondriver): check if gracefulTime is valid
+
+	Params.setGracefulTime(req.GracefulTime)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}

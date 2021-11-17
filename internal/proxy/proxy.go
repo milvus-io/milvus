@@ -43,7 +43,8 @@ type UniqueID = typeutil.UniqueID
 // Timestamp is alias of typeutil.Timestamp
 type Timestamp = typeutil.Timestamp
 
-const sendTimeTickMsgInterval = 200 * time.Millisecond
+var SendTimeTickMsgInterval = 200 * time.Millisecond
+
 const channelMgrTickerInterval = 100 * time.Millisecond
 
 // make sure Proxy implements types.Proxy
@@ -84,6 +85,8 @@ type Proxy struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+
+	timer *time.Ticker
 }
 
 // NewProxy returns a Proxy struct.
@@ -94,6 +97,7 @@ func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 		ctx:       ctx1,
 		cancel:    cancel,
 		msFactory: factory,
+		timer:     time.NewTicker(SendTimeTickMsgInterval),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	log.Debug("Proxy", zap.Any("State", node.stateCode.Load()))
@@ -227,13 +231,13 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 		defer node.wg.Done()
 
 		// TODO(dragondriver): read this from config
-		timer := time.NewTicker(sendTimeTickMsgInterval)
+		//timer := time.NewTicker(sendTimeTickMsgInterval)
 
 		for {
 			select {
 			case <-node.ctx.Done():
 				return
-			case <-timer.C:
+			case <-node.timer.C:
 				stats, ts, err := node.chTicker.getMinTsStatistics()
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics", zap.Error(err))

@@ -2423,6 +2423,17 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	}, nil
 }
 
+func (node *Proxy) SetGracefulTime(ctx context.Context, req *milvuspb.SetGracefulTimeRequest) (*commonpb.Status, error) {
+	log.Debug("Proxy set graceful time", zap.Int64("graceful time", req.GracefulTime))
+	if node.queryCoord != nil {
+		return node.queryCoord.SetGracefulTime(ctx, req)
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "query coord not healthy",
+	}, nil
+}
+
 // checkHealthy checks proxy state is Healthy
 func (node *Proxy) checkHealthy() bool {
 	code := node.stateCode.Load().(internalpb.StateCode)
@@ -2434,4 +2445,14 @@ func unhealthyStatus() *commonpb.Status {
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "proxy not healthy",
 	}
+}
+
+func (node *Proxy) SetTimeTickInterval(ctx context.Context, request *milvuspb.SetTimeTickIntervalRequest) (*commonpb.Status, error) {
+	log.Debug("Proxy set time tick interval", zap.Int64("interval", request.TimeTickInterval))
+	SendTimeTickMsgInterval = time.Millisecond * time.Duration(request.TimeTickInterval)
+	node.timer.Reset(SendTimeTickMsgInterval)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
 }
