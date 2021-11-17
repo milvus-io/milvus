@@ -25,7 +25,7 @@ Among them, the batch data will no longer be changed, and the search request wil
 QueryNodes and DataNodes consume user insert requests through the same subscription mechanism, which constitute the
 streaming data.
 
-Due to the network delays, QueryNodes often do not hold all the latest streaming data. Without other control mechanism,
+Due to the network delays, QueryNodes often do not hold all the latest streaming data. Without other control mechanisms,
 some unconsumed data will be invisible and thus reduce the query accuracy. At this time, let's introduce the
 "GuaranteeTs".
 
