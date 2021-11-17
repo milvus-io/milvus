@@ -195,3 +195,12 @@ class TestcaseBase(Base):
         conn.flush([collection_w.name])
         collection_w.load()
         return collection_w, partition_w, df_partition, df_default
+
+    def collection_insert_two_segments_one_shard(self, prefix, nb):
+        # init collection with one shard, insert data into two segments on one shard (they can be merged)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        for i in range(2):
+            df = cf.gen_default_dataframe_data(nb, start=i * nb)
+            collection_w.insert(df)
+            assert collection_w.num_entities == nb * (i + 1)
+        return collection_w

@@ -1,10 +1,13 @@
+import asyncio
 import sys
 
 from pymilvus import Collection
+from pymilvus.client.types import State
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
+from utils.util_log import test_log as log
 
 TIMEOUT = 20
 
@@ -16,7 +19,8 @@ TIMEOUT = 20
 class ApiCollectionWrapper:
     collection = None
 
-    def init_collection(self, name, schema=None, using="default", shards_num=2, check_task=None, check_items=None, **kwargs):
+    def init_collection(self, name, schema=None, using="default", shards_num=2, check_task=None, check_items=None,
+                        **kwargs):
         """ In order to distinguish the same name of collection """
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([Collection, name, schema, using, shards_num], **kwargs)
@@ -239,10 +243,12 @@ class ApiCollectionWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def get_compaction_state(self, timeout=None, **kwargs):
+    def get_compaction_state(self, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
-        res = self.collection.get_compaction_state(timeout, **kwargs)
-        return res
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.get_compaction_state, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
 
     def get_compaction_plans(self, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
@@ -250,3 +256,9 @@ class ApiCollectionWrapper:
         res, check = api_request([self.collection.get_compaction_plans, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
+
+    def wait_for_compaction_completed(self, timeout=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        res = self.collection.wait_for_compaction_completed(timeout, **kwargs)
+        log.debug(res)
+        return res
