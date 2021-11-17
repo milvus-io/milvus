@@ -245,6 +245,7 @@ func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, v
 	return tmpFGs, nil
 }
 
+// startPartitionFlowGraph would start the partition flow graph
 func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID, vChannels []string) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
