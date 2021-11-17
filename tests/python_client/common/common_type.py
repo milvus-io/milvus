@@ -13,6 +13,7 @@ default_nq = 2
 default_limit = 10
 default_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
 default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_binary_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
 max_top_k = 16384
 max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
@@ -44,6 +45,9 @@ binary_vec_field_desc = "binary vector type field"
 max_dim = 32768
 gracefulTime = 1
 default_nlist = 128
+compact_segment_num_threshold = 10
+# compact_delta_binlog_ratio is 0.2
+compact_delta_ratio_reciprocal = 5
 
 Not_Exist = "Not_Exist"
 Connect_Object_Name = "Milvus"
