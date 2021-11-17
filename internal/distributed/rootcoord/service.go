@@ -365,6 +365,7 @@ func (s *Server) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimest
 	return s.rootCoord.AllocTimestamp(ctx, in)
 }
 
+// AllocID allocates an ID
 func (s *Server) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	return s.rootCoord.AllocID(ctx, in)
 }
