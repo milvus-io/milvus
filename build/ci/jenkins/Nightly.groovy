@@ -166,7 +166,7 @@ pipeline {
                                 body: '$DEFAULT_CONTENT',
                                 recipientProviders: [requestor()],
                                 replyTo: '$DEFAULT_REPLYTO',
-                                to: "${authorEmail}"
+                                to: "qa@zilliz.com"
                             }
                         }
                     }
