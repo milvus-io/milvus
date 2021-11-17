@@ -149,10 +149,9 @@ class TestDeleteParams(TestcaseBase):
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("ids", [[tmp_nb], [0, tmp_nb]])
-    def test_delete_not_existed_values(self, ids):
+    def test_delete_not_existed_values(self):
         """
-        target: test delete part/not existed values
+        target: test delete not existed values
         method: delete data not in the collection
         expected: No exception
         """
@@ -160,11 +159,23 @@ class TestDeleteParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         # No exception
-        expr = f'{ct.default_int64_field_name} in {ids}'
-        res = collection_w.delete(expr=expr)[0]
-        # todo assert res.delete_count == 0
+        expr = f'{ct.default_int64_field_name} in {[tmp_nb]}'
+        collection_w.delete(expr=expr)[0]
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results,
                            check_items={exp_res: query_res_tmp_expr})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_part_not_existed_values(self):
+        """
+        target: test delete part non-existed values
+        method: delete ids which part not existed
+        expected: delete existed id, ignore non-existed id
+        """
+        # init collection with tmp_nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
+        expr = f'{ct.default_int64_field_name} in {[0, tmp_nb]}'
+        collection_w.delete(expr=expr)[0]
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_inconsistent_values(self):
