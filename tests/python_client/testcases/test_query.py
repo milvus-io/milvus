@@ -90,7 +90,7 @@ class TestQueryParams(TestcaseBase):
                                    check_items={exp_res: res[:1]})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dup_times",[1,2,3])
+    @pytest.mark.parametrize("dup_times", [1, 2, 3])
     @pytest.mark.parametrize("dim", [8, 128])
     def test_query_with_dup_primary_key(self, dim, dup_times):
         """
