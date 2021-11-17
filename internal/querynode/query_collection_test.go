@@ -659,16 +659,14 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 
 		// test online
 		segmentChangeInfos.Infos[0].OnlineSegments = append(segmentChangeInfos.Infos[0].OnlineSegments, genSimpleSegmentInfo())
-		err = qc.adjustByChangeInfo(segmentChangeInfos)
-		assert.NoError(t, err)
+		qc.adjustByChangeInfo(segmentChangeInfos)
 		ids := qc.globalSegmentManager.getGlobalSegmentIDs()
 		assert.Len(t, ids, 1)
 
 		// test offline
 		segmentChangeInfos.Infos[0].OnlineSegments = make([]*querypb.SegmentInfo, 0)
 		segmentChangeInfos.Infos[0].OfflineSegments = append(segmentChangeInfos.Infos[0].OfflineSegments, genSimpleSegmentInfo())
-		err = qc.adjustByChangeInfo(segmentChangeInfos)
-		assert.NoError(t, err)
+		qc.adjustByChangeInfo(segmentChangeInfos)
 		ids = qc.globalSegmentManager.getGlobalSegmentIDs()
 		assert.Len(t, ids, 0)
 	})
@@ -683,8 +681,7 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 		simpleInfo := genSimpleSegmentInfo()
 		simpleInfo.CollectionID = 1000
 		segmentChangeInfos.Infos[0].OnlineSegments = append(segmentChangeInfos.Infos[0].OnlineSegments, simpleInfo)
-		err = qc.adjustByChangeInfo(segmentChangeInfos)
-		assert.NoError(t, err)
+		qc.adjustByChangeInfo(segmentChangeInfos)
 	})
 
 	t.Run("test no segment when adjustByChangeInfo", func(t *testing.T) {
@@ -697,8 +694,7 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 		segmentChangeInfos := genSimpleSealedSegmentsChangeInfoMsg()
 		segmentChangeInfos.Infos[0].OfflineSegments = append(segmentChangeInfos.Infos[0].OfflineSegments, genSimpleSegmentInfo())
 
-		err = qc.adjustByChangeInfo(segmentChangeInfos)
-		assert.Nil(t, err)
+		qc.adjustByChangeInfo(segmentChangeInfos)
 	})
 }
 

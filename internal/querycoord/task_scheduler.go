@@ -954,6 +954,7 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 	}
 
 	if err != nil {
+		log.Error("Failed to update global sealed seg infos, begin to rollback", zap.Error(err))
 		rollBackSegmentChangeInfoErr := retry.Do(ctx, func() error {
 			rollBackChangeInfos := reverseSealedSegmentChangeInfo(sealedSegmentChangeInfos)
 			for collectionID, infos := range rollBackChangeInfos {
@@ -967,6 +968,7 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 		if rollBackSegmentChangeInfoErr != nil {
 			log.Error("scheduleLoop: Restore the information of global sealed segments in query node failed", zap.Error(rollBackSegmentChangeInfoErr))
 		}
+		log.Info("Successfully roll back segment info change")
 		return err
 	}
 

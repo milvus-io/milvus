@@ -303,11 +303,7 @@ func (q *queryCollection) consumeQuery() {
 						log.Warn(err.Error())
 					}
 				case *msgstream.SealedSegmentsChangeInfoMsg:
-					err := q.adjustByChangeInfo(sm)
-					if err != nil {
-						// should not happen
-						log.Error(err.Error())
-					}
+					q.adjustByChangeInfo(sm)
 				default:
 					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
 				}
@@ -316,15 +312,25 @@ func (q *queryCollection) consumeQuery() {
 	}
 }
 
-func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChangeInfoMsg) error {
+func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChangeInfoMsg) {
 	for _, info := range msg.Infos {
+		// precheck collection id, if not the same collection, skip
+		for _, segment := range info.OnlineSegments {
+			if segment.CollectionID != q.collectionID {
+				return
+			}
+		}
+
+		for _, segment := range info.OfflineSegments {
+			if segment.CollectionID != q.collectionID {
+				return
+			}
+		}
+
 		// for OnlineSegments:
 		for _, segment := range info.OnlineSegments {
 			// 1. update global sealed segments
-			err := q.globalSegmentManager.addGlobalSegmentInfo(segment)
-			if err != nil {
-				return err
-			}
+			q.globalSegmentManager.addGlobalSegmentInfo(segment)
 			// 2. update excluded segment, cluster have been loaded sealed segments,
 			// so we need to avoid getting growing segment from flow graph.
 			q.streaming.replica.addExcludedSegments(segment.CollectionID, []*datapb.SegmentInfo{
@@ -346,10 +352,14 @@ func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChange
 		// for OfflineSegments:
 		for _, segment := range info.OfflineSegments {
 			// 1. update global sealed segments
-			q.globalSegmentManager.removeGlobalSegmentInfo(segment.SegmentID)
+			q.globalSegmentManager.removeGlobalSealedSegmentInfo(segment.SegmentID)
 		}
+
+		log.Info("Successfully changed global sealed segment info ",
+			zap.Int64("collection ", q.collectionID),
+			zap.Any("online segments ", info.OnlineSegments),
+			zap.Any("offline segments ", info.OfflineSegments))
 	}
-	return nil
 }
 
 func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {

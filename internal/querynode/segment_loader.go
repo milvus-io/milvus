@@ -35,10 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
-const (
-	queryNodeSegmentMetaPrefix = "queryNode-segmentMeta"
-)
-
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	historicalReplica ReplicaInterface

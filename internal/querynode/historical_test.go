@@ -18,9 +18,9 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestHistorical_GlobalSealedSegments(t *testing.T) {
@@ -71,7 +71,7 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 	segmentInfoBytes, err := proto.Marshal(segmentInfo)
 	assert.Nil(t, err)
 	assert.NotNil(t, n.etcdKV)
-	segmentKey := segmentMetaPrefix + "/" + strconv.FormatInt(segmentID, 10)
+	segmentKey := util.SegmentMetaPrefix + "/" + strconv.FormatInt(segmentID, 10)
 	err = n.etcdKV.Save(segmentKey, string(segmentInfoBytes))
 	assert.NoError(t, err)
 
