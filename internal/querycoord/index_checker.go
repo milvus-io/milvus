@@ -79,6 +79,7 @@ func newIndexChecker(ctx context.Context,
 
 		meta:      meta,
 		scheduler: scheduler,
+		cluster:   cluster,
 
 		rootCoord:  root,
 		indexCoord: index,
