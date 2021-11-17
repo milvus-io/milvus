@@ -881,6 +881,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 			return fmt.Errorf("Failed to seek, error %s", err.Error())
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
+		ms.chanMsgPos[consumer] = mp
 
 		// rmq seek behavior (position, ...)
 		// pulsar seek behavior [position, ...)
