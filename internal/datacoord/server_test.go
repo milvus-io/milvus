@@ -1182,13 +1182,13 @@ func TestGetVChannelPos(t *testing.T) {
 	assert.Nil(t, err)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
-		vchan := svr.GetVChanPositions("chx1", 0, allPartitionID)
+		vchan := svr.handler.GetVChanPositions("chx1", 0, allPartitionID)
 		assert.Empty(t, vchan.UnflushedSegments)
 		assert.Empty(t, vchan.FlushedSegments)
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
-		vchan := svr.GetVChanPositions("ch1", 0, allPartitionID)
+		vchan := svr.handler.GetVChanPositions("ch1", 0, allPartitionID)
 		assert.EqualValues(t, 1, len(vchan.FlushedSegments))
 		assert.EqualValues(t, 1, vchan.FlushedSegments[0].ID)
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegments))
@@ -1196,7 +1196,7 @@ func TestGetVChannelPos(t *testing.T) {
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
-		infos := svr.GetVChanPositions("ch0_suffix", 1, allPartitionID)
+		infos := svr.handler.GetVChanPositions("ch0_suffix", 1, allPartitionID)
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegments))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegments))
@@ -1204,7 +1204,7 @@ func TestGetVChannelPos(t *testing.T) {
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
-		infos := svr.GetVChanPositions("ch1", 0, 1)
+		infos := svr.handler.GetVChanPositions("ch1", 0, 1)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegments))
 		assert.EqualValues(t, 1, len(infos.UnflushedSegments))
@@ -1622,7 +1622,7 @@ func TestOptions(t *testing.T) {
 	t.Run("SetCluster", func(t *testing.T) {
 		kv := memkv.NewMemoryKV()
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, dummyPosProvider{})
+		channelManager, err := NewChannelManager(kv, newMockHandler())
 		assert.Nil(t, err)
 
 		cluster := NewCluster(sessionManager, channelManager)
@@ -1670,7 +1670,7 @@ func (p *mockPolicyFactory) NewDeregisterPolicy() DeregisterPolicy {
 
 func TestHandleSessionEvent(t *testing.T) {
 	kv := memkv.NewMemoryKV()
-	channelManager, err := NewChannelManager(kv, dummyPosProvider{}, withFactory(&mockPolicyFactory{}))
+	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
 	assert.Nil(t, err)
 	sessionManager := NewSessionManager()
 	cluster := NewCluster(sessionManager, channelManager)

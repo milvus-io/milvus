@@ -29,7 +29,7 @@ func TestReload(t *testing.T) {
 		Params.Init()
 		kv := memkv.NewMemoryKV()
 		hash := consistent.New()
-		cm, err := NewChannelManager(kv, &dummyPosProvider{}, withFactory(NewConsistentHashChannelPolicyFactory(hash)))
+		cm, err := NewChannelManager(kv, newMockHandler(), withFactory(NewConsistentHashChannelPolicyFactory(hash)))
 		assert.Nil(t, err)
 		assert.Nil(t, cm.AddNode(1))
 		assert.Nil(t, cm.AddNode(2))
@@ -37,7 +37,7 @@ func TestReload(t *testing.T) {
 		assert.Nil(t, cm.Watch(&channel{"channel2", 1}))
 
 		hash2 := consistent.New()
-		cm2, err := NewChannelManager(kv, &dummyPosProvider{}, withFactory(NewConsistentHashChannelPolicyFactory(hash2)))
+		cm2, err := NewChannelManager(kv, newMockHandler(), withFactory(NewConsistentHashChannelPolicyFactory(hash2)))
 		assert.Nil(t, err)
 		assert.Nil(t, cm2.Startup([]int64{1, 2}))
 		assert.Nil(t, cm2.AddNode(3))

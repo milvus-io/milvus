@@ -114,10 +114,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()))
 
-		if coll := s.GetCollection(ctx, r.CollectionID); coll == nil {
-			continue
-		}
-
 		s.cluster.Watch(r.ChannelName, r.CollectionID)
 
 		allocations, err := s.segmentManager.AllocSegment(ctx,
@@ -347,7 +343,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", req.GetField2BinlogPaths()))
 
-	if req.GetDropped() && s.checkShouldDropChannel(channel) {
+	if req.GetDropped() && s.handler.CheckShouldDropChannel(channel) {
 		log.Debug("remove channel", zap.String("channel", channel))
 		err = s.channelManager.RemoveChannel(channel)
 		if err != nil {
@@ -376,21 +372,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
-}
-
-func (s *Server) checkShouldDropChannel(channel string) bool {
-	segments := s.meta.GetSegmentsByChannel(channel)
-	for _, segment := range segments {
-		if segment.GetStartPosition() != nil && // fitler empty segment
-			// FIXME: we filter compaction generated segments
-			// because datanode may not know the segment due to the network lag or
-			// datacoord crash when handling CompleteCompaction.
-			len(segment.CompactionFrom) == 0 &&
-			segment.GetState() != commonpb.SegmentState_Dropped {
-			return false
-		}
-	}
-	return true
 }
 
 // GetComponentStates returns DataCoord's current state
@@ -521,7 +502,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	channels := dresp.GetVirtualChannelNames()
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	for _, c := range channels {
-		channelInfo := s.GetVChanPositions(c, collectionID, partitionID)
+		channelInfo := s.handler.GetVChanPositions(c, collectionID, partitionID)
 		channelInfos = append(channelInfos, channelInfo)
 		log.Debug("datacoord append channelInfo in GetRecoveryInfo",
 			zap.Any("collectionID", collectionID),
