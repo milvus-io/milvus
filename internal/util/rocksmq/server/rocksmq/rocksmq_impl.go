@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/tecbot/gorocksdb"
@@ -114,6 +115,19 @@ func checkRetention() bool {
 	return RocksmqRetentionTimeInMinutes != -1 && RocksmqRetentionSizeInMB != -1
 }
 
+func getNowTs(idAllocator allocator.GIDAllocator) (int64, error) {
+	err := idAllocator.UpdateID()
+	if err != nil {
+		return 0, err
+	}
+	newID, err := idAllocator.AllocOne()
+	if err != nil {
+		return 0, err
+	}
+	nowTs, _ := tsoutil.ParseTS(uint64(newID))
+	return nowTs.Unix(), err
+}
+
 var topicMu sync.Map = sync.Map{}
 
 type rocksmq struct {
@@ -161,7 +175,7 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 		ackedMu:     sync.Map{},
 	}
 
-	ri, err := initRetentionInfo(kv, db)
+	ri, err := initRetentionInfo(kv, db, idAllocator)
 	if err != nil {
 		return nil, err
 	}
@@ -263,9 +277,14 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return err
 	}
 
+	nowTs, err := getNowTs(rmq.idAllocator)
+	if err != nil {
+		return err
+	}
+
 	rmq.retentionInfo.mutex.Lock()
 	defer rmq.retentionInfo.mutex.Unlock()
-	rmq.retentionInfo.topics.Store(topicName, time.Now().Unix())
+	rmq.retentionInfo.topics.Store(topicName, nowTs)
 	log.Debug("Rocksmq create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
@@ -833,7 +852,12 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 			}
 		}
 
-		nowTs := strconv.FormatInt(time.Now().Unix(), 10)
+		nowTs, err := getNowTs(rmq.idAllocator)
+		if err != nil {
+			log.Warn("updateAckedInfos get now timestamp failed")
+			return err
+		}
+		nowTsStr := strconv.FormatInt(nowTs, 10)
 		ackedTsKvs := make(map[string]string)
 		totalAckMsgSize := int64(0)
 
@@ -845,7 +869,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 			if pID <= minBeginID {
 				// Update acked info for message pID
 				pageAckedTsKey := path.Join(fixedAckedTsKey, strconv.FormatInt(pID, 10))
-				ackedTsKvs[pageAckedTsKey] = nowTs
+				ackedTsKvs[pageAckedTsKey] = nowTsStr
 
 				// get current page message size
 				pageMsgSizeKey := path.Join(fixedPageSizeKey, strconv.FormatInt(pID, 10))

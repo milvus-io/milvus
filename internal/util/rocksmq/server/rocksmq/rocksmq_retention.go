@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/allocator"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
 
@@ -45,31 +46,37 @@ type retentionInfo struct {
 	topics sync.Map
 	mutex  sync.RWMutex
 
-	kv *rocksdbkv.RocksdbKV
-	db *gorocksdb.DB
+	kv          *rocksdbkv.RocksdbKV
+	db          *gorocksdb.DB
+	idAllocator allocator.GIDAllocator
 
 	closeCh   chan struct{}
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
 }
 
-func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
+func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB, idAllocator allocator.GIDAllocator) (*retentionInfo, error) {
 	ri := &retentionInfo{
-		topics:  sync.Map{},
-		mutex:   sync.RWMutex{},
-		kv:      kv,
-		db:      db,
-		closeCh: make(chan struct{}),
-		closeWg: sync.WaitGroup{},
+		topics:      sync.Map{},
+		mutex:       sync.RWMutex{},
+		kv:          kv,
+		db:          db,
+		idAllocator: idAllocator,
+		closeCh:     make(chan struct{}),
+		closeWg:     sync.WaitGroup{},
 	}
 	// Get topic from topic begin id
 	beginIDKeys, _, err := ri.kv.LoadWithPrefix(TopicBeginIDTitle)
 	if err != nil {
 		return nil, err
 	}
+	nowTs, err := getNowTs(idAllocator)
+	if err != nil {
+		return nil, err
+	}
 	for _, key := range beginIDKeys {
 		topic := key[len(TopicBeginIDTitle):]
-		ri.topics.Store(topic, time.Now().Unix())
+		ri.topics.Store(topic, nowTs)
 		topicMu.Store(topic, new(sync.Mutex))
 	}
 	return ri, nil
@@ -175,7 +182,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 			if err != nil {
 				return err
 			}
-			if msgTimeExpiredCheck(ackedTs) {
+			if msgTimeExpiredCheck(ackedTs, ri.idAllocator) {
 				pageEndID = pageID
 				pValue := pageIter.Value()
 				size, err := strconv.ParseInt(string(pValue.Data()), 10, 64)
@@ -376,8 +383,13 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 	return nil
 }
 
-func msgTimeExpiredCheck(ackedTs int64) bool {
-	return ackedTs+atomic.LoadInt64(&RocksmqRetentionTimeInMinutes)*MINUTE < time.Now().Unix()
+func msgTimeExpiredCheck(ackedTs int64, idAllocator allocator.GIDAllocator) bool {
+	nowTs, err := getNowTs(idAllocator)
+	if err != nil {
+		log.Warn("get not timestamp failed when do msgTimeExpiredCheck")
+		nowTs = time.Now().Unix()
+	}
+	return ackedTs+atomic.LoadInt64(&RocksmqRetentionTimeInMinutes)*MINUTE < nowTs
 }
 
 func msgSizeExpiredCheck(deletedAckedSize, ackedSize int64) bool {

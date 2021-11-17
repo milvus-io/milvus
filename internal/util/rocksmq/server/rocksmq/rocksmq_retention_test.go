@@ -134,7 +134,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 	assert.NotNil(t, rmq)
 
 	rmq.retentionInfo.kv.DB = nil
-	_, err = initRetentionInfo(rmq.retentionInfo.kv, rmq.retentionInfo.db)
+	_, err = initRetentionInfo(rmq.retentionInfo.kv, rmq.retentionInfo.db, nil)
 	assert.Error(t, err)
 }
 
