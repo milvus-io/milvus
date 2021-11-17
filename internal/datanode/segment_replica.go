@@ -554,7 +554,7 @@ func (replica *SegmentReplica) refreshFlushedSegStatistics(segID UniqueID, numRo
 		return
 	}
 
-	log.Warn("refesh numRow on not exists segment", zap.Int64("segID", segID))
+	log.Warn("refresh numRow on not exists segment", zap.Int64("segID", segID))
 }
 
 // updateStatistics updates the number of rows of a segment in replica.

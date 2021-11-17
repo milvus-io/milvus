@@ -56,7 +56,7 @@ func TestInsertlogIterator(t *testing.T) {
 
 	t.Run("test dispose", func(t *testing.T) {
 		blobs := generateTestData(t, 1)
-		itr, err := NewInsertBinlogIterator(blobs)
+		itr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
 		assert.Nil(t, err)
 
 		itr.Dispose()
@@ -67,7 +67,7 @@ func TestInsertlogIterator(t *testing.T) {
 
 	t.Run("not empty iterator", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
-		itr, err := NewInsertBinlogIterator(blobs)
+		itr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
 		assert.Nil(t, err)
 
 		for i := 1; i <= 3; i++ {
@@ -76,6 +76,7 @@ func TestInsertlogIterator(t *testing.T) {
 			assert.Nil(t, err)
 			value := v.(*Value)
 			expected := &Value{
+				int64(i),
 				int64(i),
 				int64(i),
 				false,
@@ -106,7 +107,7 @@ func TestMergeIterator(t *testing.T) {
 
 	t.Run("empty and non-empty iterators", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
-		insertItr, err := NewInsertBinlogIterator(blobs)
+		insertItr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
 		assert.Nil(t, err)
 		iterators := []Iterator{
 			&InsertBinlogIterator{data: &InsertData{}},
@@ -123,6 +124,7 @@ func TestMergeIterator(t *testing.T) {
 			expected := &Value{
 				int64(i),
 				int64(i),
+				int64(i),
 				false,
 				map[FieldID]interface{}{rootcoord.TimeStampField: int64(i), rootcoord.RowIDField: int64(i), 101: int32(i)},
 			}
@@ -135,15 +137,16 @@ func TestMergeIterator(t *testing.T) {
 
 	t.Run("non-empty iterators", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
-		itr1, err := NewInsertBinlogIterator(blobs)
+		itr1, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
 		assert.Nil(t, err)
-		itr2, err := NewInsertBinlogIterator(blobs)
+		itr2, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
 		assert.Nil(t, err)
 		iterators := []Iterator{itr1, itr2}
 		itr := NewMergeIterator(iterators)
 
 		for i := 1; i <= 3; i++ {
 			expected := &Value{
+				int64(i),
 				int64(i),
 				int64(i),
 				false,
@@ -165,7 +168,7 @@ func TestMergeIterator(t *testing.T) {
 
 	t.Run("test dispose", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
-		itr1, err := NewInsertBinlogIterator(blobs)
+		itr1, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
 		assert.Nil(t, err)
 		itr := NewMergeIterator([]Iterator{itr1})
 

@@ -152,6 +152,8 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 	}
 
 	dbuff.updateSize(dbuff.delData.RowCount)
+	log.Debug("mergeDeltalogs end", zap.Int64("PlanID", t.getPlanID()),
+		zap.Int("number of pks to compact in insert logs", len(pk2ts)))
 
 	return pk2ts, dbuff, nil
 }
@@ -196,7 +198,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 			return nil, 0, errors.New("Unexpected error")
 		}
 
-		if _, ok := delta[v.ID]; ok {
+		if _, ok := delta[v.PK]; ok {
 			continue
 		}
 
@@ -249,6 +251,8 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 		}
 
 	}
+
+	log.Debug("merge end", zap.Int64("planID", t.getPlanID()), zap.Int64("remaining insert numRows", numRows))
 	return iDatas, numRows, nil
 }
 
@@ -279,7 +283,7 @@ func (t *compactionTask) compact() error {
 		targetSegID = t.plan.GetSegmentBinlogs()[0].GetSegmentID()
 	}
 
-	log.Debug("compaction start", zap.Int64("planID", t.plan.GetPlanID()))
+	log.Debug("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("timeout in seconds", t.plan.GetTimeoutInSeconds()))
 	segIDs := make([]UniqueID, 0, len(t.plan.GetSegmentBinlogs()))
 	for _, s := range t.plan.GetSegmentBinlogs() {
 		segIDs = append(segIDs, s.GetSegmentID())
@@ -311,7 +315,17 @@ func (t *compactionTask) compact() error {
 		// SegmentID to deltaBlobs
 		dblobs = make(map[UniqueID][]*Blob)
 		dmu    sync.Mutex
+
+		PKfieldID UniqueID
 	)
+
+	// Get PK fieldID
+	for _, fs := range meta.GetSchema().GetFields() {
+		if fs.GetFieldID() >= 100 && fs.GetDataType() == schemapb.DataType_Int64 && fs.GetIsPrimaryKey() {
+			PKfieldID = fs.GetFieldID()
+			break
+		}
+	}
 
 	g, gCtx := errgroup.WithContext(ctxTimeout)
 	for _, s := range t.plan.GetSegmentBinlogs() {
@@ -332,7 +346,7 @@ func (t *compactionTask) compact() error {
 					return err
 				}
 
-				itr, err := storage.NewInsertBinlogIterator(bs)
+				itr, err := storage.NewInsertBinlogIterator(bs, PKfieldID)
 				if err != nil {
 					log.Warn("new insert binlogs Itr wrong")
 					return err

@@ -691,9 +691,9 @@ func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstrea
 	return nil, errors.New("mocked failure")
 }
 
-func genInsertDataWithRowIDs(rowIDs [2]int64) *InsertData {
+func genInsertDataWithPKs(PKs [2]int64) *InsertData {
 	iD := genInsertData()
-	iD.Data[0].(*s.Int64FieldData).Data = rowIDs[:]
+	iD.Data[106].(*s.Int64FieldData).Data = PKs[:]
 
 	return iD
 }
@@ -703,7 +703,7 @@ func genInsertData() *InsertData {
 		Data: map[int64]s.FieldData{
 			0: &s.Int64FieldData{
 				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data:    []int64{11, 22},
 			},
 			1: &s.Int64FieldData{
 				NumRows: []int64{2},
@@ -737,7 +737,7 @@ func genInsertData() *InsertData {
 			},
 			106: &s.Int64FieldData{
 				NumRows: []int64{2},
-				Data:    []int64{11, 12},
+				Data:    []int64{1, 2},
 			},
 			107: &s.FloatFieldData{
 				NumRows: []int64{2},

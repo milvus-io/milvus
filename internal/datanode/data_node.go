@@ -119,11 +119,6 @@ type DataNode struct {
 	msFactory msgstream.Factory
 }
 
-type plan struct {
-	channelName string
-	cancel      context.CancelFunc
-}
-
 // NewDataNode will return a DataNode with abnormal state.
 func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	rand.Seed(time.Now().UnixNano())
@@ -754,7 +749,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 
 	binlogIO := &binlogIO{node.blobKv, ds.idAllocator}
 	task := newCompactionTask(
-		ctx,
+		node.ctx,
 		binlogIO, binlogIO,
 		ds.replica,
 		ds.flushManager,
