@@ -20,7 +20,7 @@ import (
 // RmqConsumer is a client that used to consume messages from rocksmq
 type RmqConsumer struct {
 	c          rocksmq.Consumer
-	msgChannel chan ConsumerMessage
+	msgChannel chan Message
 	closeCh    chan struct{}
 	once       sync.Once
 }
@@ -31,10 +31,10 @@ func (rc *RmqConsumer) Subscription() string {
 }
 
 // Chan returns a channel to read messages from rocksmq
-func (rc *RmqConsumer) Chan() <-chan ConsumerMessage {
+func (rc *RmqConsumer) Chan() <-chan Message {
 	if rc.msgChannel == nil {
 		rc.once.Do(func() {
-			rc.msgChannel = make(chan ConsumerMessage, 256)
+			rc.msgChannel = make(chan Message, 256)
 			go func() {
 				for { //nolint:gosimple
 					select {
@@ -67,7 +67,7 @@ func (rc *RmqConsumer) ConsumeAfterSeek() bool {
 }
 
 // Ack is used to ask a rocksmq message
-func (rc *RmqConsumer) Ack(message ConsumerMessage) {
+func (rc *RmqConsumer) Ack(message Message) {
 }
 
 // Close is used to free the resources of this consumer

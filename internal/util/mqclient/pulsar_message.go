@@ -16,10 +16,10 @@ import (
 )
 
 // Check pulsarMessage implements ConsumerMessage
-var _ ConsumerMessage = (*pulsarMessage)(nil)
+var _ Message = (*pulsarMessage)(nil)
 
 type pulsarMessage struct {
-	msg pulsar.ConsumerMessage
+	msg pulsar.Message
 }
 
 func (pm *pulsarMessage) Topic() string {

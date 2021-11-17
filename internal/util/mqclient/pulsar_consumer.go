@@ -20,8 +20,9 @@ import (
 )
 
 type PulsarConsumer struct {
-	c          pulsar.Consumer
-	msgChannel chan ConsumerMessage
+	c pulsar.Consumer
+	pulsar.Reader
+	msgChannel chan Message
 	hasSeek    bool
 	AtLatest   bool
 	closeCh    chan struct{}
@@ -32,10 +33,10 @@ func (pc *PulsarConsumer) Subscription() string {
 	return pc.c.Subscription()
 }
 
-func (pc *PulsarConsumer) Chan() <-chan ConsumerMessage {
+func (pc *PulsarConsumer) Chan() <-chan Message {
 	if pc.msgChannel == nil {
 		pc.once.Do(func() {
-			pc.msgChannel = make(chan ConsumerMessage, 256)
+			pc.msgChannel = make(chan Message, 256)
 			// this part handles msgstream expectation when the consumer is not seeked
 			// pulsar's default behavior is setting postition to the earliest pointer when client of the same subscription pointer is not acked
 			// yet, our message stream is to setting to the very start point of the topic
@@ -85,7 +86,7 @@ func (pc *PulsarConsumer) ConsumeAfterSeek() bool {
 	return true
 }
 
-func (pc *PulsarConsumer) Ack(message ConsumerMessage) {
+func (pc *PulsarConsumer) Ack(message Message) {
 	pm := message.(*pulsarMessage)
 	pc.c.Ack(pm.msg)
 }
