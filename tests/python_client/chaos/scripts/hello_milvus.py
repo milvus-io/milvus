@@ -55,8 +55,11 @@ def hello_milvus(host="127.0.0.1"):
     t1 = time.time()
     print(f"\nInsert {nb} vectors cost {t1 - t0} seconds")
 
+    t0 = time.time()
     print(f"\nGet collection entities...")
     print(collection.num_entities)
+    t1 = time.time()
+    print(f"\nGet collection entities cost {t1 - t0} seconds")
 
     # create index and load table
     default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
