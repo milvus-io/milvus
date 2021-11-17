@@ -29,6 +29,8 @@ fi
 if [ -f "/etc/profile.d/llvm-toolset-7.sh" ]; then
   source "/etc/profile.d/llvm-toolset-7.sh"
 fi
+
+# Exit immediately for non zero status
 set -e
 
 exec "$@"
