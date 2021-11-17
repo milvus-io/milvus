@@ -1739,6 +1739,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 	return cat.result, nil
 }
 
+// DropAlias alter the alias of collection.
 func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
