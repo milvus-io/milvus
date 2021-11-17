@@ -51,14 +51,14 @@ class TestChaosData:
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
     def test_chaos_memory_stress_querynode(self, connection, chaos_yaml):
         """
-        target: explore querynode behavior after memory stress chaos injected and recovered
+        target: explore query node behavior after memory stress chaos injected and recovered
         method: 1. create a collection, insert some data
                 2. inject memory stress chaos
                 3. load collection and search, query
-                4. todo (verify querynode response)
+                4. todo (verify query node response)
                 5. delete chaos or chaos finished
                 6. release and reload collection, verify search and query is available
-        expected: after chaos deleted, load, search and query qre both available
+        expected: after chaos deleted, load, search and query are all available
         """
         c_name = 'chaos_memory_nx6DNW4q'
         collection_w = ApiCollectionWrapper()
