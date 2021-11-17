@@ -171,6 +171,7 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 	return result, nil
 }
 
+// LoadWithRevision returns keys, values and revision by given key prifix.
 func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -191,6 +192,7 @@ func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error
 	return keys, values, resp.Header.Revision, nil
 }
 
+// Save saves the key-value pair.
 func (kv *EtcdKV) Save(key, value string) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -212,6 +214,7 @@ func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
 	return err
 }
 
+// MultiSave saves the key-value pairs in a transaction.
 func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(kvs))
@@ -227,6 +230,7 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 	return err
 }
 
+// RemoveWithPrefix removes the keys with given prefix.
 func (kv *EtcdKV) RemoveWithPrefix(prefix string) error {
 	start := time.Now()
 	key := path.Join(kv.rootPath, prefix)
@@ -238,6 +242,7 @@ func (kv *EtcdKV) RemoveWithPrefix(prefix string) error {
 	return err
 }
 
+// Remove removes the key.
 func (kv *EtcdKV) Remove(key string) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -249,6 +254,7 @@ func (kv *EtcdKV) Remove(key string) error {
 	return err
 }
 
+// MultiRemove removes the keys in a transaction.
 func (kv *EtcdKV) MultiRemove(keys []string) error {
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(keys))
@@ -264,6 +270,7 @@ func (kv *EtcdKV) MultiRemove(keys []string) error {
 	return err
 }
 
+// MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
 func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
@@ -283,6 +290,7 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 	return err
 }
 
+// Watch starts watching a key, returns a watch channel.
 func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -291,6 +299,7 @@ func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
 	return rch
 }
 
+// WatchWithPrefix starts watching a key with prefix, returns a watch channel.
 func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
