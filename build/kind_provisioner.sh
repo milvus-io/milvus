@@ -37,6 +37,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Exit immediately for non zero status
 set -e
 set -x
 
