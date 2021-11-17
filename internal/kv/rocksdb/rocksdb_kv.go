@@ -158,7 +158,7 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 // Save a pair of key-value
 func (kv *RocksdbKV) Save(key, value string) error {
 	if kv.DB == nil {
-		return errors.New("Rocksdb instance is nil when do save")
+		return errors.New("rocksdb instance is nil when do save")
 	}
 	err := kv.DB.Put(kv.WriteOptions, []byte(key), []byte(value))
 	return err
