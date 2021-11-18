@@ -1868,7 +1868,7 @@ class TestCollectionSearch(TestcaseBase):
     def test_search_with_expression_auto_id(self, dim, expression, _async):
         """
         target: test search with different expressions
-        method: test search with different expressions
+        method: test search with different expressions with auto id
         expected: searched successfully with correct limit(topK)
         """
         # 1. initialize with data
