@@ -34,6 +34,7 @@ function install_pytest_requirements(){
  python3 -m pip install --no-cache-dir -r requirements.txt
 }
 
+# Login in ci docker registry
 function docker_login_ci_registry(){
 
     if [[ -z "${CI_REGISTRY_USERNAME:-}" || -z "${CI_REGISTRY_PASSWORD:-}" ]]; then 
