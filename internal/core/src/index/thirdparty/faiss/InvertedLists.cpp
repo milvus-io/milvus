@@ -15,6 +15,7 @@
 #include <faiss/utils/utils.h>
 #include <faiss/impl/FaissAssert.h>
 
+//TODO: refactor to decouple dependency between CPU and Cuda, or upgrade faiss
 #ifndef USE_CPU
 #include "gpu/utils/DeviceUtils.h"
 #include "cuda.h"
