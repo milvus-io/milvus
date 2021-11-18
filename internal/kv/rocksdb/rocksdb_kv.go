@@ -232,7 +232,7 @@ func (kv *RocksdbKV) MultiRemove(keys []string) error {
 	return err
 }
 
-// MultiSaveAndRemove provides a transaction to execute a batch of operators
+// MultiSaveAndRemove provides a transaction to execute a batch of operations
 func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do MultiSaveAndRemove")
