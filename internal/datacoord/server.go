@@ -336,7 +336,7 @@ func (s *Server) initGarbageCollection() error {
 		bucketName: Params.MinioBucketName,
 		rootPath:   Params.MinioRootPath,
 
-		checkInterval:    defaultGcInterval,
+		checkInterval:    time.Duration(Params.GCInterval) * time.Second,
 		missingTolerance: defaultMissingTolerance,
 		dropTolerance:    defaultMissingTolerance,
 	})

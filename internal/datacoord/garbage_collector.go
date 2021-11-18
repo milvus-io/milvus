@@ -29,7 +29,6 @@ import (
 const (
 	// temp solution use const
 	// maybe put garbage config into config files in the future
-	defaultGcInterval       = 1 * time.Hour
 	defaultMissingTolerance = 24 * time.Hour // 1day
 	defaultDropTolerance    = 24 * time.Hour // 1day
 )

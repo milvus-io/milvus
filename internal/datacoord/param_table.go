@@ -81,6 +81,7 @@ type ParamTable struct {
 	EnableGarbageCollection bool
 
 	CompactionRetentionDuration int64
+	GCInterval                  int64
 }
 
 // Params is a package scoped variable of type ParamTable.
@@ -130,6 +131,7 @@ func (p *ParamTable) Init() {
 	p.initMinioRootPath()
 
 	p.initCompactionRetentionDuration()
+	p.initGcInterval()
 }
 
 // InitOnce ensures param table is a singleton
@@ -353,4 +355,8 @@ func (p *ParamTable) initMinioRootPath() {
 
 func (p *ParamTable) initCompactionRetentionDuration() {
 	p.CompactionRetentionDuration = p.ParseInt64WithDefault("dataCoord.compaction.retentionDuration", 432000)
+}
+
+func (p *ParamTable) initGcInterval() {
+	p.GCInterval = p.ParseInt64WithDefault("dataCoord.gc.interval", 3600)
 }

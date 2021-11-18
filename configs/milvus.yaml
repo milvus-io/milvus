@@ -179,6 +179,9 @@ dataCoord:
   compaction:
     retentionDuration: 432000 # 5 days in seconds
 
+  gc:
+    interval: 3600 # 1 hour in seconds
+
 dataNode:
   port: 21124
 
