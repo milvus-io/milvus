@@ -21,6 +21,7 @@ func msgQueryNodeIsUnhealthy(nodeID UniqueID) string {
 	return fmt.Sprintf("query node %d is not ready", nodeID)
 }
 
+// errQueryNodeIsUnhealthy is the error of query node is unhealthy
 func errQueryNodeIsUnhealthy(nodeID UniqueID) error {
 	return errors.New(msgQueryNodeIsUnhealthy(nodeID))
 }
