@@ -38,7 +38,7 @@ def _install_milvus(seg_size):
         return release_name, None, None
 
 
-@pytest.skip(reason="issue #11952")
+@pytest.mark.skip(reason="issue #11952")
 class TestCustomizeSegmentSize:
 
     def teardown_method(self):
