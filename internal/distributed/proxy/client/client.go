@@ -186,10 +186,12 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	return ret, err
 }
 
+// Start dummy
 func (c *Client) Start() error {
 	return nil
 }
 
+// Stop stops the client, closes the connection
 func (c *Client) Stop() error {
 	c.cancel()
 	c.grpcClientMtx.Lock()
