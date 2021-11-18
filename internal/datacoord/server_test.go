@@ -122,6 +122,10 @@ func TestAssignSegmentID(t *testing.T) {
 	t.Run("assign segment with invalid collection", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
+		svr.rootCoordClient = &mockDescribeCollRoot{
+			RootCoord: svr.rootCoordClient,
+			collID:    collID,
+		}
 		schema := newTestSchema()
 		svr.meta.AddCollection(&datapb.CollectionInfo{
 			ID:         collID,
@@ -143,6 +147,23 @@ func TestAssignSegmentID(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 0, len(resp.SegIDAssignments))
 	})
+}
+
+type mockDescribeCollRoot struct {
+	types.RootCoord
+	collID UniqueID
+}
+
+func (r *mockDescribeCollRoot) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	if req.CollectionID != r.collID {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "Collection not found",
+			},
+		}, nil
+	}
+	return r.RootCoord.DescribeCollection(ctx, req)
 }
 
 func TestFlush(t *testing.T) {
