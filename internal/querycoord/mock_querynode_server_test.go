@@ -42,7 +42,10 @@ const (
 	defaultTotalmemPerNode = 6000000
 )
 
-var GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
+var (
+	GlobalSegmentInfos  = make(map[UniqueID]*querypb.SegmentInfo)
+	globalSegInfosMutex sync.RWMutex
+)
 
 type queryNodeServerMock struct {
 	querypb.QueryNodeServer
@@ -68,7 +71,6 @@ type queryNodeServerMock struct {
 	getMetrics          func() (*milvuspb.GetMetricsResponse, error)
 
 	segmentInfos map[UniqueID]*querypb.SegmentInfo
-	segmentMu    sync.RWMutex
 
 	totalMem uint64
 }
@@ -214,9 +216,9 @@ func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.Lo
 			MemSize:      info.NumOfRows * int64(sizePerRecord),
 			NumRows:      info.NumOfRows,
 		}
-		qs.segmentMu.Lock()
+		globalSegInfosMutex.Lock()
 		qs.segmentInfos[info.SegmentID] = segmentInfo
-		qs.segmentMu.Unlock()
+		globalSegInfosMutex.Unlock()
 	}
 
 	return qs.loadSegment()
@@ -236,13 +238,13 @@ func (qs *queryNodeServerMock) ReleaseSegments(ctx context.Context, req *querypb
 
 func (qs *queryNodeServerMock) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	qs.segmentMu.RLock()
+	globalSegInfosMutex.RLock()
 	for _, info := range qs.segmentInfos {
 		if info.CollectionID == req.CollectionID && info.NodeID == qs.queryNodeID {
 			segmentInfos = append(segmentInfos, info)
 		}
 	}
-	qs.segmentMu.RUnlock()
+	globalSegInfosMutex.RUnlock()
 
 	res, err := qs.getSegmentInfos()
 	if err == nil {
