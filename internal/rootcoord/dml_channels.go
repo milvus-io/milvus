@@ -64,7 +64,7 @@ func (d *dmlChannels) GetDmlMsgStreamName() string {
 
 // ListChannels lists all dml channel names
 func (d *dmlChannels) ListChannels() []string {
-	chanNames := make([]string, 0)
+	var chanNames []string
 	d.refcnt.Range(
 		func(k, v interface{}) bool {
 			chanNames = append(chanNames, k.(string))
