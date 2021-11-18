@@ -48,7 +48,7 @@ const (
 	defaultSegmentID        = UniqueID(2021)
 	defaultQueryNodeID      = int64(100)
 	defaultChannelNum       = 2
-	defaultNumRowPerSegment = 10000
+	defaultNumRowPerSegment = 1000
 )
 
 func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.CollectionSchema {

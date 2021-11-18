@@ -943,3 +943,89 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 	err = removeAllSession()
 	assert.Nil(t, err)
 }
+
+func TestLoadBalanceIndexedSegmentsTask(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+	indexCoord := newIndexCoordMock()
+	indexCoord.returnIndexFile = true
+	queryCoord.indexCoordClient = indexCoord
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+
+	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadCollectionTask, taskExpired)
+
+	node2, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+
+	baseTask := newBaseTask(ctx, querypb.TriggerCondition_loadBalance)
+	loadBalanceTask := &loadBalanceTask{
+		baseTask: baseTask,
+		LoadBalanceRequest: &querypb.LoadBalanceRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadBalanceSegments,
+			},
+			SourceNodeIDs:    []int64{node1.queryNodeID},
+			SealedSegmentIDs: []UniqueID{defaultSegmentID},
+		},
+		rootCoord:  queryCoord.rootCoordClient,
+		dataCoord:  queryCoord.dataCoordClient,
+		indexCoord: queryCoord.indexCoordClient,
+		cluster:    queryCoord.cluster,
+		meta:       queryCoord.meta,
+	}
+	err = queryCoord.scheduler.Enqueue(loadBalanceTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadBalanceTask, taskExpired)
+
+	node1.stop()
+	node2.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+
+	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadCollectionTask, taskExpired)
+
+	node2, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+
+	indexCoord := newIndexCoordMock()
+	indexCoord.returnIndexFile = true
+	queryCoord.indexCoordClient = indexCoord
+	removeNodeSession(node1.queryNodeID)
+	for {
+		if len(queryCoord.meta.getSegmentInfosByNode(node1.queryNodeID)) == 0 {
+			break
+		}
+	}
+
+	node2.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
