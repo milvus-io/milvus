@@ -50,7 +50,7 @@ class TestQueryParams(TestcaseBase):
     def test_query_empty_collection(self):
         """
         target: test query empty collection
-        method: query on a empty collection
+        method: query on an empty collection
         expected: empty result
         """
         c_name = cf.gen_unique_str(prefix)
