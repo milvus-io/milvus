@@ -270,7 +270,7 @@ class InsertSearchRunner(BaseRunner):
         
     def run_case(self, case_metric, **case_param):
         run_count = case_param["run_count"]
-        avg_query_time = 0.0
+        # avg_query_time = 0.0
         min_query_time = 0.0
         total_query_time = 0.0        
         for i in range(run_count):
