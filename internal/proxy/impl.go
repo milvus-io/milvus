@@ -2124,6 +2124,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	}, nil
 }
 
+// GetDdChannel returns the used channel for dd operations.
 func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }
