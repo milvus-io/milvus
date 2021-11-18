@@ -1,3 +1,4 @@
+import json
 import time
 from benedict import benedict
 from utils.util_log import test_log as log
@@ -56,7 +57,7 @@ class MilvusOperator(object):
         # apply custom resource object to deploy milvus
         cus_res = CusResource(kind=self.plural, group=self.group,
                               version=self.version, namespace=namespace)
-        log.info(f"install milvus with configs: {new_configs}")
+        log.info(f'install milvus with configs: {json.dumps(new_configs, indent=4)}')
         return cus_res.create(new_configs)
 
     def uninstall(self, release_name, namespace='default', delete_depends=True, delete_pvc=True):
