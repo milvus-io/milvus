@@ -1563,7 +1563,7 @@ class TestCollectionMultiCollections:
         """
         target: test collection rows_count is correct or not with multiple collections of JACCARD
         method: create collection and add entities in it,
-            assert the value returned by count_entities method is equal to length of entities
+                assert the value returned by count_entities method is equal to length of entities
         expected: the count is equal to the length of entities
         """
         collection_list = []
