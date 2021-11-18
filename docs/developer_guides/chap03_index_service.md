@@ -9,6 +9,7 @@
 ```go
 type IndexCoord interface {
 	Component
+  // TimeTickProvider is the interface all services implement
 	TimeTickProvider
 
 	// BuildIndex receives requests from RootCoordinator to build an index.
