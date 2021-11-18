@@ -39,6 +39,10 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
     MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},component=proxy"
   fi
 
+  if [[ -n "${DISABLE_KIND:-}" ]]; then
+    sleep 1
+  fi
+  
   SERVICE_TYPE=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.type}')
 
   if [[ "${SERVICE_TYPE}" == "LoadBalancer" ]]; then
