@@ -59,19 +59,24 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
+// InvalidUniqueID is used when the UniqueID is not set (like in return with err)
 const InvalidUniqueID = UniqueID(-1)
 
+// Blob is a pack of key&value
 type Blob struct {
 	Key   string
 	Value []byte
 }
 
+// BlobList implements sort.Interface for a list of Blob
 type BlobList []*Blob
 
+// Len implements Len in sort.Interface
 func (s BlobList) Len() int {
 	return len(s)
 }
 
+// Len implements Less in sort.Interface
 func (s BlobList) Less(i, j int) bool {
 	leftValues := strings.Split(s[i].Key, "/")
 	rightValues := strings.Split(s[j].Key, "/")
@@ -80,14 +85,17 @@ func (s BlobList) Less(i, j int) bool {
 	return left < right
 }
 
+// Len implements Swap in sort.Interface
 func (s BlobList) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
+// GetKey returns the key of blob
 func (b Blob) GetKey() string {
 	return b.Key
 }
 
+// GetValue returns the value of blob
 func (b Blob) GetValue() []byte {
 	return b.Value
 }
