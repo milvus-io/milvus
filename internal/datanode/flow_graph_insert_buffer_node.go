@@ -208,6 +208,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	}
 
 	if len(seg2Upload) > 0 {
+		log.Debug("flowgraph insert buffer node consumed msgs with end position", zap.String("channel", ibNode.channelName), zap.Any("end position", endPositions[0]))
 		err := ibNode.uploadMemStates2Coord(seg2Upload)
 		if err != nil {
 			log.Error("upload segment statistics to coord error", zap.Error(err))
