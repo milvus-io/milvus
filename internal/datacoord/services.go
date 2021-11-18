@@ -114,6 +114,14 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()))
 
+		if s.meta.GetCollection(r.GetCollectionID()) == nil {
+			err := s.loadCollectionFromRootCoord(ctx, r.GetCollectionID())
+			if err != nil {
+				log.Warn("failed to load collection in alloc segment", zap.Any("request", r), zap.Error(err))
+				continue
+			}
+		}
+
 		s.cluster.Watch(r.ChannelName, r.CollectionID)
 
 		allocations, err := s.segmentManager.AllocSegment(ctx,
