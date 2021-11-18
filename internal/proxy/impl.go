@@ -1832,6 +1832,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 	return aat.result, nil
 }
 
+// CalcDistance calculates the distances between vectors.
 func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
 	param, _ := funcutil.GetAttrByKeyFromRepeatedKV("metric", request.GetParams())
 	metric, err := distance.ValidateMetricType(param)
