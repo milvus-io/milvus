@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// deleteNode is the one of nodes in delta flow graph
 type deleteNode struct {
 	baseNode
 	replica ReplicaInterface // historical
