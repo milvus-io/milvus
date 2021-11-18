@@ -514,6 +514,7 @@ static inline void fvec_madd_sse (size_t n, const float *a,
 void fvec_madd (size_t n, const float *a,
                 float bf, const float *b, float *c)
 {
+	// Change type from long to size_t to compatible with gcc-10
     if ((n & 3) == 0 &&
         ((((size_t)a) | ((size_t)b) | ((size_t)c)) & 15) == 0)
         fvec_madd_sse (n, a, bf, b, c);
@@ -601,6 +602,7 @@ static inline int fvec_madd_and_argmin_sse (
 int fvec_madd_and_argmin (size_t n, const float *a,
                           float bf, const float *b, float *c)
 {
+	// Change type from long to size_t to compatible with gcc-10
     if ((n & 3) == 0 &&
         ((((size_t)a) | ((size_t)b) | ((size_t)c)) & 15) == 0)
         return fvec_madd_and_argmin_sse (n, a, bf, b, c);
