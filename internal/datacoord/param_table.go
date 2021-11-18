@@ -81,6 +81,11 @@ type ParamTable struct {
 	EnableGarbageCollection bool
 
 	CompactionRetentionDuration int64
+
+	// Garbage Collection
+	GCInterval         time.Duration
+	GCMissingTolerance time.Duration
+	GCDropTolerance    time.Duration
 }
 
 // Params is a package scoped variable of type ParamTable.
@@ -130,6 +135,11 @@ func (p *ParamTable) Init() {
 	p.initMinioRootPath()
 
 	p.initCompactionRetentionDuration()
+
+	p.initEnableGarbageCollection()
+	p.initGCInterval()
+	p.initGCMissingTolerance()
+	p.initGCDropTolerance()
 }
 
 // InitOnce ensures param table is a singleton
@@ -298,8 +308,22 @@ func (p *ParamTable) initEnableCompaction() {
 	p.EnableCompaction = p.ParseBool("dataCoord.enableCompaction", false)
 }
 
+// -- GC --
+
 func (p *ParamTable) initEnableGarbageCollection() {
 	p.EnableGarbageCollection = p.ParseBool("dataCoord.enableGarbageCollection", false)
+}
+
+func (p *ParamTable) initGCInterval() {
+	p.GCInterval = time.Duration(p.ParseInt64WithDefault("dataCoord.gc.interval", 60*60)) * time.Second
+}
+
+func (p *ParamTable) initGCMissingTolerance() {
+	p.GCMissingTolerance = time.Duration(p.ParseInt64WithDefault("dataCoord.gc.missingTolerance", 24*60*60)) * time.Second
+}
+
+func (p *ParamTable) initGCDropTolerance() {
+	p.GCDropTolerance = time.Duration(p.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 24*60*60)) * time.Second
 }
 
 // --- MinIO ---
