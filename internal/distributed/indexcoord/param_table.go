@@ -67,7 +67,7 @@ func (pt *ParamTable) initPort() {
 	pt.Port = pt.ParseInt("indexCoord.port")
 }
 
-// initServiceAddress initializes the address of IndexCoord service.
+// LoadFromEnv gets the configuration from environment variables.
 func (pt *ParamTable) LoadFromEnv() {
 	Params.IP = funcutil.GetLocalIP()
 }
