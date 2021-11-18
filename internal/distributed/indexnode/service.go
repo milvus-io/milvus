@@ -67,6 +67,7 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// startGrpcLoop starts the grep loop of IndexNode component.
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.loopWg.Done()
 
