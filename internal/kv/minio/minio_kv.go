@@ -137,13 +137,9 @@ func (kv *MinIOKV) Load(key string) (string, error) {
 	return buf.String(), nil
 }
 
-// FGetObject download file from minio to local storage system.
+// FGetObject downloads file from minio to local storage system.
 func (kv *MinIOKV) FGetObject(key, localPath string) error {
-	err := kv.minioClient.FGetObject(kv.ctx, kv.bucketName, key, localPath+key, minio.GetObjectOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
+	return kv.minioClient.FGetObject(kv.ctx, kv.bucketName, key, localPath+key, minio.GetObjectOptions{})
 }
 
 // FGetObjects download file from minio to local storage system.
