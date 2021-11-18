@@ -9,7 +9,7 @@ import locust.stats
 import math
 from locust import LoadTestShape
 from locust.stats import stats_printer, print_stats
-from locust.log import setup_logging, greenlet_exception_logger
+# from locust.log import setup_logging, greenlet_exception_logger
 from milvus_benchmark.client import MilvusClient
 from .locust_task import MilvusTask
 from .locust_tasks import Tasks
