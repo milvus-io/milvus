@@ -33,7 +33,7 @@ const (
 	RequestTimeout = 10 * time.Second
 )
 
-// EtcdKV implments TxnKv interface, it support to process multiple kvs in a transactions
+// EtcdKV implements TxnKv interface, it supports to process multiple kvs in a transactions
 type EtcdKV struct {
 	client   *clientv3.Client
 	rootPath string
