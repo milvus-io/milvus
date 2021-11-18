@@ -19,6 +19,7 @@ package querycoord
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -117,7 +118,7 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 	for _, id := range req.CollectionIDs {
 		if _, ok := ID2collectionInfo[id]; !ok {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			err := errors.New("collection has not been loaded to memory or load failed")
+			err := fmt.Errorf("collection %d has not been loaded to memory or load failed", id)
 			status.Reason = err.Error()
 			return &querypb.ShowCollectionsResponse{
 				Status: status,
