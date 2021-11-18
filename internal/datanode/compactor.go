@@ -297,7 +297,7 @@ func (t *compactionTask) compact() error {
 
 	// Inject to stop flush
 	ti := taskInjection{
-		injected:   make(chan struct{}),
+		injected:   make(chan struct{}, 100),
 		injectOver: make(chan bool),
 		postInjection: func(pack *segmentFlushPack) {
 			pack.segmentID = targetSegID

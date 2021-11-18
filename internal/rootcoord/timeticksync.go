@@ -252,7 +252,7 @@ func (t *timetickSync) StartWatch(wg *sync.WaitGroup) {
 						}
 					}
 					if err := t.SendTimeTickToChannel([]string{chanName}, mints); err != nil {
-						log.Debug("SendTimeTickToChannel fail", zap.Error(err))
+						log.Debug("SendTimeTickToChannel fail", zap.Error(err), zap.String("channel", chanName))
 					}
 					wg.Done()
 				}(chanName)

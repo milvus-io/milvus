@@ -354,7 +354,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Any("meta", req.GetField2BinlogPaths()))
 
 	if req.GetDropped() && s.handler.CheckShouldDropChannel(channel) {
-		log.Debug("remove channel", zap.String("channel", channel))
+		log.Debug("removed channel", zap.String("channel", channel))
 		err = s.channelManager.RemoveChannel(channel)
 		if err != nil {
 			log.Warn("failed to remove channel", zap.String("channel", channel), zap.Error(err))
