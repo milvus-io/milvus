@@ -222,6 +222,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 				log.Debug("ReloadFromKV: failed to add queryNode meta to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 				return err
 			}
+			log.Debug("ReloadFromKV: reload collection info from etcd", zap.Any("info", collectionInfo))
 		}
 	}
 	return nil

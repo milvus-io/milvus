@@ -1718,6 +1718,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					return err
 				}
 
+				log.Debug("loadBalanceTask: partitions to recover", zap.Int64s("partitionIDs", partitionIDs))
 				for _, partitionID := range partitionIDs {
 					getRecoveryInfo := &datapb.GetRecoveryInfoRequest{
 						Base: &commonpb.MsgBase{
@@ -2079,6 +2080,7 @@ func assignInternalTask(ctx context.Context,
 	wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) ([]task, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
+	log.Debug("assignInternalTask: start assign task to query node")
 	internalTasks := make([]task, 0)
 	err := cluster.allocateSegmentsToQueryNode(ctx, loadSegmentRequests, wait, excludeNodeIDs, includeNodeIDs)
 	if err != nil {

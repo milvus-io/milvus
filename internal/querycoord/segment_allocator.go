@@ -98,7 +98,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 	if len(reqs) == 0 {
 		return nil
 	}
-
+	log.Debug("shuffleSegmentsToQueryNodeV2: start estimate the size of loadReqs")
 	dataSizePerReq := make([]int64, 0)
 	for _, req := range reqs {
 		sizeOfReq, err := cluster.estimateSegmentsSize(req)
@@ -107,7 +107,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 		}
 		dataSizePerReq = append(dataSizePerReq, sizeOfReq)
 	}
-
+	log.Debug("shuffleSegmentsToQueryNodeV2: estimate the size of loadReqs end")
 	for {
 		// online nodes map and totalMem, usedMem, memUsage of every node
 		totalMem := make(map[int64]uint64)
@@ -143,6 +143,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			// update totalMem, memUsage, memUsageRate
 			totalMem[nodeID], memUsage[nodeID], memUsageRate[nodeID] = queryNodeInfo.totalMem, queryNodeInfo.memUsage, queryNodeInfo.memUsageRate
 		}
+		log.Debug("shuffleSegmentsToQueryNodeV2: num of availableNodes", zap.Int("size", len(availableNodes)))
 		if len(availableNodes) > 0 {
 			nodeIDSlice := make([]int64, 0, len(availableNodes))
 			for nodeID := range availableNodes {
@@ -176,6 +177,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			}
 
 			if allocateSegmentsDone {
+				log.Debug("shuffleSegmentsToQueryNodeV2: shuffle segment to query node success")
 				return nil
 			}
 		}

@@ -171,6 +171,7 @@ func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.Colle
 			log.Error("AddCollection: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
 		}
+		log.Debug("queryNode addCollection", zap.Int64("nodeID", qn.id), zap.Any("collectionInfo", newCollection))
 	}
 
 	return nil
@@ -215,6 +216,7 @@ func (qn *queryNode) addPartition(collectionID UniqueID, partitionID UniqueID) e
 		if err != nil {
 			log.Error("AddPartition: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 		}
+		log.Debug("queryNode add partition", zap.Int64("nodeID", qn.id), zap.Any("collectionInfo", col))
 		return nil
 	}
 	return errors.New("AddPartition: can't find collection when add partition")
@@ -255,11 +257,12 @@ func (qn *queryNode) releasePartitionsInfo(collectionID UniqueID, partitionIDs [
 			}
 		}
 		info.PartitionIDs = newPartitionIDs
-		err := removeNodeCollectionInfo(collectionID, qn.id, qn.kvClient)
+		err := saveNodeCollectionInfo(collectionID, info, qn.id, qn.kvClient)
 		if err != nil {
 			log.Error("ReleasePartitionsInfo: remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
 		}
+		log.Debug("queryNode release partition info", zap.Int64("nodeID", qn.id), zap.Any("info", info))
 	}
 
 	return nil

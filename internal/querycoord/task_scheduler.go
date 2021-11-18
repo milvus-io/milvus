@@ -631,21 +631,27 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 	}
 
 	removeTaskFromKVFn := func(triggerTask task) error {
-		keys := make([]string, 0)
-		taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, triggerTask.getTaskID())
-		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, triggerTask.getTaskID())
-		keys = append(keys, taskKey)
-		keys = append(keys, stateKey)
 		childTasks := triggerTask.getChildTask()
 		for _, t := range childTasks {
-			taskKey = fmt.Sprintf("%s/%d", activeTaskPrefix, t.getTaskID())
-			stateKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
-			keys = append(keys, taskKey)
-			keys = append(keys, stateKey)
+			childTaskKeys := make([]string, 0)
+			taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.getTaskID())
+			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
+			childTaskKeys = append(childTaskKeys, taskKey)
+			childTaskKeys = append(childTaskKeys, stateKey)
+			err := scheduler.client.MultiRemove(childTaskKeys)
+			// after recover, child Task's state will be TaskDone, will not be repeat executed
+			if err != nil {
+				panic(err)
+			}
 		}
-		err := scheduler.client.MultiRemove(keys)
+		triggerTaskKeys := make([]string, 0)
+		taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, triggerTask.getTaskID())
+		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, triggerTask.getTaskID())
+		triggerTaskKeys = append(triggerTaskKeys, taskKey)
+		triggerTaskKeys = append(triggerTaskKeys, stateKey)
+		err := scheduler.client.MultiRemove(triggerTaskKeys)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		return nil
 	}
