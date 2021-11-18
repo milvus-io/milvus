@@ -79,7 +79,7 @@ message CollectionSchema {
 
 CreateCollectionRequest contains **MsgBase**, **db_name**, **collection_name** and serialized collection schema **schema**. **db_name** contains only a string named **collection_name**. Collection with the same collection_name is going to be created.
 
-Collection schema contains all the base information of a collection including **collection name**, **description**, **autoID** and **fields**. Collection description is defined by the database manager to describe the collection. **autoID** determines whether the ID of each row of data is user-defined. If **autoID** is true, our system will generate a unique ID for each data. If **autoID** is false, users need to give each entity a ID when inserting.
+Collection schema contains all the base information of a collection including **collection name**, **description**, **autoID** and **fields**. Collection description is defined by the database manager to describe the collection. **autoID** determines whether the ID of each row of data is user-defined. If **autoID** is true, our system will generate a unique ID for each data. If **autoID** is false, users need to give each entity an ID when inserting.
 
 **Fields** is a list of **FieldSchema**. Each schema should include Field **name**, **description**, **dataType**, **type_params** and **index_params**.
 
