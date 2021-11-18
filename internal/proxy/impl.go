@@ -2128,6 +2128,7 @@ func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdCh
 	panic("implement me")
 }
 
+// GetPersistentSegmentInfo get the information of sealed segment.
 func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
 	log.Debug("GetPersistentSegmentInfo",
 		zap.String("role", Params.RoleName),
