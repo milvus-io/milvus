@@ -26,14 +26,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// temp solution use const
-	// maybe put garbage config into config files in the future
-	defaultGcInterval       = 1 * time.Hour
-	defaultMissingTolerance = 24 * time.Hour // 1day
-	defaultDropTolerance    = 24 * time.Hour // 1day
-)
-
 // GcOption garbage collection options
 type GcOption struct {
 	cli              *minio.Client // OSS client
@@ -59,6 +51,8 @@ type garbageCollector struct {
 
 // newGarbageCollector create garbage collector with meta and option
 func newGarbageCollector(meta *meta, opt GcOption) *garbageCollector {
+	log.Info("GC with option", zap.Bool("enabled", opt.enabled), zap.Duration("interval", opt.checkInterval),
+		zap.Duration("missingTolerance", opt.missingTolerance), zap.Duration("dropTolerance", opt.dropTolerance))
 	return &garbageCollector{
 		meta:    meta,
 		option:  opt,

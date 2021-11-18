@@ -179,6 +179,12 @@ dataCoord:
   compaction:
     retentionDuration: 432000 # 5 days in seconds
 
+  gc:
+    interval: 3600 # gc interval in seconds
+    missingTolerance: 86400 # file meta missing tolerance duration in seconds, 60*24
+    dropTolerance: 86400 # file belongs to dropped entity tolerance duration in seconds, 60*24
+
+
 dataNode:
   port: 21124
 

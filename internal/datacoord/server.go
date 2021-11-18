@@ -336,9 +336,9 @@ func (s *Server) initGarbageCollection() error {
 		bucketName: Params.MinioBucketName,
 		rootPath:   Params.MinioRootPath,
 
-		checkInterval:    defaultGcInterval,
-		missingTolerance: defaultMissingTolerance,
-		dropTolerance:    defaultMissingTolerance,
+		checkInterval:    Params.GCInterval,
+		missingTolerance: Params.GCMissingTolerance,
+		dropTolerance:    Params.GCDropTolerance,
 	})
 	return nil
 }
