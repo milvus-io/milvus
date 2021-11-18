@@ -264,3 +264,26 @@ func TestGetAttrByKeyFromRepeatedKV(t *testing.T) {
 		assert.Equal(t, test.errIsNil, err == nil)
 	}
 }
+
+func TestCheckCtxValid(t *testing.T) {
+	bgCtx := context.Background()
+	timeout := 20 * time.Millisecond
+	deltaTime := 5 * time.Millisecond
+	ctx1, cancel1 := context.WithTimeout(bgCtx, timeout)
+	defer cancel1()
+	assert.True(t, CheckCtxValid(ctx1))
+	time.Sleep(timeout + deltaTime)
+	assert.False(t, CheckCtxValid(ctx1))
+
+	ctx2, cancel2 := context.WithTimeout(bgCtx, timeout)
+	assert.True(t, CheckCtxValid(ctx2))
+	cancel2()
+	assert.False(t, CheckCtxValid(ctx2))
+
+	futureTime := time.Now().Add(timeout)
+	ctx3, cancel3 := context.WithDeadline(bgCtx, futureTime)
+	defer cancel3()
+	assert.True(t, CheckCtxValid(ctx3))
+	time.Sleep(timeout + deltaTime)
+	assert.False(t, CheckCtxValid(ctx3))
+}

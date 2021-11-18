@@ -184,3 +184,7 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 
 	return "", errors.New("key " + key + " not found")
 }
+
+func CheckCtxValid(ctx context.Context) bool {
+	return ctx.Err() != context.DeadlineExceeded && ctx.Err() != context.Canceled
+}
