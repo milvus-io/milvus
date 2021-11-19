@@ -12,6 +12,8 @@
 package rocksmq
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -42,6 +44,14 @@ func InitIDAllocator(kvPath string) *allocator.GlobalIDAllocator {
 	idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
 	_ = idAllocator.Initialize()
 	return idAllocator
+}
+
+func newChanName() string {
+	return fmt.Sprintf("my-chan-%v", time.Now().Nanosecond())
+}
+
+func newGroupName() string {
+	return fmt.Sprintf("my-group-%v", time.Now().Nanosecond())
 }
 
 func Test_FixChannelName(t *testing.T) {
@@ -604,4 +614,60 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 	cMsgs, err := rmq.Consume(channelName, groupName, loopNum)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 0)
+}
+
+func TestRocksmq_Reader(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
+	assert.Nil(t, err)
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_reader"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	rmq, err := NewRocksMQ(name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	channelName := newChanName()
+	err = rmq.CreateTopic(channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyTopic(channelName)
+	loopNum := 100
+
+	err = rmq.CreateReader(channelName, 0, true)
+	assert.NoError(t, err)
+
+	pMsgs := make([]ProducerMessage, loopNum)
+	for i := 0; i < loopNum; i++ {
+		msg := "message_" + strconv.Itoa(i+loopNum)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs[i] = pMsg
+	}
+	ids, err := rmq.Produce(channelName, pMsgs)
+	assert.Nil(t, err)
+	assert.Equal(t, len(ids), loopNum)
+
+	rmq.ReaderSeek(channelName, ids[0])
+	ctx := context.Background()
+	for i := 0; i < loopNum; i++ {
+		assert.Equal(t, true, rmq.HasNext(channelName, true))
+		msg, err := rmq.Next(ctx, channelName, true)
+		assert.NoError(t, err)
+		assert.Equal(t, msg.MsgID, ids[i])
+	}
+	assert.False(t, rmq.HasNext(channelName, true))
+
+	rmq.ReaderSeek(channelName, ids[0])
+	for i := 0; i < loopNum-1; i++ {
+		assert.Equal(t, true, rmq.HasNext(channelName, false))
+		msg, err := rmq.Next(ctx, channelName, false)
+		assert.NoError(t, err)
+		assert.Equal(t, msg.MsgID, ids[i+1])
+	}
+	assert.False(t, rmq.HasNext(channelName, false))
 }
