@@ -48,7 +48,7 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
     MILVUS_SERVICE_IP=$(kubectl get nodes --namespace "${MILVUS_HELM_NAMESPACE}" -o jsonpath='{.items[0].status.addresses[0].address}')
     MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].nodePort}')
   else
-    #[remove-kind] use service ip when disable kind to run ci test
+    # Use service ip when disable kind to run ci test
     if [[ -n "${DISABLE_KIND:-}" ]]; then
       MILVUS_SERVICE_IP=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.clusterIP}')
       MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
@@ -63,7 +63,7 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
   fi
 fi
 echo "[debug] DISABLE_KIND is ${DISABLE_KIND:-},PARALLEL_NUM is ${PARALLEL_NUM},MILVUS_SERVICE_IP is ${MILVUS_SERVICE_IP},MILVUS_SERVICE_PORT is ${MILVUS_SERVICE_PORT}"
-#[remove-kind] use pytest run in the krte when remove kinD cluster
+# Use pytest to run in the krte container after remove kinD cluster
 if [[ -n "${DISABLE_KIND:-}" ]]; then
   cd ${ROOT}/tests/python_client
   python3 -V
