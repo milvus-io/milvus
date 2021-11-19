@@ -255,6 +255,11 @@ if [[ -z "${SKIP_SETUP:-}" ]]; then
   export DEFAULT_CLUSTER_YAML="${ROOT}/build/config/topology/trustworthy-jwt.yaml"
   export METRICS_SERVER_CONFIG_DIR="${ROOT}/build/config/metrics"
 
+  if ! docker info > /dev/null 2>&1; then
+    echo "KinD need docker to set up cluster - please start docker and try again!"
+    exit 1
+  fi
+
   if [[ "${TOPOLOGY}" == "SINGLE_CLUSTER" ]]; then
     trace "setup kind cluster" setup_kind_cluster "${SINGLE_CLUSTER_NAME}" "${NODE_IMAGE}" "${KIND_CONFIG}"
   else
