@@ -210,7 +210,8 @@ func (node *QueryNode) Init() error {
 			node.indexCoord,
 			node.historical.replica,
 			node.streaming.replica,
-			node.etcdKV)
+			node.etcdKV,
+			node.msFactory)
 
 		node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.msFactory)
 		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.msFactory)
