@@ -98,7 +98,7 @@ def hello_milvus(host="127.0.0.1"):
     sorted_res = sorted(res, key=lambda k: k['count'])
     for r in sorted_res:
         print(r)
-
+    collection.release()
 
 import argparse
 
