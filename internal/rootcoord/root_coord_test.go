@@ -680,7 +680,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		assert.Equal(t, shardsNum, int32(core.dmlChannels.GetNumChannels()))
+		assert.Equal(t, shardsNum, int32(core.dmlChannels.GetPhysicalChannelNum()))
 
 		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)

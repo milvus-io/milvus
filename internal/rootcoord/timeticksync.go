@@ -310,7 +310,7 @@ func (t *timetickSync) GetProxyNum() int {
 
 // GetChanNum return the num of channel
 func (t *timetickSync) GetChanNum() int {
-	return t.core.dmlChannels.GetNumChannels()
+	return t.core.dmlChannels.GetPhysicalChannelNum()
 }
 
 func minTimeTick(tt ...typeutil.Timestamp) typeutil.Timestamp {

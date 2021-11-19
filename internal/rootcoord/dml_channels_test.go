@@ -13,7 +13,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -43,36 +42,35 @@ func TestDmlChannels(t *testing.T) {
 	assert.Nil(t, err)
 
 	dml := newDmlChannels(core, dmlChanPrefix, totalDmlChannelNum)
-	chanNames := dml.ListChannels()
+	chanNames := dml.ListPhysicalChannels()
 	assert.Equal(t, 0, len(chanNames))
 
 	randStr := funcutil.RandomString(8)
 	assert.Panics(t, func() { dml.AddProducerChannels(randStr) })
-
-	err = dml.Broadcast([]string{randStr}, nil)
-	assert.NotNil(t, err)
-	assert.EqualError(t, err, fmt.Sprintf("channel %s not exist", randStr))
+	assert.Panics(t, func() { dml.Broadcast([]string{randStr}, nil) })
+	assert.Panics(t, func() { dml.BroadcastMark([]string{randStr}, nil) })
+	assert.Panics(t, func() { dml.RemoveProducerChannels(randStr) })
 
 	// dml_xxx_0 => {chanName0, chanName2}
 	// dml_xxx_1 => {chanName1}
 	chanName0 := dml.GetDmlMsgStreamName()
 	dml.AddProducerChannels(chanName0)
-	assert.Equal(t, 1, dml.GetNumChannels())
+	assert.Equal(t, 1, dml.GetPhysicalChannelNum())
 
 	chanName1 := dml.GetDmlMsgStreamName()
 	dml.AddProducerChannels(chanName1)
-	assert.Equal(t, 2, dml.GetNumChannels())
+	assert.Equal(t, 2, dml.GetPhysicalChannelNum())
 
 	chanName2 := dml.GetDmlMsgStreamName()
 	dml.AddProducerChannels(chanName2)
-	assert.Equal(t, 2, dml.GetNumChannels())
+	assert.Equal(t, 2, dml.GetPhysicalChannelNum())
 
 	dml.RemoveProducerChannels(chanName0)
-	assert.Equal(t, 2, dml.GetNumChannels())
+	assert.Equal(t, 2, dml.GetPhysicalChannelNum())
 
 	dml.RemoveProducerChannels(chanName1)
-	assert.Equal(t, 1, dml.GetNumChannels())
+	assert.Equal(t, 1, dml.GetPhysicalChannelNum())
 
 	dml.RemoveProducerChannels(chanName0)
-	assert.Equal(t, 0, dml.GetNumChannels())
+	assert.Equal(t, 0, dml.GetPhysicalChannelNum())
 }
