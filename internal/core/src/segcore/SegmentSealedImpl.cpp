@@ -639,9 +639,4 @@ SegmentSealedImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, T
     bitset_chunk &= mask;
 }
 
-SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema) {
-    return std::make_unique<SegmentSealedImpl>(schema);
-}
-
 }  // namespace milvus::segcore

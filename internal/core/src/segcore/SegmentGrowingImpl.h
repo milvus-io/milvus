@@ -229,4 +229,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     bool enable_small_index_ = true;
 };
 
+inline SegmentGrowingPtr
+CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& conf = SegcoreConfig::default_config()) {
+    return std::make_unique<SegmentGrowingImpl>(schema, conf);
+}
+
 }  // namespace milvus::segcore

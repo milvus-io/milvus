@@ -10,21 +10,22 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Schema.h"
-#include <random>
-#include <memory>
-#include <cstring>
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentSealed.h"
-#include "Constants.h"
-#include <boost/algorithm/string/predicate.hpp>
-#include "segcore/SegmentSealed.h"
 
-#include <knowhere/index/vector_index/VecIndex.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <knowhere/index/vector_index/IndexIVF.h>
-#include <query/SearchOnIndex.h>
+#include <boost/algorithm/string/predicate.hpp>
+#include <cstring>
+#include <memory>
+#include <random>
+
+#include "Constants.h"
+#include "common/Schema.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "query/SearchOnIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealedImpl.h"
+
 using boost::algorithm::starts_with;
 
 namespace milvus::segcore {
