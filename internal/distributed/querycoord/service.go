@@ -139,7 +139,7 @@ func (s *Server) init() error {
 	}
 	// wait for master init or healthy
 	log.Debug("QueryCoord try to wait for RootCoord ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		log.Debug("QueryCoord wait for RootCoord ready failed", zap.Error(err))
 		panic(err)
@@ -168,7 +168,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	log.Debug("QueryCoord try to wait for DataCoord ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		log.Debug("QueryCoord wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
