@@ -55,7 +55,7 @@ func TestPulsarReader(t *testing.T) {
 
 	reader, err := pc.CreateReader(ReaderOptions{
 		Topic:          topic,
-		StartMessageID: pulsar.EarliestMessageID(),
+		StartMessageID: pc.EarliestMessageID(),
 	})
 	assert.Nil(t, err)
 	assert.NotNil(t, reader)
@@ -87,7 +87,7 @@ func TestPulsarReader(t *testing.T) {
 
 	readerOfSeek, err := pc.CreateReader(ReaderOptions{
 		Topic:          topic,
-		StartMessageID: pulsar.EarliestMessageID(),
+		StartMessageID: pc.EarliestMessageID(),
 	})
 	assert.Nil(t, err)
 	defer readerOfSeek.Close()

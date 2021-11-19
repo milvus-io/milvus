@@ -1148,6 +1148,58 @@ func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
 	outputStream2.Close()
 }
 
+func TestStream_MqMsgStream_Reader(t *testing.T) {
+	ctx := context.Background()
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	readerChannels := []string{c}
+
+	msgPack := &MsgPack{}
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+	defer inputStream.Close()
+
+	n := 10
+	p := 5
+
+	for i := 0; i < n; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+
+	readStream := getPulsarReader(pulsarAddress, readerChannels)
+	defer readStream.Close()
+	var seekPosition *internalpb.MsgPosition
+	for i := 0; i < n; i++ {
+		result, err := readStream.Next(ctx, c)
+		assert.Nil(t, err)
+		assert.Equal(t, result.ID(), int64(i))
+		if i == p {
+			seekPosition = result.Position()
+		}
+	}
+	result, err := readStream.Next(ctx, c)
+	assert.Nil(t, err)
+	assert.Nil(t, result)
+
+	readStream2 := getPulsarReader(pulsarAddress, readerChannels)
+	defer readStream2.Close()
+	readStream2.SeekReaders([]*internalpb.MsgPosition{seekPosition})
+
+	for i := p; i < 10; i++ {
+		result, err := readStream2.Next(ctx, c)
+		assert.Nil(t, err)
+		assert.Equal(t, result.ID(), int64(i))
+	}
+	result2, err := readStream2.Next(ctx, c)
+	assert.Nil(t, err)
+	assert.Nil(t, result2)
+
+}
+
 /****************************************Rmq test******************************************/
 
 func initRmq(name string) *etcdkv.EtcdKV {
@@ -1642,6 +1694,14 @@ func getPulsarOutputStream(pulsarAddress string, consumerChannels []string, cons
 	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
+	return outputStream
+}
+
+func getPulsarReader(pulsarAddress string, consumerChannels []string) MsgStream {
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream.AsReader(consumerChannels)
 	return outputStream
 }
 

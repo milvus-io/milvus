@@ -45,6 +45,11 @@ func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	return &rp, nil
 }
 
+//TODO fishpenguin: implementation
+func (rc *rmqClient) CreateReader(options ReaderOptions) (Reader, error) {
+	panic("this method has not been implented")
+}
+
 // Subscribe subscribes a consumer in rmq client
 func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	receiveChannel := make(chan rocksmq.Message, options.BufSize)
