@@ -389,12 +389,12 @@ type channelsMgr interface {
 }
 ```
 
-- getChannels 和 getVChannels
+- getChannels and getVChannels
 
   getVChannels returns a list that represents all virtual DmChannels of collection, getChannels returns a list that
   represents all physical DmChannels of collection. The two lists correspond one-to-one according to position.
 
-- createDMLStream 和 getDMLStream
+- createDMLStream and getDMLStream
 
   createDMLStream creates the dml message stream of collection;
 
@@ -402,7 +402,7 @@ type channelsMgr interface {
 
   Proxy uses these dml message stream to write dml data, such as insert request.
 
-- createDQLStream 和 getDQLStream
+- createDQLStream and getDQLStream
 
   createDQLStream creates the dql message stream of collection;
 
@@ -429,7 +429,7 @@ type channelsTimeTicker interface {
 }
 ```
 
-- addPChan 和 removePChan
+- addPChan and removePChan
 
   addPChan adds a physical channel to channelsTimeTicker, channelsTimeTicker only sends the information of existing
   pChans to Root Coordinator;
