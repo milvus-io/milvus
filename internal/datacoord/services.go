@@ -747,6 +747,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	return resp, nil
 }
 
+// GetCompactionStateWithPlans returns the compaction state of given plan
 func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
 	log.Debug("received GetCompactionStateWithPlans request", zap.Int64("compactionID", req.GetCompactionID()))
 
@@ -815,6 +816,7 @@ func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState
 	return
 }
 
+// WatchChannels starts watch channels by give request
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	log.Debug("receive watch channels request", zap.Any("channels", req.GetChannelNames()))
 	resp := &datapb.WatchChannelsResponse{

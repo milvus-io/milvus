@@ -429,10 +429,12 @@ func AverageReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) C
 // ChannelBGChecker check nodes' channels and return the channels needed to be reallocated.
 type ChannelBGChecker func(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelInfo, error)
 
+// EmptyBgChecker does nothing
 func EmptyBgChecker(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelInfo, error) {
 	return nil, nil
 }
 
+// BgCheckWithMaxWatchDuration returns a ChannelBGChecker with the maxWatchDuration
 func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 	return func(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelInfo, error) {
 		reallocations := make([]*NodeChannelInfo, 0, len(channels))
