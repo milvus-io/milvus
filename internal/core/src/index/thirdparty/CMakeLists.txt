@@ -104,7 +104,8 @@ macro(build_faiss)
     endif ()
 
     message(STATUS "Building FAISS with configure args -${FAISS_CONFIGURE_ARGS}")
-
+	
+	//Notice: there will not set LDFLAGS value
     if (DEFINED ENV{FAISS_SOURCE_URL})
         set(FAISS_SOURCE_URL "$ENV{FAISS_SOURCE_URL}")
         externalproject_add(faiss_ep
