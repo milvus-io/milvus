@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Handler handles some channel method for ChannelManager
 type Handler interface {
 	GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string) bool
