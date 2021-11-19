@@ -46,6 +46,8 @@ type mqMsgStream struct {
 	producerChannels []string
 	consumers        map[string]mqclient.Consumer
 	consumerChannels []string
+	readers          map[string]mqclient.Reader
+	readerChannels   []string
 	repackFunc       RepackFunc
 	unmarshal        UnmarshalDispatcher
 	receiveBuf       chan *MsgPack
@@ -54,6 +56,7 @@ type mqMsgStream struct {
 	bufSize          int64
 	producerLock     *sync.Mutex
 	consumerLock     *sync.Mutex
+	readerLock       *sync.Mutex
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
@@ -66,8 +69,10 @@ func NewMqMsgStream(ctx context.Context,
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	producers := make(map[string]mqclient.Producer)
 	consumers := make(map[string]mqclient.Consumer)
+	readers := make(map[string]mqclient.Reader)
 	producerChannels := make([]string, 0)
 	consumerChannels := make([]string, 0)
+	readerChannels := make([]string, 0)
 	receiveBuf := make(chan *MsgPack, receiveBufSize)
 
 	stream := &mqMsgStream{
@@ -77,12 +82,15 @@ func NewMqMsgStream(ctx context.Context,
 		producerChannels: producerChannels,
 		consumers:        consumers,
 		consumerChannels: consumerChannels,
+		readers:          readers,
+		readerChannels:   readerChannels,
 		unmarshal:        unmarshal,
 		bufSize:          bufSize,
 		receiveBuf:       receiveBuf,
 		streamCancel:     streamCancel,
 		producerLock:     &sync.Mutex{},
 		consumerLock:     &sync.Mutex{},
+		readerLock:       &sync.Mutex{},
 		wait:             &sync.WaitGroup{},
 	}
 
@@ -155,6 +163,39 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200))
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
+			panic(errMsg)
+		}
+	}
+}
+
+// AsProducer create producer to send message to channels
+func (ms *mqMsgStream) AsReader(channels []string) {
+	for _, channel := range channels {
+		if len(channel) == 0 {
+			log.Error("MsgStream asProducer's channel is a empty string")
+			break
+		}
+		fn := func() error {
+			r, err := ms.client.CreateReader(mqclient.ReaderOptions{
+				Topic:          channel,
+				StartMessageID: ms.client.EarliestMessageID(),
+			})
+			if err != nil {
+				return err
+			}
+			if r == nil {
+				return errors.New("reader is nil")
+			}
+
+			ms.readerLock.Lock()
+			defer ms.readerLock.Unlock()
+			ms.readers[channel] = r
+			ms.readerChannels = append(ms.readerChannels, channel)
+			return nil
+		}
+		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200))
+		if err != nil {
+			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
 	}
@@ -510,6 +551,54 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 	return ms.receiveBuf
 }
 
+func (ms *mqMsgStream) SeekReaders(msgPositions []*internalpb.MsgPosition) error {
+	for _, mp := range msgPositions {
+		reader, ok := ms.readers[mp.ChannelName]
+		if !ok {
+			return fmt.Errorf("channel %s not subscribed", mp.ChannelName)
+		}
+		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
+		if err != nil {
+			return err
+		}
+		log.Debug("MsgStream reader begin to seek", zap.Any("MessageID", mp.MsgID))
+		err = reader.Seek(messageID)
+		if err != nil {
+			log.Debug("Failed to seek", zap.Error(err))
+			return err
+		}
+	}
+	return nil
+}
+
+func (ms *mqMsgStream) Next(ctx context.Context, channelName string) (TsMsg, error) {
+	reader, ok := ms.readers[channelName]
+	if !ok {
+		return nil, fmt.Errorf("reader for channel %s is not exist", channelName)
+	}
+	if reader.HasNext() {
+		msg, err := reader.Next(ctx)
+		if err != nil {
+			return nil, err
+		}
+		tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
+		if err != nil {
+			log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+			return nil, errors.New("Failed to getTsMsgFromConsumerMsg")
+		}
+		pos := tsMsg.Position()
+		tsMsg.SetPosition(&MsgPosition{
+			ChannelName: pos.ChannelName,
+			MsgID:       pos.MsgID,
+			Timestamp:   tsMsg.BeginTs(),
+		})
+		return tsMsg, nil
+	}
+	log.Debug("All data has been read, there is no more data", zap.String("channel", channelName))
+	return nil, nil
+
+}
+
 // Seek reset the subscription associated with this consumer to a specific position
 // User has to ensure mq_msgstream is not closed before seek, and the seek position is already written.
 func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
@@ -669,6 +758,11 @@ func (ms *MqTtMsgStream) Close() {
 	for _, consumer := range ms.consumers {
 		if consumer != nil {
 			consumer.Close()
+		}
+	}
+	for _, reader := range ms.readers {
+		if reader != nil {
+			reader.Close()
 		}
 	}
 }
