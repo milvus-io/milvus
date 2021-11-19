@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
@@ -58,8 +60,6 @@ var _ types.IndexCoord = (*IndexCoord)(nil)
 // request to build the index to IndexNode. IndexCoord records the status of the index, and the index file.
 type IndexCoord struct {
 	stateCode atomic.Value
-
-	ID UniqueID
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -193,13 +193,6 @@ func (i *IndexCoord) Init() error {
 			return
 		}
 
-		i.ID, err = i.idAllocator.AllocOne()
-		if err != nil {
-			log.Error("IndexCoord idAllocator allocOne failed", zap.Error(err))
-			initErr = err
-			return
-		}
-
 		option := &miniokv.Option{
 			Address:           Params.MinIOAddress,
 			AccessKeyID:       Params.MinIOAccessKeyID,
@@ -302,8 +295,14 @@ func (i *IndexCoord) isHealthy() bool {
 // GetComponentStates gets the component states of IndexCoord.
 func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexCoord component states ...")
+
+	nodeID := common.NotRegisteredID
+	if i.session != nil && i.session.Registered() {
+		nodeID = i.session.ServerID
+	}
+
 	stateInfo := &internalpb.ComponentInfo{
-		NodeID:    i.ID,
+		NodeID:    nodeID,
 		Role:      "IndexCoord",
 		StateCode: i.stateCode.Load().(internalpb.StateCode),
 	}
@@ -515,19 +514,19 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 // GetMetrics gets the metrics info of IndexCoord.
 func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("IndexCoord.GetMetrics",
-		zap.Int64("node_id", i.ID),
+		zap.Int64("node_id", i.session.ServerID),
 		zap.String("req", req.Request))
 
 	if !i.isHealthy() {
 		log.Warn("IndexCoord.GetMetrics failed",
-			zap.Int64("node_id", i.ID),
+			zap.Int64("node_id", i.session.ServerID),
 			zap.String("req", req.Request),
-			zap.Error(errIndexCoordIsUnhealthy(i.ID)))
+			zap.Error(errIndexCoordIsUnhealthy(i.session.ServerID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(i.ID),
+				Reason:    msgIndexCoordIsUnhealthy(i.session.ServerID),
 			},
 			Response: "",
 		}, nil
@@ -536,7 +535,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Error("IndexCoord.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", i.ID),
+			zap.Int64("node_id", i.session.ServerID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -563,7 +562,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
 		log.Debug("IndexCoord.GetMetrics",
-			zap.Int64("node_id", i.ID),
+			zap.Int64("node_id", i.session.ServerID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
@@ -575,7 +574,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 	}
 
 	log.Debug("IndexCoord.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", i.ID),
+		zap.Int64("node_id", i.session.ServerID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 

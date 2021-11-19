@@ -23,6 +23,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -693,4 +696,18 @@ func Test_GrpcGetQueryChannelFail(t *testing.T) {
 	})
 	assert.NotNil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
+}
+
+func TestQueryCoord_GetComponentStates(t *testing.T) {
+	n := &QueryCoord{}
+	n.stateCode.Store(internalpb.StateCode_Healthy)
+	resp, err := n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	n.session = &sessionutil.Session{}
+	n.session.UpdateRegistered(true)
+	resp, err = n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }

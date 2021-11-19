@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -33,8 +35,13 @@ import (
 
 // GetComponentStates return information about whether the coord is healthy
 func (qc *QueryCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	nodeID := common.NotRegisteredID
+	if qc.session != nil && qc.session.Registered() {
+		nodeID = qc.session.ServerID
+	}
 	serviceComponentInfo := &internalpb.ComponentInfo{
-		NodeID:    Params.QueryCoordID,
+		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
+		NodeID:    nodeID,
 		StateCode: qc.stateCode.Load().(internalpb.StateCode),
 	}
 

@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -1194,9 +1196,15 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 	code := c.stateCode.Load().(internalpb.StateCode)
 	log.Debug("GetComponentStates", zap.String("State Code", internalpb.StateCode_name[int32(code)]))
 
+	nodeID := common.NotRegisteredID
+	if c.session != nil && c.session.Registered() {
+		nodeID = c.session.ServerID
+	}
+
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
-			NodeID:    c.session.ServerID,
+			// NodeID:    c.session.ServerID, // will race with Core.Register()
+			NodeID:    nodeID,
 			Role:      typeutil.RootCoordRole,
 			StateCode: code,
 			ExtraInfo: nil,
@@ -1207,7 +1215,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 		},
 		SubcomponentStates: []*internalpb.ComponentInfo{
 			{
-				NodeID:    c.session.ServerID,
+				NodeID:    nodeID,
 				Role:      typeutil.RootCoordRole,
 				StateCode: code,
 				ExtraInfo: nil,

@@ -238,3 +238,11 @@ func TestSessionRevoke(t *testing.T) {
 		s.Revoke(time.Second)
 	})
 }
+
+func TestSession_Registered(t *testing.T) {
+	session := &Session{}
+	session.UpdateRegistered(false)
+	assert.False(t, session.Registered())
+	session.UpdateRegistered(true)
+	assert.True(t, session.Registered())
+}

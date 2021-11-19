@@ -38,6 +38,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
@@ -285,8 +287,13 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 // GetComponentStates gets the component states of IndexNode.
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexNode components states ...")
+	nodeID := common.NotRegisteredID
+	if i.session != nil && i.session.Registered() {
+		nodeID = i.session.ServerID
+	}
 	stateInfo := &internalpb.ComponentInfo{
-		NodeID:    Params.NodeID,
+		// NodeID:    Params.NodeID, // will race with i.Register()
+		NodeID:    nodeID,
 		Role:      "NodeImpl",
 		StateCode: i.stateCode.Load().(internalpb.StateCode),
 	}
