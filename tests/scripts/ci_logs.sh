@@ -16,6 +16,7 @@
 
 # Exit immediately for non zero status
 set -e
+# Check unset variables
 set -u
 set -x
 
