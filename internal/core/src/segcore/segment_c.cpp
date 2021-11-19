@@ -16,8 +16,8 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "log/Log.h"
 #include "segcore/Collection.h"
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentSealed.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealedImpl.h"
 #include "segcore/segment_c.h"
 #include "segcore/SimilarityCorelation.h"
 

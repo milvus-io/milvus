@@ -23,11 +23,6 @@ using namespace milvus::engine;
 using namespace milvus::segcore;
 using std::vector;
 
-TEST(ConcurrentVector, TestABI) {
-    ASSERT_EQ(TestABI(), 42);
-    assert(true);
-}
-
 TEST(ConcurrentVector, TestSingle) {
     auto dim = 8;
     ConcurrentVectorImpl<int, false> c_vec(dim, 32);

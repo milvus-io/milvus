@@ -40,7 +40,4 @@ class SegmentSealed : public SegmentInternalInterface {
 
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;
 
-SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema);
-
 }  // namespace milvus::segcore

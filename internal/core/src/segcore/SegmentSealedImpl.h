@@ -187,4 +187,10 @@ class SegmentSealedImpl : public SegmentSealed {
     TimestampIndex timestamp_index_;
     SchemaPtr schema_;
 };
+
+inline SegmentSealedPtr
+CreateSealedSegment(SchemaPtr schema) {
+    return std::make_unique<SegmentSealedImpl>(schema);
+}
+
 }  // namespace milvus::segcore

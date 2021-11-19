@@ -14,7 +14,6 @@ set(SEGCORE_FILES
         Collection.cpp
         collection_c.cpp
         segment_c.cpp
-        SegmentGrowing.cpp
         SegmentGrowingImpl.cpp
         SegmentSealedImpl.cpp
         FieldIndexing.cpp
