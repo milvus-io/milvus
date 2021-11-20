@@ -12,6 +12,7 @@
 package rocksmq
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -125,6 +126,7 @@ type rocksmq struct {
 	ackedMu     sync.Map
 
 	retentionInfo *retentionInfo
+	readers       sync.Map
 }
 
 // NewRocksMQ step:
@@ -159,6 +161,7 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 		storeMu:     &sync.Mutex{},
 		consumers:   sync.Map{},
 		ackedMu:     sync.Map{},
+		readers:     sync.Map{},
 	}
 
 	ri, err := initRetentionInfo(kv, db)
@@ -306,6 +309,13 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	// clean up retention info
 	topicMu.Delete(topicName)
 	rmq.retentionInfo.topics.Delete(topicName)
+
+	// clean up reader
+	if val, ok := rmq.readers.LoadAndDelete(topicName); ok {
+		if reader, rOk := val.(*rocksmqReader); rOk {
+			reader.Close()
+		}
+	}
 	log.Debug("Rocksmq destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
@@ -486,6 +496,16 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 				continue
 			default:
 				continue
+			}
+		}
+	}
+
+	// Notify reader
+	if val, ok := rmq.readers.Load(topicName); ok {
+		if reader, rOk := val.(*rocksmqReader); rOk {
+			select {
+			case reader.readerMutex <- struct{}{}:
+			default:
 			}
 		}
 	}
@@ -892,4 +912,67 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 		}
 	}
 	return nil
+}
+
+func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool) error {
+	readOpts := gorocksdb.NewDefaultReadOptions()
+	readOpts.SetPrefixSameAsStart(true)
+	iter := rmq.store.NewIterator(readOpts)
+	fixChanName, err := fixChannelName(topicName)
+	if err != nil {
+		log.Debug("RocksMQ: fixChannelName " + topicName + " failed")
+		return err
+	}
+	dataKey := path.Join(fixChanName, strconv.FormatInt(startMsgID, 10))
+	iter.Seek([]byte(dataKey))
+	if !iter.Valid() {
+		log.Warn("iterator of startMsgID is invalid")
+	}
+
+	reader := &rocksmqReader{
+		store:              rmq.store,
+		topic:              topicName,
+		readOpts:           readOpts,
+		iter:               iter,
+		currentID:          startMsgID,
+		messageIDInclusive: messageIDInclusive,
+		readerMutex:        make(chan struct{}, 1),
+	}
+	rmq.readers.Store(topicName, reader)
+
+	return nil
+}
+
+func (rmq *rocksmq) ReaderSeek(topicName string, msgID UniqueID) {
+	if val, ok := rmq.readers.Load(topicName); ok {
+		if reader, rOk := val.(*rocksmqReader); rOk {
+			reader.Seek(msgID)
+		}
+	}
+}
+
+func (rmq *rocksmq) Next(ctx context.Context, topicName string, messageIDInclusive bool) (ConsumerMessage, error) {
+	if val, ok := rmq.readers.Load(topicName); ok {
+		if reader, rOk := val.(*rocksmqReader); rOk {
+			return reader.Next(ctx, messageIDInclusive)
+		}
+	}
+	return ConsumerMessage{}, fmt.Errorf("reader of %s doesn't exist", topicName)
+}
+
+func (rmq *rocksmq) HasNext(topicName string, messageIDInclusive bool) bool {
+	if val, ok := rmq.readers.Load(topicName); ok {
+		if reader, rOk := val.(*rocksmqReader); rOk {
+			return reader.HasNext(messageIDInclusive)
+		}
+	}
+	return false
+}
+
+func (rmq *rocksmq) CloseReader(topicName string) {
+	if val, ok := rmq.readers.Load(topicName); ok {
+		if reader, rOk := val.(*rocksmqReader); rOk {
+			reader.Close()
+		}
+	}
 }

@@ -158,6 +158,11 @@ func (c *client) consume(consumer *consumer) {
 	}
 }
 
+func (c *client) CreateReader(readerOptions ReaderOptions) (Reader, error) {
+	reader, err := newReader(c, &readerOptions)
+	return reader, err
+}
+
 // Close close the channel to notify rocksmq to stop operation and close rocksmq server
 func (c *client) Close() {
 	// TODO(yukun): Should call server.close() here?
