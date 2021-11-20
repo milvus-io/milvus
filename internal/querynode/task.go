@@ -481,7 +481,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		for _, fg := range nodeFGs {
 			if fg.channel == channel {
 				// use pChannel to consume
-				err := fg.consumerFlowGraph(VPDeltaChannels[channel], consumeSubName)
+				err := fg.consumerFlowGraphLatest(VPDeltaChannels[channel], consumeSubName)
 				if err != nil {
 					errMsg := "msgStream consume error :" + err.Error()
 					log.Warn(errMsg)
@@ -494,28 +494,9 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		zap.Any("collectionID", collectionID),
 		zap.Any("toSubChannels", toSubChannels))
 
-	// TODO: seek with check points
-	/*
-			// seek channel
-			for _, pos := range toSeekChannels {
-				for _, fg := range nodeFGs {
-					if fg.channel == pos.ChannelName {
-						pos.MsgGroup = consumeSubName
-						// use pChannel to seek
-						pos.ChannelName = VPChannels[fg.channel]
-						err := fg.seekQueryNodeFlowGraph(pos)
-						if err != nil {
-							errMsg := "msgStream seek error :" + err.Error()
-							log.Warn(errMsg)
-							return errors.New(errMsg)
-						}
-					}
-				}
-			}
-		log.Debug("Seek all channel done",
-			zap.Any("collectionID", collectionID),
-			zap.Any("toSeekChannels", toSeekChannels))
-	*/
+	for _, info := range w.req.Infos {
+		w.node.loader.FromDmlCPLoadDelete(w.ctx, collectionID, info.SeekPosition)
+	}
 
 	// start flow graphs
 	err = w.node.dataSyncService.startCollectionDeltaFlowGraph(collectionID, vDeltaChannels)
