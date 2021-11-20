@@ -153,20 +153,22 @@ func (queue *baseTaskQueue) PopActiveTask(tID UniqueID) task {
 
 func (queue *baseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	queue.utLock.RLock()
-	defer queue.utLock.RUnlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
 		if e.Value.(task).ID() == reqID {
+			queue.utLock.RUnlock()
 			return e.Value.(task)
 		}
 	}
+	queue.utLock.RUnlock()
 
 	queue.atLock.RLock()
-	defer queue.atLock.RUnlock()
 	for tID := range queue.activeTasks {
 		if tID == reqID {
+			queue.atLock.RUnlock()
 			return queue.activeTasks[tID]
 		}
 	}
+	queue.atLock.RUnlock()
 
 	return nil
 }
