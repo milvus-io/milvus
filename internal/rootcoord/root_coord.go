@@ -482,7 +482,7 @@ func (c *Core) setMsgStreams() error {
 		metrics.RootCoordDDChannelTimeTick.Set(float64(tsoutil.Mod24H(t)))
 
 		//c.dmlChannels.BroadcastAll(&msgPack)
-		pc := c.dmlChannels.ListChannels()
+		pc := c.dmlChannels.ListPhysicalChannels()
 		pt := make([]uint64, len(pc))
 		for i := 0; i < len(pt); i++ {
 			pt[i] = t
