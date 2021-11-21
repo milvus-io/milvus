@@ -41,8 +41,12 @@ func newReader(c *client, readerOptions *ReaderOptions) (*reader, error) {
 	if c.server == nil {
 		return nil, newError(InvalidConfiguration, "rmq server in client is nil")
 	}
-	err := c.server.CreateReader(readerOptions.Topic, reader.startMessageID, reader.startMessageIDInclusive)
-	return reader, err
+	name, err := c.server.CreateReader(readerOptions.Topic, reader.startMessageID, reader.startMessageIDInclusive)
+	if err != nil {
+		return nil, err
+	}
+	reader.name = name
+	return reader, nil
 }
 
 func (r *reader) Topic() string {
@@ -50,7 +54,7 @@ func (r *reader) Topic() string {
 }
 
 func (r *reader) Next(ctx context.Context) (Message, error) {
-	cMsg, err := r.c.server.Next(ctx, r.topic, r.startMessageIDInclusive)
+	cMsg, err := r.c.server.Next(ctx, r.topic, r.name, r.startMessageIDInclusive)
 	if err != nil {
 		return Message{}, err
 	}
@@ -63,14 +67,14 @@ func (r *reader) Next(ctx context.Context) (Message, error) {
 }
 
 func (r *reader) HasNext() bool {
-	return r.c.server.HasNext(r.topic, r.startMessageIDInclusive)
+	return r.c.server.HasNext(r.topic, r.name, r.startMessageIDInclusive)
 }
 
 func (r *reader) Close() {
-	r.c.server.CloseReader(r.topic)
+	r.c.server.CloseReader(r.topic, r.name)
 }
 
 func (r *reader) Seek(msgID UniqueID) error { //nolint:govet
-	r.c.server.ReaderSeek(r.topic, msgID)
+	r.c.server.ReaderSeek(r.topic, r.name, msgID)
 	return nil
 }
