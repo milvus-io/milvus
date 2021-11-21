@@ -424,9 +424,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	defer lock.Unlock()
 
 	getLockTime := time.Since(start).Milliseconds()
-	if getLockTime > 200 {
-		log.Warn("rocksmq produce get lock slow", zap.Int64("elapse", getLockTime))
-	}
 
 	msgLen := len(messages)
 	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
@@ -516,8 +513,12 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	if err != nil {
 		return []UniqueID{}, err
 	}
-	log.Debug("Rocksmq produce successfully ", zap.String("topic", topicName),
-		zap.Int64("elapsed", time.Since(start).Milliseconds()))
+
+	getProduceTime := time.Since(start).Milliseconds()
+	if getLockTime > 200 || getProduceTime > 200 {
+		log.Warn("rocksmq produce too slowly", zap.String("topic", topicName),
+			zap.Int64("get lock elapse", getLockTime), zap.Int64("produce elapse", getProduceTime))
+	}
 	return msgIDs, nil
 }
 
