@@ -2025,7 +2025,7 @@ class TestCreateCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "Create collection failed: meta table add collection failed," \
+            assert message == "CreateCollection failed: meta table add collection failed," \
                               "error = collection %s exist" % collection
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2043,7 +2043,7 @@ class TestCreateCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "Create collection failed: meta table add collection failed," \
+            assert message == "CreateCollection failed: meta table add collection failed," \
                               "error = collection %s exist" % collection
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2258,7 +2258,7 @@ class TestDescribeCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_name
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_multithread(self, connect):
@@ -2397,7 +2397,7 @@ class TestDropCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_name
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_collection_multithread(self, connect):
@@ -2740,7 +2740,7 @@ class TestLoadCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_name
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_release_collection_not_existed(self, connect, collection):
@@ -2756,7 +2756,7 @@ class TestLoadCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_name
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_collection_not_load(self, connect, collection):
@@ -2819,7 +2819,7 @@ class TestLoadCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_name
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
         try:
             connect.release_collection(collection_name)
@@ -2827,7 +2827,7 @@ class TestLoadCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_name
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_collection_after_drop(self, connect, collection):
@@ -2847,7 +2847,7 @@ class TestLoadCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_collection_without_flush(self, connect, collection):
@@ -3266,7 +3266,7 @@ class TestLoadPartition:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection
 
         try:
             connect.release_partitions(collection, [default_tag])
@@ -3274,7 +3274,7 @@ class TestLoadPartition:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection
 
 
 class TestLoadPartitionInvalid(object):
