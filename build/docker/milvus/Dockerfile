@@ -14,7 +14,8 @@ FROM milvusdb/openblas:ubuntu18.04-20210428 AS openblas
 #FROM alpine
 FROM ubuntu:bionic-20200921
 
-RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev gfortran && \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libtbb-dev gfortran netcat iputils-ping && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
