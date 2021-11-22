@@ -169,10 +169,10 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 	if segment == nil {
 		return nil
 	}
-	m.segments.DropSegment(segmentID)
 	if err := m.removeSegmentInfo(segment); err != nil {
 		return err
 	}
+	m.segments.DropSegment(segmentID)
 	return nil
 }
 
@@ -334,41 +334,30 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	return nil
 }
 
-// ListSegmentFiles lists all segment related file paths in valid & dropped list
-func (m *meta) ListSegmentFiles() (valid []string, dropped []string, droppedAt []uint64) {
+// ListSegmentFiles lists all segments' logs
+func (m *meta) ListSegmentFiles() []string {
 	m.RLock()
 	defer m.RUnlock()
 
+	var logs []string
+
 	for _, segment := range m.segments.GetSegments() {
+		if !isSegmentHealthy(segment) {
+			continue
+		}
 		for _, binlog := range segment.GetBinlogs() {
-			if segment.State != commonpb.SegmentState_Dropped {
-				valid = append(valid, binlog.Binlogs...)
-			} else {
-				dropped = append(dropped, binlog.Binlogs...)
-				droppedAt = append(droppedAt, segment.DroppedAt)
-			}
+			logs = append(logs, binlog.Binlogs...)
 		}
 
 		for _, statLog := range segment.GetStatslogs() {
-			if segment.State != commonpb.SegmentState_Dropped {
-				valid = append(valid, statLog.Binlogs...)
-			} else {
-				dropped = append(dropped, statLog.Binlogs...)
-				droppedAt = append(droppedAt, segment.DroppedAt)
-			}
+			logs = append(logs, statLog.Binlogs...)
 		}
 
 		for _, deltaLog := range segment.GetDeltalogs() {
-			if segment.State != commonpb.SegmentState_Dropped {
-				valid = append(valid, deltaLog.GetDeltaLogPath())
-			} else {
-				dropped = append(dropped, deltaLog.GetDeltaLogPath())
-				droppedAt = append(droppedAt, segment.DroppedAt)
-			}
-
+			logs = append(logs, deltaLog.GetDeltaLogPath())
 		}
 	}
-	return valid, dropped, droppedAt
+	return logs
 }
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`
