@@ -573,8 +573,10 @@ func (pc *parserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType schemap
 			}
 			if node.Value == 1 {
 				gv.Val.(*planpb.GenericValue_BoolVal).BoolVal = true
-			} else {
+			} else if node.Value == 0 {
 				gv.Val.(*planpb.GenericValue_BoolVal).BoolVal = false
+			} else {
+				return nil, fmt.Errorf("bool field should only match 0 or 1")
 			}
 		} else {
 			return nil, fmt.Errorf("type mismatch")
