@@ -14,16 +14,6 @@ def ip_check(ip):
         log.error("[IP_CHECK] IP(%s) is not a string." % ip)
         return False
 
-    _list = ip.split('.')
-    if len(_list) != 4:
-        log.error("[IP_CHECK] IP(%s) is wrong, please check manually." % ip)
-        return False
-
-    for i in _list:
-        if not str(i).isdigit():
-            log.error("[IP_CHECK] IP(%s) is wrong, please check manually." % ip)
-            return False
-
     return True
 
 
