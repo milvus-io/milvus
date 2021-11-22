@@ -522,7 +522,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 	infos := make([]*queryPb.SegmentInfo, 0)
 
 	// get info from historical
-	node.historical.replica.printReplica()
+	// node.historical.replica.printReplica()
 	historicalSegmentInfos, err := node.historical.replica.getSegmentInfosByColID(in.CollectionID)
 	if err != nil {
 		log.Debug("GetSegmentInfo: get historical segmentInfo failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
@@ -537,7 +537,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 	infos = append(infos, historicalSegmentInfos...)
 
 	// get info from streaming
-	node.streaming.replica.printReplica()
+	// node.streaming.replica.printReplica()
 	streamingSegmentInfos, err := node.streaming.replica.getSegmentInfosByColID(in.CollectionID)
 	if err != nil {
 		log.Debug("GetSegmentInfo: get streaming segmentInfo failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
@@ -550,7 +550,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		return res, err
 	}
 	infos = append(infos, streamingSegmentInfos...)
-	log.Debug("GetSegmentInfo: get segment info from query node", zap.Int64("nodeID", node.session.ServerID), zap.Any("segment infos", infos))
+	// log.Debug("GetSegmentInfo: get segment info from query node", zap.Int64("nodeID", node.session.ServerID), zap.Any("segment infos", infos))
 
 	return &queryPb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
