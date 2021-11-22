@@ -250,12 +250,11 @@ func TestExprMultiRange_Str(t *testing.T) {
 		"BoolN1 == True",
 		"True == BoolN1",
 		"BoolN1 == False",
-		"BoolN1 == 1",
-		"BoolN1 == 0",
 	}
 	invalidExprs := []string{
-		"BoolN1 == 2",
-		"BoolN1 > 2",
+		"BoolN1 == 1",
+		"BoolN1 == 0",
+		"BoolN1 > 0",
 	}
 
 	fields := []*schemapb.FieldSchema{
