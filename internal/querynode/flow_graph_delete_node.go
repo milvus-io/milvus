@@ -102,7 +102,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 		return
 	}
 
-	if targetSegment.segmentType != segmentTypeSealed {
+	if targetSegment.segmentType != segmentTypeSealed && targetSegment.segmentType != segmentTypeIndexing {
 		return
 	}
 
@@ -116,7 +116,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 		return
 	}
 
-	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
+	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("SegmentType", targetSegment.segmentType))
 }
 
 func newDeleteNode(historicalReplica ReplicaInterface) *deleteNode {
