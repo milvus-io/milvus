@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -250,6 +251,8 @@ func (i *IndexCoord) Start() error {
 			if err := i.Stop(); err != nil {
 				log.Fatal("failed to stop server", zap.Error(err))
 			}
+			// manually send signal to starter goroutine
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 		})
 
 		startErr = i.sched.Start()

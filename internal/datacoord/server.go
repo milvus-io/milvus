@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
@@ -94,6 +95,7 @@ type Server struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel context.CancelFunc
 	serverLoopWg     sync.WaitGroup
+	quitCh           chan struct{}
 	isServing        ServerState
 	helper           ServerHelper
 
@@ -178,6 +180,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:                    ctx,
+		quitCh:                 make(chan struct{}),
 		msFactory:              factory,
 		flushCh:                make(chan UniqueID, 1024),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
@@ -199,6 +202,11 @@ func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNod
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 	return rootcoordclient.NewClient(ctx, metaRootPath, etcdEndpoints)
+}
+
+// QuitSignal returns signal when server quits
+func (s *Server) QuitSignal() <-chan struct{} {
+	return s.quitCh
 }
 
 // Register register data service at etcd
@@ -402,6 +410,8 @@ func (s *Server) startServerLoop() {
 		if err := s.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 }
 

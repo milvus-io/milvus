@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -1170,6 +1171,8 @@ func (c *Core) Start() error {
 			if err := c.Stop(); err != nil {
 				log.Fatal("failed to stop server", zap.Error(err))
 			}
+			// manually send signal to starter goroutine
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 		})
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()

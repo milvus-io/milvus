@@ -35,6 +35,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -196,6 +197,8 @@ func (i *IndexNode) Start() error {
 			if err := i.Stop(); err != nil {
 				log.Fatal("failed to stop server", zap.Error(err))
 			}
+			// manually send signal to starter goroutine
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 		})
 
 		i.UpdateStateCode(internalpb.StateCode_Healthy)
