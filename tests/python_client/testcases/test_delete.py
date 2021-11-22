@@ -459,12 +459,12 @@ class TestDeleteOperation(TestcaseBase):
 
         # Just one query res and search res, because de-dup
         res, _ = collection_w.query(tmp_expr, output_fields=["*"])
-        assert res[0][ct.default_float_field_name] != 0.0
+        assert len(res) == 1
 
-        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
+        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][1]],
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit, output_fields=[ct.default_int64_field_name, ct.default_float_field_name])
-        assert search_res[0][0].entity._row_data[ct.default_float_field_name] != 0.0
+        assert len(search_res) == 1
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_empty_partition(self):
