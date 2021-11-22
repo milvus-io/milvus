@@ -114,7 +114,6 @@ func (gc *garbageCollector) scan() {
 		Prefix:    gc.option.rootPath,
 		Recursive: true,
 	}) {
-		log.Warn(info.Key)
 		_, has := vm[info.Key]
 		if has {
 			v++

@@ -893,6 +893,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestWriteLargeSizeData", func(t *testing.T) {
+		t.Skip("Large data skip for online ut")
 		size := 1 << 29 // 512M
 		var vec []float32
 		for i := 0; i < size/4; i++ {

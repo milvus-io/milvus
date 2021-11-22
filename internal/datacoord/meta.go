@@ -537,6 +537,7 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
 			cloned := segment.Clone()
 			cloned.State = commonpb.SegmentState_Dropped
+			cloned.DroppedAt = uint64(time.Now().UnixNano())
 			segments = append(segments, cloned)
 		}
 	}
