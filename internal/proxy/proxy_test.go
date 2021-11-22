@@ -2483,6 +2483,26 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	})
 }
 
+func Test_GetFlushState(t *testing.T) {
+	t.Run("normal test", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		resp, err := proxy.GetFlushState(context.TODO(), nil)
+		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{}, resp)
+		assert.Nil(t, err)
+	})
+
+	t.Run("test get flush state with unhealthy proxy", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
+		resp, err := proxy.GetFlushState(context.TODO(), nil)
+		assert.EqualValues(t, unhealthyStatus(), resp.Status)
+		assert.Nil(t, err)
+	})
+}
+
 func TestProxy_GetComponentStates(t *testing.T) {
 	n := &Proxy{}
 	n.stateCode.Store(internalpb.StateCode_Healthy)

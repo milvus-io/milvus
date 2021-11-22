@@ -113,7 +113,9 @@ func (m *MockDataCoordClient) GetCompactionStateWithPlans(ctx context.Context, r
 func (m *MockDataCoordClient) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest, opts ...grpc.CallOption) (*datapb.WatchChannelsResponse, error) {
 	return &datapb.WatchChannelsResponse{}, m.err
 }
-
+func (m *MockDataCoordClient) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
+	return &milvuspb.GetFlushStateResponse{}, m.err
+}
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
 

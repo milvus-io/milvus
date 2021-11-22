@@ -826,7 +826,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 
 	if s.isClosed() {
-		log.Warn("failed to  watch channels request", zap.Any("channels", req.GetChannelNames()),
+		log.Warn("failed to watch channels request", zap.Any("channels", req.GetChannelNames()),
 			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
 		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
 		return resp, nil
@@ -845,5 +845,41 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 
+	return resp, nil
+}
+
+// GetFlushState gets the flush state of multiple segments
+func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	log.Debug("received get flush state request", zap.Int64s("segment ids", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
+
+	resp := &milvuspb.GetFlushStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
+	if s.isClosed() {
+		log.Warn("failed to get flush state because of closed server",
+			zap.Int64s("segment ids", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		return resp, nil
+	}
+
+	var unflushed []UniqueID
+	for _, sid := range req.GetSegmentIDs() {
+		segment := s.meta.GetSegment(sid)
+		// segment is nil if it was compacted
+		if segment == nil || segment.GetState() == commonpb.SegmentState_Flushed ||
+			segment.GetState() == commonpb.SegmentState_Flushed {
+			continue
+		}
+
+		unflushed = append(unflushed, sid)
+	}
+
+	if len(unflushed) != 0 {
+		log.Debug("unflushed segment ids", zap.Int64s("segment ids", unflushed), zap.Int("len", len(unflushed)))
+		resp.Flushed = false
+	} else {
+		log.Debug("all segment is flushed", zap.Int64s("segment ids", req.GetSegmentIDs()))
+		resp.Flushed = true
+	}
+
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }

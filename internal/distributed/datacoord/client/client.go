@@ -645,3 +645,21 @@ func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 	return ret.(*datapb.WatchChannelsResponse), err
 }
+
+// GetFlushState gets the flush state of multiple segments
+func (c *Client) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.GetFlushState(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.GetFlushStateResponse), err
+}

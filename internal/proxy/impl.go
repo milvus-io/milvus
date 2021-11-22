@@ -2537,6 +2537,21 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	return resp, err
 }
 
+// GetFlushState gets the flush state of multiple segments
+func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	log.Info("received get flush state request", zap.Any("request", req))
+	resp := &milvuspb.GetFlushStateResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		log.Info("unable to get flush state because of closed server")
+		return resp, nil
+	}
+
+	resp, err := node.dataCoord.GetFlushState(ctx, req)
+	log.Info("received get flush state response", zap.Any("response", resp))
+	return resp, err
+}
+
 // checkHealthy checks proxy state is Healthy
 func (node *Proxy) checkHealthy() bool {
 	code := node.stateCode.Load().(internalpb.StateCode)

@@ -399,6 +399,10 @@ func (m *MockDataCoord) WatchChannels(ctx context.Context, req *datapb.WatchChan
 	return nil, nil
 }
 
+func (m *MockDataCoord) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase
@@ -606,6 +610,10 @@ func (m *MockProxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCo
 }
 
 func (m *MockProxy) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return nil, nil
 }
 

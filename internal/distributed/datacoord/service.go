@@ -286,3 +286,8 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	return s.dataCoord.WatchChannels(ctx, req)
 }
+
+// GetFlushState gets the flush state of multiple segments
+func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	return s.dataCoord.GetFlushState(ctx, req)
+}
