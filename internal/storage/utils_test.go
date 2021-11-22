@@ -119,7 +119,6 @@ func TestGetBinlogSize(t *testing.T) {
 	}
 
 	codec := NewIndexFileBinlogCodec()
-	defer codec.Close()
 
 	serializedBlobs, err := codec.Serialize(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas)
 	assert.Nil(t, err)
@@ -194,7 +193,6 @@ func TestEstimateMemorySize(t *testing.T) {
 	}
 
 	codec := NewIndexFileBinlogCodec()
-	defer codec.Close()
 
 	serializedBlobs, err := codec.Serialize(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas)
 	assert.Nil(t, err)

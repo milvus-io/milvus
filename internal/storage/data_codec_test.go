@@ -293,7 +293,6 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []string{"1", "2", "3", "4"}, resultData.Data[StringField].(*StringFieldData).Data)
 	assert.Equal(t, []byte{0, 255, 0, 255}, resultData.Data[BinaryVectorField].(*BinaryVectorFieldData).Data)
 	assert.Equal(t, []float32{0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7}, resultData.Data[FloatVectorField].(*FloatVectorFieldData).Data)
-	assert.Nil(t, insertCodec.Close())
 	log.Debug("Data", zap.Any("Data", resultData.Data))
 	log.Debug("Infos", zap.Any("Infos", resultData.Infos))
 
@@ -353,7 +352,6 @@ func TestDDCodec(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, resultTs, ts)
 	assert.Equal(t, resultRequests, ddRequests)
-	assert.Nil(t, dataDefinitionCodec.Close())
 
 	blobs = []*Blob{}
 	_, _, err = dataDefinitionCodec.Deserialize(blobs)
@@ -415,9 +413,6 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 	}
 	assert.Equal(t, indexName, idxName)
 	assert.Equal(t, indexID, idxID)
-
-	err = codec.Close()
-	assert.Nil(t, err)
 
 	// empty
 	_, _, _, _, _, _, _, _, _, _, err = codec.DeserializeImpl(nil)

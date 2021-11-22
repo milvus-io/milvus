@@ -268,8 +268,7 @@ type InsertData struct {
 // Blob key example:
 // ${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/${log_idx}
 type InsertCodec struct {
-	Schema          *etcdpb.CollectionMeta
-	readerCloseFunc []func() error
+	Schema *etcdpb.CollectionMeta
 }
 
 func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
@@ -396,9 +395,6 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 ) {
 	if len(blobs) == 0 {
 		return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
-	}
-	readerClose := func(reader *BinlogReader) func() error {
-		return func() error { return reader.Close() }
 	}
 
 	var blobList BlobList = blobs
@@ -607,6 +603,10 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 			default:
 				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("undefined data type %d", dataType)
 			}
+			err = eventReader.Close()
+			if err != nil {
+				log.Warn("event reader close failed", zap.Error(err))
+			}
 		}
 		if fieldID == rootcoord.TimeStampField {
 			blobInfo := BlobInfo{
@@ -614,7 +614,10 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 			}
 			resultData.Infos = append(resultData.Infos, blobInfo)
 		}
-		insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
+		err = binlogReader.Close()
+		if err != nil {
+			log.Warn("event reader close failed", zap.Error(err))
+		}
 	}
 
 	return cID, pID, sID, resultData, nil
@@ -627,16 +630,6 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *InsertData, err error) {
 	_, partitionID, segmentID, data, err = insertCodec.DeserializeAll(blobs)
 	return partitionID, segmentID, data, err
-}
-
-func (insertCodec *InsertCodec) Close() error {
-	for _, closeFunc := range insertCodec.readerCloseFunc {
-		err := closeFunc()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
@@ -656,7 +649,6 @@ func (data *DeleteData) Append(pk UniqueID, ts Timestamp) {
 
 // DeleteCodec serializes and deserializes the delete data
 type DeleteCodec struct {
-	readerCloseFunc []func() error
 }
 
 // NewDeleteCodec returns a DeleteCodec
@@ -724,9 +716,6 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	if len(blobs) == 0 {
 		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
 	}
-	readerClose := func(reader *BinlogReader) func() error {
-		return func() error { return reader.Close() }
-	}
 
 	var pid, sid UniqueID
 	result := &DeleteData{}
@@ -771,8 +760,14 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			result.Pks = append(result.Pks, pk)
 			result.Tss = append(result.Tss, ts)
 		}
-
-		deleteCodec.readerCloseFunc = append(deleteCodec.readerCloseFunc, readerClose(binlogReader))
+		err = eventReader.Close()
+		if err != nil {
+			log.Warn("event reader close failed", zap.Error(err))
+		}
+		err = binlogReader.Close()
+		if err != nil {
+			log.Warn("event reader close failed", zap.Error(err))
+		}
 
 	}
 	result.RowCount = int64(len(result.Pks))
@@ -784,8 +779,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 // ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
 // ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
 type DataDefinitionCodec struct {
-	collectionID    int64
-	readerCloseFunc []func() error
+	collectionID int64
 }
 
 func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
@@ -912,9 +906,6 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 	if len(blobs) == 0 {
 		return nil, nil, fmt.Errorf("blobs is empty")
 	}
-	readerClose := func(reader *BinlogReader) func() error {
-		return func() error { return reader.Close() }
-	}
 	var requestsStrings []string
 	var resultTs []Timestamp
 
@@ -958,32 +949,26 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 					requestsStrings = append(requestsStrings, singleString)
 				}
 			}
+			err = eventReader.Close()
+			if err != nil {
+				log.Warn("event reader close failed", zap.Error(err))
+			}
+		}
+		err = binlogReader.Close()
+		if err != nil {
+			log.Warn("event reader close failed", zap.Error(err))
 		}
 
-		dataDefinitionCodec.readerCloseFunc = append(dataDefinitionCodec.readerCloseFunc, readerClose(binlogReader))
 	}
 
 	return resultTs, requestsStrings, nil
 }
 
-func (dataDefinitionCodec *DataDefinitionCodec) Close() error {
-	for _, closeFunc := range dataDefinitionCodec.readerCloseFunc {
-		err := closeFunc()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type IndexFileBinlogCodec struct {
-	readerCloseFuncs []func() error
 }
 
 func NewIndexFileBinlogCodec() *IndexFileBinlogCodec {
-	return &IndexFileBinlogCodec{
-		readerCloseFuncs: make([]func() error, 0),
-	}
+	return &IndexFileBinlogCodec{}
 }
 
 func (codec *IndexFileBinlogCodec) Serialize(
@@ -1118,10 +1103,6 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 	if len(blobs) == 0 {
 		return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, errors.New("blobs is empty")
 	}
-	readerClose := func(reader *BinlogReader) func() error {
-		return func() error { return reader.Close() }
-	}
-
 	indexParams = make(map[string]string)
 	datas = make([]*Blob, 0)
 
@@ -1205,9 +1186,16 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 					})
 				}
 			}
+			err = eventReader.Close()
+			if err != nil {
+				log.Warn("event reader close failed", zap.Error(err))
+			}
+		}
+		err = binlogReader.Close()
+		if err != nil {
+			log.Warn("event reader close failed", zap.Error(err))
 		}
 
-		codec.readerCloseFuncs = append(codec.readerCloseFuncs, readerClose(binlogReader))
 	}
 
 	return indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas, nil
@@ -1222,16 +1210,6 @@ func (codec *IndexFileBinlogCodec) Deserialize(blobs []*Blob) (
 ) {
 	_, _, _, _, _, _, indexParams, indexName, indexID, datas, err = codec.DeserializeImpl(blobs)
 	return datas, indexParams, indexName, indexID, err
-}
-
-func (codec *IndexFileBinlogCodec) Close() error {
-	for _, closeFunc := range codec.readerCloseFuncs {
-		err := closeFunc()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 type IndexCodec struct {

@@ -425,7 +425,6 @@ func TestPrintDDFiles(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, resultTs, ts)
 	assert.Equal(t, resultRequests, ddRequests)
-	assert.Nil(t, dataDefinitionCodec.Close())
 
 	PrintBinlogFiles(binlogFiles)
 }

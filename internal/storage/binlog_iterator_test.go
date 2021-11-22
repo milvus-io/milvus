@@ -28,7 +28,6 @@ func generateTestData(t *testing.T, num int) []*Blob {
 		{FieldID: 101, Name: "int32", DataType: schemapb.DataType_Int32},
 	}}
 	insertCodec := NewInsertCodec(&etcdpb.CollectionMeta{ID: 1, Schema: schema})
-	defer insertCodec.Close()
 
 	data := &InsertData{Data: map[FieldID]FieldData{rootcoord.TimeStampField: &Int64FieldData{Data: []int64{}}, rootcoord.RowIDField: &Int64FieldData{Data: []int64{}}, 101: &Int32FieldData{Data: []int32{}}}}
 	for i := 1; i <= num; i++ {

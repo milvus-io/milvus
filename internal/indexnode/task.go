@@ -348,7 +348,6 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 	storageBlobs := getStorageBlobs(blobs)
 	var insertCodec storage.InsertCodec
-	defer insertCodec.Close()
 	collectionID, partitionID, segmentID, insertData, err2 := insertCodec.DeserializeAll(storageBlobs)
 	if err2 != nil {
 		return err2
@@ -407,7 +406,6 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_ = codec.Close()
 		tr.Record("serialize index codec done")
 
 		getSavePathByKey := func(key string) string {

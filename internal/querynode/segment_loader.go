@@ -225,12 +225,6 @@ func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinl
 
 func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog, segmentType segmentType) error {
 	iCodec := storage.InsertCodec{}
-	defer func() {
-		err := iCodec.Close()
-		if err != nil {
-			log.Warn(err.Error())
-		}
-	}()
 	blobs := make([]*storage.Blob, 0)
 	for _, fb := range fieldBinlogs {
 		log.Debug("load segment fields data",

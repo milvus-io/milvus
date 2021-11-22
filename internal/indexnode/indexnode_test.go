@@ -81,7 +81,6 @@ func TestIndexNode(t *testing.T) {
 
 	t.Run("CreateIndex FloatVector", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -197,7 +196,6 @@ func TestIndexNode(t *testing.T) {
 	})
 	t.Run("CreateIndex BinaryVector", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -310,7 +308,6 @@ func TestIndexNode(t *testing.T) {
 
 	t.Run("Create Deleted_Index", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -489,7 +486,6 @@ func TestCreateIndexFailed(t *testing.T) {
 
 	t.Run("CreateIndex error", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -608,7 +604,6 @@ func TestCreateIndexFailed(t *testing.T) {
 
 	t.Run("Invalid Param", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
