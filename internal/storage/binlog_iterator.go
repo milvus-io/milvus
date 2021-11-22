@@ -58,7 +58,6 @@ func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID) (*InsertBinlogIt
 	reader := NewInsertCodec(nil)
 
 	_, _, serData, err := reader.Deserialize(blobs)
-	defer reader.Close()
 
 	if err != nil {
 		return nil, err
