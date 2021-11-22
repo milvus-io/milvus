@@ -726,7 +726,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "`travel_timestamp` value %s is illegal" % invalid_travel_time})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue 11985")
     def test_search_param_invalid_guarantee_timestamp(self, get_invalid_guarantee_timestamp):
         """
         target: test search with invalid guarantee timestamp
