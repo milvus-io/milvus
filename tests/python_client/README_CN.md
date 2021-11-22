@@ -105,7 +105,7 @@ Milvus 支持4种部署方式，请根据需求选择部署方式，PyMilvus 支
 
 **模块调用关系图**
 
-[![img](https://github.com/milvus-io/milvus/raw/master/tests/python_client/graphs/module_call_diagram.jpg)](https://github.com/milvus-io/milvus/blob/master/tests/python_client/graphs/module_call_diagram.jpeg)
+[![img](https://github.com/milvus-io/milvus/raw/master/tests/python_client/graphs/module_call_diagram.jpeg)](https://github.com/milvus-io/milvus/blob/master/tests/python_client/graphs/module_call_diagram.jpeg)
 
 <img src="graphs/sdk_test_flow_chart.jpg" alt="SDK Test Flow Chart" width="400"/>
 
