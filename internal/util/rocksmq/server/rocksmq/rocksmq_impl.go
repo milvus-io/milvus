@@ -589,6 +589,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	}
 	lock.Lock()
 	defer lock.Unlock()
+	getLockTime := time.Since(start).Milliseconds()
 
 	metaKey := constructCurrentID(topicName, groupName)
 	currentID, err := rmq.kv.Load(metaKey)
@@ -669,9 +670,11 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	}
 
 	go rmq.updateAckedInfo(topicName, groupName, consumedIDs)
-	log.Debug("Rocksmq produce successfully ", zap.String("topic", topicName),
-		zap.String("groupName", groupName),
-		zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	getConsumeTime := time.Since(start).Milliseconds()
+	if getLockTime > 200 || getConsumeTime > 200 {
+		log.Warn("rocksmq consume too slowly", zap.String("topic", topicName),
+			zap.Int64("get lock elapse", getLockTime), zap.Int64("consume elapse", getConsumeTime))
+	}
 	return consumerMessage, nil
 }
 
