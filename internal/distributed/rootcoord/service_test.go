@@ -257,6 +257,9 @@ func TestGrpcService(t *testing.T) {
 
 	t.Run("alloc time stamp", func(t *testing.T) {
 		req := &rootcoordpb.AllocTimestampRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_RequestTSO,
+			},
 			Count: 1,
 		}
 		rsp, err := svr.AllocTimestamp(ctx, req)
@@ -266,6 +269,9 @@ func TestGrpcService(t *testing.T) {
 
 	t.Run("alloc id", func(t *testing.T) {
 		req := &rootcoordpb.AllocIDRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_RequestID,
+			},
 			Count: 1,
 		}
 		rsp, err := svr.AllocID(ctx, req)
