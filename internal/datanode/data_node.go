@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -186,6 +187,8 @@ func (node *DataNode) Register() error {
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 
 	Params.initMsgChannelSubName()
