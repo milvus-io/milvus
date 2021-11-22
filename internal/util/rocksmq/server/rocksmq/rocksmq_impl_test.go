@@ -639,7 +639,7 @@ func TestRocksmq_Reader(t *testing.T) {
 	defer rmq.DestroyTopic(channelName)
 	loopNum := 100
 
-	err = rmq.CreateReader(channelName, 0, true)
+	readerName, err := rmq.CreateReader(channelName, 0, true)
 	assert.NoError(t, err)
 
 	pMsgs := make([]ProducerMessage, loopNum)
@@ -652,22 +652,22 @@ func TestRocksmq_Reader(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(ids), loopNum)
 
-	rmq.ReaderSeek(channelName, ids[0])
+	rmq.ReaderSeek(channelName, readerName, ids[0])
 	ctx := context.Background()
 	for i := 0; i < loopNum; i++ {
-		assert.Equal(t, true, rmq.HasNext(channelName, true))
-		msg, err := rmq.Next(ctx, channelName, true)
+		assert.Equal(t, true, rmq.HasNext(channelName, readerName, true))
+		msg, err := rmq.Next(ctx, channelName, readerName, true)
 		assert.NoError(t, err)
 		assert.Equal(t, msg.MsgID, ids[i])
 	}
-	assert.False(t, rmq.HasNext(channelName, true))
+	assert.False(t, rmq.HasNext(channelName, readerName, true))
 
-	rmq.ReaderSeek(channelName, ids[0])
+	rmq.ReaderSeek(channelName, readerName, ids[0])
 	for i := 0; i < loopNum-1; i++ {
-		assert.Equal(t, true, rmq.HasNext(channelName, false))
-		msg, err := rmq.Next(ctx, channelName, false)
+		assert.Equal(t, true, rmq.HasNext(channelName, readerName, false))
+		msg, err := rmq.Next(ctx, channelName, readerName, false)
 		assert.NoError(t, err)
 		assert.Equal(t, msg.MsgID, ids[i+1])
 	}
-	assert.False(t, rmq.HasNext(channelName, false))
+	assert.False(t, rmq.HasNext(channelName, readerName, false))
 }

@@ -23,8 +23,9 @@ import (
 )
 
 type rocksmqReader struct {
-	store *gorocksdb.DB
-	topic string
+	store      *gorocksdb.DB
+	topic      string
+	readerName string
 
 	readOpts *gorocksdb.ReadOptions
 	iter     *gorocksdb.Iterator
@@ -71,7 +72,11 @@ func (rr *rocksmqReader) Next(ctx context.Context, messageIDInclusive bool) (Con
 		case <-ctx.Done():
 			log.Debug("Stop get next reader message!")
 			return ConsumerMessage{}, nil
-		case <-rr.readerMutex:
+		case _, ok := <-rr.readerMutex:
+			if !ok {
+				log.Warn("reader Mutex closed")
+				return ConsumerMessage{}, nil
+			}
 			dataKey := path.Join(fixChanName, strconv.FormatInt(rr.currentID, 10))
 			if iter.Seek([]byte(dataKey)); !iter.Valid() {
 				continue
