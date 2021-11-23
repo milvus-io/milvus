@@ -337,7 +337,6 @@ class TestCompactionOperation(TestcaseBase):
         for hits in search_res:
             assert len(hits) == ct.default_limit
 
-    @pytest.mark.xfail(reason="Issue #12148")
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_after_binary_index(self):
         """
@@ -367,9 +366,10 @@ class TestCompactionOperation(TestcaseBase):
 
         # search
         collection_w.load()
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
         search_res, _ = collection_w.search(cf.gen_binary_vectors(ct.default_nq, ct.default_dim)[1],
                                             ct.default_binary_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+                                            search_params, ct.default_limit)
         assert len(search_res) == ct.default_nq
         for hits in search_res:
             assert len(hits) == ct.default_limit

@@ -224,10 +224,10 @@ class TestQueryParams(TestcaseBase):
                                        check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #7521 #7522")
+    @pytest.mark.xfail(reason="issue #12210 #7522")
     def test_query_expr_by_bool_field(self):
         """
-        target: test query by bool field and output binary field
+        target: test query by bool field and output bool field
         method: 1.create and insert with [int64, float, bool, float_vec] fields
                 2.query by bool field, and output all int64, bool fields
         expected: verify query result and output fields
@@ -240,10 +240,19 @@ class TestQueryParams(TestcaseBase):
                                                       primary_field=ct.default_int64_field_name)
         assert self.collection_wrap.num_entities == ct.default_nb
         self.collection_wrap.load()
-        term_expr = f'{ct.default_bool_field_name} in [True]'
-        res, _ = self.collection_wrap.query(term_expr, output_fields=[ct.default_bool_field_name])
-        assert len(res) == ct.default_nb / 2
-        assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_bool_field_name}
+
+        # Now don't support output bool field
+        # res, _ = self.collection_wrap.query(term_expr, output_fields=[ct.default_bool_field_name])
+        # assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_bool_field_name}
+
+        exprs = [f'{ct.default_bool_field_name} in [false]',
+                 f'{ct.default_bool_field_name} in [True]',
+                 f'{ct.default_bool_field_name} == true',
+                 f'{ct.default_bool_field_name} == False']
+        # exprs.append(f'{ct.default_bool_field_name} in [0]')
+        for expr in exprs:
+            res, _ = self.collection_wrap.query(expr)
+            assert len(res) == ct.default_nb / 2
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_by_int8_field(self):
