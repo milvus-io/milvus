@@ -45,7 +45,7 @@ EasyAssertInfo(bool value,
             info += " => " + std::string(extra_info);
         }
         std::cout << info << std::endl;
-        throw SegcoreError(error_code, std::string(extra_info));
+        throw SegcoreError(error_code, std::string(info));
     }
 }
 

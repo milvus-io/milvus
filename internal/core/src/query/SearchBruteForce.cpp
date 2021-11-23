@@ -14,7 +14,9 @@
 #include <common/Types.h>
 #include <boost/dynamic_bitset.hpp>
 #include <queue>
+#include <string>
 #include "SubSearchResult.h"
+#include "segcore/Utils.h"
 
 #include <faiss/utils/distances.h>
 #include <faiss/utils/BinaryDistance.h>
@@ -57,7 +59,9 @@ raw_search(MetricType metric_type,
         // only matched ids will be chosen, not to use heap
         binary_distance_knn_mc(metric_type, x, xb, n, ntotal, k, code_size, D, labels, bitset);
     } else {
-        PanicInfo("unsupported");
+        std::string msg = std::string("do binary search with unsupported metric type: ") +
+                          segcore::FaissMetricTypeToString(metric_type);
+        PanicInfo(msg);
     }
 }
 
