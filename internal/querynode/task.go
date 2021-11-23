@@ -217,13 +217,37 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	}
 	log.Debug("watchDMChannel, group channels done", zap.Any("collectionID", collectionID))
 
-	// add check points info
-	checkPointInfos := make([]*datapb.SegmentInfo, 0)
+	// add excluded segments for unFlushed segments,
+	// unFlushed segments before check point should be filtered out.
+	unFlushedCheckPointInfos := make([]*datapb.SegmentInfo, 0)
 	for _, info := range w.req.Infos {
-		checkPointInfos = append(checkPointInfos, info.UnflushedSegments...)
+		unFlushedCheckPointInfos = append(unFlushedCheckPointInfos, info.UnflushedSegments...)
 	}
-	w.node.streaming.replica.addExcludedSegments(collectionID, checkPointInfos)
-	log.Debug("watchDMChannel, add check points info done", zap.Any("collectionID", collectionID))
+	w.node.streaming.replica.addExcludedSegments(collectionID, unFlushedCheckPointInfos)
+	log.Debug("watchDMChannel, add check points info for unFlushed segments done",
+		zap.Any("collectionID", collectionID),
+		zap.Any("unFlushedCheckPointInfos", unFlushedCheckPointInfos),
+	)
+
+	// add excluded segments for flushed segments,
+	// flushed segments with later check point than seekPosition should be filtered out.
+	flushedCheckPointInfos := make([]*datapb.SegmentInfo, 0)
+	for _, info := range w.req.Infos {
+		for _, flushedSegment := range info.FlushedSegments {
+			for _, position := range toSeekChannels {
+				if flushedSegment.DmlPosition != nil &&
+					flushedSegment.DmlPosition.ChannelName == position.ChannelName &&
+					flushedSegment.DmlPosition.Timestamp > position.Timestamp {
+					flushedCheckPointInfos = append(flushedCheckPointInfos, flushedSegment)
+				}
+			}
+		}
+	}
+	w.node.streaming.replica.addExcludedSegments(collectionID, flushedCheckPointInfos)
+	log.Debug("watchDMChannel, add check points info for flushed segments done",
+		zap.Any("collectionID", collectionID),
+		zap.Any("flushedCheckPointInfos", flushedCheckPointInfos),
+	)
 
 	// create tSafe
 	for _, channel := range vChannels {
