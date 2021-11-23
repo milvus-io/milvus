@@ -276,20 +276,39 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 		if err != nil {
 			return searchResults, searchSegmentIDs, err
 		}
+
+		var err2 error
+		var segmentLock sync.RWMutex
+		var wg sync.WaitGroup
 		for _, segID := range segIDs {
-			seg, err := h.replica.getSegmentByID(segID)
-			if err != nil {
-				return searchResults, searchSegmentIDs, err
-			}
-			if !seg.getOnService() {
-				continue
-			}
-			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
-			if err != nil {
-				return searchResults, searchSegmentIDs, err
-			}
-			searchResults = append(searchResults, searchResult)
-			searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)
+			segID2 := segID
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				seg, err := h.replica.getSegmentByID(segID2)
+				if err != nil {
+					err2 = err
+					return
+				}
+				if !seg.getOnService() {
+					return
+				}
+				searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
+				if err != nil {
+					err2 = err
+					return
+				}
+
+				segmentLock.Lock()
+				searchResults = append(searchResults, searchResult)
+				searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)
+				segmentLock.Unlock()
+			}()
+
+		}
+		wg.Wait()
+		if err2 != nil {
+			return searchResults, searchSegmentIDs, err2
 		}
 	}
 
