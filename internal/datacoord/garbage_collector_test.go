@@ -160,8 +160,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
-		gc.start()
-		gc.scan()
+		gc.clearEtcd()
 
 		current := make([]string, 0, 3)
 		for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: rootPath, Recursive: true}) {
