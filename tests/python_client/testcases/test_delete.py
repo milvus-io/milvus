@@ -297,7 +297,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=tmp_expr)
 
-    @pytest.mark.xfail(reason="Issue #11641")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_after_index(self):
         """
@@ -328,7 +327,6 @@ class TestDeleteOperation(TestcaseBase):
                                             ct.default_search_params, ct.default_limit)
         assert 0 not in search_res[0].ids
 
-    @pytest.mark.xfail(reason="Issue #11641")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_and_index(self):
         """
