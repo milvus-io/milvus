@@ -571,15 +571,15 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 	case schemapb.DataType_FloatVector:
 		var data = &storage.FloatVectorFieldData{
 			NumRows: numOfRows,
-			Data:    make([]float32, 0, len(content)),
+			Data:    []float32{},
 		}
 
 		for _, c := range content {
-			r, ok := c.(float32)
+			r, ok := c.([]float32)
 			if !ok {
 				return nil, errTransferType
 			}
-			data.Data = append(data.Data, r)
+			data.Data = append(data.Data, r...)
 		}
 
 		data.Dim = len(data.Data) / int(numRows)
@@ -588,15 +588,15 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 	case schemapb.DataType_BinaryVector:
 		var data = &storage.BinaryVectorFieldData{
 			NumRows: numOfRows,
-			Data:    make([]byte, 0, len(content)),
+			Data:    []byte{},
 		}
 
 		for _, c := range content {
-			r, ok := c.(byte)
+			r, ok := c.([]byte)
 			if !ok {
 				return nil, errTransferType
 			}
-			data.Data = append(data.Data, r)
+			data.Data = append(data.Data, r...)
 		}
 
 		data.Dim = len(data.Data) * 8 / int(numRows)
