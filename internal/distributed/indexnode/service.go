@@ -154,6 +154,7 @@ func (s *Server) start() error {
 
 // Stop stops IndexNode's grpc service.
 func (s *Server) Stop() error {
+	log.Debug("IndexNode stop", zap.String("Address", Params.Address))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err

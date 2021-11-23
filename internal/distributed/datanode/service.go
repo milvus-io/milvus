@@ -139,6 +139,7 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) Stop() error {
+	log.Debug("Datanode stop", zap.String("Address", Params.Address))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err

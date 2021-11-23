@@ -153,6 +153,7 @@ func (s *Server) start() error {
 // Stop stops the DataCoord server gracefully.
 // Need to call the GracefulStop interface of grpc server and call the stop method of the inner DataCoord object.
 func (s *Server) Stop() error {
+	log.Debug("Datacoord stop", zap.String("Address", Params.Address))
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {

@@ -112,6 +112,7 @@ func (s *Server) start() error {
 
 // Stop stops IndexCoord's grpc service.
 func (s *Server) Stop() error {
+	log.Debug("Indexcoord stop", zap.String("Address", Params.Address))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err

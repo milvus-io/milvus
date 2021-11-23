@@ -255,6 +255,7 @@ func (s *Server) start() error {
 
 // Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() error {
+	log.Debug("QueryCoord stop", zap.String("Address", Params.Address))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err

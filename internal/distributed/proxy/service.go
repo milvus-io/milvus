@@ -252,6 +252,7 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	log.Debug("Proxy stop", zap.String("Address", Params.Address))
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {
