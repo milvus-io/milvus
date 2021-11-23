@@ -128,8 +128,12 @@ func (kv *MinIOKV) Load(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
+	info, err := object.Stat()
+	if err != nil {
+		return "", err
+	}
 	buf := new(strings.Builder)
+	buf.Grow(int(info.Size))
 	_, err = io.Copy(buf, object)
 	if err != nil && err != io.EOF {
 		return "", err
