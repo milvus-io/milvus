@@ -59,7 +59,10 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
 				zap.Any("pks", delMsg.PrimaryKeys),
-				zap.Any("timestamp", delMsg.Timestamps))
+				zap.Any("timestamp", delMsg.Timestamps),
+				zap.Any("timestampBegin", delMsg.BeginTs()),
+				zap.Any("timestampEnd", delMsg.EndTs()),
+			)
 			processDeleteMessages(dNode.replica, delMsg, delData)
 		}
 	}
