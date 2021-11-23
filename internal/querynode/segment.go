@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type segmentType int32
@@ -345,13 +346,7 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 	vcm storage.ChunkManager, result *segcorepb.RetrieveResults) error {
 
 	for _, fieldData := range result.FieldsData {
-		log.Debug("FillVectorFieldData for fieldID", zap.Any("fieldID", fieldData.FieldId))
-		// If the vector field doesn't have index. Vector data is in memory for
-		// brute force search. No need to download data from remote.
-		_, ok := s.indexInfos[fieldData.FieldId]
-		if !ok {
-			log.Debug("FillVectorFieldData field doesn't have index",
-				zap.Any("field", fieldData.FieldId))
+		if !typeutil.IsVectorType(fieldData.Type) {
 			continue
 		}
 
@@ -359,10 +354,16 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 		if err != nil {
 			continue
 		}
-		log.Debug("FillVectorFieldData", zap.Any("fieldId", fieldData.FieldId))
+
+		// If the vector field doesn't have index. Vector data is in memory for
+		// brute force search. No need to download data from remote.
+		if _, ok := s.indexInfos[fieldData.FieldId]; !ok {
+			continue
+		}
 
 		dim := fieldData.GetVectors().GetDim()
-		log.Debug("FillVectorFieldData", zap.Int64("dim", dim), zap.Any("datatype", fieldData.Type))
+		log.Debug("FillVectorFieldData", zap.Int64("fieldId", fieldData.FieldId),
+			zap.Any("datatype", fieldData.Type), zap.Int64("dim", dim))
 
 		for i, offset := range result.Offset {
 			var vecPath string
@@ -374,37 +375,30 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 					offset -= idBinlogRowSize
 				}
 			}
-			log.Debug("FillVectorFieldData", zap.Any("path", vecPath))
+			log.Debug("FillVectorFieldData", zap.String("path", vecPath))
 
 			switch fieldData.Type {
 			case schemapb.DataType_BinaryVector:
 				rowBytes := dim / 8
 				x := fieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
 				content := make([]byte, rowBytes)
-				_, err := vcm.ReadAt(vecPath, content, offset*rowBytes)
-				if err != nil {
+				if _, err = vcm.ReadAt(vecPath, content, offset*rowBytes); err != nil {
 					return err
 				}
-				log.Debug("FillVectorFieldData", zap.Any("binaryVectorResult", content))
-
 				resultLen := dim / 8
 				copy(x.BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
 			case schemapb.DataType_FloatVector:
 				x := fieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
 				rowBytes := dim * 4
 				content := make([]byte, rowBytes)
-				_, err := vcm.ReadAt(vecPath, content, offset*rowBytes)
-				if err != nil {
+				if _, err = vcm.ReadAt(vecPath, content, offset*rowBytes); err != nil {
 					return err
 				}
 				floatResult := make([]float32, dim)
 				buf := bytes.NewReader(content)
-				err = binary.Read(buf, common.Endian, &floatResult)
-				if err != nil {
+				if err = binary.Read(buf, common.Endian, &floatResult); err != nil {
 					return err
 				}
-				log.Debug("FillVectorFieldData", zap.Any("floatVectorResult", floatResult))
-
 				resultLen := dim
 				copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
 			}
