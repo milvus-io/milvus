@@ -39,7 +39,7 @@ jobs:
   ubuntu:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
     # Add /rerun-unit 
-    if: "(github.event_name == 'push' ||  (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/rerun-unit')))"
+    if: "(github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/rerun-unit')))"
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
