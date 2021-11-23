@@ -168,12 +168,15 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	log.Debug("receive a compaction result", zap.Int64("planID", result.GetPlanID()), zap.Int64("segmentID", result.GetSegmentID()))
 	planID := result.PlanID
 	if _, ok := c.plans[planID]; !ok {
+		log.Warn("unable to find plan", zap.Int64("planID", planID))
 		return fmt.Errorf("plan %d is not found", planID)
 	}
 
 	if c.plans[planID].state != executing {
+		log.Warn("the state of plan is not executing", zap.Int64("planID", planID), zap.Any("state", c.plans[planID].state))
 		return fmt.Errorf("plan %d's state is %v", planID, c.plans[planID].state)
 	}
 
@@ -181,10 +184,12 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	switch plan.GetType() {
 	case datapb.CompactionType_InnerCompaction:
 		if err := c.handleInnerCompactionResult(plan, result); err != nil {
+			log.Warn("failed to handle inner compaction result", zap.Int64("planID", result.GetPlanID()), zap.Int64("segmentID", result.GetSegmentID()), zap.Error(err))
 			return err
 		}
 	case datapb.CompactionType_MergeCompaction:
 		if err := c.handleMergeCompactionResult(plan, result); err != nil {
+			log.Warn("failed to handle merge compaction result", zap.Int64("planID", result.GetPlanID()), zap.Int64("segmentID", result.GetSegmentID()), zap.Error(err))
 			return err
 		}
 	default:

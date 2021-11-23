@@ -251,7 +251,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
 
-	t1 := time.Now()
 	// 1. check whether segment's binlogs should be compacted or not
 	if t.compactionHandler.isFull() {
 		return
@@ -261,9 +260,9 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	singleCompactionPlan, err := t.singleCompaction(segment, signal.isForce, signal)
 	if err != nil {
 		log.Warn("failed to do single compaction", zap.Int64("segmentID", segment.ID), zap.Error(err))
-	} else {
-		log.Info("time cost of generating single compaction plan", zap.Int64("milllis", time.Since(t1).Milliseconds()),
-			zap.Int64("planID", singleCompactionPlan.GetPlanID()), zap.Int64("signalID", signal.id))
+	} else if singleCompactionPlan != nil {
+		log.Info("success to exec single compaction plan", zap.Int64("segment", segment.GetID()),
+			zap.Int64("signalID", signal.id), zap.Int64("planID", singleCompactionPlan.GetPlanID()))
 	}
 
 	// 2. check whether segments of partition&channel level should be compacted or not
@@ -330,11 +329,11 @@ func (t *compactionTrigger) mergeCompaction(segments []*SegmentInfo, signal *com
 			continue
 		}
 
-		log.Debug("exec merge compaction plan", zap.Any("plan", plan))
 		if err := t.compactionHandler.execCompactionPlan(signal, plan); err != nil {
 			log.Warn("failed to execute compaction plan", zap.Error(err))
 			continue
 		}
+		log.Debug("success to exec merge compaction plan", zap.Any("plan", plan))
 		res = append(res, plan)
 	}
 	return res
@@ -402,14 +401,9 @@ func (t *compactionTrigger) globalSingleCompaction(segments []*SegmentInfo, isFo
 		if !isForce && t.compactionHandler.isFull() {
 			return plans
 		}
-		plan, err := t.singleCompaction(segment, isForce, signal)
-		if err != nil {
-			log.Warn("failed to exec single compaction", zap.Error(err))
-			continue
-		}
+		plan, _ := t.singleCompaction(segment, isForce, signal)
 		if plan != nil {
 			plans = append(plans, plan)
-			log.Debug("exec single compaction plan", zap.Any("plan", plan))
 		}
 	}
 	return plans
@@ -432,5 +426,12 @@ func (t *compactionTrigger) singleCompaction(segment *SegmentInfo, isForce bool,
 	if err := t.fillOriginPlan(plan); err != nil {
 		return nil, err
 	}
-	return plan, t.compactionHandler.execCompactionPlan(signal, plan)
+
+	err := t.compactionHandler.execCompactionPlan(signal, plan)
+	if err != nil {
+		log.Warn("failed to exec single compaction", zap.Error(err))
+		return nil, err
+	}
+	log.Debug("success to execute single compaction", zap.Any("plan", plan))
+	return plan, nil
 }
