@@ -17,7 +17,6 @@
 package msgstream
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -133,19 +132,18 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 }
 
 // Create consumer to receive message from channels, with initial position
+// if initial position is set to latest, last message in the channel is exclusive
 func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
 		}
 		fn := func() error {
-			receiveChannel := make(chan mqclient.Message, ms.bufSize)
 			pc, err := ms.client.Subscribe(mqclient.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
-				Type:                        mqclient.KeyShared,
+				Type:                        mqclient.Exclusive,
 				SubscriptionInitialPosition: position,
-				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
 				return err
@@ -599,7 +597,7 @@ func (ms *mqMsgStream) Next(ctx context.Context, channelName string) (TsMsg, err
 
 }
 
-// Seek reset the subscription associated with this consumer to a specific position
+// Seek reset the subscription associated with this consumer to a specific position, the seek position is exclusive
 // User has to ensure mq_msgstream is not closed before seek, and the seek position is already written.
 func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	for _, mp := range msgPositions {
@@ -612,25 +610,12 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 			return err
 		}
 		log.Debug("MsgStream begin to seek", zap.Any("MessageID", mp.MsgID))
-		err = consumer.Seek(messageID)
+		err = consumer.Seek(messageID, false)
 		if err != nil {
 			log.Debug("Failed to seek", zap.Error(err))
 			return err
 		}
 		log.Debug("MsgStream seek finished", zap.Any("MessageID", messageID))
-		if consumer.ConsumeAfterSeek() {
-			log.Debug("MsgStream start to pop one message after seek")
-			msg, ok := <-consumer.Chan()
-			if !ok {
-				return errors.New("consumer closed")
-			}
-			log.Debug("MsgStream finish to pop one message after seek")
-			consumer.Ack(msg)
-			if !bytes.Equal(msg.ID().Serialize(), messageID.Serialize()) {
-				err = fmt.Errorf("seek msg not correct")
-				log.Error("msMsgStream seek", zap.Error(err))
-			}
-		}
 	}
 	return nil
 }
@@ -708,13 +693,11 @@ func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName strin
 			continue
 		}
 		fn := func() error {
-			receiveChannel := make(chan mqclient.Message, ms.bufSize)
 			pc, err := ms.client.Subscribe(mqclient.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
-				Type:                        mqclient.KeyShared,
+				Type:                        mqclient.Exclusive,
 				SubscriptionInitialPosition: position,
-				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
 				return err
@@ -955,7 +938,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if err != nil {
 			return err
 		}
-		err = consumer.Seek(seekMsgID)
+		err = consumer.Seek(seekMsgID, true)
 		if err != nil {
 			return err
 		}
@@ -975,16 +958,10 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 			return fmt.Errorf("Failed to seek, error %s", err.Error())
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
-		ms.chanMsgPos[consumer] = mp
+		ms.chanMsgPos[consumer] = (proto.Clone(mp)).(*MsgPosition)
 
-		// rmq seek behavior (position, ...)
-		// pulsar seek behavior [position, ...)
-		// skip one tt for pulsar
-
-		runLoop := false
-		if consumer.ConsumeAfterSeek() {
-			runLoop = true
-		}
+		// skip all data before current tt
+		runLoop := true
 		for runLoop {
 			select {
 			case <-ms.ctx.Done():

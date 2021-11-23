@@ -18,6 +18,7 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -444,7 +445,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
 
 	if err != nil {
-		log.Debug("RocksMQ: alloc id failed.")
+		log.Error("RocksMQ: alloc id failed.", zap.Error(err))
 		return []UniqueID{}, err
 	}
 
@@ -488,7 +489,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	kvValues := make(map[string]string)
 
 	if beginIDValue == "0" {
-		log.Debug("RocksMQ: overwrite " + kvChannelBeginID + " with " + strconv.FormatInt(idStart, 10))
 		kvValues[kvChannelBeginID] = strconv.FormatInt(idStart, 10)
 	}
 
@@ -614,18 +614,14 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		log.Debug("RocksMQ: fixChannelName " + topicName + " failed")
 		return nil, err
 	}
-	dataKey := fixChanName + "/" + currentID
 
-	// msgID is DefaultMessageID means this is the first consume operation
-	// currentID may be not valid if the deprecated values has been removed, when
-	// we move currentID to first location.
-	// Note that we assume currentId is always correct and not larger than the latest endID.
-	if iter.Seek([]byte(dataKey)); currentID != DefaultMessageID && iter.Valid() {
-		iter.Next()
+	var dataKey string
+	if currentID == DefaultMessageID {
+		dataKey = fixChanName + "/"
 	} else {
-		newKey := fixChanName + "/"
-		iter.Seek([]byte(newKey))
+		dataKey = fixChanName + "/" + currentID
 	}
+	iter.Seek([]byte(dataKey))
 
 	offset := 0
 	for ; iter.Valid() && offset < n; iter.Next() {
@@ -666,9 +662,8 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		consumedIDs = append(consumedIDs, msg.MsgID)
 	}
 	newID := consumedIDs[len(consumedIDs)-1]
-	err = rmq.seek(topicName, groupName, newID)
+	err = rmq.moveConsumePos(topicName, groupName, newID+1)
 	if err != nil {
-		log.Debug("RocksMQ: Seek(" + groupName + "," + topicName + "," + strconv.FormatInt(newID, 10) + ") failed")
 		return nil, err
 	}
 
@@ -690,13 +685,11 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 		log.Warn("RocksMQ: channel " + key + " not exists")
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
-
 	storeKey, err := combKey(topicName, msgID)
 	if err != nil {
 		log.Warn("RocksMQ: combKey(" + topicName + "," + strconv.FormatInt(msgID, 10) + ") failed")
 		return err
 	}
-
 	opts := gorocksdb.NewDefaultReadOptions()
 	defer opts.Destroy()
 	val, err := rmq.store.Get(opts, []byte(storeKey))
@@ -705,14 +698,22 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 		log.Warn("RocksMQ: get " + storeKey + " failed")
 		return err
 	}
+	if !val.Exists() {
+		//skip seek if key is not found, this is the behavior as pulsar
+		return nil
+	}
 
 	/* Step II: Save current_id in kv */
-	err = rmq.kv.Save(key, strconv.FormatInt(msgID, 10))
+	return rmq.moveConsumePos(topicName, groupName, msgID)
+}
+
+func (rmq *rocksmq) moveConsumePos(topicName string, groupName string, msgID UniqueID) error {
+	key := constructCurrentID(topicName, groupName)
+	err := rmq.kv.Save(key, strconv.FormatInt(msgID, 10))
 	if err != nil {
 		log.Warn("RocksMQ: save " + key + " failed")
 		return err
 	}
-
 	return nil
 }
 
@@ -733,7 +734,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	return rmq.seek(topicName, groupName, msgID)
 }
 
-// SeekToLatest updates current id to the msg id of latest message
+// SeekToLatest updates current id to the msg id of latest message + 1
 func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
@@ -745,39 +746,34 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
-	readOpts.SetPrefixSameAsStart(true)
 	iter := rmq.store.NewIterator(readOpts)
 	defer iter.Close()
 
 	fixChanName, _ := fixChannelName(topicName)
-	iter.Seek([]byte(fixChanName + "/"))
-	iKey := iter.Key()
-	// iter.SeekToLast bypass prefix limitation
-	// use for range until iterator invalid for now
-	if iter.Valid() {
-		iter.Next()
-		for iter.Valid() {
-			iKey.Free()
-			iKey = iter.Key()
-			iter.Next()
-		}
-	} else {
-		// In this case there are no messages, so shouldn't return error
-		return nil
-	}
-	if iKey == nil {
+
+	// 0 is the ASC value of "/" + 1
+	iter.SeekForPrev([]byte(fixChanName + "0"))
+
+	// should find the last key we written into, start with fixChanName/
+	// if not find, start from 0
+	if !iter.Valid() {
 		return nil
 	}
 
-	seekMsgID := string(iKey.Data()) // bytes to string, copy
+	iKey := iter.Key()
+	seekMsgID := string(iKey.Data())
 	iKey.Free()
+	// if find message is not belong to current channel, start from 0
+	if !strings.Contains(seekMsgID, fixChanName+"/") {
+		return nil
+	}
 
 	msgID, err := strconv.ParseInt(seekMsgID[FixedChannelNameLen+1:], 10, 64)
 	if err != nil {
 		return err
 	}
-	err = rmq.kv.Save(key, strconv.FormatInt(msgID, 10))
-	return err
+	// current msgID should not be included
+	return rmq.moveConsumePos(topicName, groupName, msgID+1)
 }
 
 // Notify sends a mutex in MsgMutex channel to tell consumers to consume

@@ -154,7 +154,8 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 				}
 				return status, err
 			}
-			log.Debug("querynode seek query channel: ", zap.Any("consumeChannels", consumeChannels))
+			log.Debug("querynode seek query channel: ", zap.Any("consumeChannels", consumeChannels),
+				zap.String("seek position", string(in.SeekPosition.MsgID)))
 		}
 	}
 

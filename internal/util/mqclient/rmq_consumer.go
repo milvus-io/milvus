@@ -23,6 +23,7 @@ type RmqConsumer struct {
 	msgChannel chan Message
 	closeCh    chan struct{}
 	once       sync.Once
+	skip       bool
 }
 
 // Subscription returns the subscription name of this consumer
@@ -43,7 +44,11 @@ func (rc *RmqConsumer) Chan() <-chan Message {
 							close(rc.msgChannel)
 							return
 						}
-						rc.msgChannel <- &rmqMessage{msg: msg}
+						if !rc.skip {
+							rc.msgChannel <- &rmqMessage{msg: msg}
+						} else {
+							rc.skip = false
+						}
 					case <-rc.closeCh:
 						close(rc.msgChannel)
 						return
@@ -56,14 +61,11 @@ func (rc *RmqConsumer) Chan() <-chan Message {
 }
 
 // Seek is used to seek the position in rocksmq topic
-func (rc *RmqConsumer) Seek(id MessageID) error {
+func (rc *RmqConsumer) Seek(id MessageID, inclusive bool) error {
 	msgID := id.(*rmqID).messageID
+	// skip the first message when consume
+	rc.skip = !inclusive
 	return rc.c.Seek(msgID)
-}
-
-// ConsumeAfterSeek defines rmq consumer should NOT consume after seek
-func (rc *RmqConsumer) ConsumeAfterSeek() bool {
-	return false
 }
 
 // Ack is used to ask a rocksmq message
