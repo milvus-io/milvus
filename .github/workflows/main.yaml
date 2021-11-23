@@ -31,15 +31,10 @@ on:
       - go.mod
       - '!**.md'
       - '!build/ci/jenkins/**'
-  # Add Issue Comment for rerun
-  issue_comment:
-    types: [created, edited]
 
 jobs:
   ubuntu:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
-    # Add /rerun-unit 
-    if: "(github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/rerun-unit')))"
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -49,76 +44,31 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
-      - name: Is Organization Member
-        shell: bash
-        if:  "github.event_name == 'issue_comment'"
-        id: is_organization_member
-        run: |
-           response_code=$(curl -sIL -w %{http_code} -H "Authorization: token ${{ secrets.RERUN_BOT_TOKEN }}" -H "Accept: application/vnd.github.v3+json" \
-           -o /dev/null https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/members/${{ github.event.sender.login }})
-           echo " response code is ${response_code} "
-           if [[ ${response_code} == '204' ]];then
-              echo "::set-output name=is-member::true"
-           elif [[ ${response_code} == '404' ]]; then 
-              echo "::set-output name=is-member::false"
-           else
-              echo "Please check if the repository secret RERUN_BOT_TOKEN  still exists and have the permission to read organization membership."
-              exit 1
-           fi
-      - name: Get Job URL
-        if: "github.event_name == 'issue_comment' && steps.is_organization_member.outputs.is-member == 'true'"
-        id: get_job_url
-        shell: bash
-        run:  |        
-          echo "::set-output name=job-url::'$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID'"
-      - name: Create Comment for Org Member
-        if: "github.event_name == 'issue_comment' && steps.is_organization_member.outputs.is-member == 'true'"
-        uses: actions-cool/issues-helper@v2.5.0       
-        with:
-          actions: 'create-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number }}
-          body: |
-            Hello ${{ github.event.sender.login }}. Workflow is successfully triggered,  get more information from ${{ steps.get_job_url.outputs.job-url }}.    
-      - name: Create Comment for Non-Org Member
-        if: "github.event_name == 'issue_comment' && steps.is_organization_member.outputs.is-member == 'false'"
-        uses: actions-cool/issues-helper@v2.5.0       
-        with:
-          actions: 'create-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number }}
-          body: |
-            Hello ${{ github.event.sender.login }}, you are not in the organization, so you do not have the permission to rerun the workflow, please contact `@milvus-io/milvus-maintainers` for help.
       - name: Checkout
-        if: "github.event_name != 'issue_comment' || steps.is_organization_member.outputs.is-member == 'true'"
         uses: actions/checkout@v2
       - name: Cache CCache Volumes
-        if: "github.event_name != 'issue_comment' || steps.is_organization_member.outputs.is-member == 'true'"
         uses: actions/cache@v1
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
           key: ubuntu${{ matrix.ubuntu }}-ccache-${{ hashFiles('internal/core/**') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
       - name: Cache Go Mod Volumes
-        if: "github.event_name != 'issue_comment' || steps.is_organization_member.outputs.is-member == 'true'"
         uses: actions/cache@v1
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
           key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
       - name: Start Service
-        if: "github.event_name != 'issue_comment' || steps.is_organization_member.outputs.is-member == 'true'"
         shell: bash
         run: |
           docker-compose up -d pulsar etcd minio
       - name: Build and UnitTest
-        if: "github.event_name != 'issue_comment' || steps.is_organization_member.outputs.is-member == 'true'"
         env:
           CHECK_BUILDER: "1"
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make unittest"
       - name: Upload coverage to Codecov
-        if: "github.repository == 'milvus-io/milvus' && (github.event_name != 'issue_comment' || steps.is_organization_member.outputs.is-member == 'true')"
+        if: "github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
