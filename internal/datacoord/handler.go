@@ -28,7 +28,10 @@ func newServerHandler(s *Server) *ServerHandler {
 
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
 func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo {
-	segments := h.s.meta.GetSegmentsByChannel(channel)
+	// cannot use GetSegmentsByChannel since dropped segments are needed here
+	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
+		return s.InsertChannel == channel
+	})
 	log.Debug("GetSegmentsByChannel",
 		zap.Any("collectionID", collectionID),
 		zap.Any("channel", channel),
@@ -36,10 +39,16 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 	)
 	var flushed []*datapb.SegmentInfo
 	var unflushed []*datapb.SegmentInfo
+	var dropped []UniqueID
 	var seekPosition *internalpb.MsgPosition
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
+			continue
+		}
+
+		if s.GetState() == commonpb.SegmentState_Dropped {
+			dropped = append(dropped, s.GetID())
 			continue
 		}
 
@@ -74,6 +83,7 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 		SeekPosition:      seekPosition,
 		FlushedSegments:   flushed,
 		UnflushedSegments: unflushed,
+		DroppedSegments:   dropped,
 	}
 }
 
