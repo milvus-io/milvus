@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"path"
 	"sync"
 	"time"
 
@@ -25,6 +26,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
+)
+
+const (
+	//TODO silverxia change to configuration
+	insertLogPrefix = `insert_log`
+	statsLogPrefix  = `stats_log`
+	deltaLogPrefix  = `delta_log`
 )
 
 // GcOption garbage collection options
@@ -108,21 +116,29 @@ func (gc *garbageCollector) scan() {
 		vm[k] = struct{}{}
 	}
 
-	for info := range gc.option.cli.ListObjects(context.TODO(), gc.option.bucketName, minio.ListObjectsOptions{
-		Prefix:    gc.option.rootPath,
-		Recursive: true,
-	}) {
-		_, has := vm[info.Key]
-		if has {
-			v++
-			continue
-		}
-		m++
-		// not found in meta, check last modified time exceeds tolerance duration
-		if time.Since(info.LastModified) > gc.option.missingTolerance {
-			e++
-			// ignore error since it could be cleaned up next time
-			_ = gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, info.Key, minio.RemoveObjectOptions{})
+	// walk only data cluster related prefixes
+	prefixes := make([]string, 0, 3)
+	prefixes = append(prefixes, path.Join(gc.option.rootPath, insertLogPrefix))
+	prefixes = append(prefixes, path.Join(gc.option.rootPath, statsLogPrefix))
+	prefixes = append(prefixes, path.Join(gc.option.rootPath, deltaLogPrefix))
+
+	for _, prefix := range prefixes {
+		for info := range gc.option.cli.ListObjects(context.TODO(), gc.option.bucketName, minio.ListObjectsOptions{
+			Prefix:    prefix,
+			Recursive: true,
+		}) {
+			_, has := vm[info.Key]
+			if has {
+				v++
+				continue
+			}
+			m++
+			// not found in meta, check last modified time exceeds tolerance duration
+			if time.Since(info.LastModified) > gc.option.missingTolerance {
+				e++
+				// ignore error since it could be cleaned up next time
+				_ = gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, info.Key, minio.RemoveObjectOptions{})
+			}
 		}
 	}
 	log.Warn("scan result", zap.Int("valid", v), zap.Int("missing", m), zap.Int("removed", e))
