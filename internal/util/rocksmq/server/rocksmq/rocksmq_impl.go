@@ -597,6 +597,9 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		log.Debug("RocksMQ: load " + metaKey + " failed")
 		return nil, err
 	}
+	if currentID == "" {
+		return nil, fmt.Errorf("currentID of topicName=%s, groupName=%s not exist", topicName, groupName)
+	}
 
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
