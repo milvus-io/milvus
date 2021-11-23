@@ -2139,7 +2139,7 @@ func assignInternalTask(ctx context.Context,
 			internalTasks = append(internalTasks, loadSegmentTask)
 		}
 
-		if watchDeltaChannelRequest != nil {
+		if watchDeltaChannelRequest != nil && len(loadSegmentsReqs) != 0 {
 			ctx = opentracing.ContextWithSpan(context.Background(), sp)
 			watchDeltaRequest := proto.Clone(watchDeltaChannelRequest).(*querypb.WatchDeltaChannelsRequest)
 			watchDeltaRequest.NodeID = nodeID
