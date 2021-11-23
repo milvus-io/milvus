@@ -90,6 +90,10 @@ class TestCollectionSearchInvalid(TestcaseBase):
         yield request.param
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_invalid_expr_bool_value(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_invalid_partition(self, request):
         if request.param == []:
             pytest.skip("empty is valid for partition")
@@ -394,6 +398,25 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "invalid expression %s"
                                                     % invalid_search_expr})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_param_invalid_expr_bool(self, get_invalid_expr_bool_value):
+        """
+        target: test search with invalid parameter values
+        method: search with invalid bool search expressions
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, is_all_data_type=True)[0]
+        # 2 search with invalid bool expr
+        invalid_search_expr_bool = f"{default_bool_field_name} == {get_invalid_expr_bool_value}"
+        log.info("test_search_param_invalid_expr_bool: searching with "
+                 "invalid expr: %s" % invalid_search_expr_bool)
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, invalid_search_expr_bool,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "failed to create query plan"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_partition_invalid_type(self, get_invalid_partition):
@@ -1809,8 +1832,7 @@ class TestCollectionSearch(TestcaseBase):
             assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 7910")
-    @pytest.mark.parametrize("bool_type", [True, False, "true", "false", 1, 0, 2])
+    @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
     def test_search_with_expression_bool(self, dim, auto_id, _async, bool_type):
         """
         target: test search with different bool expressions
