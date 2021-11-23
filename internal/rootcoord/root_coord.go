@@ -882,6 +882,39 @@ func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *s
 	return bldID, nil
 }
 
+// RemoveIndex will call drop index service
+func (c *Core) RemoveIndex(ctx context.Context, collName string, indexName string) error {
+	_, indexInfos, err := c.MetaTable.GetIndexByName(collName, indexName)
+	if err != nil {
+		log.Error("GetIndexByName failed,", zap.String("collection name", collName),
+			zap.String("index name", indexName), zap.Error(err))
+		return err
+	}
+	for _, indexInfo := range indexInfos {
+		if err = c.CallDropIndexService(ctx, indexInfo.IndexID); err != nil {
+			log.Error("CallDropIndexService failed,", zap.String("collection name", collName), zap.Error(err))
+			return err
+		}
+	}
+	return nil
+}
+
+// ExpireMetaCache will call invalidate collection meta cache
+func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, ts typeutil.Timestamp) {
+	for _, collName := range collNames {
+		req := proxypb.InvalidateCollMetaCacheRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO, msg type
+				MsgID:     0, //TODO, msg id
+				Timestamp: ts,
+				SourceID:  c.session.ServerID,
+			},
+			CollectionName: collName,
+		}
+		c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+	}
+}
+
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
 	c.session = sessionutil.NewSession(c.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
