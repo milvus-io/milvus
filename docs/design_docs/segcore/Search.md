@@ -14,7 +14,7 @@ The execution mode of Boolean Expr works as follows:
 2. proxy node unmarshals the proto, parses it to logical plan, makes static check, and generates protobuf IR.
 3. query node unmarshals the plan, generates an executable plan AST, and queries in the segcore.
 
-See details of expression usage at [expr_grammar.md](https://milvus.io/docs/v2.0.0/expression.md)
+See details of expression usage at [expr_grammar.md](https://milvus.io/docs/v2.0.0/boolean.md)
 
 ## Segcore Search Process
 
