@@ -764,6 +764,15 @@ message CompactionMergeInfo {
   int64 target = 2;
 }
 
+message GetFlushStateRequest {
+  repeated int64 segmentIDs = 1;
+}
+
+message GetFlushStateResponse {
+  common.Status status = 1;
+  bool flushed = 2;
+}
+
 service ProxyService {
   rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
 }

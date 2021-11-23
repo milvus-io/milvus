@@ -52,6 +52,7 @@ type MockDataCoord struct {
 	manualCompactionResp *milvuspb.ManualCompactionResponse
 	compactionPlansResp  *milvuspb.GetCompactionPlansResponse
 	watchChannelsResp    *datapb.WatchChannelsResponse
+	getFlushStateResp    *milvuspb.GetFlushStateResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -148,6 +149,10 @@ func (m *MockDataCoord) GetCompactionStateWithPlans(ctx context.Context, req *mi
 
 func (m *MockDataCoord) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	return m.watchChannelsResp, m.err
+}
+
+func (m *MockDataCoord) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	return m.getFlushStateResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -303,6 +308,15 @@ func Test_NewServer(t *testing.T) {
 			watchChannelsResp: &datapb.WatchChannelsResponse{},
 		}
 		resp, err := server.WatchChannels(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("GetFlushState", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			getFlushStateResp: &milvuspb.GetFlushStateResponse{},
+		}
+		resp, err := server.GetFlushState(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

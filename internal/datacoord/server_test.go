@@ -1820,6 +1820,101 @@ func TestPostFlush(t *testing.T) {
 	})
 }
 
+func TestGetFlushState(t *testing.T) {
+	t.Run("get flush state with all flushed segments", func(t *testing.T) {
+		svr := &Server{
+			isServing: ServerStateHealthy,
+			meta: &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    1,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    2,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		resp, err := svr.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
+		assert.Nil(t, err)
+		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
+			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Flushed: true,
+		}, resp)
+	})
+
+	t.Run("get flush state with unflushed segments", func(t *testing.T) {
+		svr := &Server{
+			isServing: ServerStateHealthy,
+			meta: &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    1,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    2,
+								State: commonpb.SegmentState_Sealed,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		resp, err := svr.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
+		assert.Nil(t, err)
+		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
+			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Flushed: false,
+		}, resp)
+	})
+
+	t.Run("get flush state with compacted segments", func(t *testing.T) {
+		svr := &Server{
+			isServing: ServerStateHealthy,
+			meta: &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    1,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    2,
+								State: commonpb.SegmentState_Dropped,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		resp, err := svr.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
+		assert.Nil(t, err)
+		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
+			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Flushed: true,
+		}, resp)
+	})
+}
+
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
 	Params.Init()
 	Params.TimeTickChannelName = Params.TimeTickChannelName + strconv.Itoa(rand.Int())

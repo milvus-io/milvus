@@ -39,6 +39,7 @@ service DataCoord {
   rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
 
   rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
+  rpc GetFlushState(milvus.GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
 }
 
 service DataNode {

@@ -198,6 +198,10 @@ func (coord *DataCoordMock) WatchChannels(ctx context.Context, req *datapb.Watch
 	return &datapb.WatchChannelsResponse{}, nil
 }
 
+func (coord *DataCoordMock) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	return &milvuspb.GetFlushStateResponse{}, nil
+}
+
 func NewDataCoordMock() *DataCoordMock {
 	return &DataCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
