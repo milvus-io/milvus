@@ -506,7 +506,7 @@ func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID Unique
 		return
 	}
 
-	if targetSegment.segmentType != segmentTypeSealed {
+	if targetSegment.segmentType != segmentTypeSealed && targetSegment.segmentType != segmentTypeIndexing {
 		return
 	}
 
@@ -519,7 +519,7 @@ func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID Unique
 		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
 		return
 	}
-	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
+	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("segmentType", targetSegment.segmentType))
 }
 
 // JoinIDPath joins ids to path format.
