@@ -91,10 +91,10 @@ pipeline {
                                         script {
                                             sh 'printenv'
                                             def clusterEnabled = "false"
-                                            def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
+                                            // def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
                                             if ("${MILVUS_SERVER_TYPE}" == "distributed") {
                                                 clusterEnabled = "true"
-                                                setMemoryResourceLimitArgs="--set queryNode.resources.limits.memory=4Gi"
+                                                // setMemoryResourceLimitArgs="--set queryNode.resources.limits.memory=4Gi"
                                             }
 
                                             def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
@@ -111,7 +111,7 @@ pipeline {
                                                     --skip-test \
                                                     --skip-build \
                                                     --skip-build-image \
-                                                    --install-extra-arg "--set etcd.persistence.storageClass=local-path ${setMemoryResourceLimitArgs} \
+                                                    --install-extra-arg "--set etcd.persistence.storageClass=local-path  \
                                                     --set metrics.serviceMonitor.enabled=true" 
                                                     """
                                                 }
