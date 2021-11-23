@@ -2167,11 +2167,12 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		},
 		SegmentIDs: segments,
 	})
-	log.Debug("GetPersistentSegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
 	if err != nil {
+		log.Debug("GetPersistentSegmentInfo fail", zap.Error(err))
 		resp.Status.Reason = fmt.Errorf("dataCoord:GetSegmentInfo, err:%w", err).Error()
 		return resp, nil
 	}
+	log.Debug("GetPersistentSegmentInfo ", zap.Int("len(infos)", len(infoResp.Infos)), zap.Any("status", infoResp.Status))
 	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		resp.Status.Reason = infoResp.Status.Reason
 		return resp, nil
