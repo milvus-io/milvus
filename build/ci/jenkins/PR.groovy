@@ -2,6 +2,7 @@
 
 int total_timeout_minutes = 120
 int e2e_timeout_seconds = 50 * 60
+def imageTag=''
 
 pipeline {
     options {
@@ -44,10 +45,11 @@ pipeline {
                         script {
                             sh 'printenv'
                             def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                            def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()                           
+                            def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()    
+                            imageTag="${env.BRANCH_NAME}-${date}-${gitShortCommit}"                   
                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                 sh """
-                                TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}" \
+                                TAG="${imageTag}" \
                                 ./e2e-k8s.sh \
                                 --skip-export-logs \
                                 --skip-install \
@@ -85,19 +87,15 @@ pipeline {
                                         script {
                                             sh 'printenv'
                                             def clusterEnabled = "false"
-                                            def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
                                             if ("${MILVUS_SERVER_TYPE}" == 'distributed') {
                                                 clusterEnabled = "true"
-                                                setMemoryResourceLimitArgs="--set queryNode.resources.limits.memory=4Gi"
                                             }
 
-                                            def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                                            def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                                             if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                 withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                     sh """
                                                     MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                                    TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}" \
+                                                    TAG=${imageTag}\
                                                     ./e2e-k8s.sh \
                                                     --skip-export-logs \
                                                     --skip-cleanup \
@@ -105,7 +103,7 @@ pipeline {
                                                     --skip-test \
                                                     --skip-build \
                                                     --skip-build-image \
-                                                    --install-extra-arg "--set etcd.persistence.storageClass=local-path ${setMemoryResourceLimitArgs} \
+                                                    --install-extra-arg "--set etcd.persistence.storageClass=local-path \
                                                     --set metrics.serviceMonitor.enabled=true" 
                                                     """
                                                 }
@@ -131,15 +129,8 @@ pipeline {
                                                 sh """
                                                 MILVUS_HELM_RELEASE_NAME="${release_name}" \
                                                 MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
-                                                ./e2e-k8s.sh \
-                                                --skip-export-logs \
-                                                --skip-cleanup \
-                                                --skip-setup \
-                                                --skip-build \
-                                                --skip-build-image \
-                                                --skip-install \
-                                                --test-extra-arg "-x --tags L0 L1" \
-                                                --test-timeout ${e2e_timeout_seconds}
+                                                TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                ./ci_e2e.sh  "-x --tags L0 L1" 
                                                 """
                                             } else {
                                             error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
