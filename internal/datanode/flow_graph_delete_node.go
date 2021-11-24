@@ -45,7 +45,7 @@ type deleteNode struct {
 	idAllocator  allocatorInterface
 	flushManager flushManager
 
-	clearSignal chan<- UniqueID
+	clearSignal chan<- string
 }
 
 // DelDataBuf buffers insert data, monitoring buffer size and limit
@@ -99,7 +99,9 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 	for i, pk := range msg.PrimaryKeys {
 		segIDs, ok := m[pk]
 		if !ok {
-			log.Warn("primary key not exist in all segments", zap.Int64("primary key", pk))
+			log.Warn("primary key not exist in all segments",
+				zap.Int64("primary key", pk),
+				zap.String("vChannelName", dn.channelName))
 			continue
 		}
 		for _, segID := range segIDs {
@@ -112,7 +114,9 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		rows := len(pks)
 		tss, ok := segIDToTsMap[segID]
 		if !ok || rows != len(tss) {
+			// TODO: what's the expected behavior after this Error?
 			log.Error("primary keys and timestamp's element num mis-match")
+			continue
 		}
 
 		var delDataBuf *DelDataBuf
@@ -127,7 +131,11 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		for i := 0; i < rows; i++ {
 			delData.Pks = append(delData.Pks, pks[i])
 			delData.Tss = append(delData.Tss, tss[i])
-			log.Debug("delete", zap.Int64("primary key", pks[i]), zap.Uint64("ts", tss[i]))
+			log.Debug("delete",
+				zap.Int64("primary key", pks[i]),
+				zap.Uint64("ts", tss[i]),
+				zap.Int64("segmentID", segID),
+				zap.String("vChannelName", dn.channelName))
 		}
 
 		// store
@@ -145,13 +153,24 @@ func (dn *deleteNode) showDelBuf() {
 		segID := seg.segmentID
 		if v, ok := dn.delBuf.Load(segID); ok {
 			delDataBuf, _ := v.(*DelDataBuf)
-			log.Debug("del data buffer status", zap.Int64("segID", segID), zap.Int64("size", delDataBuf.size))
+			log.Debug("delta buffer status",
+				zap.Int64("segID", segID),
+				zap.Int64("size", delDataBuf.size),
+				zap.String("vchannel", dn.channelName))
+			// TODO control the printed length
 			length := len(delDataBuf.delData.Pks)
 			for i := 0; i < length; i++ {
-				log.Debug("del data", zap.Int64("pk", delDataBuf.delData.Pks[i]), zap.Uint64("ts", delDataBuf.delData.Tss[i]))
+				log.Debug("del data",
+					zap.Int64("pk", delDataBuf.delData.Pks[i]),
+					zap.Uint64("ts", delDataBuf.delData.Tss[i]),
+					zap.Int64("segmentID", segID),
+					zap.String("vchannel", dn.channelName),
+				)
 			}
 		} else {
-			log.Error("segment not exist", zap.Int64("segID", segID))
+			log.Error("segment not exist",
+				zap.Int64("segID", segID),
+				zap.String("vchannel", dn.channelName))
 		}
 	}
 }
@@ -193,7 +212,9 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 
 	// handle flush
 	if len(fgMsg.segmentsToFlush) > 0 {
-		log.Debug("DeleteNode receives flush message", zap.Int64s("segIDs", fgMsg.segmentsToFlush))
+		log.Debug("DeleteNode receives flush message",
+			zap.Int64s("segIDs", fgMsg.segmentsToFlush),
+			zap.String("vChannelName", dn.channelName))
 		for _, segmentToFlush := range fgMsg.segmentsToFlush {
 			buf, ok := dn.delBuf.Load(segmentToFlush)
 			if !ok {
@@ -212,8 +233,8 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	if fgMsg.dropCollection {
-		log.Debug("DeleteNode reveives dropCollection signal")
-		dn.clearSignal <- dn.replica.getCollectionID()
+		log.Debug("DeleteNode notifies BackgroundGC to release vchannel", zap.String("vChannelName", dn.channelName))
+		dn.clearSignal <- dn.channelName
 	}
 
 	for _, sp := range spans {
@@ -241,7 +262,7 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []int64) map[int64]
 	return result
 }
 
-func newDeleteNode(ctx context.Context, fm flushManager, sig chan<- UniqueID, config *nodeConfig) (*deleteNode, error) {
+func newDeleteNode(ctx context.Context, fm flushManager, sig chan<- string, config *nodeConfig) (*deleteNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)

@@ -98,12 +98,11 @@ func (c *compactionExecutor) stopTask(planID UniqueID) {
 	}
 }
 
-func (c *compactionExecutor) stopExecutingtaskByCollectionID(collID UniqueID) {
+func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string) {
 	c.executing.Range(func(key interface{}, value interface{}) bool {
-		if value.(compactor).getCollection() == collID {
+		if value.(*compactionTask).plan.GetChannel() == vChannelName {
 			c.stopTask(key.(UniqueID))
 		}
-
 		return true
 	})
 }

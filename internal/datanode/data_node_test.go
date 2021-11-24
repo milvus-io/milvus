@@ -358,32 +358,33 @@ func TestDataNode(t *testing.T) {
 			zap.String("response", resp.Response))
 	})
 
-	t.Run("Test BackGroundGC", func(te *testing.T) {
+	t.Run("Test BackGroundGC", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		node := newIDLEDataNodeMock(ctx)
 
-		collIDCh := make(chan UniqueID)
-		node.clearSignal = collIDCh
-		go node.BackGroundGC(collIDCh)
+		vchanNameCh := make(chan string)
+		node.clearSignal = vchanNameCh
+		go node.BackGroundGC(vchanNameCh)
 
 		testDataSyncs := []struct {
-			collID        UniqueID
 			dmChannelName string
 		}{
-			{1, "fake-by-dev-rootcoord-dml-backgroundgc-1"},
-			{2, "fake-by-dev-rootcoord-dml-backgroundgc-2"},
-			{3, "fake-by-dev-rootcoord-dml-backgroundgc-3"},
-			{4, ""},
-			{1, ""},
+			{"fake-by-dev-rootcoord-dml-backgroundgc-1"},
+			{"fake-by-dev-rootcoord-dml-backgroundgc-2"},
+			{"fake-by-dev-rootcoord-dml-backgroundgc-3"},
+			{""},
+			{""},
 		}
 
-		for i, t := range testDataSyncs {
+		for i, test := range testDataSyncs {
 			if i <= 2 {
-				err = node.NewDataSyncService(&datapb.VchannelInfo{CollectionID: t.collID, ChannelName: t.dmChannelName})
-				assert.Nil(te, err)
-			}
 
-			collIDCh <- t.collID
+				err = node.NewDataSyncService(&datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName})
+
+				assert.Nil(t, err)
+
+				vchanNameCh <- test.dmChannelName
+			}
 		}
 
 		assert.Eventually(t, func() bool {
