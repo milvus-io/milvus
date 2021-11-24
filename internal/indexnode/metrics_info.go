@@ -18,7 +18,6 @@ package indexnode
 
 import (
 	"context"
-	"os"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -46,10 +45,7 @@ func getSystemInfoMetrics(
 				Disk:         metricsinfo.GetDiskCount(),
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
-			SystemInfo: metricsinfo.DeployMetrics{
-				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-			},
+			SystemInfo:  metricsinfo.DeployMetrics{},
 			CreatedTime: Params.CreatedTime.String(),
 			UpdatedTime: Params.UpdatedTime.String(),
 			Type:        typeutil.IndexNodeRole,
@@ -61,6 +57,9 @@ func getSystemInfoMetrics(
 			SimdType: Params.SimdType,
 		},
 	}
+
+	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
+
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{

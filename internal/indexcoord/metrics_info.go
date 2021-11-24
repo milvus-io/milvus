@@ -18,7 +18,6 @@ package indexcoord
 
 import (
 	"context"
-	"os"
 
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
@@ -53,10 +52,7 @@ func getSystemInfoMetrics(
 					Disk:         metricsinfo.GetDiskCount(),
 					DiskUsage:    metricsinfo.GetDiskUsage(),
 				},
-				SystemInfo: metricsinfo.DeployMetrics{
-					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-				},
+				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: Params.CreatedTime.String(),
 				UpdatedTime: Params.UpdatedTime.String(),
 				Type:        typeutil.IndexCoordRole,
@@ -68,6 +64,8 @@ func getSystemInfoMetrics(
 		},
 		ConnectedNodes: make([]metricsinfo.IndexNodeInfos, 0),
 	}
+
+	metricsinfo.FillDeployMetricsWithEnv(&clusterTopology.Self.SystemInfo)
 
 	nodesMetrics := coord.nodeManager.getMetrics(ctx, req)
 	for _, nodeMetrics := range nodesMetrics {

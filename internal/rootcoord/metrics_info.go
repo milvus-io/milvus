@@ -13,7 +13,6 @@ package rootcoord
 
 import (
 	"context"
-	"os"
 
 	"go.uber.org/zap"
 
@@ -39,10 +38,7 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 					Disk:         metricsinfo.GetDiskCount(),
 					DiskUsage:    metricsinfo.GetDiskUsage(),
 				},
-				SystemInfo: metricsinfo.DeployMetrics{
-					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-				},
+				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: Params.CreatedTime.String(),
 				UpdatedTime: Params.UpdatedTime.String(),
 				Type:        typeutil.RootCoordRole,
@@ -58,6 +54,7 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
+	metricsinfo.FillDeployMetricsWithEnv(&rootCoordTopology.Self.SystemInfo)
 
 	resp, err := metricsinfo.MarshalTopology(rootCoordTopology)
 	if err != nil {

@@ -57,12 +57,24 @@ const (
 
 	// StandaloneDeployMode represents the stand-alone deployment mode
 	StandaloneDeployMode = "STANDALONE"
+
+	// GitBuildTagsEnvKey build tag
+	GitBuildTagsEnvKey = "MILVUS_GIT_BUILD_TAGS"
+
+	// MilvusBuildTimeEnvKey build time
+	MilvusBuildTimeEnvKey = "MILVUS_BUILD_TIME"
+
+	// MilvusUsedGoVersion used go version
+	MilvusUsedGoVersion = "MILVUS_USED_GO_VERSION"
 )
 
 // DeployMetrics records the deploy information of nodes.
 type DeployMetrics struct {
 	SystemVersion string `json:"system_version"`
 	DeployMode    string `json:"deploy_mode"`
+	BuildVersion  string `json:"build_version"`
+	BuildTime     string `json:"build_time"`
+	UsedGoVersion string `json:"used_go_version"`
 }
 
 // BaseComponentInfos contains basic information that all components should have.

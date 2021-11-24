@@ -72,9 +72,29 @@ func printBanner() {
 func injectVariablesToEnv() {
 	// inject in need
 
-	err := os.Setenv(metricsinfo.GitCommitEnvKey, GitCommit)
+	var err error
+
+	err = os.Setenv(metricsinfo.GitCommitEnvKey, GitCommit)
 	if err != nil {
-		log.Warn("failed to inject git commit to environment variable",
+		log.Warn(fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.GitCommitEnvKey),
+			zap.Error(err))
+	}
+
+	err = os.Setenv(metricsinfo.GitBuildTagsEnvKey, BuildTags)
+	if err != nil {
+		log.Warn(fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.GitBuildTagsEnvKey),
+			zap.Error(err))
+	}
+
+	err = os.Setenv(metricsinfo.MilvusBuildTimeEnvKey, BuildTime)
+	if err != nil {
+		log.Warn(fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.MilvusBuildTimeEnvKey),
+			zap.Error(err))
+	}
+
+	err = os.Setenv(metricsinfo.MilvusUsedGoVersion, GoVersion)
+	if err != nil {
+		log.Warn(fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.MilvusUsedGoVersion),
 			zap.Error(err))
 	}
 }
