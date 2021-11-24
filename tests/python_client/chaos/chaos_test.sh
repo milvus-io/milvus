@@ -47,6 +47,10 @@ then
     helm upgrade ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=2 --reuse-values
 fi
 
+# wait all pod ready
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
+kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s
+
 popd
 
 # replace chaos object as defined
@@ -66,12 +70,12 @@ python scripts/hello_milvus.py --host "$host"
 # chaos test
 if [ "$chaos_task" == "chaos-test" ];
 then
-    pytest -s -v test_chaos.py --host "$host" --log-cli-level=INFO || echo "chaos test fail"
+    pytest -s -v test_chaos.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
 fi
 # data consist test
 if [ "$chaos_task" == "data-consist-test" ];
 then
-    pytest -s -v test_chaos_data_consist.py --host "$host" --log-cli-level=INFO || echo "chaos test fail"
+    pytest -s -v test_chaos_data_consist.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
 fi
 sleep 30s
 echo "start running e2e test"
@@ -82,4 +86,4 @@ python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
 
 # save logs
 data=`date +%Y-%m-%d-%H-%M-%S`
-bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}-${chaos_type}-${data}
+bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}-${chaos_type}-${chaos_task}-${data}
