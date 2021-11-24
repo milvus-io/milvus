@@ -28,6 +28,7 @@ type consumer struct {
 	startOnce sync.Once
 
 	msgMutex  chan struct{}
+	initCh    chan struct{}
 	messageCh chan Message
 }
 
@@ -48,13 +49,16 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 	if options.MessageChannel == nil {
 		messageCh = make(chan Message, 1)
 	}
-
+	// only used for
+	initCh := make(chan struct{}, 1)
+	initCh <- struct{}{}
 	return &consumer{
 		topic:        options.Topic,
 		client:       c,
 		consumerName: options.SubscriptionName,
 		options:      options,
 		msgMutex:     make(chan struct{}, 1),
+		initCh:       initCh,
 		messageCh:    messageCh,
 	}, nil
 }

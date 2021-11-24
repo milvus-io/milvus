@@ -13,6 +13,7 @@ package rocksmq
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -120,6 +121,76 @@ func TestClient_Subscribe(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestClient_SeekLatest(t *testing.T) {
+	rmqPath := "/tmp/milvus/seekLatest"
+	rmq := newRocksMQ(rmqPath)
+	defer removePath(rmqPath)
+	client, err := NewClient(ClientOptions{
+		Server: rmq,
+	})
+	assert.NoError(t, err)
+	defer client.Close()
+
+	topicName := newTopicName()
+	opt := ConsumerOptions{
+		Topic:                       topicName,
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
+	}
+	consumer1, err := client.Subscribe(opt)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer1)
+
+	producer, err := client.CreateProducer(ProducerOptions{
+		Topic: topicName,
+	})
+	assert.NotNil(t, producer)
+	assert.NoError(t, err)
+	msg := &ProducerMessage{
+		Payload: make([]byte, 10),
+	}
+	id, err := producer.Send(msg)
+	assert.Nil(t, err)
+
+	msgChan := consumer1.Chan()
+	msgRead, ok := <-msgChan
+	assert.Equal(t, ok, true)
+	assert.Equal(t, msgRead.MsgID, id)
+
+	consumer1.Close()
+
+	opt1 := ConsumerOptions{
+		Topic:                       topicName,
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: SubscriptionPositionLatest,
+	}
+	consumer2, err := client.Subscribe(opt1)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer2)
+
+	msgChan = consumer2.Chan()
+	loop := true
+	for loop {
+		select {
+		case msg := <-msgChan:
+			assert.Equal(t, len(msg.Payload), 8)
+			loop = false
+		case <-time.After(2 * time.Second):
+			msg := &ProducerMessage{
+				Payload: make([]byte, 8),
+			}
+			_, err = producer.Send(msg)
+			assert.Nil(t, err)
+		}
+	}
+
+	producer1, err := client.CreateProducer(ProducerOptions{
+		Topic: newTopicName(),
+	})
+	assert.NotNil(t, producer1)
+	assert.NoError(t, err)
+}
+
 func TestClient_consume(t *testing.T) {
 	rmqPath := "/tmp/milvus/test_client3"
 	rmq := newRocksMQ(rmqPath)
@@ -148,8 +219,11 @@ func TestClient_consume(t *testing.T) {
 	msg := &ProducerMessage{
 		Payload: make([]byte, 10),
 	}
-	_, err = producer.Send(msg)
+	id, err := producer.Send(msg)
 	assert.Nil(t, err)
 
-	<-consumer.Chan()
+	msgChan := consumer.Chan()
+	msgConsume, ok := <-msgChan
+	assert.Equal(t, ok, true)
+	assert.Equal(t, id, msgConsume.MsgID)
 }
