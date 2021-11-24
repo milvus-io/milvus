@@ -10,6 +10,7 @@ pipeline {
         timeout(time: total_timeout_minutes, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         parallelsAlwaysFailFast()
+        preserveStashes(buildCount: 5)
 
     }
     agent {
@@ -58,6 +59,10 @@ pipeline {
                                 --skip-test
                                 """
 
+                                // stash imageTag info for rebuild install & E2E Test only
+                                sh "echo ${imageTag} > imageTag.txt"
+                                stash includes: 'imageTag.txt', name: 'imageTag'
+
                             }
                         }
                     }
@@ -92,6 +97,17 @@ pipeline {
                                             }
 
                                             if ("${MILVUS_CLIENT}" == "pymilvus") {
+                                                if ("${imageTag}"==''){
+                                                    dir ("imageTag"){
+                                                        try{
+                                                            unstash 'imageTag'
+                                                            imageTag=sh(returnStdout: true, script: 'cat imageTag.txt | tr -d \'\n\r\'')
+                                                        }catch(e){
+                                                            print "No Image Tag info remained ,please rerun build to build new image."
+                                                            exit 1
+                                                        }
+                                                    }
+                                                }
                                                 withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                     sh """
                                                     MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
