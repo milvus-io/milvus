@@ -2422,6 +2422,19 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	log.Debug("Proxy.GetMetrics",
 		zap.String("metric_type", metricType))
 
+	msgID := UniqueID(0)
+	msgID, err = node.idAllocator.AllocOne()
+	if err != nil {
+		log.Warn("Proxy.GetMetrics failed to allocate id",
+			zap.Error(err))
+	}
+	req.Base = &commonpb.MsgBase{
+		MsgType:   commonpb.MsgType_SystemInfo,
+		MsgID:     msgID,
+		Timestamp: 0,
+		SourceID:  Params.ProxyID,
+	}
+
 	if metricType == metricsinfo.SystemInfoMetrics {
 		ret, err := node.metricsCacheManager.GetSystemInfoMetrics()
 		if err == nil && ret != nil {

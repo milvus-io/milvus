@@ -18,7 +18,6 @@ package querycoord
 
 import (
 	"context"
-	"os"
 
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
@@ -53,10 +52,7 @@ func getSystemInfoMetrics(
 					Disk:         metricsinfo.GetDiskCount(),
 					DiskUsage:    metricsinfo.GetDiskUsage(),
 				},
-				SystemInfo: metricsinfo.DeployMetrics{
-					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-				},
+				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: Params.CreatedTime.String(),
 				UpdatedTime: Params.UpdatedTime.String(),
 				Type:        typeutil.QueryCoordRole,
@@ -69,6 +65,7 @@ func getSystemInfoMetrics(
 		},
 		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
 	}
+	metricsinfo.FillDeployMetricsWithEnv(&clusterTopology.Self.SystemInfo)
 
 	nodesMetrics := qc.cluster.getMetrics(ctx, req)
 	for _, nodeMetrics := range nodesMetrics {

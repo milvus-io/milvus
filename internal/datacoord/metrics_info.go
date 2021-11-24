@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"errors"
-	"os"
 
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
@@ -90,7 +89,7 @@ func (s *Server) getSystemInfoMetrics(
 
 // getDataCoordMetrics composes datacoord infos
 func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
-	return metricsinfo.DataCoordInfos{
+	ret := metricsinfo.DataCoordInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
 			HardwareInfos: metricsinfo.HardwareMetrics{
@@ -102,10 +101,7 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 				Disk:         metricsinfo.GetDiskCount(),
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
-			SystemInfo: metricsinfo.DeployMetrics{
-				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-			},
+			SystemInfo:  metricsinfo.DeployMetrics{},
 			CreatedTime: Params.CreatedTime.String(),
 			UpdatedTime: Params.UpdatedTime.String(),
 			Type:        typeutil.DataCoordRole,
@@ -115,6 +111,10 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 			SegmentMaxSize: Params.SegmentMaxSize,
 		},
 	}
+
+	metricsinfo.FillDeployMetricsWithEnv(&ret.BaseComponentInfos.SystemInfo)
+
+	return ret
 }
 
 // getDataNodeMetrics composes data node infos
