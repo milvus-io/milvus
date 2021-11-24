@@ -129,12 +129,6 @@ type Core struct {
 
 	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
 
-	// dml channels used for insert
-	dmlChannels *dmlChannels
-
-	// delta channels used for delete
-	deltaChannels *dmlChannels
-
 	//Proxy manager
 	proxyManager *proxyManager
 
@@ -482,8 +476,7 @@ func (c *Core) setMsgStreams() error {
 		}
 		metrics.RootCoordDDChannelTimeTick.Set(float64(tsoutil.Mod24H(t)))
 
-		//c.dmlChannels.BroadcastAll(&msgPack)
-		pc := c.dmlChannels.ListPhysicalChannels()
+		pc := c.chanTimeTick.listDmlChannels()
 		pt := make([]uint64, len(pc))
 		for i := 0; i < len(pt); i++ {
 			pt[i] = t
@@ -503,7 +496,7 @@ func (c *Core) setMsgStreams() error {
 		//	zap.Any("DefaultTs", t),
 		//	zap.Any("sourceID", c.session.ServerID),
 		//	zap.Any("reason", reason))
-		return c.chanTimeTick.UpdateTimeTick(&ttMsg, reason)
+		return c.chanTimeTick.updateTimeTick(&ttMsg, reason)
 	}
 
 	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) (map[string][]byte, error) {
@@ -519,7 +512,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastMark(channelNames, &msgPack)
+		return c.chanTimeTick.broadcastMarkDmlChannels(channelNames, &msgPack)
 	}
 
 	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
@@ -535,7 +528,7 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.chanTimeTick.broadcastDmlChannels(channelNames, &msgPack)
 	}
 
 	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error {
@@ -551,7 +544,7 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.chanTimeTick.broadcastDmlChannels(channelNames, &msgPack)
 	}
 
 	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error {
@@ -567,7 +560,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.Broadcast(channelNames, &msgPack)
+		return c.chanTimeTick.broadcastDmlChannels(channelNames, &msgPack)
 	}
 
 	return nil
@@ -1007,46 +1000,23 @@ func (c *Core) Init() error {
 			return
 		}
 
-		// initialize dml channels used for insert
-		c.dmlChannels = newDmlChannels(c, Params.DmlChannelName, Params.DmlChannelNum)
-
-		// initialize delta channels used for delete, share Params.DmlChannelNum with dmlChannels
-		c.deltaChannels = newDmlChannels(c, Params.DeltaChannelName, Params.DmlChannelNum)
-
-		// recover physical channels for all collections
 		chanMap := c.MetaTable.ListCollectionPhysicalChannels()
-		for collID, chanNames := range chanMap {
-			c.dmlChannels.AddProducerChannels(chanNames...)
-			log.Debug("recover physical channels", zap.Int64("collID", collID), zap.Any("physical channels", chanNames))
-
-			// TODO: convert physical channel name to delta channel name
-			for _, chanName := range chanNames {
-				deltaChanName, err := ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName)
-				if err != nil {
-					log.Error("failed to convert dml channel name to delta channel name", zap.String("chanName", chanName))
-					return
-				}
-				c.deltaChannels.AddProducerChannels(deltaChanName)
-				log.Debug("recover delta channels", zap.Int64("collID", collID), zap.String("deltaChanName", deltaChanName))
-			}
-		}
-
-		c.chanTimeTick = newTimeTickSync(c)
-		c.chanTimeTick.AddProxy(c.session)
+		c.chanTimeTick = newTimeTickSync(c.ctx, c.session, c.msFactory, chanMap)
+		c.chanTimeTick.addProxy(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 
 		log.Debug("RootCoord, set proxy manager")
 		c.proxyManager, initError = newProxyManager(
 			c.ctx,
 			Params.EtcdEndpoints,
-			c.chanTimeTick.GetProxy,
+			c.chanTimeTick.getProxy,
 			c.proxyClientManager.GetProxyClients,
 		)
 		if initError != nil {
 			return
 		}
-		c.proxyManager.AddSession(c.chanTimeTick.AddProxy, c.proxyClientManager.AddProxyClient)
-		c.proxyManager.DelSession(c.chanTimeTick.DelProxy, c.proxyClientManager.DelProxyClient)
+		c.proxyManager.AddSession(c.chanTimeTick.addProxy, c.proxyClientManager.AddProxyClient)
+		c.proxyManager.DelSession(c.chanTimeTick.delProxy, c.proxyClientManager.DelProxyClient)
 
 		c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
@@ -1197,7 +1167,7 @@ func (c *Core) Start() error {
 		c.wg.Add(4)
 		go c.startTimeTickLoop()
 		go c.tsLoop()
-		go c.chanTimeTick.StartWatch(&c.wg)
+		go c.chanTimeTick.startWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
 		go c.session.LivenessCheck(c.ctx, func() {
 			log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
@@ -1839,7 +1809,7 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 		msgTypeName := commonpb.MsgType_name[int32(in.Base.GetMsgType())]
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "invalid message type "+msgTypeName), nil
 	}
-	err := c.chanTimeTick.UpdateTimeTick(in, "gRPC")
+	err := c.chanTimeTick.updateTimeTick(in, "gRPC")
 	if err != nil {
 		log.Error("UpdateTimeTick failed", zap.String("role", Params.RoleName),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
