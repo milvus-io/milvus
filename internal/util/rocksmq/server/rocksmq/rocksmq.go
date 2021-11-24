@@ -50,7 +50,7 @@ type RocksMQ interface {
 
 	Notify(topicName, groupName string)
 
-	CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool) (string, error)
+	CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool, subscriptionRolePrefix string) (string, error)
 	ReaderSeek(topicName string, readerName string, msgID UniqueID)
 	Next(ctx context.Context, topicName string, readerName string, messageIDInclusive bool) (ConsumerMessage, error)
 	HasNext(topicName string, readerName string, messageIDInclusive bool) bool

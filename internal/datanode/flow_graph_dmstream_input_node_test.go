@@ -67,7 +67,7 @@ func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
 }
 
 func (mtm *mockTtMsgStream) AsProducer(channels []string)                 {}
-func (mtm *mockTtMsgStream) AsReader(channels []string)                   {}
+func (mtm *mockTtMsgStream) AsReader(channels []string, subName string)   {}
 func (mtm *mockTtMsgStream) AsConsumer(channels []string, subName string) {}
 func (mtm *mockTtMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 }

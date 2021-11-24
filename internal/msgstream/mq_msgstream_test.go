@@ -1935,7 +1935,7 @@ func getPulsarReader(pulsarAddress string, consumerChannels []string) MsgStream 
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	outputStream.AsReader(consumerChannels)
+	outputStream.AsReader(consumerChannels, "pulsar-reader-prefix-")
 	return outputStream
 }
 

@@ -734,7 +734,7 @@ func TestRocksmq_Reader(t *testing.T) {
 	defer rmq.DestroyTopic(channelName)
 	loopNum := 100
 
-	readerName, err := rmq.CreateReader(channelName, 0, true)
+	readerName, err := rmq.CreateReader(channelName, 0, true, "test-sub-name")
 	assert.NoError(t, err)
 
 	pMsgs := make([]ProducerMessage, loopNum)

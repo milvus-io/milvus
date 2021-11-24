@@ -58,7 +58,7 @@ type MsgStream interface {
 	Chan() <-chan *MsgPack
 	AsProducer(channels []string)
 	AsConsumer(channels []string, subName string)
-	AsReader(channels []string)
+	AsReader(channels []string, subName string)
 	AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition)
 	SetRepackFunc(repackFunc RepackFunc)
 	ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32
