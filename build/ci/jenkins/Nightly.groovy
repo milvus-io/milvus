@@ -139,14 +139,8 @@ pipeline {
                                                         sh """ 
                                                         MILVUS_HELM_RELEASE_NAME="${release_name}" \
                                                         MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
-                                                        ./e2e-k8s.sh \
-                                                        --skip-export-logs \
-                                                        --skip-install \
-                                                        --skip-cleanup \
-                                                        --skip-setup \
-                                                        --skip-build \
-                                                        --skip-build-image --test-extra-arg "-n 4 --tags L0 L1 L2 --repeat-scope=session" \
-                                                        --test-timeout ${e2e_timeout_seconds}
+                                                        TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                        ./ci_e2e.sh  "-n 4 --tags L0 L1 L2 --repeat-scope=session"
                                                         """
                                                     } else {
                                                     error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
