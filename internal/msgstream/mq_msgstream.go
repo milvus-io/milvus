@@ -167,7 +167,7 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 }
 
 // AsProducer create producer to send message to channels
-func (ms *mqMsgStream) AsReader(channels []string) {
+func (ms *mqMsgStream) AsReader(channels []string, subName string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
 			log.Error("MsgStream asProducer's channel is a empty string")
@@ -175,8 +175,9 @@ func (ms *mqMsgStream) AsReader(channels []string) {
 		}
 		fn := func() error {
 			r, err := ms.client.CreateReader(mqclient.ReaderOptions{
-				Topic:          channel,
-				StartMessageID: ms.client.EarliestMessageID(),
+				Topic:                  channel,
+				StartMessageID:         ms.client.EarliestMessageID(),
+				SubscriptionRolePrefix: subName,
 			})
 			if err != nil {
 				return err

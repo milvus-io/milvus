@@ -60,6 +60,7 @@ func (pc *pulsarClient) CreateReader(options ReaderOptions) (Reader, error) {
 		Topic:                   options.Topic,
 		StartMessageID:          options.StartMessageID.(*pulsarID).messageID,
 		StartMessageIDInclusive: options.StartMessageIDInclusive,
+		SubscriptionRolePrefix:  options.SubscriptionRolePrefix,
 	}
 	pr, err := pc.client.CreateReader(opts)
 	if err != nil {

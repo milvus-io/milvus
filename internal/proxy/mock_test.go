@@ -278,7 +278,7 @@ func (ms *simpleMockMsgStream) AsProducer(channels []string) {
 func (ms *simpleMockMsgStream) AsConsumer(channels []string, subName string) {
 }
 
-func (ms *simpleMockMsgStream) AsReader(channels []string) {
+func (ms *simpleMockMsgStream) AsReader(channels []string, subName string) {
 }
 
 func (ms *simpleMockMsgStream) SeekReaders(msgPositions []*internalpb.MsgPosition) error {

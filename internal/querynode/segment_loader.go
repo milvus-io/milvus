@@ -449,7 +449,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
-	stream.AsReader([]string{pChannelName})
+	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeID, collectionID))
 	stream.SeekReaders([]*internalpb.MsgPosition{position})
 
 	delData := &deleteData{

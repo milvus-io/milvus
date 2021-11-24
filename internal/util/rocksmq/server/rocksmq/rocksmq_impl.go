@@ -932,7 +932,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 	return nil
 }
 
-func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool) (string, error) {
+func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool, subscriptionRolePrefix string) (string, error) {
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	readOpts.SetPrefixSameAsStart(true)
 	iter := rmq.store.NewIterator(readOpts)
@@ -950,7 +950,7 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	if err != nil {
 		return "", errors.New("Can't get current ts from rocksmq idAllocator")
 	}
-	readerName := ReaderNamePrefix + strconv.FormatInt(nowTs, 10)
+	readerName := subscriptionRolePrefix + ReaderNamePrefix + strconv.FormatInt(nowTs, 10)
 
 	reader := &rocksmqReader{
 		store:              rmq.store,

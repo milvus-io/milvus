@@ -52,6 +52,7 @@ func (rc *rmqClient) CreateReader(options ReaderOptions) (Reader, error) {
 		Topic:                   options.Topic,
 		StartMessageID:          options.StartMessageID.(*rmqID).messageID,
 		StartMessageIDInclusive: options.StartMessageIDInclusive,
+		SubscriptionRolePrefix:  options.SubscriptionRolePrefix,
 	}
 	pr, err := rc.client.CreateReader(opts)
 	if err != nil {

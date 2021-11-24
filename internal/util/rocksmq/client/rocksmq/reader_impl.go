@@ -19,6 +19,7 @@ type reader struct {
 	name                    string
 	startMessageID          UniqueID
 	startMessageIDInclusive bool
+	subscriptionRolePrefix  string
 }
 
 func newReader(c *client, readerOptions *ReaderOptions) (*reader, error) {
@@ -37,11 +38,12 @@ func newReader(c *client, readerOptions *ReaderOptions) (*reader, error) {
 		name:                    readerOptions.Name,
 		startMessageID:          readerOptions.StartMessageID,
 		startMessageIDInclusive: readerOptions.StartMessageIDInclusive,
+		subscriptionRolePrefix:  readerOptions.SubscriptionRolePrefix,
 	}
 	if c.server == nil {
 		return nil, newError(InvalidConfiguration, "rmq server in client is nil")
 	}
-	name, err := c.server.CreateReader(readerOptions.Topic, reader.startMessageID, reader.startMessageIDInclusive)
+	name, err := c.server.CreateReader(readerOptions.Topic, reader.startMessageID, reader.startMessageIDInclusive, reader.subscriptionRolePrefix)
 	if err != nil {
 		return nil, err
 	}

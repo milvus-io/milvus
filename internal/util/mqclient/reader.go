@@ -32,6 +32,9 @@ type ReaderOptions struct {
 	// If true, the reader will start at the `StartMessageID`, included.
 	// Default is `false` and the reader will start from the "next" message
 	StartMessageIDInclusive bool
+
+	// SubscriptionRolePrefix set the subscription role prefix. The default prefix is "reader".
+	SubscriptionRolePrefix string
 }
 
 // Reader can be used to scan through all the messages currently available in a topic.
