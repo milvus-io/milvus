@@ -1382,7 +1382,7 @@ class TestUtilityAdvanced(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_growing_query_segment_info(self):
         """
-        target: test getting query segment info of collection with data
+        target: test getting growing query segment info of collection with data
         method: init a collection, insert data, load, search, and get query segment info
         expected:
             1. length of segment is greater than 0
@@ -1399,6 +1399,29 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.load()
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(vectors, default_field_name, ct.default_search_params, ct.default_limit)
+        res, _ = self.utility_wrap.get_query_segment_info(c_name)
+        assert len(res) > 0
+        cnt = 0
+        for r in res:
+            cnt += r.num_rows
+        assert cnt == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_get_sealed_query_segment_info(self):
+        """
+        target: test getting sealed query segment info of collection with data
+        method: init a collection, insert data, flush, load, and get query segment info
+        expected:
+            1. length of segment is greater than 0
+            2. the sum num_rows of each segment is equal to num of entities
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        nb = 3000
+        df = cf.gen_default_dataframe_data(nb)
+        collection_w.insert(df)
+        collection_w.num_entities
+        collection_w.load()
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         assert len(res) > 0
         cnt = 0
