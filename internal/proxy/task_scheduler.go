@@ -239,7 +239,10 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	if err != nil {
 		return err
 	}
-	_ = queue.addPChanStats(t)
+	err = queue.addPChanStats(t)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
