@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,11 +34,19 @@ func TestImpl_GetComponentStates(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
+	node.session.UpdateRegistered(true)
+
 	rsp, err := node.GetComponentStates(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+	rsp, err = node.GetComponentStates(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+
+	node.stateCode = atomic.Value{}
+	node.stateCode.Store("invalid")
 	rsp, err = node.GetComponentStates(ctx)
 	assert.Error(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
