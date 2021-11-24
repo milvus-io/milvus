@@ -552,10 +552,11 @@ func (mfm *mockFlushManager) flushDelData(data *DelDataBuf, segmentID UniqueID, 
 	return nil
 }
 
-func (mfm *mockFlushManager) injectFlush(injection taskInjection, segments ...UniqueID) {
+func (mfm *mockFlushManager) injectFlush(injection *taskInjection, segments ...UniqueID) {
 	go func() {
 		time.Sleep(time.Second * time.Duration(mfm.sleepSeconds))
-		injection.injected <- struct{}{}
+		//injection.injected <- struct{}{}
+		close(injection.injected)
 		<-injection.injectOver
 	}()
 }

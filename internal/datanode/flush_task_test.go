@@ -95,7 +95,7 @@ func TestFlushTaskRunner_FailError(t *testing.T) {
 }
 
 func TestFlushTaskRunner_Injection(t *testing.T) {
-	injectCh := make(chan taskInjection, 1)
+	injectCh := make(chan *taskInjection, 1)
 	task := newFlushTaskRunner(1, injectCh)
 	signal := make(chan struct{})
 
@@ -103,21 +103,16 @@ func TestFlushTaskRunner_Injection(t *testing.T) {
 	nextFlag := false
 	processed := make(chan struct{})
 
-	injected := make(chan struct{})
-	injectOver := make(chan bool)
-
-	injectCh <- taskInjection{
-		injected:   injected,
-		injectOver: injectOver,
-		postInjection: func(pack *segmentFlushPack) {
-			t.Log("task injection executed")
-			pack.segmentID = 2
-		},
-	}
+	ti := newTaskInjection(1, func(pack *segmentFlushPack) {
+		t.Log("task injection executed")
+		pack.segmentID = 2
+	})
+	go ti.waitForInjected()
+	injectCh <- ti
 
 	go func() {
-		<-injected
-		injectOver <- true
+		<-ti.injected
+		ti.injectDone(true)
 	}()
 
 	task.init(func(pack *segmentFlushPack) {
