@@ -167,7 +167,7 @@ message VchannelInfo {
   internal.MsgPosition seek_position = 3;
   repeated SegmentInfo unflushedSegments = 4;
   repeated SegmentInfo flushedSegments = 5;
-  repeated int64 dropped_segments = 6;
+  repeated SegmentInfo dropped_segments = 6;
 }
 
 message WatchDmChannelsRequest {

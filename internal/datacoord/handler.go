@@ -39,7 +39,7 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 	)
 	var flushed []*datapb.SegmentInfo
 	var unflushed []*datapb.SegmentInfo
-	var dropped []UniqueID
+	var dropped []*datapb.SegmentInfo
 	var seekPosition *internalpb.MsgPosition
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
@@ -48,7 +48,7 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 		}
 
 		if s.GetState() == commonpb.SegmentState_Dropped {
-			dropped = append(dropped, s.GetID())
+			dropped = append(dropped, trimSegmentInfo(s.SegmentInfo))
 			continue
 		}
 
