@@ -110,7 +110,8 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 // Init initializes QueryNode's grpc client.
 func (c *Client) Init() error {
 	Params.Init()
-	return nil
+	_, err := c.getGrpcClient()
+	return err
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
