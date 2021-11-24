@@ -1878,6 +1878,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			qc:        node.queryCoord,
 			ids:       ids.IdArray,
 		}
+		log.Debug("calcDistance enqueue",
+			zap.String("role", Params.RoleName),
+			zap.String("db", queryRequest.DbName),
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames))
 
 		err := node.sched.dqQueue.Enqueue(qt)
 		if err != nil {
@@ -1888,6 +1893,25 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, err
 		}
+		log.Debug("calcDistance",
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", qt.Base.MsgID),
+			zap.Uint64("timestamp", qt.Base.Timestamp),
+			zap.String("db", queryRequest.DbName),
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames),
+			zap.Any("OutputFields", queryRequest.OutputFields))
+		defer func() {
+			log.Debug("calcDistance Done",
+				zap.Error(err),
+				zap.String("role", Params.RoleName),
+				zap.Int64("msgID", qt.Base.MsgID),
+				zap.Uint64("timestamp", qt.Base.Timestamp),
+				zap.String("db", queryRequest.DbName),
+				zap.String("collection", queryRequest.CollectionName),
+				zap.Any("partitions", queryRequest.PartitionNames),
+				zap.Any("OutputFields", queryRequest.OutputFields))
+		}()
 
 		err = qt.WaitToFinish()
 		if err != nil {
@@ -1898,6 +1922,15 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, err
 		}
+		log.Debug("calcDistance Finished",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", qt.Base.MsgID),
+			zap.Uint64("timestamp", qt.Base.Timestamp),
+			zap.String("db", queryRequest.DbName),
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames),
+			zap.Any("OutputFields", queryRequest.OutputFields))
 
 		return &milvuspb.QueryResults{
 			Status:     qt.result.Status,
@@ -1978,6 +2011,8 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 
 		return nil, errors.New("Failed to fetch vectors")
 	}
+
+	log.Debug("grpc calcDistance begin")
 
 	vectorsLeft := request.GetOpLeft().GetDataArray()
 	opLeft := request.GetOpLeft().GetIdArray()
