@@ -58,6 +58,7 @@ type ddNode struct {
 
 	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
 	flushedSegments []*datapb.SegmentInfo
+	droppedSegments []UniqueID
 	vchannelName    string
 
 	deltaMsgStream msgstream.MsgStream
@@ -170,7 +171,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 }
 
 func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) bool {
-	if ddn.isFlushed(msg.GetSegmentID()) {
+	if ddn.isFlushed(msg.GetSegmentID()) || ddn.isDropped(msg.GetSegmentID()) {
 		return true
 	}
 
@@ -187,6 +188,15 @@ func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) 
 func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
 	for _, s := range ddn.flushedSegments {
 		if s.ID == segmentID {
+			return true
+		}
+	}
+	return false
+}
+
+func (ddn *ddNode) isDropped(segID UniqueID) bool {
+	for _, sID := range ddn.droppedSegments {
+		if sID == segID {
 			return true
 		}
 	}
@@ -277,6 +287,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 		BaseNode:        baseNode,
 		collectionID:    collID,
 		flushedSegments: fs,
+		droppedSegments: vchanInfo.GetDroppedSegments(),
 		vchannelName:    vchanInfo.ChannelName,
 		deltaMsgStream:  deltaMsgStream,
 	}
