@@ -86,7 +86,7 @@ jobs:
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_failure.yaml\'/g" constants.py
           sed -i "s/CHAOS_DURATION =.*/CHAOS_DURATION = 80/g" constants.py
           cat constants.py
-          pytest -s -v test_chaos.py --host 127.0.0.1
+          pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO
 
       - name: Milvus E2E Test
         timeout-minutes: 5
@@ -95,6 +95,8 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           kubectl get pod -n chaos-testing
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s          
           python hello_milvus.py
 
       - name: Data Consist Test
@@ -103,7 +105,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
-          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1
+          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 --log-cli-level=INFO
 
       - name: Milvus E2E Test
         timeout-minutes: 5
@@ -112,6 +114,8 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           kubectl get pod -n chaos-testing
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s          
           python hello_milvus.py
 
       - name: Export logs
