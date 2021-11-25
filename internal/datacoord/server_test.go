@@ -1291,7 +1291,7 @@ func TestShouldDropChannel(t *testing.T) {
 		CollectionID:   0,
 		PartitionID:    0,
 		InsertChannel:  "ch1",
-		State:          commonpb.SegmentState_Dropped,
+		State:          commonpb.SegmentState_Flushed,
 		CompactionFrom: []int64{4, 5},
 		StartPosition: &internalpb.MsgPosition{
 			ChannelName: "ch1",
@@ -1345,16 +1345,18 @@ func TestShouldDropChannel(t *testing.T) {
 		assert.True(t, r)
 	})
 
-	t.Run("channel with all dropped segments and compacted segments", func(t *testing.T) {
+	t.Run("channel with all dropped segments and flushed compacted segments", func(t *testing.T) {
 		err := svr.meta.AddSegment(NewSegmentInfo(s2))
 		require.Nil(t, err)
 
 		r := svr.handler.CheckShouldDropChannel("ch1")
-		assert.True(t, r)
+		assert.False(t, r)
 	})
 
 	t.Run("channel with other state segments", func(t *testing.T) {
-		err := svr.meta.AddSegment(NewSegmentInfo(s3))
+		err := svr.meta.DropSegment(2)
+		require.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(s3))
 		require.Nil(t, err)
 
 		r := svr.handler.CheckShouldDropChannel("ch1")
