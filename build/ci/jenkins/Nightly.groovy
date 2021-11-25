@@ -172,7 +172,7 @@ pipeline {
                                 body: '$DEFAULT_CONTENT',
                                 recipientProviders: [requestor()],
                                 replyTo: '$DEFAULT_REPLYTO',
-                                to: "qa@zilliz.com"
+                                to: "qa@zilliz.com,devops@zilliz.com"
                             }
                         }
                     }
