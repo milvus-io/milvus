@@ -266,12 +266,14 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 				return
 			}
 
+			log.Debug("read tt from send chan")
 			// reduce each channel to get min timestamp
 			local := proxyTimetick[t.session.ServerID]
 			if len(local.in.ChannelNames) == 0 {
 				continue
 			}
 
+			log.Debug("send tt to channels", zap.Any("channels", local.in.ChannelNames))
 			hdr := fmt.Sprintf("send ts to %d channels", len(local.in.ChannelNames))
 			tr := timerecord.NewTimeRecorder(hdr)
 			wg := sync.WaitGroup{}

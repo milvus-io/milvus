@@ -280,6 +280,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 				}
 				metrics.ProxyDmlChannelTimeTick.WithLabelValues("DefaultTimestamp").Set(float64(maxTs))
 
+				log.Debug("update channel timetick to rootcoord", zap.Any("req", req))
 				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
