@@ -245,8 +245,8 @@ func TestDataSyncService_removePartitionFlowGraphs(t *testing.T) {
 
 		dataSyncService.addPartitionFlowGraph(defaultPartitionID, defaultPartitionID, []Channel{defaultVChannel})
 
-		err = dataSyncService.tSafeReplica.removeTSafe(defaultVChannel)
-		assert.NoError(t, err)
+		isRemoved := dataSyncService.tSafeReplica.removeTSafe(defaultVChannel)
+		assert.True(t, isRemoved)
 		dataSyncService.removePartitionFlowGraph(defaultPartitionID)
 	})
 }

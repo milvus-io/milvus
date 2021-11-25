@@ -34,8 +34,8 @@ func TestTSafeReplica_valid(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, resT)
 
-	err = replica.removeTSafe(defaultVChannel)
-	assert.NoError(t, err)
+	isRemoved := replica.removeTSafe(defaultVChannel)
+	assert.True(t, isRemoved)
 }
 
 func TestTSafeReplica_invalid(t *testing.T) {
@@ -54,8 +54,8 @@ func TestTSafeReplica_invalid(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, resT)
 
-	err = replica.removeTSafe(defaultVChannel)
-	assert.NoError(t, err)
+	isRemoved := replica.removeTSafe(defaultVChannel)
+	assert.True(t, isRemoved)
 
 	replica.addTSafe(defaultVChannel)
 	replica.addTSafe(defaultVChannel)

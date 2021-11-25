@@ -24,11 +24,13 @@ import (
 
 type tSafeWatcher struct {
 	notifyChan chan bool
+	closeCh    chan struct{}
 }
 
 func newTSafeWatcher() *tSafeWatcher {
 	return &tSafeWatcher{
 		notifyChan: make(chan bool, 1),
+		closeCh:    make(chan struct{}, 1),
 	}
 }
 
@@ -40,6 +42,10 @@ func (watcher *tSafeWatcher) notify() {
 
 func (watcher *tSafeWatcher) watcherChan() <-chan bool {
 	return watcher.notifyChan
+}
+
+func (watcher *tSafeWatcher) close() {
+	watcher.closeCh <- struct{}{}
 }
 
 type tSafer interface {

@@ -50,12 +50,16 @@ func TestCollection_vChannel(t *testing.T) {
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	collection.addVChannels([]string{defaultVChannel})
-	collection.addVChannels([]string{defaultVChannel})
-	collection.addVChannels([]string{"TestCollection_addVChannel_channel"})
+	collection.addVChannels([]Channel{defaultVChannel})
+	collection.addVChannels([]Channel{defaultVChannel})
+	collection.addVChannels([]Channel{"TestCollection_addVChannel_channel"})
 
 	channels := collection.getVChannels()
 	assert.Equal(t, 2, len(channels))
+
+	collection.removeVChannel(defaultVChannel)
+	channels = collection.getVChannels()
+	assert.Equal(t, 1, len(channels))
 }
 
 func TestCollection_vDeltaChannel(t *testing.T) {
@@ -63,12 +67,16 @@ func TestCollection_vDeltaChannel(t *testing.T) {
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	collection.addVDeltaChannels([]string{defaultHistoricalVChannel})
-	collection.addVDeltaChannels([]string{defaultHistoricalVChannel})
-	collection.addVDeltaChannels([]string{"TestCollection_addVDeltaChannel_channel"})
+	collection.addVDeltaChannels([]Channel{defaultHistoricalVChannel})
+	collection.addVDeltaChannels([]Channel{defaultHistoricalVChannel})
+	collection.addVDeltaChannels([]Channel{"TestCollection_addVDeltaChannel_channel"})
 
 	channels := collection.getVDeltaChannels()
 	assert.Equal(t, 2, len(channels))
+
+	collection.removeVDeltaChannel(defaultHistoricalVChannel)
+	channels = collection.getVDeltaChannels()
+	assert.Equal(t, 1, len(channels))
 }
 
 func TestCollection_pChannel(t *testing.T) {
@@ -76,9 +84,9 @@ func TestCollection_pChannel(t *testing.T) {
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	collection.addPChannels([]string{"TestCollection_addPChannel_channel-0"})
-	collection.addPChannels([]string{"TestCollection_addPChannel_channel-0"})
-	collection.addPChannels([]string{"TestCollection_addPChannel_channel-1"})
+	collection.addPChannels([]Channel{"TestCollection_addPChannel_channel-0"})
+	collection.addPChannels([]Channel{"TestCollection_addPChannel_channel-0"})
+	collection.addPChannels([]Channel{"TestCollection_addPChannel_channel-1"})
 
 	channels := collection.getPChannels()
 	assert.Equal(t, 2, len(channels))
@@ -89,9 +97,9 @@ func TestCollection_pDeltaChannel(t *testing.T) {
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	collection.addPDeltaChannels([]string{"TestCollection_addPDeltaChannel_channel-0"})
-	collection.addPDeltaChannels([]string{"TestCollection_addPDeltaChannel_channel-0"})
-	collection.addPDeltaChannels([]string{"TestCollection_addPDeltaChannel_channel-1"})
+	collection.addPDeltaChannels([]Channel{"TestCollection_addPDeltaChannel_channel-0"})
+	collection.addPDeltaChannels([]Channel{"TestCollection_addPDeltaChannel_channel-0"})
+	collection.addPDeltaChannels([]Channel{"TestCollection_addPDeltaChannel_channel-1"})
 
 	channels := collection.getPDeltaChannels()
 	assert.Equal(t, 2, len(channels))

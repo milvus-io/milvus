@@ -390,6 +390,9 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
 		task := releaseCollectionTask{
 			req:  genReleaseCollectionRequest(),
 			node: node,
@@ -413,6 +416,25 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 		}
 		err = task.Execute(ctx)
 		assert.Error(t, err)
+	})
+
+	t.Run("test execute remove deltaVChannel tSafe", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.addVDeltaChannels([]Channel{defaultHistoricalVChannel})
+
+		task := releaseCollectionTask{
+			req:  genReleaseCollectionRequest(),
+			node: node,
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
 	})
 }
 
@@ -457,6 +479,9 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
 		task := releasePartitionsTask{
 			req:  genReleasePartitionsRequest(),
 			node: node,
@@ -486,4 +511,30 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("test execute, remove deltaVChannel", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+
+		err = node.historical.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		col.addVDeltaChannels([]Channel{defaultHistoricalVChannel})
+		col.setLoadType(loadTypePartition)
+
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		task := releasePartitionsTask{
+			req:  genReleasePartitionsRequest(),
+			node: node,
+		}
+		task.node.dataSyncService.addPartitionFlowGraph(defaultCollectionID,
+			defaultPartitionID,
+			[]Channel{defaultVChannel})
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
 }
