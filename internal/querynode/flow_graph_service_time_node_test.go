@@ -80,8 +80,8 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 
 	t.Run("test no tSafe", func(t *testing.T) {
 		node := genServiceTimeNode()
-		err := node.tSafeReplica.removeTSafe(defaultVChannel)
-		assert.NoError(t, err)
+		isRemoved := node.tSafeReplica.removeTSafe(defaultVChannel)
+		assert.True(t, isRemoved)
 		msg := &serviceTimeMsg{
 			timeRange: TimeRange{
 				timestampMin: 0,

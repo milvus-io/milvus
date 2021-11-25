@@ -23,7 +23,9 @@ func TestTSafe_GetAndSet(t *testing.T) {
 	tSafe := newTSafe(context.Background(), "TestTSafe-channel")
 	tSafe.start()
 	watcher := newTSafeWatcher()
-	tSafe.registerTSafeWatcher(watcher)
+	defer watcher.close()
+	err := tSafe.registerTSafeWatcher(watcher)
+	assert.NoError(t, err)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -42,7 +44,9 @@ func TestTSafe_Remove(t *testing.T) {
 	tSafe := newTSafe(context.Background(), "TestTSafe-remove")
 	tSafe.start()
 	watcher := newTSafeWatcher()
-	tSafe.registerTSafeWatcher(watcher)
+	defer watcher.close()
+	err := tSafe.registerTSafeWatcher(watcher)
+	assert.NoError(t, err)
 
 	tSafe.set(UniqueID(1), Timestamp(1000))
 	tSafe.set(UniqueID(2), Timestamp(1001))
@@ -60,7 +64,9 @@ func TestTSafe_Close(t *testing.T) {
 	tSafe := newTSafe(context.Background(), "TestTSafe-close")
 	tSafe.start()
 	watcher := newTSafeWatcher()
-	tSafe.registerTSafeWatcher(watcher)
+	defer watcher.close()
+	err := tSafe.registerTSafeWatcher(watcher)
+	assert.NoError(t, err)
 
 	// test set won't panic while close
 	go func() {
@@ -79,6 +85,6 @@ func TestTSafe_Close(t *testing.T) {
 	tSafe.set(UniqueID(101), Timestamp(1000))
 	tSafe.removeRecord(UniqueID(1))
 	// register TSafe will fail
-	err := tSafe.registerTSafeWatcher(watcher)
+	err = tSafe.registerTSafeWatcher(watcher)
 	assert.Error(t, err)
 }
