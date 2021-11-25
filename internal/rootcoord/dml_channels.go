@@ -12,6 +12,7 @@
 package rootcoord
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -29,16 +30,18 @@ type dmlMsgStream struct {
 }
 
 type dmlChannels struct {
-	core       *Core
+	ctx        context.Context
+	factory    msgstream.Factory
 	namePrefix string
 	capacity   int64
 	idx        *atomic.Int64
 	pool       sync.Map
 }
 
-func newDmlChannels(c *Core, chanNamePrefix string, chanNum int64) *dmlChannels {
+func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePrefix string, chanNum int64) *dmlChannels {
 	d := &dmlChannels{
-		core:       c,
+		ctx:        ctx,
+		factory:    factory,
 		namePrefix: chanNamePrefix,
 		capacity:   chanNum,
 		idx:        atomic.NewInt64(0),
@@ -46,8 +49,8 @@ func newDmlChannels(c *Core, chanNamePrefix string, chanNum int64) *dmlChannels 
 	}
 
 	for i := int64(0); i < chanNum; i++ {
-		name := getDmlChannelName(d.namePrefix, i)
-		ms, err := c.msFactory.NewMsgStream(c.ctx)
+		name := genChannelName(d.namePrefix, i)
+		ms, err := factory.NewMsgStream(ctx)
 		if err != nil {
 			log.Error("Failed to add msgstream", zap.String("name", name), zap.Error(err))
 			panic("Failed to add msgstream")
@@ -62,13 +65,12 @@ func newDmlChannels(c *Core, chanNamePrefix string, chanNum int64) *dmlChannels 
 	return d
 }
 
-func (d *dmlChannels) GetDmlMsgStreamName() string {
+func (d *dmlChannels) getChannelName() string {
 	cnt := d.idx.Inc()
-	return getDmlChannelName(d.namePrefix, (cnt-1)%d.capacity)
+	return genChannelName(d.namePrefix, (cnt-1)%d.capacity)
 }
 
-// ListPhysicalChannels lists all dml channel names
-func (d *dmlChannels) ListPhysicalChannels() []string {
+func (d *dmlChannels) listChannels() []string {
 	var chanNames []string
 	d.pool.Range(
 		func(k, v interface{}) bool {
@@ -83,13 +85,11 @@ func (d *dmlChannels) ListPhysicalChannels() []string {
 	return chanNames
 }
 
-// GetNumChannels get current dml channel count
-func (d *dmlChannels) GetPhysicalChannelNum() int {
-	return len(d.ListPhysicalChannels())
+func (d *dmlChannels) getChannelNum() int {
+	return len(d.listChannels())
 }
 
-// Broadcast broadcasts msg pack into specified channel
-func (d *dmlChannels) Broadcast(chanNames []string, pack *msgstream.MsgPack) error {
+func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) error {
 	for _, chanName := range chanNames {
 		v, ok := d.pool.Load(chanName)
 		if !ok {
@@ -110,8 +110,7 @@ func (d *dmlChannels) Broadcast(chanNames []string, pack *msgstream.MsgPack) err
 	return nil
 }
 
-// BroadcastMark broadcasts msg pack into specified channel and returns related message id
-func (d *dmlChannels) BroadcastMark(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
+func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	for _, chanName := range chanNames {
 		v, ok := d.pool.Load(chanName)
@@ -140,8 +139,7 @@ func (d *dmlChannels) BroadcastMark(chanNames []string, pack *msgstream.MsgPack)
 	return result, nil
 }
 
-// AddProducerChannels add named channels as producer
-func (d *dmlChannels) AddProducerChannels(names ...string) {
+func (d *dmlChannels) addChannels(names ...string) {
 	for _, name := range names {
 		v, ok := d.pool.Load(name)
 		if !ok {
@@ -159,8 +157,7 @@ func (d *dmlChannels) AddProducerChannels(names ...string) {
 	}
 }
 
-// RemoveProducerChannels removes specified channels
-func (d *dmlChannels) RemoveProducerChannels(names ...string) {
+func (d *dmlChannels) removeChannels(names ...string) {
 	for _, name := range names {
 		v, ok := d.pool.Load(name)
 		if !ok {
@@ -180,6 +177,6 @@ func (d *dmlChannels) RemoveProducerChannels(names ...string) {
 	}
 }
 
-func getDmlChannelName(prefix string, idx int64) string {
+func genChannelName(prefix string, idx int64) string {
 	return fmt.Sprintf("%s_%d", prefix, idx)
 }

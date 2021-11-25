@@ -136,10 +136,10 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	chanNames := make([]string, t.Req.ShardsNum)
 	deltaChanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.dmlChannels.GetDmlMsgStreamName(), collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.chanTimeTick.getDmlChannelName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 
-		deltaChanNames[i] = t.core.deltaChannels.GetDmlMsgStreamName()
+		deltaChanNames[i] = t.core.chanTimeTick.getDeltaChannelName()
 		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.DmlChannelName, Params.DeltaChannelName)
 		if err1 != nil || deltaChanName != deltaChanNames[i] {
 			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
@@ -200,15 +200,15 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
 
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		// add dml channel before send dd msg
-		t.core.dmlChannels.AddProducerChannels(chanNames...)
+		t.core.chanTimeTick.addDmlChannels(chanNames...)
 
 		// also add delta channels
-		t.core.deltaChannels.AddProducerChannels(deltaChanNames...)
+		t.core.chanTimeTick.addDeltaChannels(deltaChanNames...)
 
 		ids, err := t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 		if err != nil {
@@ -222,13 +222,13 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		}
 		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
 		if err != nil {
-			t.core.dmlChannels.RemoveProducerChannels(chanNames...)
-			t.core.deltaChannels.RemoveProducerChannels(deltaChanNames...)
+			t.core.chanTimeTick.removeDmlChannels(chanNames...)
+			t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
 
-		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 
 		return nil
@@ -306,9 +306,9 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
 
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOpStr)
 		if err != nil {
@@ -320,24 +320,23 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 
 		// send tt into deleted channels to tell data_node to clear flowgragh
-		t.core.chanTimeTick.SendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
+		t.core.chanTimeTick.sendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
 
 		// remove dml channel after send dd msg
-		t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
+		t.core.chanTimeTick.removeDmlChannels(collMeta.PhysicalChannelNames...)
 
 		// remove delta channels
 		deltaChanNames := make([]string, len(collMeta.PhysicalChannelNames))
 		for i, chanName := range collMeta.PhysicalChannelNames {
-			deltaChanNames[i], err = ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName)
-			if err != nil {
+			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName); err != nil {
 				return err
 			}
 		}
-		t.core.deltaChannels.RemoveProducerChannels(deltaChanNames...)
+		t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 		return nil
 	}
 
@@ -522,9 +521,9 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
 
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ts, ddOpStr)
 		if err != nil {
@@ -536,7 +535,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 		return nil
 	}
@@ -607,9 +606,9 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
 
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ts, ddOpStr)
 		if err != nil {
@@ -621,7 +620,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 		return nil
 	}
