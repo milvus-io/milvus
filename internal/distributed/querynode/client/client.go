@@ -164,15 +164,15 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	if err == context.Canceled || err == context.DeadlineExceeded {
-		return nil, err
+		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
 	}
 	log.Debug("QueryNode Client grpc error", zap.Error(err))
 
 	c.resetConnection()
 
 	ret, err = caller()
-	if err == nil {
-		return ret, nil
+	if err != nil {
+		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
 	}
 	return ret, err
 }
