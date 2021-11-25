@@ -771,16 +771,13 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 		}
 
-		if len(watchDeltaChannels) != len(recoveryInfo.Channels) {
-			for _, info := range recoveryInfo.Channels {
-				deltaChannel, err := generateWatchDeltaChannelInfo(info)
-				if err != nil {
-					return err
-				}
-				watchDeltaChannels = append(watchDeltaChannels, deltaChannel)
+		for _, info := range recoveryInfo.Channels {
+			deltaChannel, err := generateWatchDeltaChannelInfo(info)
+			if err != nil {
+				return err
 			}
+			watchDeltaChannels = append(watchDeltaChannels, deltaChannel)
 		}
-
 		for _, info := range recoveryInfo.Channels {
 			// watch dml channels
 			channel := info.ChannelName
@@ -799,12 +796,13 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 
 		}
 	}
+	mergedDeltaChannels := mergeWatchDeltaChannelInfo(watchDeltaChannels)
 	msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
 	msgBase.MsgType = commonpb.MsgType_WatchDeltaChannels
 	watchDeltaChannelReq := &querypb.WatchDeltaChannelsRequest{
 		Base:         msgBase,
 		CollectionID: collectionID,
-		Infos:        watchDeltaChannels,
+		Infos:        mergedDeltaChannels,
 	}
 	// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
 	lpt.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
@@ -1762,14 +1760,12 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 					}
 
-					if len(watchDeltaChannels) != len(recoveryInfo.Channels) {
-						for _, info := range recoveryInfo.Channels {
-							deltaChannel, err := generateWatchDeltaChannelInfo(info)
-							if err != nil {
-								return err
-							}
-							watchDeltaChannels = append(watchDeltaChannels, deltaChannel)
+					for _, info := range recoveryInfo.Channels {
+						deltaChannel, err := generateWatchDeltaChannelInfo(info)
+						if err != nil {
+							return err
 						}
+						watchDeltaChannels = append(watchDeltaChannels, deltaChannel)
 					}
 
 					for _, channelInfo := range recoveryInfo.Channels {
@@ -1816,12 +1812,13 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						}
 					}
 				}
+				mergedDeltaChannel := mergeWatchDeltaChannelInfo(watchDeltaChannels)
 				msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
 				msgBase.MsgType = commonpb.MsgType_WatchDeltaChannels
 				watchDeltaChannelReq := &querypb.WatchDeltaChannelsRequest{
 					Base:         msgBase,
 					CollectionID: collectionID,
-					Infos:        watchDeltaChannels,
+					Infos:        mergedDeltaChannel,
 				}
 				// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
 				lbt.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
@@ -2215,4 +2212,23 @@ func generateWatchDeltaChannelInfo(info *datapb.VchannelInfo) (*datapb.VchannelI
 	deltaChannel.FlushedSegments = nil
 	deltaChannel.DroppedSegments = nil
 	return deltaChannel, nil
+}
+
+func mergeWatchDeltaChannelInfo(infos []*datapb.VchannelInfo) []*datapb.VchannelInfo {
+	minPositions := make(map[string]int)
+	for index, info := range infos {
+		_, ok := minPositions[info.ChannelName]
+		if !ok {
+			minPositions[info.ChannelName] = index
+		}
+		minTimeStampIndex := minPositions[info.ChannelName]
+		if info.SeekPosition.GetTimestamp() < infos[minTimeStampIndex].SeekPosition.GetTimestamp() {
+			minPositions[info.ChannelName] = index
+		}
+	}
+	var result []*datapb.VchannelInfo
+	for _, index := range minPositions {
+		result = append(result, infos[index])
+	}
+	return result
 }
