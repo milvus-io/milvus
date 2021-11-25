@@ -531,10 +531,14 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		}
 	}
 
-	var dmlPosition *internalpb.MsgPosition
+	var startPosition, dmlPosition *internalpb.MsgPosition
 	for _, s := range segments {
 		if dmlPosition == nil || s.GetDmlPosition().Timestamp > dmlPosition.Timestamp {
 			dmlPosition = s.GetDmlPosition()
+		}
+
+		if startPosition == nil || s.GetStartPosition().Timestamp < startPosition.Timestamp {
+			startPosition = s.GetStartPosition()
 		}
 	}
 
@@ -569,6 +573,7 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 			Binlogs:             result.GetInsertLogs(),
 			Statslogs:           result.GetField2StatslogPaths(),
 			Deltalogs:           deltalogs,
+			StartPosition:       startPosition,
 			DmlPosition:         dmlPosition,
 			CreatedByCompaction: true,
 			CompactionFrom:      compactionFrom,
