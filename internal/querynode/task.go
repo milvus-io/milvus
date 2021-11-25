@@ -853,9 +853,10 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Debug("start release history pids", zap.Any("pids", pids))
+	log.Debug("start release history pids", zap.Any("pids", pids), zap.Any("load type", hCol.getLoadType()))
 	if len(pids) == 0 && hCol.getLoadType() == loadTypePartition {
 		r.node.dataSyncService.removeCollectionDeltaFlowGraph(r.req.CollectionID)
+		log.Debug("release delta channels", zap.Any("deltaChannels", hCol.getVDeltaChannels()))
 		vChannels := hCol.getVDeltaChannels()
 		for _, channel := range vChannels {
 			log.Debug("Releasing tSafe in releasePartitionTask...",
