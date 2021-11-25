@@ -382,23 +382,29 @@ func TestFlowGraph_DDNode_isFlushed(te *testing.T) {
 }
 
 func TestFlowGraph_DDNode_isDropped(te *testing.T) {
+	genSegmentInfoByID := func(segmentID UniqueID) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID: segmentID,
+		}
+	}
+
 	tests := []struct {
-		indroppedSegment []UniqueID
+		indroppedSegment []*datapb.SegmentInfo
 		inSeg            UniqueID
 
 		expectedOut bool
 
 		description string
 	}{
-		{[]UniqueID{1, 2, 3}, 1, true,
+		{[]*datapb.SegmentInfo{genSegmentInfoByID(1), genSegmentInfoByID(2), genSegmentInfoByID(3)}, 1, true,
 			"Input seg 1 in droppedSegs{1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, 2, true,
+		{[]*datapb.SegmentInfo{genSegmentInfoByID(1), genSegmentInfoByID(2), genSegmentInfoByID(3)}, 2, true,
 			"Input seg 2 in droppedSegs{1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, 3, true,
+		{[]*datapb.SegmentInfo{genSegmentInfoByID(1), genSegmentInfoByID(2), genSegmentInfoByID(3)}, 3, true,
 			"Input seg 3 in droppedSegs{1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, 4, false,
+		{[]*datapb.SegmentInfo{genSegmentInfoByID(1), genSegmentInfoByID(2), genSegmentInfoByID(3)}, 4, false,
 			"Input seg 4 not in droppedSegs{1, 2, 3}"},
-		{[]UniqueID{}, 5, false,
+		{[]*datapb.SegmentInfo{}, 5, false,
 			"Input seg 5, no droppedSegs {}"},
 	}
 

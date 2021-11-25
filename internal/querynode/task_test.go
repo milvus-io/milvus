@@ -178,6 +178,38 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 	})
+
+	t.Run("test add excluded segment for dropped segment", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDmChannelsTask{
+			req:  genWatchDMChannelsRequest(),
+			node: node,
+		}
+		tmpChannel := defaultVChannel + "_1"
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID: defaultCollectionID,
+				ChannelName:  defaultVChannel,
+				SeekPosition: &msgstream.MsgPosition{
+					ChannelName: tmpChannel,
+					Timestamp:   0,
+					MsgID:       []byte{1, 2, 3},
+				},
+				DroppedSegments: []*datapb.SegmentInfo{
+					{
+						DmlPosition: &internalpb.MsgPosition{
+							ChannelName: tmpChannel,
+							Timestamp:   typeutil.MaxTimestamp,
+						},
+					},
+				},
+			},
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
 }
 
 func TestTask_loadSegmentsTask(t *testing.T) {

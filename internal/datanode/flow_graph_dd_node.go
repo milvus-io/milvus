@@ -58,7 +58,7 @@ type ddNode struct {
 
 	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
 	flushedSegments []*datapb.SegmentInfo
-	droppedSegments []UniqueID
+	droppedSegments []*datapb.SegmentInfo
 	vchannelName    string
 
 	deltaMsgStream msgstream.MsgStream
@@ -199,8 +199,8 @@ func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
 }
 
 func (ddn *ddNode) isDropped(segID UniqueID) bool {
-	for _, sID := range ddn.droppedSegments {
-		if sID == segID {
+	for _, droppedSegment := range ddn.droppedSegments {
+		if droppedSegment.GetID() == segID {
 			return true
 		}
 	}

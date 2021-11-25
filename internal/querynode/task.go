@@ -249,6 +249,26 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		zap.Any("flushedCheckPointInfos", flushedCheckPointInfos),
 	)
 
+	// add excluded segments for dropped segments,
+	// dropped segments with later check point than seekPosition should be filtered out.
+	droppedCheckPointInfos := make([]*datapb.SegmentInfo, 0)
+	for _, info := range w.req.Infos {
+		for _, droppedSegment := range info.DroppedSegments {
+			for _, position := range toSeekChannels {
+				if droppedSegment != nil &&
+					droppedSegment.DmlPosition.ChannelName == position.ChannelName &&
+					droppedSegment.DmlPosition.Timestamp > position.Timestamp {
+					droppedCheckPointInfos = append(droppedCheckPointInfos, droppedSegment)
+				}
+			}
+		}
+	}
+	w.node.streaming.replica.addExcludedSegments(collectionID, droppedCheckPointInfos)
+	log.Debug("watchDMChannel, add check points info for dropped segments done",
+		zap.Any("collectionID", collectionID),
+		zap.Any("droppedCheckPointInfos", droppedCheckPointInfos),
+	)
+
 	// create tSafe
 	for _, channel := range vChannels {
 		w.node.tSafeReplica.addTSafe(channel)

@@ -1433,7 +1433,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
-		assert.ElementsMatch(t, []int64{8}, resp.GetChannels()[0].GetDroppedSegments())
+		assert.Len(t, resp.GetChannels()[0].GetDroppedSegments(), 1)
+		assert.Equal(t, UniqueID(8), resp.GetChannels()[0].GetDroppedSegments()[0].GetID())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
