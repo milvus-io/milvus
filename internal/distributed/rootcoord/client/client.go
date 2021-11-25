@@ -209,9 +209,13 @@ func (c *GrpcClient) Register() error {
 	return nil
 }
 
-func (c *GrpcClient) resetConnection() {
+func (c *GrpcClient) resetConnection(client rootcoordpb.RootCoordClient) {
 	c.grpcClientMtx.Lock()
 	defer c.grpcClientMtx.Unlock()
+
+	if client != c.grpcClient {
+		return
+	}
 	if c.conn != nil {
 		_ = c.conn.Close()
 	}
@@ -219,32 +223,46 @@ func (c *GrpcClient) resetConnection() {
 	c.grpcClient = nil
 }
 
-func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, error) {
-	ret, err := caller()
-	if err == nil {
-		return ret, nil
-	}
-	if err == context.Canceled || err == context.DeadlineExceeded {
+func (c *GrpcClient) _recall(caller func(rootcoordpb.RootCoordClient) (interface{}, error)) (interface{}, error) {
+	client, err := c.getGrpcClient()
+	if err != nil {
 		return nil, err
 	}
-	log.Debug("RootCoord Client grpc error", zap.Error(err))
 
-	c.resetConnection()
+	ret, err2 := caller(client)
+	if err2 == nil {
+		return ret, nil
+	}
+	if err2 == context.Canceled || err2 == context.DeadlineExceeded {
+		return nil, err2
+	}
 
-	ret, err = caller()
+	log.Debug("RootCoord Client grpc error", zap.Error(err2))
+
+	c.resetConnection(client)
+	return ret, err2
+}
+
+func (c *GrpcClient) recall(ctx context.Context, caller func(rootcoordpb.RootCoordClient) (interface{}, error)) (interface{}, error) {
+	if !funcutil.CheckCtxValid(ctx) {
+		return nil, ctx.Err()
+	}
+
+	ret, err := c._recall(caller)
 	if err == nil {
 		return ret, nil
 	}
-	return ret, err
+
+	if !funcutil.CheckCtxValid(ctx) {
+		return nil, ctx.Err()
+	}
+
+	return c._recall(caller)
 }
 
 // GetComponentStates TODO: timeout need to be propagated through ctx
 func (c *GrpcClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -258,11 +276,7 @@ func (c *GrpcClient) GetComponentStates(ctx context.Context) (*internalpb.Compon
 
 // GetTimeTickChannel get timetick channel name
 func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -276,11 +290,7 @@ func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRe
 
 // GetStatisticsChannel just define a channel, not used currently
 func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -294,11 +304,7 @@ func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 
 // CreateCollection create collection
 func (c *GrpcClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -312,11 +318,7 @@ func (c *GrpcClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCo
 
 // DropCollection drop collection
 func (c *GrpcClient) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -330,11 +332,7 @@ func (c *GrpcClient) DropCollection(ctx context.Context, in *milvuspb.DropCollec
 
 // HasCollection check collection existence
 func (c *GrpcClient) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -348,11 +346,7 @@ func (c *GrpcClient) HasCollection(ctx context.Context, in *milvuspb.HasCollecti
 
 // DescribeCollection return collection info
 func (c *GrpcClient) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -366,11 +360,7 @@ func (c *GrpcClient) DescribeCollection(ctx context.Context, in *milvuspb.Descri
 
 // ShowCollections list all collection names
 func (c *GrpcClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -384,11 +374,7 @@ func (c *GrpcClient) ShowCollections(ctx context.Context, in *milvuspb.ShowColle
 
 // CreatePartition create partition
 func (c *GrpcClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -402,11 +388,7 @@ func (c *GrpcClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePar
 
 // DropPartition drop partition
 func (c *GrpcClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -420,11 +402,7 @@ func (c *GrpcClient) DropPartition(ctx context.Context, in *milvuspb.DropPartiti
 
 // HasPartition check partition existence
 func (c *GrpcClient) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -438,11 +416,7 @@ func (c *GrpcClient) HasPartition(ctx context.Context, in *milvuspb.HasPartition
 
 // ShowPartitions list all partitions in collection
 func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -456,11 +430,7 @@ func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartit
 
 // CreateIndex create index
 func (c *GrpcClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -474,11 +444,7 @@ func (c *GrpcClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRe
 
 // DropIndex drop index
 func (c *GrpcClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -492,11 +458,7 @@ func (c *GrpcClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexReques
 
 // DescribeIndex return index info
 func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -510,11 +472,7 @@ func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeInd
 
 // AllocTimestamp global timestamp allocator
 func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -528,11 +486,7 @@ func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTi
 
 // AllocID global ID allocator
 func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -546,11 +500,7 @@ func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest
 
 // UpdateChannelTimeTick used to handle ChannelTimeTickMsg
 func (c *GrpcClient) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -564,11 +514,7 @@ func (c *GrpcClient) UpdateChannelTimeTick(ctx context.Context, in *internalpb.C
 
 // DescribeSegment receiver time tick from proxy service, and put it into this channel
 func (c *GrpcClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -582,11 +528,7 @@ func (c *GrpcClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeS
 
 // ShowSegments list all segments
 func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -600,11 +542,7 @@ func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegments
 
 // ReleaseDQLMessageStream release DQL msgstream
 func (c *GrpcClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -618,11 +556,7 @@ func (c *GrpcClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Re
 
 // SegmentFlushCompleted check whether segment flush is completed
 func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -636,11 +570,7 @@ func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.Segme
 
 // GetMetrics get metrics
 func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -654,11 +584,7 @@ func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequ
 
 // CreateAlias create collection alias
 func (c *GrpcClient) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -672,11 +598,7 @@ func (c *GrpcClient) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasR
 
 // DropAlias drop collection alias
 func (c *GrpcClient) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
@@ -690,11 +612,7 @@ func (c *GrpcClient) DropAlias(ctx context.Context, req *milvuspb.DropAliasReque
 
 // AlterAlias alter collection alias
 func (c *GrpcClient) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.recall(ctx, func(client rootcoordpb.RootCoordClient) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
