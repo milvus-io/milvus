@@ -300,6 +300,9 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// get all aliases before meta table updated
+	aliases := t.core.MetaTable.ListAliases(collMeta.ID)
+
 	// use lambda function here to guarantee all resources to be released
 	dropCollectionFn := func() error {
 		// lock for ddl operation
@@ -352,8 +355,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
-
-	aliases := t.core.MetaTable.ListAliases(collMeta.ID)
 	t.core.ExpireMetaCache(ctx, aliases, ts)
 
 	// Update DDOperation in etcd
