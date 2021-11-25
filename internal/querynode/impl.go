@@ -21,6 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -38,17 +39,21 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.Comp
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-	code := node.stateCode.Load().(internalpb.StateCode)
-	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+	code, ok := node.stateCode.Load().(internalpb.StateCode)
+	if !ok {
+		errMsg := "unexpected error in type assertion"
 		stats.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+			Reason:    errMsg,
 		}
-		return stats, err
+		return stats, errors.New(errMsg)
+	}
+	nodeID := common.NotRegisteredID
+	if node.session != nil && node.session.Registered() {
+		nodeID = node.session.ServerID
 	}
 	info := &internalpb.ComponentInfo{
-		NodeID:    Params.QueryNodeID,
+		NodeID:    nodeID,
 		Role:      typeutil.QueryNodeRole,
 		StateCode: code,
 	}
