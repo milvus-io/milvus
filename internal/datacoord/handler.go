@@ -132,11 +132,13 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 	segments := h.s.meta.GetSegmentsByChannel(channel)
 	for _, segment := range segments {
-		if segment.GetStartPosition() != nil && // fitler empty segment
+		if segment.GetStartPosition() != nil && // filter empty segment
 			// FIXME: we filter compaction generated segments
 			// because datanode may not know the segment due to the network lag or
 			// datacoord crash when handling CompleteCompaction.
-			len(segment.CompactionFrom) == 0 &&
+			// FIXME: cancel this limitation for #12265
+			// need to change a unified DropAndFlush to solve the root problem
+			//len(segment.CompactionFrom) == 0 &&
 			segment.GetState() != commonpb.SegmentState_Dropped {
 			return false
 		}
