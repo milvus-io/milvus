@@ -469,6 +469,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 			zap.Int("Length of Field2Stats", len(fieldStats)),
 			zap.Int("Length of Field2Deltalogs", len(deltaInfos)),
+			zap.String("vChannelName", dsService.vchannelName),
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{

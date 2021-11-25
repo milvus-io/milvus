@@ -39,9 +39,10 @@ type dataSyncService struct {
 	replica      Replica                        // segment replica stores meta
 	idAllocator  allocatorInterface             // id/timestamp allocator
 	msFactory    msgstream.Factory
-	collectionID UniqueID        // collection id of vchan for which this data sync service serves
+	collectionID UniqueID // collection id of vchan for which this data sync service serves
+	vchannelName string
 	dataCoord    types.DataCoord // DataCoord instance to interact with
-	clearSignal  chan<- UniqueID // signal channel to notify flowgraph close for collection/partition drop msg consumed
+	clearSignal  chan<- string   // signal channel to notify flowgraph close for collection/partition drop msg consumed
 
 	flushingSegCache *Cache       // a guarding cache stores currently flushing segment ids
 	flushManager     flushManager // flush manager handles flush process
@@ -54,7 +55,7 @@ func newDataSyncService(ctx context.Context,
 	alloc allocatorInterface,
 	factory msgstream.Factory,
 	vchan *datapb.VchannelInfo,
-	clearSignal chan<- UniqueID,
+	clearSignal chan<- string,
 	dataCoord types.DataCoord,
 	flushingSegCache *Cache,
 	blobKV kv.BaseKV,
@@ -76,6 +77,7 @@ func newDataSyncService(ctx context.Context,
 		idAllocator:      alloc,
 		msFactory:        factory,
 		collectionID:     vchan.GetCollectionID(),
+		vchannelName:     vchan.GetChannelName(),
 		dataCoord:        dataCoord,
 		clearSignal:      clearSignal,
 		flushingSegCache: flushingSegCache,
