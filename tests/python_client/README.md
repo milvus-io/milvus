@@ -113,7 +113,7 @@ where `host` should be set as the IP address of the Milvus service, and `*.html`
 
 ### Module Overview
 
-![Module Overview](./graphs/module_call_diagram.jpg)
+![Module Overview](./graphs/module_call_diagram.jpeg)
 
 <img src="graphs/sdk_test_flow_chart.jpg" alt="SDK Test Flow Chart" width="400"/>
 
