@@ -110,6 +110,7 @@ pipeline {
                                                             print "No Image Tag info remained ,please rerun build to build new image."
                                                             exit 1
                                                         }
+                                                    }
                                                 }
                                                 withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                     sh """
@@ -178,10 +179,6 @@ pipeline {
                     success {
                         container('main') {
                             script {
-
-                                def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                                def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-                                def imageTag= "${env.BRANCH_NAME}-${date}-${gitShortCommit}"
                                 withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                                     sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}'
 
