@@ -21,46 +21,15 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
-
-type MockDataNodeClient struct {
-	err error
-}
-
-func (m *MockDataNodeClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{}, m.err
-}
-
-func (m *MockDataNodeClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockDataNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	return &milvuspb.GetMetricsResponse{}, m.err
-}
-
-func (m *MockDataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
 
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
-
 	ctx := context.Background()
 	client, err := NewClient(ctx, "")
 	assert.Nil(t, client)
@@ -109,19 +78,38 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r6, err)
 	}
 
-	client.getGrpcClient = func() (datapb.DataNodeClient, error) {
-		return &MockDataNodeClient{err: nil}, errors.New("dummy")
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: errors.New("dummy"),
 	}
+
+	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.DataNodeClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
+
 	checkFunc(false)
 
-	client.getGrpcClient = func() (datapb.DataNodeClient, error) {
-		return &MockDataNodeClient{err: errors.New("dummy")}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.DataNodeClient{Err: errors.New("dummy")}
+	}
+
+	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
+
 	checkFunc(false)
 
-	client.getGrpcClient = func() (datapb.DataNodeClient, error) {
-		return &MockDataNodeClient{err: nil}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.DataNodeClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
+
 	checkFunc(true)
 
 	err = client.Stop()

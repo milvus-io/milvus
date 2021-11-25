@@ -146,7 +146,7 @@ func TestDataSyncService_collectionFlowGraphs(t *testing.T) {
 	fac, err := genFactory()
 	assert.NoError(t, err)
 
-	tSafe := newTSafeReplica()
+	tSafe := newTSafeReplica(ctx)
 	dataSyncService := newDataSyncService(ctx, streaming, historicalReplica, tSafe, fac)
 	assert.NotNil(t, dataSyncService)
 
@@ -193,7 +193,7 @@ func TestDataSyncService_partitionFlowGraphs(t *testing.T) {
 	fac, err := genFactory()
 	assert.NoError(t, err)
 
-	tSafe := newTSafeReplica()
+	tSafe := newTSafeReplica(ctx)
 
 	dataSyncService := newDataSyncService(ctx, streaming, historicalReplica, tSafe, fac)
 	assert.NotNil(t, dataSyncService)
@@ -242,7 +242,7 @@ func TestDataSyncService_removePartitionFlowGraphs(t *testing.T) {
 		fac, err := genFactory()
 		assert.NoError(t, err)
 
-		tSafe := newTSafeReplica()
+		tSafe := newTSafeReplica(ctx)
 		tSafe.addTSafe(defaultVChannel)
 
 		dataSyncService := newDataSyncService(ctx, streaming, historicalReplica, tSafe, fac)

@@ -21,38 +21,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
-
-type MockProxyClient struct {
-	err error
-}
-
-func (m *MockProxyClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{}, m.err
-}
-
-func (m *MockProxyClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockProxyClient) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockProxyClient) GetDdChannel(ctx context.Context, in *internalpb.GetDdChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockProxyClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
 
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
@@ -96,19 +70,36 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r4, err)
 	}
 
-	client.getGrpcClient = func() (proxypb.ProxyClient, error) {
-		return &MockProxyClient{err: nil}, errors.New("dummy")
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: errors.New("dummy"),
 	}
+
+	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.ProxyClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
+
 	checkFunc(false)
 
-	client.getGrpcClient = func() (proxypb.ProxyClient, error) {
-		return &MockProxyClient{err: errors.New("dummy")}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.ProxyClient{Err: errors.New("dummy")}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
 	checkFunc(false)
 
-	client.getGrpcClient = func() (proxypb.ProxyClient, error) {
-		return &MockProxyClient{err: nil}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.ProxyClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
+
 	checkFunc(true)
 
 	err = client.Stop()

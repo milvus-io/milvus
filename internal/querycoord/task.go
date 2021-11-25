@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -37,6 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 )
+
+const timeoutForRPC = 10 * time.Second
 
 const (
 	triggerTaskPrefix     = "queryCoord-triggerTask"
@@ -313,7 +316,9 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		},
 		CollectionID: collectionID,
 	}
-	showPartitionResponse, err := lct.rootCoord.ShowPartitions(ctx, showPartitionRequest)
+	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel2()
+	showPartitionResponse, err := lct.rootCoord.ShowPartitions(ctx2, showPartitionRequest)
 	if err != nil {
 		lct.setResultInfo(err)
 		return err
@@ -364,7 +369,11 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		recoveryInfo, err := lct.dataCoord.GetRecoveryInfo(ctx, getRecoveryInfoRequest)
+		recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
+			ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+			defer cancel2()
+			return lct.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
+		}()
 		if err != nil {
 			lct.setResultInfo(err)
 			return err
@@ -586,7 +595,9 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 			DbID:         rct.DbID,
 			CollectionID: rct.CollectionID,
 		}
-		res, err := rct.rootCoord.ReleaseDQLMessageStream(rct.ctx, releaseDQLMessageStreamReq)
+		ctx2, cancel2 := context.WithTimeout(rct.ctx, timeoutForRPC)
+		defer cancel2()
+		res, err := rct.rootCoord.ReleaseDQLMessageStream(ctx2, releaseDQLMessageStreamReq)
 		if res.ErrorCode != commonpb.ErrorCode_Success || err != nil {
 			log.Warn("releaseCollectionTask: release collection end, releaseDQLMessageStream occur error", zap.Int64("collectionID", rct.CollectionID))
 			err = errors.New("rootCoord releaseDQLMessageStream failed")
@@ -732,7 +743,11 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		recoveryInfo, err := lpt.dataCoord.GetRecoveryInfo(ctx, getRecoveryInfoRequest)
+		recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
+			ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+			defer cancel2()
+			return lpt.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
+		}()
 		if err != nil {
 			lpt.setResultInfo(err)
 			return err
@@ -1542,7 +1557,11 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				CollectionID: collectionID,
 				PartitionID:  partitionID,
 			}
-			recoveryInfo, err := ht.dataCoord.GetRecoveryInfo(ctx, getRecoveryInfoRequest)
+			recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
+				ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+				defer cancel2()
+				return ht.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
+			}()
 			if err != nil {
 				ht.setResultInfo(err)
 				return err
@@ -1726,7 +1745,11 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						CollectionID: collectionID,
 						PartitionID:  partitionID,
 					}
-					recoveryInfo, err := lbt.dataCoord.GetRecoveryInfo(ctx, getRecoveryInfo)
+					recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
+						ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+						defer cancel2()
+						return lbt.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfo)
+					}()
 					if err != nil {
 						lbt.setResultInfo(err)
 						return err
@@ -1921,7 +1944,11 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					CollectionID: collectionID,
 					PartitionID:  partitionID,
 				}
-				recoveryInfo, err := lbt.dataCoord.GetRecoveryInfo(ctx, getRecoveryInfoRequest)
+				recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
+					ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+					defer cancel2()
+					return lbt.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
+				}()
 				if err != nil {
 					lbt.setResultInfo(err)
 					return err

@@ -12,13 +12,14 @@
 package querynode
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestTSafeReplica_valid(t *testing.T) {
-	replica := newTSafeReplica()
+	replica := newTSafeReplica(context.Background())
 	replica.addTSafe(defaultVChannel)
 
 	watcher := newTSafeWatcher()
@@ -38,7 +39,7 @@ func TestTSafeReplica_valid(t *testing.T) {
 }
 
 func TestTSafeReplica_invalid(t *testing.T) {
-	replica := newTSafeReplica()
+	replica := newTSafeReplica(context.Background())
 	replica.addTSafe(defaultVChannel)
 
 	watcher := newTSafeWatcher()

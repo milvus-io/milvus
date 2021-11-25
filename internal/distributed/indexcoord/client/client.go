@@ -19,81 +19,73 @@ package grpcindexcoordclient
 import (
 	"context"
 	"fmt"
-	"sync"
-	"time"
 
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // Client is the grpc client of IndexCoord.
 type Client struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	grpcClient    indexpb.IndexCoordClient
-	conn          *grpc.ClientConn
-	grpcClientMtx sync.RWMutex
-
-	addr string
-	sess *sessionutil.Session
+	grpcClient grpcclient.GrpcClient
+	sess       *sessionutil.Session
 }
 
-func (c *Client) getGrpcClient() (indexpb.IndexCoordClient, error) {
-	c.grpcClientMtx.RLock()
-	if c.grpcClient != nil {
-		defer c.grpcClientMtx.RUnlock()
-		return c.grpcClient, nil
-	}
-	c.grpcClientMtx.RUnlock()
-
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-
-	if c.grpcClient != nil {
-		return c.grpcClient, nil
-	}
-
-	// FIXME(dragondriver): how to handle error here?
-	// if we return nil here, then we should check if client is nil outside,
-	err := c.connect(retry.Attempts(20))
-	if err != nil {
-		log.Debug("IndexcoordClient try reconnect failed", zap.Error(err))
+// NewClient creates a new IndexCoord client.
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
+	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
+	if sess == nil {
+		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		log.Debug("IndexCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-
-	return c.grpcClient, nil
-}
-
-func (c *Client) resetConnection() {
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-
-	if c.conn != nil {
-		_ = c.conn.Close()
+	Params.Init()
+	client := &Client{
+		grpcClient: &grpcclient.ClientBase{
+			ClientMaxRecvSize: Params.ClientMaxRecvSize,
+			ClientMaxSendSize: Params.ClientMaxSendSize,
+		},
+		sess: sess,
 	}
-	c.conn = nil
-	c.grpcClient = nil
+	client.grpcClient.SetRole(typeutil.IndexCoordRole)
+	client.grpcClient.SetGetAddrFunc(client.getIndexCoordAddr)
+	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
+
+	return client, nil
 }
 
-func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
-	key := typeutil.IndexCoordRole
-	msess, _, err := sess.GetSessions(key)
+// Init initializes IndexCoord's grpc client.
+func (c *Client) Init() error {
+	return nil
+}
+
+// Start starts IndexCoord's client service. But it does nothing here.
+func (c *Client) Start() error {
+	return nil
+}
+
+// Stop stops IndexCoord's grpc client.
+func (c *Client) Stop() error {
+	return c.grpcClient.Close()
+}
+
+// Register dummy
+func (c *Client) Register() error {
+	return nil
+}
+
+func (c *Client) getIndexCoordAddr() (string, error) {
+	key := c.grpcClient.GetRole()
+	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
 		log.Debug("IndexCoordClient GetSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
@@ -107,134 +99,17 @@ func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-// NewClient creates a new IndexCoord client.
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
-	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("RootCoordClient NewClient failed", zap.Error(err))
-		return nil, err
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	return &Client{
-		ctx:    ctx,
-		cancel: cancel,
-		sess:   sess,
-	}, nil
-}
-
-// Init initializes IndexCoord's grpc client.
-func (c *Client) Init() error {
-	Params.Init()
-	return nil
-}
-
-func (c *Client) connect(retryOptions ...retry.Option) error {
-	var err error
-	var kacp = keepalive.ClientParameters{
-		Time:                60 * time.Second, // send pings every 60 seconds if there is no activity
-		Timeout:             6 * time.Second,  // wait 6 second for ping ack before considering the connection dead
-		PermitWithoutStream: true,             // send pings even without active streams
-	}
-	connectIndexCoordaddrFn := func() error {
-		c.addr, err = getIndexCoordAddr(c.sess)
-		if err != nil {
-			log.Debug("IndexCoordClient getIndexCoordAddress failed")
-			return err
-		}
-		opts := trace.GetInterceptorOpts()
-		log.Debug("IndexCoordClient try connect ", zap.String("address", c.addr))
-		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
-		defer cancel()
-		conn, err := grpc.DialContext(ctx, c.addr,
-			grpc.WithKeepaliveParams(kacp),
-			grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithDefaultCallOptions(
-				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
-				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
-			grpc.WithUnaryInterceptor(
-				grpc_middleware.ChainUnaryClient(
-					grpc_retry.UnaryClientInterceptor(grpc_retry.WithMax(3)),
-					grpc_opentracing.UnaryClientInterceptor(opts...),
-				)),
-			grpc.WithStreamInterceptor(
-				grpc_middleware.ChainStreamClient(
-					grpc_retry.StreamClientInterceptor(grpc_retry.WithMax(3)),
-					grpc_opentracing.StreamClientInterceptor(opts...),
-				)),
-		)
-		if err != nil {
-			return err
-		}
-		if c.conn != nil {
-			_ = c.conn.Close()
-		}
-		c.conn = conn
-		return nil
-	}
-
-	err = retry.Do(c.ctx, connectIndexCoordaddrFn, retryOptions...)
-	if err != nil {
-		log.Debug("IndexCoordClient try connect failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexCoordClient connect success")
-	c.grpcClient = indexpb.NewIndexCoordClient(c.conn)
-	return nil
-}
-
-func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {
-	ret, err := caller()
-	if err == nil {
-		return ret, nil
-	}
-	if err == context.Canceled || err == context.DeadlineExceeded {
-		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
-	}
-
-	log.Debug("IndexCoord Client grpc error", zap.Error(err))
-
-	c.resetConnection()
-
-	ret, err = caller()
-	if err != nil {
-		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
-	}
-	return ret, err
-}
-
-// Start starts IndexCoord's client service. But it does nothing here.
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops IndexCoord's grpc client.
-func (c *Client) Stop() error {
-	c.cancel()
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-	if c.conn != nil {
-		return c.conn.Close()
-	}
-	return nil
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+	return indexpb.NewIndexCoordClient(cc)
 }
 
 // GetComponentStates gets the component states of IndexCoord.
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		return client.(indexpb.IndexCoordClient).GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -244,15 +119,11 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 
 // GetTimeTickChannel gets the time tick channel of IndexCoord.
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		return client.(indexpb.IndexCoordClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -262,15 +133,11 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.(indexpb.IndexCoordClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -280,15 +147,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 // BuildIndex sends the build index request to IndexCoord.
 func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.BuildIndex(ctx, req)
+		return client.(indexpb.IndexCoordClient).BuildIndex(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -298,15 +161,11 @@ func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest)
 
 // DropIndex sends the drop index request to IndexCoord.
 func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.DropIndex(ctx, req)
+		return client.(indexpb.IndexCoordClient).DropIndex(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -316,15 +175,11 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 
 // GetIndexStates gets the index states from IndexCoord.
 func (c *Client) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetIndexStates(ctx, req)
+		return client.(indexpb.IndexCoordClient).GetIndexStates(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -334,15 +189,11 @@ func (c *Client) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStates
 
 // GetIndexFilePaths gets the index file paths from IndexCoord.
 func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetIndexFilePaths(ctx, req)
+		return client.(indexpb.IndexCoordClient).GetIndexFilePaths(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -352,15 +203,11 @@ func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 
 // GetMetrics gets the metrics info of IndexCoord.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetMetrics(ctx, req)
+		return client.(indexpb.IndexCoordClient).GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

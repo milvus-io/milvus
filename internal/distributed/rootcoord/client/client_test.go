@@ -21,122 +21,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
-
-type MockRootCoordClient struct {
-	err error
-}
-
-func (m *MockRootCoordClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{}, m.err
-}
-func (m *MockRootCoordClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-func (m *MockRootCoordClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
-	return &milvuspb.BoolResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-	return &milvuspb.DescribeCollectionResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
-	return &milvuspb.ShowCollectionsResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
-	return &milvuspb.BoolResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
-	return &milvuspb.ShowPartitionsResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest, opts ...grpc.CallOption) (*milvuspb.DescribeSegmentResponse, error) {
-	return &milvuspb.DescribeSegmentResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentsResponse, error) {
-	return &milvuspb.ShowSegmentsResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest, opts ...grpc.CallOption) (*milvuspb.DescribeIndexResponse, error) {
-	return &milvuspb.DescribeIndexResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
-	return &rootcoordpb.AllocTimestampResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
-	return &rootcoordpb.AllocIDResponse{}, m.err
-}
-
-func (m *MockRootCoordClient) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockRootCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	return &milvuspb.GetMetricsResponse{}, m.err
-}
 
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
@@ -245,19 +135,38 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r26, err)
 	}
 
-	client.getGrpcClient = func() (rootcoordpb.RootCoordClient, error) {
-		return &MockRootCoordClient{err: nil}, errors.New("dummy")
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: errors.New("dummy"),
 	}
+
+	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.RootCoordClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
+
 	checkFunc(false)
 
-	client.getGrpcClient = func() (rootcoordpb.RootCoordClient, error) {
-		return &MockRootCoordClient{err: errors.New("dummy")}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.RootCoordClient{Err: errors.New("dummy")}
+	}
+
+	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
+
 	checkFunc(false)
 
-	client.getGrpcClient = func() (rootcoordpb.RootCoordClient, error) {
-		return &MockRootCoordClient{err: nil}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.RootCoordClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
+
 	checkFunc(true)
 
 	err = client.Stop()

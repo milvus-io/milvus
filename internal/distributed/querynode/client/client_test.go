@@ -21,69 +21,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
-
-type MockQueryNodeClient struct {
-	err error
-}
-
-func (m *MockQueryNodeClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{}, m.err
-}
-
-func (m *MockQueryNodeClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-func (m *MockQueryNodeClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockQueryNodeClient) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockQueryNodeClient) RemoveQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockQueryNodeClient) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockQueryNodeClient) WatchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockQueryNodeClient) LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockQueryNodeClient) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockQueryNodeClient) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockQueryNodeClient) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockQueryNodeClient) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*querypb.GetSegmentInfoResponse, error) {
-	return &querypb.GetSegmentInfoResponse{}, m.err
-}
-
-func (m *MockQueryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	return &milvuspb.GetMetricsResponse{}, m.err
-}
 
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
@@ -156,21 +99,39 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r13, err)
 	}
 
-	client.getGrpcClient = func() (querypb.QueryNodeClient, error) {
-		return &MockQueryNodeClient{err: nil}, errors.New("dummy")
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: errors.New("dummy"),
 	}
+
+	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.QueryNodeClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
+
 	checkFunc(false)
 
-	client.getGrpcClient = func() (querypb.QueryNodeClient, error) {
-		return &MockQueryNodeClient{err: errors.New("dummy")}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.QueryNodeClient{Err: errors.New("dummy")}
+	}
+
+	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
+
 	checkFunc(false)
 
-	client.getGrpcClient = func() (querypb.QueryNodeClient, error) {
-		return &MockQueryNodeClient{err: nil}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.QueryNodeClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
+
 	checkFunc(true)
-
 	err = client.Stop()
 	assert.Nil(t, err)
 }

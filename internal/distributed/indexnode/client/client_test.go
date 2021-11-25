@@ -21,44 +21,20 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"google.golang.org/grpc"
+
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
 
-type MockIndexNodeClient struct {
-	err error
-}
-
-func (m *MockIndexNodeClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{}, m.err
-}
-
-func (m *MockIndexNodeClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockIndexNodeClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockIndexNodeClient) CreateIndex(ctx context.Context, in *indexpb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockIndexNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	return &milvuspb.GetMetricsResponse{}, m.err
-}
-
 func Test_NewClient(t *testing.T) {
-	proxy.Params.InitOnce()
-
+	Params.Init()
 	ctx := context.Background()
 	client, err := NewClient(ctx, "")
 	assert.Nil(t, client)
@@ -104,19 +80,35 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r5, err)
 	}
 
-	client.getGrpcClient = func() (indexpb.IndexNodeClient, error) {
-		return &MockIndexNodeClient{err: nil}, errors.New("dummy")
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: errors.New("dummy"),
 	}
+
+	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.IndexNodeClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
+
 	checkFunc(false)
 
-	client.getGrpcClient = func() (indexpb.IndexNodeClient, error) {
-		return &MockIndexNodeClient{err: errors.New("dummy")}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.IndexNodeClient{Err: errors.New("dummy")}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
 	checkFunc(false)
 
-	client.getGrpcClient = func() (indexpb.IndexNodeClient, error) {
-		return &MockIndexNodeClient{err: nil}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+
+	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.IndexNodeClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 	checkFunc(true)
 
 	err = client.Stop()

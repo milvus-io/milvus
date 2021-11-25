@@ -191,7 +191,7 @@ func (node *QueryNode) Init() error {
 			zap.Any("EtcdEndpoints", Params.EtcdEndpoints),
 			zap.Any("MetaRootPath", Params.MetaRootPath),
 		)
-		node.tSafeReplica = newTSafeReplica()
+		node.tSafeReplica = newTSafeReplica(node.queryNodeLoopCtx)
 
 		streamingReplica := newCollectionReplica(node.etcdKV)
 		historicalReplica := newCollectionReplica(node.etcdKV)
@@ -410,7 +410,7 @@ func (node *QueryNode) waitChangeInfo(segmentChangeInfos *querypb.SealedSegments
 		return nil
 	}
 
-	return retry.Do(context.TODO(), fn, retry.Attempts(50))
+	return retry.Do(node.queryNodeLoopCtx, fn, retry.Attempts(50))
 }
 
 // remove the segments since it's already compacted or balanced to other querynodes

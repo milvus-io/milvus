@@ -430,7 +430,7 @@ func (qn *queryNode) watchDmChannels(ctx context.Context, in *querypb.WatchDmCha
 		return errors.New("WatchDmChannels: queryNode is offline")
 	}
 
-	status, err := qn.client.WatchDmChannels(ctx, in)
+	status, err := qn.client.WatchDmChannels(qn.ctx, in)
 	if err != nil {
 		return err
 	}
@@ -454,7 +454,7 @@ func (qn *queryNode) watchDeltaChannels(ctx context.Context, in *querypb.WatchDe
 		return errors.New("WatchDmChannels: queryNode is offline")
 	}
 
-	status, err := qn.client.WatchDeltaChannels(ctx, in)
+	status, err := qn.client.WatchDeltaChannels(qn.ctx, in)
 	if err != nil {
 		return err
 	}
@@ -470,7 +470,7 @@ func (qn *queryNode) addQueryChannel(ctx context.Context, in *querypb.AddQueryCh
 		return errors.New("AddQueryChannel: queryNode is offline")
 	}
 
-	status, err := qn.client.AddQueryChannel(ctx, in)
+	status, err := qn.client.AddQueryChannel(qn.ctx, in)
 	if err != nil {
 		return err
 	}
@@ -492,7 +492,7 @@ func (qn *queryNode) removeQueryChannel(ctx context.Context, in *querypb.RemoveQ
 		return nil
 	}
 
-	status, err := qn.client.RemoveQueryChannel(ctx, in)
+	status, err := qn.client.RemoveQueryChannel(qn.ctx, in)
 	if err != nil {
 		return err
 	}
@@ -510,7 +510,7 @@ func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseC
 		return nil
 	}
 
-	status, err := qn.client.ReleaseCollection(ctx, in)
+	status, err := qn.client.ReleaseCollection(qn.ctx, in)
 	if err != nil {
 		return err
 	}
@@ -531,7 +531,7 @@ func (qn *queryNode) releasePartitions(ctx context.Context, in *querypb.ReleaseP
 		return nil
 	}
 
-	status, err := qn.client.ReleasePartitions(ctx, in)
+	status, err := qn.client.ReleasePartitions(qn.ctx, in)
 	if err != nil {
 		return err
 	}
@@ -551,7 +551,7 @@ func (qn *queryNode) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentI
 		return nil, fmt.Errorf("getSegmentInfo: queryNode %d is offline", qn.id)
 	}
 
-	res, err := qn.client.GetSegmentInfo(ctx, in)
+	res, err := qn.client.GetSegmentInfo(qn.ctx, in)
 	if err != nil {
 		return nil, err
 	}
@@ -570,7 +570,7 @@ func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.Component
 		}
 	}
 
-	res, err := qn.client.GetComponentStates(ctx)
+	res, err := qn.client.GetComponentStates(qn.ctx)
 	if err != nil || res.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return &internalpb.ComponentInfo{
 			NodeID:    qn.id,
@@ -586,7 +586,7 @@ func (qn *queryNode) getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequ
 		return nil, errQueryNodeIsNotOnService(qn.id)
 	}
 
-	return qn.client.GetMetrics(ctx, in)
+	return qn.client.GetMetrics(qn.ctx, in)
 }
 
 func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error {
@@ -594,7 +594,7 @@ func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsR
 		return errors.New("LoadSegments: queryNode is offline")
 	}
 
-	status, err := qn.client.LoadSegments(ctx, in)
+	status, err := qn.client.LoadSegments(qn.ctx, in)
 	if err != nil {
 		return err
 	}
@@ -620,7 +620,7 @@ func (qn *queryNode) releaseSegments(ctx context.Context, in *querypb.ReleaseSeg
 		return errors.New("ReleaseSegments: queryNode is offline")
 	}
 
-	status, err := qn.client.ReleaseSegments(ctx, in)
+	status, err := qn.client.ReleaseSegments(qn.ctx, in)
 	if err != nil {
 		return err
 	}

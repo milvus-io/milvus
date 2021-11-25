@@ -30,6 +30,7 @@ import (
 )
 
 func TestIndexCoordClient(t *testing.T) {
+	Params.Init()
 	ctx := context.Background()
 	server, err := grpcindexcoord.NewServer(ctx)
 	assert.Nil(t, err)
