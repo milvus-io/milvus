@@ -12,7 +12,6 @@ elif [[ "$unamestr" == 'Darwin' ]]; then
 fi
 echo "platform: $platform"
 
-release="milvus-chaos"
 ns="chaos-testing"
 
 # switch namespace
@@ -20,9 +19,10 @@ kubectl config set-context --current --namespace=${ns}
 
 # set parameters
 pod=${1:-"querynode"}
-chaos_type=${2:-"pod_kill"}
+chaos_type=${2:-"pod_kill"} #pod_kill or pod_failure
 chaos_task=${3:-"chaos-test"} # chaos-test or data-consist-test 
 
+release="test"-${pod}-${chaos_type/_/-} # replace pod_kill to pod-kill
 
 # install milvus cluster for chaos testing
 pushd ./scripts
@@ -65,9 +65,17 @@ fi
 
 # run chaos testing
 echo "start running testcase ${pod}"
-host=$(kubectl get svc/milvus-chaos -o jsonpath="{.spec.clusterIP}")
+if [[ $release =~ "milvus" ]]
+then
+    host=$(kubectl get svc/${release} -o jsonpath="{.spec.clusterIP}")
+else
+    host=$(kubectl get svc/${release}-milvus -o jsonpath="{.spec.clusterIP}")
+fi
+
 python scripts/hello_milvus.py --host "$host"
 # chaos test
+export ENABLE_TRACEBACK=False
+
 if [ "$chaos_task" == "chaos-test" ];
 then
     pytest -s -v test_chaos.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"

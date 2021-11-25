@@ -3,6 +3,7 @@ import threading
 import pytest
 import os
 import time
+import json
 from time import sleep
 
 from pymilvus import connections
@@ -132,15 +133,20 @@ class TestChaos(TestChaosBase):
 
         # parse chaos object
         chaos_config = cc.gen_experiment_config(chaos_yaml)
-        self._chaos_config = chaos_config  # cache the chaos config for tear down
-        log.info(f"chaos_config: {chaos_config}")
-
         # parse the test expectations in testcases.yaml
         if self.parser_testcase_config(chaos_yaml) is False:
             log.error("Fail to get the testcase info in testcases.yaml")
             assert False
-        # init report
+
         meta_name = chaos_config.get('metadata', None).get('name', None)
+        release_name = meta_name
+        chaos_config_str = json.dumps(chaos_config)
+        chaos_config_str = chaos_config_str.replace("milvus-chaos", release_name)
+        chaos_config = json.loads(chaos_config_str)
+        self._chaos_config = chaos_config  # cache the chaos config for tear down
+        log.info(f"chaos_config: {chaos_config}")
+
+        # init report
         dir_name = "./reports"
         file_name = f"./reports/{meta_name}.log"
         if not os.path.exists(dir_name):
