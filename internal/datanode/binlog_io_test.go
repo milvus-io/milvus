@@ -18,8 +18,10 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
@@ -57,6 +59,44 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		p, err = b.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
 		assert.EqualError(t, err, errUploadToBlobStorage.Error())
 		assert.Nil(t, p)
+	})
+
+	t.Run("Test upload error", func(t *testing.T) {
+		f := &MetaFactory{}
+		meta := f.GetCollectionMeta(UniqueID(10001), "uploads")
+		dData := &DeleteData{
+			Pks: []int64{},
+			Tss: []uint64{},
+		}
+
+		iData := genEmptyInsertData()
+		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, p)
+
+		iData = genInsertData()
+		dData = &DeleteData{
+			Pks:      []int64{},
+			Tss:      []uint64{1},
+			RowCount: 1,
+		}
+		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, p)
+
+		mkv := &mockKv{errMultiSave: true}
+		bin := &binlogIO{mkv, alloc}
+		iData = genInsertData()
+		dData = &DeleteData{
+			Pks:      []int64{1},
+			Tss:      []uint64{1},
+			RowCount: 1,
+		}
+		ctx, cancel := context.WithTimeout(context.TODO(), 20*time.Millisecond)
+		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, p)
+		cancel()
 	})
 
 	t.Run("Test download", func(t *testing.T) {
@@ -99,7 +139,17 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 				}
 			})
 		}
+	})
 
+	t.Run("Test download twice", func(t *testing.T) {
+		mkv := &mockKv{errMultiLoad: true}
+		b := &binlogIO{mkv, alloc}
+
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*20)
+		blobs, err := b.download(ctx, []string{"a"})
+		assert.Error(t, err)
+		assert.Empty(t, blobs)
+		cancel()
 	})
 }
 
@@ -152,7 +202,22 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				}
 			})
 		}
+	})
 
+	t.Run("Test genDeltaBlobs error", func(t *testing.T) {
+		k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []int64{1}, Tss: []uint64{}}, 1, 1, 1)
+		assert.Error(t, err)
+		assert.Empty(t, k)
+		assert.Empty(t, v)
+
+		errAlloc := NewAllocatorFactory()
+		errAlloc.isvalid = false
+
+		bin := binlogIO{memkv.NewMemoryKV(), errAlloc}
+		k, v, err = bin.genDeltaBlobs(&DeleteData{Pks: []int64{1}, Tss: []uint64{1}}, 1, 1, 1)
+		assert.Error(t, err)
+		assert.Empty(t, k)
+		assert.Empty(t, v)
 	})
 
 	t.Run("Test genInsertBlobs", func(t *testing.T) {
@@ -170,6 +235,33 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 			zap.Any("kvs no.", len(kvs)),
 			zap.String("insert paths field0", pin[0].GetBinlogs()[0]),
 			zap.String("stats paths field0", pstats[0].GetBinlogs()[0]))
+	})
+
+	t.Run("Test genInsertBlobs error", func(t *testing.T) {
+		kvs, pin, pstats, err := b.genInsertBlobs(&InsertData{}, 1, 1, nil)
+		assert.Error(t, err)
+		assert.Empty(t, kvs)
+		assert.Empty(t, pin)
+		assert.Empty(t, pstats)
+
+		f := &MetaFactory{}
+		meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs")
+
+		kvs, pin, pstats, err = b.genInsertBlobs(genEmptyInsertData(), 10, 1, meta)
+		assert.Error(t, err)
+		assert.Empty(t, kvs)
+		assert.Empty(t, pin)
+		assert.Empty(t, pstats)
+
+		errAlloc := NewAllocatorFactory()
+		errAlloc.errAllocBatch = true
+		bin := &binlogIO{memkv.NewMemoryKV(), errAlloc}
+		kvs, pin, pstats, err = bin.genInsertBlobs(genInsertData(), 10, 1, meta)
+
+		assert.Error(t, err)
+		assert.Empty(t, kvs)
+		assert.Empty(t, pin)
+		assert.Empty(t, pstats)
 	})
 
 	t.Run("Test idxGenerator", func(t *testing.T) {
@@ -224,3 +316,31 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	})
 
 }
+
+type mockKv struct {
+	errMultiLoad bool
+	errMultiSave bool
+}
+
+var _ kv.BaseKV = (*mockKv)(nil)
+
+func (mk *mockKv) Load(key string) (string, error) { return "", nil }
+func (mk *mockKv) MultiLoad(keys []string) ([]string, error) {
+	if mk.errMultiLoad {
+		return []string{}, errors.New("mockKv multiload error")
+	}
+	return []string{"a"}, nil
+}
+
+func (mk *mockKv) LoadWithPrefix(key string) ([]string, []string, error) { return nil, nil, nil }
+func (mk *mockKv) Save(key, value string) error                          { return nil }
+func (mk *mockKv) MultiSave(kvs map[string]string) error {
+	if mk.errMultiSave {
+		return errors.New("mockKv multisave error")
+	}
+	return nil
+}
+func (mk *mockKv) Remove(key string) error           { return nil }
+func (mk *mockKv) MultiRemove(keys []string) error   { return nil }
+func (mk *mockKv) RemoveWithPrefix(key string) error { return nil }
+func (mk *mockKv) Close()                            {}

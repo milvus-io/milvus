@@ -251,6 +251,28 @@ func TestInsertCodec(t *testing.T) {
 			},
 		},
 	}
+
+	insertDataEmpty := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField:        &Int64FieldData{[]int64{}, []int64{}},
+			TimestampField:    &Int64FieldData{[]int64{}, []int64{}},
+			BoolField:         &BoolFieldData{[]int64{}, []bool{}},
+			Int8Field:         &Int8FieldData{[]int64{}, []int8{}},
+			Int16Field:        &Int16FieldData{[]int64{}, []int16{}},
+			Int32Field:        &Int32FieldData{[]int64{}, []int32{}},
+			Int64Field:        &Int64FieldData{[]int64{}, []int64{}},
+			FloatField:        &FloatFieldData{[]int64{}, []float32{}},
+			DoubleField:       &DoubleFieldData{[]int64{}, []float64{}},
+			StringField:       &StringFieldData{[]int64{}, []string{}},
+			BinaryVectorField: &BinaryVectorFieldData{[]int64{}, []byte{}, 8},
+			FloatVectorField:  &FloatVectorFieldData{[]int64{}, []float32{}, 4},
+		},
+	}
+	b, s, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
+	assert.Error(t, err)
+	assert.Empty(t, b)
+	assert.Empty(t, s)
+
 	Blobs1, statsBlob1, err := insertCodec.Serialize(PartitionID, SegmentID, insertData1)
 	assert.Nil(t, err)
 	for _, blob := range Blobs1 {

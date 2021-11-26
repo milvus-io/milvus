@@ -533,9 +533,10 @@ func genFlowGraphDeleteMsg(pks []int64, chanName string) flowGraphMsg {
 
 type AllocatorFactory struct {
 	sync.Mutex
-	r       *rand.Rand
-	isvalid bool
-	random  bool
+	r             *rand.Rand
+	isvalid       bool
+	random        bool
+	errAllocBatch bool
 }
 
 var _ allocatorInterface = &AllocatorFactory{}
@@ -564,7 +565,7 @@ func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
 }
 
 func (alloc *AllocatorFactory) allocIDBatch(count uint32) (UniqueID, uint32, error) {
-	if count == 0 {
+	if count == 0 || alloc.errAllocBatch {
 		return 0, 0, errors.New("count should be greater than zero")
 	}
 
@@ -746,6 +747,58 @@ func genInsertData() *InsertData {
 			108: &s.DoubleFieldData{
 				NumRows: []int64{2},
 				Data:    []float64{3.333, 3.334},
+			},
+		}}
+}
+
+func genEmptyInsertData() *InsertData {
+	return &InsertData{
+		Data: map[int64]s.FieldData{
+			0: &s.Int64FieldData{
+				NumRows: []int64{0},
+				Data:    []int64{},
+			},
+			1: &s.Int64FieldData{
+				NumRows: []int64{0},
+				Data:    []int64{},
+			},
+			100: &s.FloatVectorFieldData{
+				NumRows: []int64{0},
+				Data:    []float32{},
+				Dim:     2,
+			},
+			101: &s.BinaryVectorFieldData{
+				NumRows: []int64{0},
+				Data:    []byte{},
+				Dim:     32,
+			},
+			102: &s.BoolFieldData{
+				NumRows: []int64{0},
+				Data:    []bool{},
+			},
+			103: &s.Int8FieldData{
+				NumRows: []int64{0},
+				Data:    []int8{},
+			},
+			104: &s.Int16FieldData{
+				NumRows: []int64{0},
+				Data:    []int16{},
+			},
+			105: &s.Int32FieldData{
+				NumRows: []int64{0},
+				Data:    []int32{},
+			},
+			106: &s.Int64FieldData{
+				NumRows: []int64{0},
+				Data:    []int64{},
+			},
+			107: &s.FloatFieldData{
+				NumRows: []int64{0},
+				Data:    []float32{},
+			},
+			108: &s.DoubleFieldData{
+				NumRows: []int64{0},
+				Data:    []float64{},
 			},
 		}}
 }
