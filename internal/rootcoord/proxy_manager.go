@@ -73,98 +73,119 @@ func (p *proxyManager) DelSession(fns ...func(*sessionutil.Session)) {
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
 func (p *proxyManager) WatchProxy() error {
-	ctx2, cancel := context.WithTimeout(p.ctx, RequestTimeout)
+	ctx, cancel := context.WithTimeout(p.ctx, RequestTimeout)
 	defer cancel()
+
+	sessions, rev, err := p.getSessionsOnEtcd(ctx)
+	if err != nil {
+		return err
+	}
+	log.Debug("succeed to get sessions on etcd", zap.Any("sessions", sessions), zap.Int64("revision", rev))
+	for _, f := range p.getSessions {
+		f(sessions)
+	}
+
+	eventCh := p.etcdCli.Watch(
+		p.ctx,
+		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		clientv3.WithPrefix(),
+		clientv3.WithCreatedNotify(),
+		clientv3.WithPrevKV(),
+		clientv3.WithRev(rev+1),
+	)
+	go p.startWatchEtcd(p.ctx, eventCh)
+	return nil
+}
+
+func (p *proxyManager) startWatchEtcd(ctx context.Context, eventCh clientv3.WatchChan) {
+	log.Debug("start to watch etcd")
+	for {
+		select {
+		case <-ctx.Done():
+			log.Warn("stop watching etcd loop")
+			return
+		case event, ok := <-eventCh:
+			if !ok {
+				log.Warn("stop watching etcd loop due to closed etcd event channel")
+				return
+			}
+			if err := event.Err(); err != nil {
+				log.Error("received error event from etcd watcher", zap.Error(err))
+				return
+			}
+			for _, e := range event.Events {
+				var err error
+				switch e.Type {
+				case mvccpb.PUT:
+					err = p.handlePutEvent(e)
+				case mvccpb.DELETE:
+					err = p.handleDeleteEvent(e)
+				}
+				if err != nil {
+					log.Warn("failed to handle proxy event", zap.Any("event", e), zap.Error(err))
+				}
+			}
+		}
+	}
+}
+
+func (p *proxyManager) handlePutEvent(e *clientv3.Event) error {
+	session, err := p.parseSession(e.Kv.Value)
+	if err != nil {
+		return err
+	}
+	log.Debug("received proxy put event with session", zap.Any("session", session))
+	for _, f := range p.addSessions {
+		f(session)
+	}
+	metrics.RootCoordProxyLister.WithLabelValues(metricProxy(session.ServerID)).Set(1)
+	return nil
+}
+
+func (p *proxyManager) handleDeleteEvent(e *clientv3.Event) error {
+	session, err := p.parseSession(e.PrevKv.Value)
+	if err != nil {
+		return err
+	}
+	log.Debug("received proxy delete event with session", zap.Any("session", session))
+	for _, f := range p.delSessions {
+		f(session)
+	}
+	metrics.RootCoordProxyLister.WithLabelValues(metricProxy(session.ServerID)).Set(0)
+	return nil
+}
+
+func (p *proxyManager) parseSession(value []byte) (*sessionutil.Session, error) {
+	session := new(sessionutil.Session)
+	err := json.Unmarshal(value, session)
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Session, int64, error) {
 	resp, err := p.etcdCli.Get(
-		ctx2,
+		ctx,
 		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)
 	if err != nil {
-		return fmt.Errorf("proxyManager, watch proxy failed, error = %w", err)
+		return nil, 0, fmt.Errorf("proxy manager failed to watch proxy with error %w", err)
 	}
 
-	go func() {
-		sessions := []*sessionutil.Session{}
-		for _, v := range resp.Kvs {
-			sess := new(sessionutil.Session)
-			err := json.Unmarshal(v.Value, sess)
-			if err != nil {
-				log.Debug("unmarshal SvrSession failed", zap.Error(err))
-				continue
-			}
-			sessions = append(sessions, sess)
+	var sessions []*sessionutil.Session
+	for _, v := range resp.Kvs {
+		session, err := p.parseSession(v.Value)
+		if err != nil {
+			log.Debug("failed to unmarshal session", zap.Error(err))
+			continue
 		}
-		for _, f := range p.getSessions {
-			f(sessions)
-		}
-		for _, s := range sessions {
-			metrics.RootCoordProxyLister.WithLabelValues(metricProxy(s.ServerID)).Set(1)
-			log.Debug("Get proxy", zap.Int64("id", s.ServerID), zap.String("addr", s.Address), zap.String("name", s.ServerName))
-		}
+		sessions = append(sessions, session)
+	}
 
-		rch := p.etcdCli.Watch(
-			p.ctx,
-			path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
-			clientv3.WithPrefix(),
-			clientv3.WithCreatedNotify(),
-			clientv3.WithPrevKV(),
-			clientv3.WithRev(resp.Header.Revision+1),
-		)
-		for {
-			select {
-			case <-p.ctx.Done():
-				log.Debug("context done", zap.Error(p.ctx.Err()))
-				return
-			case wresp, ok := <-rch:
-				if !ok {
-					log.Debug("watch proxy failed")
-					return
-				}
-				pl, _ := listProxyInEtcd(p.ctx, p.etcdCli)
-				for _, ev := range wresp.Events {
-					switch ev.Type {
-					case mvccpb.PUT:
-						sess := new(sessionutil.Session)
-						err := json.Unmarshal(ev.Kv.Value, sess)
-						if err != nil {
-							log.Debug("watch proxy, unmarshal failed", zap.Error(err))
-							continue
-						}
-						if len(pl) > 0 {
-							if _, ok := pl[sess.ServerID]; !ok {
-								continue
-							}
-						}
-						p.lock.Lock()
-						log.Debug("watchProxy detect PUT event", zap.Int64("serverID", sess.ServerID))
-						for _, f := range p.addSessions {
-							f(sess)
-						}
-						p.lock.Unlock()
-						metrics.RootCoordProxyLister.WithLabelValues(metricProxy(sess.ServerID)).Set(1)
-					case mvccpb.DELETE:
-						sess := new(sessionutil.Session)
-						err := json.Unmarshal(ev.PrevKv.Value, sess)
-						if err != nil {
-							log.Debug("watch proxy, unmarshal failed", zap.Error(err))
-							continue
-						}
-						p.lock.Lock()
-						log.Debug("watchProxy detect DELETE event", zap.Int64("serverID", sess.ServerID))
-						for _, f := range p.delSessions {
-							f(sess)
-						}
-						p.lock.Unlock()
-						metrics.RootCoordProxyLister.WithLabelValues(metricProxy(sess.ServerID)).Set(0)
-					}
-				}
-			}
-		}
-	}()
-
-	return nil
+	return sessions, resp.Header.Revision, nil
 }
 
 // Stop stops the proxyManager

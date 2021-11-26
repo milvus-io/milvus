@@ -26,61 +26,73 @@ import (
 
 type proxyClientManager struct {
 	core        *Core
-	lock        sync.Mutex
+	lock        sync.RWMutex
 	proxyClient map[int64]types.Proxy
+	helper      proxyClientManagerHelper
+}
+
+type proxyClientManagerHelper struct {
+	afterConnect func()
+}
+
+var defaultClientManagerHelper = proxyClientManagerHelper{
+	afterConnect: func() {},
 }
 
 func newProxyClientManager(c *Core) *proxyClientManager {
 	return &proxyClientManager{
 		core:        c,
-		lock:        sync.Mutex{},
 		proxyClient: make(map[int64]types.Proxy),
+		helper:      defaultClientManagerHelper,
 	}
 }
 
-func (p *proxyClientManager) GetProxyClients(sess []*sessionutil.Session) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	var pl map[int64]*sessionutil.Session
-	for _, s := range sess {
-		if _, ok := p.proxyClient[s.ServerID]; ok {
-			continue
-		}
-		if len(pl) > 0 {
-			if _, ok := pl[s.ServerID]; !ok {
-				continue
-			}
-		}
-
-		pc, err := p.core.NewProxyClient(s)
-		if err != nil {
-			log.Debug("create proxy client failed", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID), zap.Error(err))
-			pl, _ = listProxyInEtcd(p.core.ctx, p.core.etcdCli)
-			continue
-		}
-		p.proxyClient[s.ServerID] = pc
-		log.Debug("create proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
+func (p *proxyClientManager) GetProxyClients(sessions []*sessionutil.Session) {
+	for _, session := range sessions {
+		p.AddProxyClient(session)
 	}
 }
 
-func (p *proxyClientManager) AddProxyClient(s *sessionutil.Session) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	if _, ok := p.proxyClient[s.ServerID]; ok {
+func (p *proxyClientManager) AddProxyClient(session *sessionutil.Session) {
+	p.lock.RLock()
+	_, ok := p.proxyClient[session.ServerID]
+	p.lock.RUnlock()
+	if ok {
 		return
 	}
-	pc, err := p.core.NewProxyClient(s)
+
+	go p.connect(session)
+}
+
+func (p *proxyClientManager) connect(session *sessionutil.Session) {
+	pc, err := p.core.NewProxyClient(session)
 	if err != nil {
-		log.Debug("create proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID), zap.Error(err))
+		log.Warn("failed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID), zap.Error(err))
 		return
 	}
-	p.proxyClient[s.ServerID] = pc
-	log.Debug("create proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	_, ok := p.proxyClient[session.ServerID]
+	if ok {
+		pc.Stop()
+		return
+	}
+	p.proxyClient[session.ServerID] = pc
+	log.Debug("succeed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID))
+	p.helper.afterConnect()
 }
 
 func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	cli, ok := p.proxyClient[s.ServerID]
+	if ok {
+		cli.Stop()
+	}
+
 	delete(p.proxyClient, s.ServerID)
 	log.Debug("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
 }

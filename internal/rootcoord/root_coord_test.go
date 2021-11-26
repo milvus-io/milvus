@@ -58,6 +58,10 @@ type proxyMock struct {
 	mutex     sync.Mutex
 }
 
+func (p *proxyMock) Stop() error {
+	return nil
+}
+
 func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
