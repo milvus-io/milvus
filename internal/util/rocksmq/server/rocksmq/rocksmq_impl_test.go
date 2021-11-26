@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -765,4 +766,41 @@ func TestRocksmq_Reader(t *testing.T) {
 		assert.Equal(t, msg.MsgID, ids[i+1])
 	}
 	assert.False(t, rmq.HasNext(channelName, readerName, false))
+}
+
+func TestRocksmq_Close(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
+	assert.Nil(t, err)
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_close"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	rmq, err := NewRocksMQ(name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	atomic.StoreInt64(&rmq.state, RmqStateStopped)
+	assert.Error(t, rmq.CreateTopic(""))
+	assert.Error(t, rmq.CreateConsumerGroup("", ""))
+	rmq.RegisterConsumer(&Consumer{})
+	_, err = rmq.Produce("", nil)
+	assert.Error(t, err)
+	_, err = rmq.Consume("", "", 0)
+	assert.Error(t, err)
+
+	assert.Error(t, rmq.seek("", "", 0))
+	assert.Error(t, rmq.SeekToLatest("", ""))
+	_, err = rmq.CreateReader("", 0, false, "")
+	assert.Error(t, err)
+	rmq.ReaderSeek("", "", 0)
+	_, err = rmq.Next(nil, "", "", false)
+	assert.Error(t, err)
+	rmq.HasNext("", "", false)
+	rmq.CloseReader("", "")
 }
