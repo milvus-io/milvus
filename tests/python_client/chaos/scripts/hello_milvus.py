@@ -65,7 +65,10 @@ def hello_milvus(host="127.0.0.1"):
     # create index and load table
     default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
     print(f"\nCreate index...")
+    t0 = time.time()
     collection.create_index(field_name="float_vector", index_params=default_index)
+    t1 = time.time()
+    print(f"\nCreate index cost {t1 - t0} seconds")
     print(f"\nload collection...")
     t0 = time.time()
     collection.load()
