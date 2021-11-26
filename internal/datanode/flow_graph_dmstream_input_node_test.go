@@ -104,6 +104,9 @@ func (mtm *mockTtMsgStream) SeekReaders(msgPositions []*internalpb.MsgPosition) 
 func (mtm *mockTtMsgStream) Next(ctx context.Context, channelName string) (msgstream.TsMsg, error) {
 	return nil, nil
 }
+func (mtm *mockTtMsgStream) HasNext(channelName string) bool {
+	return true
+}
 
 func TestNewDmInputNode(t *testing.T) {
 	ctx := context.Background()

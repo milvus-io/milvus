@@ -575,27 +575,29 @@ func (ms *mqMsgStream) Next(ctx context.Context, channelName string) (TsMsg, err
 	if !ok {
 		return nil, fmt.Errorf("reader for channel %s is not exist", channelName)
 	}
-	if reader.HasNext() {
-		msg, err := reader.Next(ctx)
-		if err != nil {
-			return nil, err
-		}
-		tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
-		if err != nil {
-			log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
-			return nil, errors.New("Failed to getTsMsgFromConsumerMsg")
-		}
-		pos := tsMsg.Position()
-		tsMsg.SetPosition(&MsgPosition{
-			ChannelName: pos.ChannelName,
-			MsgID:       pos.MsgID,
-			Timestamp:   tsMsg.BeginTs(),
-		})
-		return tsMsg, nil
+	msg, err := reader.Next(ctx)
+	if err != nil {
+		return nil, err
 	}
-	log.Debug("All data has been read, there is no more data", zap.String("channel", channelName))
-	return nil, nil
-
+	tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
+	if err != nil {
+		log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+		return nil, errors.New("Failed to getTsMsgFromConsumerMsg")
+	}
+	pos := tsMsg.Position()
+	tsMsg.SetPosition(&MsgPosition{
+		ChannelName: pos.ChannelName,
+		MsgID:       pos.MsgID,
+		Timestamp:   tsMsg.BeginTs(),
+	})
+	return tsMsg, nil
+}
+func (ms *mqMsgStream) HasNext(channelName string) bool {
+	reader, ok := ms.readers[channelName]
+	if !ok {
+		return false
+	}
+	return reader.HasNext()
 }
 
 // Seek reset the subscription associated with this consumer to a specific position, the seek position is exclusive

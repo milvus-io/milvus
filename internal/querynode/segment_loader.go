@@ -18,6 +18,7 @@ import (
 	"path"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -36,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
+
+const timeoutForEachRead = 10 * time.Second
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
@@ -458,24 +461,30 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		deleteOffset:     make(map[UniqueID]int64),
 	}
 	log.Debug("start read msg from stream reader")
-	for {
+	for stream.HasNext(pChannelName) {
+		ctx, cancel := context.WithTimeout(ctx, timeoutForEachRead)
 		tsMsg, err := stream.Next(ctx, pChannelName)
 		if err != nil {
+			cancel()
 			return err
 		}
 		if tsMsg == nil {
-			break
+			cancel()
+			continue
 		}
 
 		if tsMsg.Type() == commonpb.MsgType_Delete {
 			dmsg := tsMsg.(*msgstream.DeleteMsg)
 			if dmsg.CollectionID != collectionID {
+				cancel()
 				continue
 			}
 			log.Debug("delete pk", zap.Any("pk", dmsg.PrimaryKeys))
 			processDeleteMessages(loader.historicalReplica, dmsg, delData)
 		}
+		cancel()
 	}
+	log.Debug("All data has been read, there is no more data", zap.String("channel", pChannelName))
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
 		if err != nil {
