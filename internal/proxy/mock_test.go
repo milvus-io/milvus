@@ -288,6 +288,10 @@ func (ms *simpleMockMsgStream) Next(ctx context.Context, channelName string) (ms
 	return nil, nil
 }
 
+func (ms *simpleMockMsgStream) HasNext(channelName string) bool {
+	return true
+}
+
 func (ms *simpleMockMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 }
 

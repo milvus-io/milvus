@@ -69,6 +69,7 @@ type MsgStream interface {
 	BroadcastMark(*MsgPack) (map[string][]MessageID, error)
 	Consume() *MsgPack
 	Next(ctx context.Context, channelName string) (TsMsg, error)
+	HasNext(channelName string) bool
 	Seek(offset []*MsgPosition) error
 	SeekReaders(msgPositions []*internalpb.MsgPosition) error
 }

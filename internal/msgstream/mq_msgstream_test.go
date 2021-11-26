@@ -1296,6 +1296,8 @@ func TestStream_MqMsgStream_Reader(t *testing.T) {
 	defer readStream.Close()
 	var seekPosition *internalpb.MsgPosition
 	for i := 0; i < n; i++ {
+		hasNext := readStream.HasNext(c)
+		assert.True(t, hasNext)
 		result, err := readStream.Next(ctx, c)
 		assert.Nil(t, err)
 		assert.Equal(t, result.ID(), int64(i))
@@ -1303,8 +1305,12 @@ func TestStream_MqMsgStream_Reader(t *testing.T) {
 			seekPosition = result.Position()
 		}
 	}
-	result, err := readStream.Next(ctx, c)
-	assert.Nil(t, err)
+	hasNext := readStream.HasNext(c)
+	assert.False(t, hasNext)
+	timeoutCtx1, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	result, err := readStream.Next(timeoutCtx1, c)
+	assert.NotNil(t, err)
 	assert.Nil(t, result)
 
 	readStream2 := getPulsarReader(pulsarAddress, readerChannels)
@@ -1312,12 +1318,18 @@ func TestStream_MqMsgStream_Reader(t *testing.T) {
 	readStream2.SeekReaders([]*internalpb.MsgPosition{seekPosition})
 
 	for i := p; i < 10; i++ {
+		hasNext := readStream2.HasNext(c)
+		assert.True(t, hasNext)
 		result, err := readStream2.Next(ctx, c)
 		assert.Nil(t, err)
 		assert.Equal(t, result.ID(), int64(i))
 	}
-	result2, err := readStream2.Next(ctx, c)
-	assert.Nil(t, err)
+	hasNext = readStream2.HasNext(c)
+	assert.False(t, hasNext)
+	timeoutCtx2, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	result2, err := readStream2.Next(timeoutCtx2, c)
+	assert.NotNil(t, err)
 	assert.Nil(t, result2)
 
 }
