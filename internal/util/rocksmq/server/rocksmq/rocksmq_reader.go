@@ -43,26 +43,26 @@ func (rr *rocksmqReader) Seek(msgID UniqueID) { //nolint:govet
 	}
 }
 
-func (rr *rocksmqReader) Next(ctx context.Context, messageIDInclusive bool) (ConsumerMessage, error) {
+func (rr *rocksmqReader) Next(ctx context.Context, messageIDInclusive bool) (*ConsumerMessage, error) {
 	ll, ok := topicMu.Load(rr.topic)
 	if !ok {
-		return ConsumerMessage{}, fmt.Errorf("topic name = %s not exist", rr.topic)
+		return nil, fmt.Errorf("topic name = %s not exist", rr.topic)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return ConsumerMessage{}, fmt.Errorf("get mutex failed, topic name = %s", rr.topic)
+		return nil, fmt.Errorf("get mutex failed, topic name = %s", rr.topic)
 	}
 	lock.Lock()
 	defer lock.Unlock()
 	fixChanName, err := fixChannelName(rr.topic)
 	if err != nil {
 		log.Debug("RocksMQ: fixChannelName " + rr.topic + " failed")
-		return ConsumerMessage{}, err
+		return nil, err
 	}
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
 
-	var msg ConsumerMessage
+	var msg *ConsumerMessage
 	readOpts.SetPrefixSameAsStart(true)
 	iter := rr.store.NewIterator(readOpts)
 	defer iter.Close()
@@ -71,11 +71,11 @@ func (rr *rocksmqReader) Next(ctx context.Context, messageIDInclusive bool) (Con
 		select {
 		case <-ctx.Done():
 			log.Debug("Stop get next reader message!")
-			return ConsumerMessage{}, nil
+			return nil, ctx.Err()
 		case _, ok := <-rr.readerMutex:
 			if !ok {
 				log.Warn("reader Mutex closed")
-				return ConsumerMessage{}, nil
+				return nil, fmt.Errorf("reader Mutex closed")
 			}
 			dataKey := path.Join(fixChanName, strconv.FormatInt(rr.currentID, 10))
 			if iter.Seek([]byte(dataKey)); !iter.Valid() {
@@ -84,12 +84,12 @@ func (rr *rocksmqReader) Next(ctx context.Context, messageIDInclusive bool) (Con
 			if messageIDInclusive {
 				val, err := rr.store.Get(readOpts, []byte(dataKey))
 				if err != nil {
-					return ConsumerMessage{}, err
+					return nil, err
 				}
 				if !val.Exists() {
 					continue
 				}
-				msg = ConsumerMessage{
+				msg = &ConsumerMessage{
 					MsgID: rr.currentID,
 				}
 				origData := val.Data()
@@ -112,7 +112,7 @@ func (rr *rocksmqReader) Next(ctx context.Context, messageIDInclusive bool) (Con
 						key.Free()
 					}
 					if err != nil {
-						return ConsumerMessage{}, err
+						return nil, err
 					}
 					rr.readerMutex <- struct{}{}
 				} else {
@@ -127,10 +127,10 @@ func (rr *rocksmqReader) Next(ctx context.Context, messageIDInclusive bool) (Con
 					key.Free()
 					id, err := strconv.ParseInt(tmpKey[FixedChannelNameLen+1:], 10, 64)
 					if err != nil {
-						return ConsumerMessage{}, err
+						return nil, err
 					}
 					val := iter.Value()
-					msg = ConsumerMessage{
+					msg = &ConsumerMessage{
 						MsgID: id,
 					}
 					origData := val.Data()
