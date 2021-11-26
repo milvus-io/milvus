@@ -146,8 +146,7 @@ func (t *tSafeReplica) registerTSafeWatcher(vChannel Channel, watcher *tSafeWatc
 	if err != nil {
 		return err
 	}
-	safer.registerTSafeWatcher(watcher)
-	return nil
+	return safer.registerTSafeWatcher(watcher)
 }
 
 func newTSafeReplica() TSafeReplicaInterface {
