@@ -87,8 +87,8 @@ then
 fi
 sleep 30s
 echo "start running e2e test"
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
-kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} -n chaos-testing --timeout=360s
+kubectl wait --for=condition=Ready pod -l release=${release} -n chaos-testing --timeout=360s
 
 python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
 
