@@ -13,7 +13,7 @@ prefix = "compact"
 tmp_nb = 100
 
 
-@pytest.mark.skip(reason="Ci failed")
+# @pytest.mark.skip(reason="Ci failed")
 class TestCompactionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -33,7 +33,6 @@ class TestCompactionParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
         collection_w.compact(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.xfail(reason="Issue #12075")
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_twice(self):
         """
@@ -263,7 +262,7 @@ class TestCompactionParams(TestcaseBase):
         pass
 
 
-@pytest.mark.skip(reason="Ci failed")
+# @pytest.mark.skip(reason="Ci failed")
 class TestCompactionOperation(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -285,11 +284,11 @@ class TestCompactionOperation(TestcaseBase):
             assert collection_w.num_entities == (i + 1) * tmp_nb
             ids.extend(insert_res.primary_keys)
 
-        expr = f'{ct.default_int64_field_name} in {[0, 2*tmp_nb-1]}'
+        expr = f'{ct.default_int64_field_name} in {[0, 2 * tmp_nb - 1]}'
         collection_w.delete(expr)
 
-        collection_w.insert(cf.gen_default_dataframe_data(1, start=2*tmp_nb))
-        assert collection_w.num_entities == 2*tmp_nb + 1
+        collection_w.insert(cf.gen_default_dataframe_data(1, start=2 * tmp_nb))
+        assert collection_w.num_entities == 2 * tmp_nb + 1
 
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
@@ -349,9 +348,8 @@ class TestCompactionOperation(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1,
                                                  schema=cf.gen_default_binary_collection_schema())
-
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         for i in range(2):
+            df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
             collection_w.insert(data=df)
             assert collection_w.num_entities == (i + 1) * ct.default_nb
 
@@ -359,22 +357,40 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.create_index(ct.default_binary_vec_field_name, ct.default_binary_index)
         log.debug(collection_w.index())
 
+        collection_w.load()
+
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
+        vectors = cf.gen_binary_vectors(ct.default_nq, ct.default_dim)[1]
+        search_res_one, _ = collection_w.search(vectors,
+                                                ct.default_binary_vec_field_name,
+                                                search_params, ct.default_limit)
+        assert len(search_res_one) == ct.default_nq
+        for hits in search_res_one:
+            assert len(hits) == ct.default_limit
+
         # compact
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
         collection_w.get_compaction_plans()
 
-        # search
-        collection_w.load()
+        # verify index re-build and re-load
+        search_params = {"metric_type": "L1", "params": {"nprobe": 10}}
+        search_res_two, _ = collection_w.search(vectors,
+                                                ct.default_binary_vec_field_name,
+                                                search_params, ct.default_limit,
+                                                check_task=CheckTasks.err_res,
+                                                check_items={ct.err_code: 1,
+                                                             ct.err_msg: "Metric type of field index isn't the same with search info"})
+
+        # verify search result
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-        search_res, _ = collection_w.search(cf.gen_binary_vectors(ct.default_nq, ct.default_dim)[1],
-                                            ct.default_binary_vec_field_name,
-                                            search_params, ct.default_limit)
-        assert len(search_res) == ct.default_nq
-        for hits in search_res:
+        search_res_two, _ = collection_w.search(vectors,
+                                                ct.default_binary_vec_field_name,
+                                                search_params, ct.default_limit)
+        assert len(search_res_two) == ct.default_nq
+        for hits in search_res_two:
             assert len(hits) == ct.default_limit
 
-    @pytest.mark.xfail(reason="Issue #12146")
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_and_index(self):
         """
@@ -573,7 +589,6 @@ class TestCompactionOperation(TestcaseBase):
         c_plans, _ = collection_w.get_compaction_plans()
         assert len(c_plans.plans) == 0
 
-    @pytest.mark.skip(reason="Issue #12075")
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_merge_multi_segments(self):
         """
@@ -594,9 +609,12 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.wait_for_compaction_completed()
 
         c_plans = collection_w.get_compaction_plans()[0]
+        assert len(c_plans.plans[0].sources) == 2
+        target = c_plans.plans[0].target
         collection_w.load()
-        self.utility_wrap.get_query_segment_info(collection_w.name)
-        # assert 0 == 1
+        segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        assert len(segments_info) == 1
+        assert segments_info[0].segmentID == target
 
     @pytest.mark.skip(reason="todo")
     @pytest.mark.tags(CaseLabel.L2)
@@ -623,14 +641,13 @@ class TestCompactionOperation(TestcaseBase):
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, num_of_segment=threshold)
 
         # todo compaction cost
-        collection_w.get_compaction_plans()
+        sleep(2)
         collection_w.load()
         segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
 
         # verify segments reaches threshold, auto-merge ten segments into one
         assert len(segments_info) == 1
 
-    @pytest.mark.xfail(reason="Issue #12131")
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_less_threshold_no_merge(self):
         """
