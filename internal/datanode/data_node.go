@@ -644,6 +644,10 @@ func (node *DataNode) Stop() error {
 	}
 
 	node.session.Revoke(time.Second)
+
+	// https://github.com/milvus-io/milvus/issues/12282
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	return nil
 }
 

@@ -223,6 +223,10 @@ func (i *IndexNode) Stop() error {
 		cb()
 	}
 	i.session.Revoke(time.Second)
+
+	// https://github.com/milvus-io/milvus/issues/12282
+	i.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	log.Debug("Index node stopped.")
 	return nil
 }
