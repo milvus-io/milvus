@@ -533,11 +533,25 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		rootCoord:              node.rootCoord,
 	}
 
-	log.Debug("ShowCollections enqueue",
+	log.Debug("ShowCollections received",
 		zap.String("role", Params.RoleName),
-		zap.Any("request", request))
+		zap.String("DbName", request.DbName),
+		zap.Uint64("TimeStamp", request.TimeStamp),
+		zap.String("ShowType", request.Type.String()),
+		zap.Any("CollectionNames", request.CollectionNames),
+	)
+
 	err := node.sched.ddQueue.Enqueue(sct)
 	if err != nil {
+		log.Warn("ShowCollections failed to enqueue",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.String("DbName", request.DbName),
+			zap.Uint64("TimeStamp", request.TimeStamp),
+			zap.String("ShowType", request.Type.String()),
+			zap.Any("CollectionNames", request.CollectionNames),
+		)
+
 		return &milvuspb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -546,21 +560,27 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		}, nil
 	}
 
-	log.Debug("ShowCollections",
+	log.Debug("ShowCollections enqueued",
 		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", sct.ID()),
 		zap.String("DbName", sct.ShowCollectionsRequest.DbName),
+		zap.Uint64("TimeStamp", request.TimeStamp),
 		zap.String("ShowType", sct.ShowCollectionsRequest.Type.String()),
 		zap.Any("CollectionNames", sct.ShowCollectionsRequest.CollectionNames),
 	)
-	defer func() {
-		log.Debug("ShowCollections Done",
-			zap.Error(err),
-			zap.String("role", Params.RoleName),
-			zap.Any("result", sct.result))
-	}()
 
 	err = sct.WaitToFinish()
 	if err != nil {
+		log.Warn("ShowCollections failed to WaitToFinish",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", sct.ID()),
+			zap.String("DbName", request.DbName),
+			zap.Uint64("TimeStamp", request.TimeStamp),
+			zap.String("ShowType", request.Type.String()),
+			zap.Any("CollectionNames", request.CollectionNames),
+		)
+
 		return &milvuspb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -568,6 +588,16 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 			},
 		}, nil
 	}
+
+	log.Debug("ShowCollections Done",
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", sct.ID()),
+		zap.String("DbName", request.DbName),
+		zap.Uint64("TimeStamp", request.TimeStamp),
+		zap.String("ShowType", request.Type.String()),
+		zap.Any("CollectionNames", request.CollectionNames),
+		zap.Any("result", sct.result),
+	)
 
 	return sct.result, nil
 }
