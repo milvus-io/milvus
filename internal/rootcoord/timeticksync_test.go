@@ -58,7 +58,7 @@ func TestTimetickSync(t *testing.T) {
 				MsgType: commonpb.MsgType_TimeTick,
 			},
 		}
-		ttSync.proxyTimeTick[1] = newChannelTimeTickMsg(msg)
+		ttSync.proxyTimeTick[1] = newChanTsMsg(msg, 1)
 		ttSync.sendToChannel()
 	})
 
@@ -87,7 +87,7 @@ func TestTimetickSync(t *testing.T) {
 
 		msg.Timestamps = append(msg.Timestamps, uint64(2))
 		msg.DefaultTimestamp = uint64(200)
-		cttMsg := newChannelTimeTickMsg(msg)
+		cttMsg := newChanTsMsg(msg, 1)
 		ttSync.proxyTimeTick[msg.Base.SourceID] = cttMsg
 
 		ttSync.ddlMinTs = uint64(100)
