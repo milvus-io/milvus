@@ -833,6 +833,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 						return err
 					}
 					sCol.removeVChannel(channel)
+					hCol.removeVChannel(channel)
 				}
 			}
 		}
@@ -887,6 +888,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 					return err
 				}
 				sCol.removeVDeltaChannel(channel)
+				hCol.removeVDeltaChannel(channel)
 			}
 		}
 	}

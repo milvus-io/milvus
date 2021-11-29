@@ -130,6 +130,10 @@ func (c *Collection) removeVChannel(channel Channel) {
 		}
 	}
 	c.vChannels = tmpChannels
+	log.Debug("remove vChannel from collection",
+		zap.Any("collectionID", c.ID()),
+		zap.Any("channel", channel),
+	)
 }
 
 // addPChannels add physical channels to physical channels of collection
@@ -237,6 +241,10 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 		}
 	}
 	c.vDeltaChannels = tmpChannels
+	log.Debug("remove vDeltaChannel from collection",
+		zap.Any("collectionID", c.ID()),
+		zap.Any("channel", channel),
+	)
 }
 
 // setReleaseTime records when collection is released
