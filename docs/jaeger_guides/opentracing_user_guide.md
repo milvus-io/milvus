@@ -52,7 +52,7 @@ The minimum and maximum request duration, you can use this condition to find the
 
 ### Limit Result
 
-The max number of result.
+The max number of results.
 
 ## Search result
 
@@ -60,7 +60,7 @@ You can search through the above conditions, and those that meet the conditions 
 
 ![](./figs/jaeger_single_search_result.png)
 
-The detailed information of search result.
+The detailed information of search results.
 
 1. The upper left corner identifies the service name: tracing, Root span name: Insert grpc received and The first half of the Trace ID 46874e2.
 2. The duration of the entire request is shown in the upper right corner.
