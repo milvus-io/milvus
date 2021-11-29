@@ -641,6 +641,7 @@ func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	return ret.(*milvuspb.GetCompactionPlansResponse), err
 }
 
+// WatchChannels notifies DataCoord to watch vchannels of a collection
 func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
