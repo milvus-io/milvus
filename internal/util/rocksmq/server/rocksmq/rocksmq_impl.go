@@ -1028,6 +1028,7 @@ func (rmq *rocksmq) getReader(topicName, readerName string) *rocksmqReader {
 	return nil
 }
 
+// ReaderSeek seek a reader to the pointed position
 func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID UniqueID) {
 	if rmq.isClosed() {
 		return
