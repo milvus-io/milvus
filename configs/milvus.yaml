@@ -28,7 +28,7 @@ etcd:
 
 # Related configuration of minio, which is responsible for data persistence for Milvus.
 minio:
-  address: localhost
+  address: localhost # Address of MinIO/S3
   port: 9000   # Port of MinIO/S3
   accessKeyID: minioadmin
   secretAccessKey: minioadmin # MinIO/S3 encryption string
