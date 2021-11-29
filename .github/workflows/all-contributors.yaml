@@ -11,7 +11,7 @@ on:
     #         │  │   │ │ │
     #         │  │   │ │ │
     #         │  │   │ │ │
-    - cron:  '30 * * * *'
+    - cron:  '50 * * * *'
 
 jobs:
   contributor:
