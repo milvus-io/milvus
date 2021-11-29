@@ -1952,7 +1952,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}
 
 		if retrievedIds == nil || retrievedVectors == nil {
-			return nil, errors.New("Failed to fetch vectors")
+			return nil, errors.New("failed to fetch vectors")
 		}
 
 		dict := make(map[int64]int)
@@ -1969,7 +1969,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				index, ok := dict[id]
 				if !ok {
 					log.Error("id not found in CalcDistance", zap.Int64("id", id))
-					return nil, errors.New("Failed to fetch vectors by id: " + fmt.Sprintln(id))
+					return nil, errors.New("failed to fetch vectors by id: " + fmt.Sprintln(id))
 				}
 				result = append(result, floatArr[int64(index)*element:int64(index+1)*element]...)
 			}
@@ -1996,7 +1996,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				index, ok := dict[id]
 				if !ok {
 					log.Error("id not found in CalcDistance", zap.Int64("id", id))
-					return nil, errors.New("Failed to fetch vectors by id: " + fmt.Sprintln(id))
+					return nil, errors.New("failed to fetch vectors by id: " + fmt.Sprintln(id))
 				}
 				result = append(result, binaryArr[int64(index)*element:int64(index+1)*element]...)
 			}
@@ -2009,7 +2009,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, nil
 		}
 
-		return nil, errors.New("Failed to fetch vectors")
+		return nil, errors.New("failed to fetch vectors")
 	}
 
 	log.Debug("grpc calcDistance begin")
@@ -2154,9 +2154,9 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}
 	}
 
-	err = errors.New("Unexpected error")
+	err = errors.New("unexpected error")
 	if (vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetFloatVector() != nil) || (vectorsLeft.GetFloatVector() != nil && vectorsRight.GetBinaryVector() != nil) {
-		err = errors.New("Cannot calculate distance between binary vectors and float vectors")
+		err = errors.New("cannot calculate distance between binary vectors and float vectors")
 	}
 
 	return &milvuspb.CalcDistanceResults{
