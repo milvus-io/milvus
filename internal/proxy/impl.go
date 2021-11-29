@@ -1397,6 +1397,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	err = it.WaitToFinish()
 	if err != nil {
+		log.Debug("Proxy Insert failed", zap.Error(err))
 		result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		result.Status.Reason = err.Error()
 		numRows := it.req.NumRows
