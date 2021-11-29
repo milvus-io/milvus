@@ -1510,8 +1510,11 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
+
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
 	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -1528,7 +1531,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		qc:        node.queryCoord,
 	}
 
-	log.Debug("Search enqueue",
+	log.Debug("Search received",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1536,8 +1540,21 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Any("dsl", request.Dsl),
 		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
 		zap.Any("OutputFields", request.OutputFields))
+
 	err := node.sched.dqQueue.Enqueue(qt)
 	if err != nil {
+		log.Debug("Search failed to enqueue",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("partitions", request.PartitionNames),
+			zap.Any("dsl", request.Dsl),
+			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+			zap.Any("OutputFields", request.OutputFields),
+		)
+
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1546,9 +1563,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		}, nil
 	}
 
-	log.Debug("Search",
+	log.Debug("Search enqueued",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", qt.Base.MsgID),
+		zap.Int64("msgID", qt.ID()),
 		zap.Uint64("timestamp", qt.Base.Timestamp),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1556,33 +1574,22 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Any("dsl", request.Dsl),
 		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
 		zap.Any("OutputFields", request.OutputFields))
-	defer func() {
-		log.Debug("Search Done",
+
+	err = qt.WaitToFinish()
+
+	if err != nil {
+		log.Debug("Search failed to WaitToFinish",
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", qt.Base.MsgID),
-			zap.Uint64("timestamp", qt.Base.Timestamp),
+			zap.Int64("msgID", qt.ID()),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames),
 			zap.Any("dsl", request.Dsl),
 			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
 			zap.Any("OutputFields", request.OutputFields))
-	}()
 
-	err = qt.WaitToFinish()
-	log.Debug("Search Finished",
-		zap.Error(err),
-		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", qt.Base.MsgID),
-		zap.Uint64("timestamp", qt.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames),
-		zap.Any("dsl", request.Dsl),
-		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
-
-	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1590,6 +1597,17 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			},
 		}, nil
 	}
+
+	log.Debug("Search Done",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", qt.ID()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames),
+		zap.Any("dsl", request.Dsl),
+		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+		zap.Any("OutputFields", request.OutputFields))
 
 	return qt.result, nil
 }
