@@ -2551,7 +2551,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    auto res2 = Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
