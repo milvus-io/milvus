@@ -1889,6 +1889,12 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 
 // CalcDistance calculates the distances between vectors.
 func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
+	if !node.checkHealthy() {
+		return &milvuspb.CalcDistanceResults{
+			Status: unhealthyStatus(),
+		}, nil
+	}
+
 	param, _ := funcutil.GetAttrByKeyFromRepeatedKV("metric", request.GetParams())
 	metric, err := distance.ValidateMetricType(param)
 	if err != nil {
@@ -1899,6 +1905,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			},
 		}, nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CalcDistance")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	query := func(ids *milvuspb.VectorIDs) (*milvuspb.QueryResults, error) {
 		outputFields := []string{ids.FieldName}
@@ -1926,14 +1936,17 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			qc:        node.queryCoord,
 			ids:       ids.IdArray,
 		}
-		log.Debug("calcDistance enqueue",
-			zap.String("role", Params.RoleName),
-			zap.String("db", queryRequest.DbName),
-			zap.String("collection", queryRequest.CollectionName),
-			zap.Any("partitions", queryRequest.PartitionNames))
 
 		err := node.sched.dqQueue.Enqueue(qt)
 		if err != nil {
+			log.Debug("CalcDistance queryTask failed to enqueue",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName),
+				zap.String("db", queryRequest.DbName),
+				zap.String("collection", queryRequest.CollectionName),
+				zap.Any("partitions", queryRequest.PartitionNames))
+
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1941,7 +1954,9 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, err
 		}
-		log.Debug("calcDistance",
+
+		log.Debug("CalcDistance queryTask enqueued",
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
 			zap.Int64("msgID", qt.Base.MsgID),
 			zap.Uint64("timestamp", qt.Base.Timestamp),
@@ -1949,9 +1964,12 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			zap.String("collection", queryRequest.CollectionName),
 			zap.Any("partitions", queryRequest.PartitionNames),
 			zap.Any("OutputFields", queryRequest.OutputFields))
-		defer func() {
-			log.Debug("calcDistance Done",
+
+		err = qt.WaitToFinish()
+		if err != nil {
+			log.Debug("CalcDistance queryTask failed to WaitToFinish",
 				zap.Error(err),
+				zap.String("traceID", traceID),
 				zap.String("role", Params.RoleName),
 				zap.Int64("msgID", qt.Base.MsgID),
 				zap.Uint64("timestamp", qt.Base.Timestamp),
@@ -1959,10 +1977,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				zap.String("collection", queryRequest.CollectionName),
 				zap.Any("partitions", queryRequest.PartitionNames),
 				zap.Any("OutputFields", queryRequest.OutputFields))
-		}()
 
-		err = qt.WaitToFinish()
-		if err != nil {
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1970,8 +1985,9 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, err
 		}
-		log.Debug("calcDistance Finished",
-			zap.Error(err),
+
+		log.Debug("CalcDistance queryTask Done",
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
 			zap.Int64("msgID", qt.Base.MsgID),
 			zap.Uint64("timestamp", qt.Base.Timestamp),
@@ -2060,13 +2076,25 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		return nil, errors.New("failed to fetch vectors")
 	}
 
-	log.Debug("grpc calcDistance begin")
+	log.Debug("CalcDistance received",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.String("metric", metric))
 
 	vectorsLeft := request.GetOpLeft().GetDataArray()
 	opLeft := request.GetOpLeft().GetIdArray()
 	if opLeft != nil {
+		log.Debug("OpLeft IdArray not empty, Get vectors by id",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		result, err := query(opLeft)
 		if err != nil {
+			log.Debug("Failed to get left vectors by id",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2074,9 +2102,18 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("OpLeft IdArray not empty, Get vectors by id done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 
 		vectorsLeft, err = arrangeFunc(opLeft, result.FieldsData)
 		if err != nil {
+			log.Debug("Failed to re-arrange left vectors",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2084,13 +2121,22 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("Re-arrange left vectors done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 	}
 
 	if vectorsLeft == nil {
+		msg := "Left vectors array is empty"
+		log.Debug(msg,
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		return &milvuspb.CalcDistanceResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "Left vectors array is empty",
+				Reason:    msg,
 			},
 		}, nil
 	}
@@ -2098,8 +2144,17 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	vectorsRight := request.GetOpRight().GetDataArray()
 	opRight := request.GetOpRight().GetIdArray()
 	if opRight != nil {
+		log.Debug("OpRight IdArray not empty, Get vectors by id",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		result, err := query(opRight)
 		if err != nil {
+			log.Debug("Failed to get right vectors by id",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2107,9 +2162,18 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("OpRight IdArray not empty, Get vectors by id done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 
 		vectorsRight, err = arrangeFunc(opRight, result.FieldsData)
 		if err != nil {
+			log.Debug("Failed to re-arrange right vectors",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2117,22 +2181,36 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("Re-arrange right vectors done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 	}
 
 	if vectorsRight == nil {
+		msg := "Right vectors array is empty"
+		log.Debug(msg,
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		return &milvuspb.CalcDistanceResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "Right vectors array is empty",
+				Reason:    msg,
 			},
 		}, nil
 	}
 
 	if vectorsLeft.Dim != vectorsRight.Dim {
+		msg := "Vectors dimension is not equal"
+		log.Debug(msg,
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		return &milvuspb.CalcDistanceResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "Vectors dimension is not equal",
+				Reason:    msg,
 			},
 		}, nil
 	}
@@ -2140,6 +2218,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	if vectorsLeft.GetFloatVector() != nil && vectorsRight.GetFloatVector() != nil {
 		distances, err := distance.CalcFloatDistance(vectorsLeft.Dim, vectorsLeft.GetFloatVector().Data, vectorsRight.GetFloatVector().Data, metric)
 		if err != nil {
+			log.Debug("Failed to CalcFloatDistance",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2147,6 +2230,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("CalcFloatDistance done",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 
 		return &milvuspb.CalcDistanceResults{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
@@ -2161,6 +2249,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	if vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
 		hamming, err := distance.CalcHammingDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
 		if err != nil {
+			log.Debug("Failed to CalcHammingDistance",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2170,6 +2263,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}
 
 		if metric == distance.HAMMING {
+			log.Debug("CalcHammingDistance done",
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
 				Array: &milvuspb.CalcDistanceResults_IntDist{
@@ -2183,6 +2280,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		if metric == distance.TANIMOTO {
 			tanimoto, err := distance.CalcTanimotoCoefficient(vectorsLeft.Dim, hamming)
 			if err != nil {
+				log.Debug("Failed to CalcTanimotoCoefficient",
+					zap.Error(err),
+					zap.String("traceID", traceID),
+					zap.String("role", Params.RoleName))
+
 				return &milvuspb.CalcDistanceResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2190,6 +2292,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 					},
 				}, nil
 			}
+
+			log.Debug("CalcTanimotoCoefficient done",
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
 
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
@@ -2206,6 +2312,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	if (vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetFloatVector() != nil) || (vectorsLeft.GetFloatVector() != nil && vectorsRight.GetBinaryVector() != nil) {
 		err = errors.New("cannot calculate distance between binary vectors and float vectors")
 	}
+
+	log.Debug("Failed to CalcDistance",
+		zap.Error(err),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName))
 
 	return &milvuspb.CalcDistanceResults{
 		Status: &commonpb.Status{
