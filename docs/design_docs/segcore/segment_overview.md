@@ -10,13 +10,13 @@ Both Segment types share the same interface, based on `SegmentInterface`, Extern
 2. `SegmentGrowing` & `CreateGrowingSegment`
 3. `SegmentSealed` & `CreateSealedSegment`
 
-Other internal functions and are hidden as implementation details in the following classes:
+Other internal functions are hidden as implementation details in the following classes:
 
 1. `SegmentInternalInterface`
 2. `SegmentGrowingImpl`
 3. `SegmentSealedImpl`
 
-In principle, the reusable code logic of growing / sealed is written into the 'SegmentInternalInterface' as far as possible, The different part of two classes contain more different parts
+In principle, the reusable code logic of growing / sealed is written into the 'SegmentInternalInterface' as far as possible. The different part of two classes contain more different parts
 
 See more details about segments at:
 
