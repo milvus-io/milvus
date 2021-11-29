@@ -51,14 +51,6 @@ func TestReader_Next(t *testing.T) {
 	defer client.Close()
 
 	topicName := newTopicName()
-	reader, err := newReader(client, &ReaderOptions{
-		Topic:                   topicName,
-		StartMessageIDInclusive: true,
-	})
-	assert.NoError(t, err)
-	assert.NotNil(t, reader)
-	assert.Equal(t, reader.Topic(), topicName)
-	defer reader.Close()
 
 	producer, err := client.CreateProducer(ProducerOptions{
 		Topic: topicName,
@@ -77,23 +69,39 @@ func TestReader_Next(t *testing.T) {
 		ids = append(ids, id)
 	}
 
-	reader.Seek(ids[1])
+	reader1, err := newReader(client, &ReaderOptions{
+		Topic:                   topicName,
+		StartMessageIDInclusive: true,
+		SubscriptionRolePrefix:  "reder1",
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, reader1)
+	assert.Equal(t, reader1.Topic(), topicName)
+	defer reader1.Close()
+
+	reader1.Seek(ids[1])
 	ctx := context.Background()
 	for i := 1; i < msgNum; i++ {
-		assert.True(t, reader.HasNext())
-		rMsg, err := reader.Next(ctx)
+		assert.True(t, reader1.HasNext())
+		rMsg, err := reader1.Next(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, rMsg.MsgID, ids[i])
 	}
-	assert.False(t, reader.HasNext())
+	assert.False(t, reader1.HasNext())
 
-	reader.startMessageIDInclusive = false
-	reader.Seek(ids[5])
+	reader2, err := newReader(client, &ReaderOptions{
+		Topic:                   topicName,
+		StartMessageIDInclusive: false,
+		SubscriptionRolePrefix:  "reader2",
+	})
+	assert.NoError(t, err)
+
+	reader2.Seek(ids[5])
 	for i := 5; i < msgNum-1; i++ {
-		assert.True(t, reader.HasNext())
-		rMsg, err := reader.Next(ctx)
+		assert.True(t, reader2.HasNext())
+		rMsg, err := reader2.Next(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, rMsg.MsgID, ids[i+1])
 	}
-	assert.False(t, reader.HasNext())
+	assert.False(t, reader2.HasNext())
 }
