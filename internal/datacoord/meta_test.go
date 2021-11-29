@@ -515,7 +515,8 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 					map[int64]*SegmentInfo{
 						1: {
 							SegmentInfo: &datapb.SegmentInfo{
-								ID: 1,
+								ID:    1,
+								State: commonpb.SegmentState_Flushed,
 							},
 							isCompacting: false,
 						},
@@ -563,18 +564,21 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:           1,
 								CollectionID: 1,
+								State:        commonpb.SegmentState_Flushed,
 							},
 						},
 						2: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:           2,
 								CollectionID: 1,
+								State:        commonpb.SegmentState_Growing,
 							},
 						},
 						3: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:           3,
 								CollectionID: 2,
+								State:        commonpb.SegmentState_Flushed,
 							},
 						},
 					},
@@ -588,12 +592,14 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 					SegmentInfo: &datapb.SegmentInfo{
 						ID:           1,
 						CollectionID: 1,
+						State:        commonpb.SegmentState_Flushed,
 					},
 				},
 				{
 					SegmentInfo: &datapb.SegmentInfo{
 						ID:           2,
 						CollectionID: 1,
+						State:        commonpb.SegmentState_Growing,
 					},
 				},
 			},

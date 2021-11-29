@@ -346,6 +346,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 					},
 				},
 			},
+			State: commonpb.SegmentState_Growing,
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(info))
 		assert.Nil(t, err)
@@ -372,6 +373,8 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 					},
 				},
 			},
+
+			State: commonpb.SegmentState_Growing,
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(info))
 		assert.Nil(t, err)
@@ -450,7 +453,8 @@ func TestGetSegmentInfo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
-			ID: 0,
+			ID:    0,
+			State: commonpb.SegmentState_Flushed,
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
 		assert.Nil(t, err)
@@ -467,7 +471,8 @@ func TestGetSegmentInfo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
-			ID: 0,
+			ID:    0,
+			State: commonpb.SegmentState_Flushed,
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
 		assert.Nil(t, err)
@@ -816,6 +821,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 				ID:            segment.id,
 				CollectionID:  segment.collectionID,
 				InsertChannel: "ch1",
+				State:         commonpb.SegmentState_Growing,
 			}
 			err := svr.meta.AddSegment(NewSegmentInfo(s))
 			assert.Nil(t, err)
@@ -897,6 +903,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 				ID:            1,
 				CollectionID:  1,
 				InsertChannel: "ch1",
+				State:         commonpb.SegmentState_Growing,
 			},
 		})
 		assert.Nil(t, err)
@@ -912,6 +919,143 @@ func TestSaveBinlogPaths(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		<-spyCh
+	})
+}
+
+func TestDropVirtualChannel(t *testing.T) {
+	t.Run("normal DropVirtualChannel", func(t *testing.T) {
+		spyCh := make(chan struct{}, 1)
+		svr := newTestServer(t, nil, SetSegmentManager(&spySegmentManager{spyCh: spyCh}))
+
+		defer closeTestServer(t, svr)
+
+		svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0})
+		type testSegment struct {
+			id           UniqueID
+			collectionID UniqueID
+		}
+		segments := make([]testSegment, 0, maxOperationsPerTxn) // test batch overflow
+		for i := 0; i < maxOperationsPerTxn; i++ {
+			segments = append(segments, testSegment{
+				id:           int64(i),
+				collectionID: 0,
+			})
+		}
+		for idx, segment := range segments {
+			s := &datapb.SegmentInfo{
+				ID:            segment.id,
+				CollectionID:  segment.collectionID,
+				InsertChannel: "ch1",
+
+				State: commonpb.SegmentState_Growing,
+			}
+			if idx%2 == 0 {
+				s.Binlogs = []*datapb.FieldBinlog{
+					{FieldID: 1},
+				}
+				s.Statslogs = []*datapb.FieldBinlog{
+					{FieldID: 1},
+				}
+			}
+			err := svr.meta.AddSegment(NewSegmentInfo(s))
+			assert.Nil(t, err)
+		}
+
+		err := svr.channelManager.AddNode(0)
+		require.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		require.Nil(t, err)
+
+		ctx := context.Background()
+		req := &datapb.DropVirtualChannelRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			ChannelName: "ch1",
+			Segments:    make([]*datapb.DropVirtualChannelSegment, 0, maxOperationsPerTxn),
+		}
+		for _, segment := range segments {
+			seg2Drop := &datapb.DropVirtualChannelSegment{
+				SegmentID:    segment.id,
+				CollectionID: segment.collectionID,
+				Field2BinlogPaths: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []string{
+							"/by-dev/test/0/1/2/1/Allo1",
+							"/by-dev/test/0/1/2/1/Allo2",
+						},
+					},
+				},
+				Field2StatslogPaths: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []string{
+							"/by-dev/test/0/1/2/1/stats1",
+							"/by-dev/test/0/1/2/1/stats2",
+						},
+					},
+				},
+				Deltalogs: []*datapb.DeltaLogInfo{
+					{
+						RecordEntries: 1,
+						DeltaLogPath:  "/by-dev/test/0/1/2/1/delta1",
+					},
+				},
+				CheckPoint: &internalpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				StartPosition: &internalpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				NumOfRows: 10,
+			}
+			req.Segments = append(req.Segments, seg2Drop)
+		}
+		resp, err := svr.DropVirtualChannel(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		<-spyCh
+
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		require.Nil(t, err)
+
+		//resend
+		resp, err = svr.DropVirtualChannel(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+	})
+
+	t.Run("with channel not matched", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		err := svr.channelManager.AddNode(0)
+		require.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		require.Nil(t, err)
+
+		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
+			ChannelName: "ch2",
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
 	})
 }
 

@@ -305,3 +305,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.dataCoord.GetFlushState(ctx, req)
 }
+
+// DropVirtualChannel drop virtual channel in datacoord
+func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+	return s.dataCoord.DropVirtualChannel(ctx, req)
+}

@@ -675,3 +675,21 @@ func (c *Client) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	}
 	return ret.(*milvuspb.GetFlushStateResponse), err
 }
+
+// DropVirtualChannel drops virtual channel in datacoord.
+func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.DropVirtualChannel(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*datapb.DropVirtualChannelResponse), err
+}

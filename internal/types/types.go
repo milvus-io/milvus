@@ -199,7 +199,7 @@ type DataCoord interface {
 	//  and related message stream positions
 	//
 	// ctx is the context to control request deadline and cancellation
-	// req contains the collection/partition id to query
+	// req contains the segment binlogs and checkpoint informations.
 	//
 	// response status contains the status/error code and failing reason if any
 	// error is returned only when some communication issue occurs
@@ -232,6 +232,17 @@ type DataCoord interface {
 	WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
 	// GetFlushState gets the flush state of multiple segments
 	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
+
+	// DropVirtualChannel notifies DataCoord a virtual channel is dropped and
+	// updates related segments binlogs(including insert binlogs, stats logs and delta logs)
+	//  and related message stream positions
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the dropped virtual channel name and related segment information
+	//
+	// response status contains the status/error code and failing reason if any
+	// error is returned only when some communication issue occurs
+	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
 }
 
 // IndexNode is the interface `indexnode` package implements
