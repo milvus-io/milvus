@@ -52,7 +52,7 @@ type RocksMQ interface {
 
 	CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool, subscriptionRolePrefix string) (string, error)
 	ReaderSeek(topicName string, readerName string, msgID UniqueID)
-	Next(ctx context.Context, topicName string, readerName string, messageIDInclusive bool) (ConsumerMessage, error)
+	Next(ctx context.Context, topicName string, readerName string, messageIDInclusive bool) (*ConsumerMessage, error)
 	HasNext(topicName string, readerName string, messageIDInclusive bool) bool
 	CloseReader(topicName string, readerName string)
 }

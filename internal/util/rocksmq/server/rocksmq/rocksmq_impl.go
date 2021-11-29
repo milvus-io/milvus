@@ -1040,13 +1040,13 @@ func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID Unique
 	reader.Seek(msgID)
 }
 
-func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName string, messageIDInclusive bool) (ConsumerMessage, error) {
+func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName string, messageIDInclusive bool) (*ConsumerMessage, error) {
 	if rmq.isClosed() {
-		return ConsumerMessage{}, errors.New(RmqNotServingErrMsg)
+		return nil, errors.New(RmqNotServingErrMsg)
 	}
 	reader := rmq.getReader(topicName, readerName)
 	if reader == nil {
-		return ConsumerMessage{}, fmt.Errorf("reader of %s doesn't exist", topicName)
+		return nil, fmt.Errorf("reader of %s doesn't exist", topicName)
 	}
 	return reader.Next(ctx, messageIDInclusive)
 }
