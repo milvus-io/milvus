@@ -72,7 +72,7 @@ As shown in the figure below, different GuaranteeTs correspond to four different
 - Strong consistency: GuaranteeTs is set to the newest timestamp of the system, QueryNodes will wait for the ServiceTime
   to be greater than or equal to the GuaranteeTs;
 - Eventual consistency: Set GuaranteeTs to 0 and skip the check, QueryNodes will execute search requests immediately;
-- Bounded Staleness: Set GuaranteeTs to an older timestamp, such as 1 minutes ago, the query can be executed immediately
+- Bounded Staleness: Set GuaranteeTs to an older timestamp, such as 1 minute ago, the query can be executed immediately
   within a tolerable range;
 - Read your own write (Session): Set GuaranteeTs to the client last write, in this way, every client will see all their
   own data.
