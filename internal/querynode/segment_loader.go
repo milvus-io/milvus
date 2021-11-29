@@ -310,7 +310,10 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 			RowData:      records,
 		},
 	}
-	pks := getPrimaryKeys(tmpInsertMsg, loader.streamingReplica)
+	pks, err := getPrimaryKeys(tmpInsertMsg, loader.streamingReplica)
+	if err != nil {
+		return err
+	}
 	segment.updateBloomFilter(pks)
 
 	// 3. do insert
