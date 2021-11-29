@@ -78,7 +78,7 @@ done
 
 
 find ${LOG_DIR:-/ci-logs/} -type f  -name "*${RELEASE_NAME:-milvus-testing}*" \
-| xargs tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz --remove-files || true
+| xargs tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz -P --remove-files || true
 
 remain_log_files=$(find ${LOG_DIR:-/ci-logs/} -type f  -name "*${RELEASE_NAME:-milvus-testing}*")
 
