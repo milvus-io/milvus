@@ -202,7 +202,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	if err == context.Canceled || err == context.DeadlineExceeded {
-		return nil, err
+		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
 	}
 
 	log.Debug("DataCoord Client grpc error", zap.Error(err))
@@ -210,6 +210,10 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	c.resetConnection()
 
 	ret, err = caller()
+	if err != nil {
+		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
+	}
+
 	return ret, err
 }
 
