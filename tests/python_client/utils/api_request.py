@@ -50,8 +50,8 @@ def api_request(_list, **kwargs):
                     arg.append(a)
             arg_str = str(arg)
             log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
-            if enable_traceback == "True":
+            # if enable_traceback == "True":
+            if kwargs.get("enable_traceback", True):
                 log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__qualname__, log_arg, str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
-
