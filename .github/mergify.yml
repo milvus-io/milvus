@@ -1,4 +1,26 @@
 pull_request_rules:
+  - name: Add needs-dco label when DCO check failed
+    conditions:
+      - base=master
+      - -status-success=DCO
+    actions:
+      label:
+        remove:
+          - dco-passed
+        add:
+          - needs-dco
+
+  - name: Add dco-passed label when DCO check passed
+    conditions:
+      - base=master
+      - status-success=DCO
+    actions:
+      label:
+        remove:
+          - needs-dco
+        add:
+          - dco-passed
+
   - name: Test passed for code changed
     conditions:
       - base=master
