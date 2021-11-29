@@ -197,7 +197,7 @@ class TestcaseBase(Base):
         return collection_w, partition_w, df_partition, df_default
 
     def collection_insert_multi_segments_one_shard(self, collection_prefix, num_of_segment=2, nb_of_segment=1,
-                                                   is_dup=True, is_binary=False):
+                                                   is_dup=True):
         """
         init collection with one shard, insert data into two segments on one shard (they can be merged)
         :param collection_prefix: collection name prefix
