@@ -121,7 +121,7 @@ func (t *timetickSync) sendToChannel() {
 
 	// detect whether rootcoord receives ttMsg from all proxy nodes
 	maxCnt := int64(0)
-	idleProxyList := make([]typeutil.UniqueID, 0)
+	idleProxyList := make([]typeutil.UniqueID, 0, len(t.proxyTimeTick))
 	for id, v := range t.proxyTimeTick {
 		if v == nil {
 			idleProxyList = append(idleProxyList, id)
