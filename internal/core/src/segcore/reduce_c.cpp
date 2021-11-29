@@ -60,8 +60,7 @@ DeleteMarshaledHits(CMarshaledHits c_marshaled_hits) {
 //    const int64_t MAXLEN = 32;
 //    snprintf(buf + strlen(buf), MAXLEN, "{ seg No.%ld ", seg_idx);
 //    for (int64_t i = from; i < to; i++) {
-//        snprintf(buf + strlen(buf), MAXLEN, "(%ld, %ld, %f), ", i, result->primary_keys_[i],
-//                 result->result_distances_[i]);
+//        snprintf(buf + strlen(buf), MAXLEN, "(%ld, %ld, %f), ", i, result->primary_keys_[i], result->distances_[i]);
 //    }
 //    snprintf(buf + strlen(buf), MAXLEN, "} ");
 //}
@@ -75,7 +74,7 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
         auto search_result = search_results[i];
         AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
         AssertInfo(search_result->primary_keys_.size() == nq * topk, "incorrect search result primary key size");
-        AssertInfo(search_result->result_distances_.size() == nq * topk, "incorrect search result distance size");
+        AssertInfo(search_result->distances_.size() == nq * topk, "incorrect search result distance size");
     }
 
     std::vector<std::vector<int64_t>> search_records(num_segments);
@@ -89,7 +88,7 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
         for (int i = 0; i < num_segments; i++) {
             auto search_result = search_results[i];
             auto primary_key = search_result->primary_keys_[base_offset];
-            auto distance = search_result->result_distances_[base_offset];
+            auto distance = search_result->distances_[base_offset];
             result_pairs.push_back(
                 SearchResultPair(primary_key, distance, search_result, i, base_offset, base_offset + topk));
         }
@@ -130,7 +129,7 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
     }
     LOG_SEGCORE_DEBUG_ << "skip duplicated search result, count = " << skip_dup_cnt;
 
-    // after reduce, remove redundant values in primary_keys, result_distances and internal_seg_offsets
+    // after reduce, remove redundant values in primary_keys, distances and ids
     for (int i = 0; i < num_segments; i++) {
         auto search_result = search_results[i];
         if (search_result->result_offsets_.size() == 0) {
@@ -138,19 +137,18 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
         }
 
         std::vector<int64_t> primary_keys;
-        std::vector<float> result_distances;
-        std::vector<int64_t> internal_seg_offsets;
+        std::vector<float> distances;
+        std::vector<int64_t> ids;
         for (int j = 0; j < search_records[i].size(); j++) {
             auto& offset = search_records[i][j];
             primary_keys.push_back(offset != INVALID_OFFSET ? search_result->primary_keys_[offset] : INVALID_ID);
-            result_distances.push_back(offset != INVALID_OFFSET ? search_result->result_distances_[offset] : MAXFLOAT);
-            internal_seg_offsets.push_back(offset != INVALID_OFFSET ? search_result->internal_seg_offsets_[offset]
-                                                                    : INVALID_SEG_OFFSET);
+            distances.push_back(offset != INVALID_OFFSET ? search_result->distances_[offset] : MAXFLOAT);
+            ids.push_back(offset != INVALID_OFFSET ? search_result->ids_[offset] : INVALID_ID);
         }
 
         search_result->primary_keys_ = primary_keys;
-        search_result->result_distances_ = result_distances;
-        search_result->internal_seg_offsets_ = internal_seg_offsets;
+        search_result->distances_ = distances;
+        search_result->ids_ = ids;
     }
 }
 
@@ -213,7 +211,7 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits, CSearchResult* c_searc
 #pragma omp parallel for
             for (int j = 0; j < size; j++) {
                 auto loc = search_result->result_offsets_[j];
-                result_distances[loc] = search_result->result_distances_[j];
+                result_distances[loc] = search_result->distances_[j];
                 row_datas[loc] = search_result->row_data_[j];
             }
             counts[i] = size;

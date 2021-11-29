@@ -70,7 +70,7 @@ Search(CSegmentInterface c_segment,
         *search_result = segment->Search(plan, *phg_ptr, timestamp);
         // if (plan->plan_node_->search_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
         if (!milvus::segcore::PositivelyRelated(plan->plan_node_->search_info_.metric_type_)) {
-            for (auto& dis : search_result->result_distances_) {
+            for (auto& dis : search_result->distances_) {
                 dis *= -1;
             }
         }

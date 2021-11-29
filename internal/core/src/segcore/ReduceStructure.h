@@ -53,7 +53,7 @@ struct SearchResultPair {
             offset_++;
             if (offset_ < offset_rb_) {
                 primary_key_ = search_result_->primary_keys_.at(offset_);
-                distance_ = search_result_->result_distances_.at(offset_);
+                distance_ = search_result_->distances_.at(offset_);
             } else {
                 primary_key_ = INVALID_ID;
                 distance_ = MAXFLOAT;
