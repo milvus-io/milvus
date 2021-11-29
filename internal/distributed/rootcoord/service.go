@@ -405,6 +405,7 @@ func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFl
 	return s.rootCoord.SegmentFlushCompleted(ctx, in)
 }
 
+// GetMetrics gets the metrics of RootCoord.
 func (s *Server) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.rootCoord.GetMetrics(ctx, in)
 }
