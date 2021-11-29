@@ -5229,7 +5229,7 @@
           "expr": "go_threads{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\"}",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{component}}: {{pod}}",
+          "legendFormat": "{{pod}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
