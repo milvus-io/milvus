@@ -84,7 +84,7 @@ Click the search result. You can analyze the detail trace information.
 
 Click the Span to see the detailed span information such as the last span in the picture above.
 
-1. Tags contains a series of custom tags. You can mark in the code what type of call this Span is, request method, call result, call, etc. All the information it contains can be filtered by the Tags on the homepage.
+1. Tags contain a series of custom tags. You can mark in the code what type of call this Span is,the request method, call result, call, etc. All the information it contains can be filtered by the Tags on the homepage.
 2. Process can locate which specific server processing this data.
 3. Logs are the logs printed by this span during the call.
 
