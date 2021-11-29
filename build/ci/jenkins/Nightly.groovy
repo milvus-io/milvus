@@ -142,10 +142,12 @@ pipeline {
                                         script {
                                                     def release_name=sh(returnStdout: true, script: './get_release_name.sh')
                                                     def clusterEnabled = "false"
-                                                    int e2e_timeout_seconds = 6 * 60 * 60
+                                                    int e2e_timeout_seconds = 1* 60 
+                                                    // int e2e_timeout_seconds = 6 * 60 * 60
                                                     if ("${MILVUS_SERVER_TYPE}" == "distributed") {
                                                         clusterEnabled = "true"
-                                                        e2e_timeout_seconds = 10 * 60 * 60
+                                                        // e2e_timeout_seconds = 10 * 60 * 60
+                                                         e2e_timeout_seconds = 1* 60 
                                                     }
                                                     if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                         sh """ 

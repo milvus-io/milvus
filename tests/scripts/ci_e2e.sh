@@ -52,7 +52,10 @@ mkdir -p ${CI_LOG_PATH}
 fi
 trace "prepare e2e test"  install_pytest_requirements  
 
-pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
-                                        --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
-trace "e2e test" "timeout" "${TEST_TIMEOUT:-}" `pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
-                                        --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}`
+if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+  timeout `pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
+                                      --html=${CI_LOG_PATH}/report.html  --self-contained-html ${@:-}`
+else
+  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
+                                      --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
+fi
