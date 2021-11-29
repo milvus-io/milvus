@@ -178,7 +178,7 @@ message DropCollectionRequest {
   // Not useful for now
   string db_name = 2;
 
-  // The unique collection name in milvus. (Required)
+  // The name of the collection whcih to be dropped. (Required)
   string collection_name = 3;
 }
 ```
@@ -199,7 +199,7 @@ message HasCollectionRequest {
   // Not useful for now
   string db_name = 2;
 
-  // The collection name you want to check. (Required)
+  // The name of the collection which you want to check. (Required)
   string collection_name = 3; 
 
   // If time_stamp is not zero, will return true when time_stamp >= created collection timestamp, otherwise will return false.
@@ -223,7 +223,7 @@ message LoadCollectionRequest {
   // Not useful for now
   string db_name = 2;
 
-  // The collection name you want to load. (Required)
+  // The name of the collection which you want to load into cache. (Required)
   string collection_name = 3;
 }
 ```
@@ -244,7 +244,7 @@ message ReleaseCollectionRequest {
   // Not useful for now
   string db_name = 2;
 
-  // The collection name you want to release. (Required)
+  // The name of the collection which you want to release. (Required)
   string collection_name = 3;
 }
 ```
@@ -412,7 +412,7 @@ message CreatePartitionRequest {
   // The collection name in milvus. (Required)
   string collection_name = 3;
 
-  // The partition name you want to create. (Required)
+  // The name of the partition to be created. (Required)
   string partition_name = 4;
 }
 ```
@@ -436,7 +436,7 @@ message DropPartitionRequest {
   // The collection name in milvus. (Required)
   string collection_name = 3;
 
-  // The partition name you want to drop. (Required)
+  // The name of the partition which you want to drop. (Required)
   string partition_name = 4; 
 }
 ```
@@ -460,7 +460,7 @@ message HasPartitionRequest {
   // The collection name in milvus
   string collection_name = 3;
 
-  // The partition name you want to check
+  // The name of the partition which you want to check
   string partition_name = 4;
 }
 ```
@@ -484,7 +484,7 @@ message LoadPartitionsRequest {
   // The collection name in milvus. (Required)
   string collection_name = 3;
 
-  // The partition names you want to load. (Required)
+  // A name array of the partitions whcih you want to load. (Required)
   repeated string partition_names = 4;
 }
 ```
@@ -508,7 +508,7 @@ message ReleasePartitionsRequest {
   // The collection name in milvus. (Required)
   string collection_name = 3;
 
-  // The partition names you want to release. (Required)
+  // A name array of the partitions whcih you want to release. (Required)
   repeated string partition_names = 4;
 }
 ```
