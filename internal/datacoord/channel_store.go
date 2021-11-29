@@ -319,7 +319,7 @@ func (c *ChannelStore) remove(nodeID int64) error {
 
 func (c *ChannelStore) txn(opSet ChannelOpSet) error {
 	saves := make(map[string]string)
-	removals := make([]string, 0)
+	var removals []string
 	for _, update := range opSet {
 		for i, c := range update.Channels {
 			k := buildChannelKey(update.NodeID, c.Name)

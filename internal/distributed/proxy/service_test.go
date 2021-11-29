@@ -403,6 +403,10 @@ func (m *MockDataCoord) GetFlushState(ctx context.Context, req *milvuspb.GetFlus
 	return nil, nil
 }
 
+func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+	return &datapb.DropVirtualChannelResponse{}, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase

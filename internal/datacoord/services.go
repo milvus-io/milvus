@@ -384,6 +384,70 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return resp, nil
 }
 
+// DropVirtualChannel notifies vchannel dropped
+// And contains the remaining data log & checkpoint to update
+func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+	resp := &datapb.DropVirtualChannelResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	if s.isClosed() {
+		resp.Status.Reason = serverNotServingErrMsg
+		return resp, nil
+	}
+
+	channel := req.GetChannelName()
+	log.Debug("receive DropVirtualChannel request",
+		zap.String("channel name", channel))
+
+	// validate
+	nodeID := req.GetBase().GetSourceID()
+	if !s.channelManager.Match(nodeID, channel) {
+		FailResponse(resp.Status, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
+		log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+		return resp, nil
+	}
+
+	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
+	for _, seg2Drop := range req.GetSegments() {
+		info := &datapb.SegmentInfo{
+			ID:            seg2Drop.GetSegmentID(),
+			CollectionID:  seg2Drop.GetCollectionID(),
+			InsertChannel: channel,
+			Binlogs:       seg2Drop.GetField2BinlogPaths(),
+			Statslogs:     seg2Drop.GetField2StatslogPaths(),
+			Deltalogs:     seg2Drop.GetDeltalogs(),
+			StartPosition: seg2Drop.GetStartPosition(),
+			DmlPosition:   seg2Drop.GetCheckPoint(),
+			NumOfRows:     seg2Drop.GetNumOfRows(),
+		}
+		segment := NewSegmentInfo(info)
+		segments = append(segments, segment)
+	}
+
+	err := s.meta.UpdateDropChannelSegmentInfo(channel, segments)
+	if err != nil {
+		log.Error("Update Drop Channel segment info failed", zap.String("channel", channel), zap.Error(err))
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+
+	log.Debug("DropVChannel plan to remove", zap.String("channel", channel))
+	err = s.channelManager.RemoveChannel(channel)
+	if err != nil {
+		log.Warn("DropVChannel failed to RemoveChannel", zap.String("channel", channel), zap.Error(err))
+	}
+	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
+
+	// clean up removal flag
+	s.meta.FinishRemoveChannel(channel)
+
+	// no compaction triggerred in Drop procedure
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
