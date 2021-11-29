@@ -880,7 +880,7 @@ func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState
 	return
 }
 
-// WatchChannels starts watch channels by give request
+// WatchChannels notifies DataCoord to watch vchannels of a collection
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	log.Debug("receive watch channels request", zap.Any("channels", req.GetChannelNames()))
 	resp := &datapb.WatchChannelsResponse{
