@@ -85,7 +85,7 @@ if [ "$chaos_task" == "data-consist-test" ];
 then
     pytest -s -v test_chaos_data_consist.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
 fi
-sleep 30s
+sleep 30
 echo "start running e2e test"
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} -n chaos-testing --timeout=360s
 kubectl wait --for=condition=Ready pod -l release=${release} -n chaos-testing --timeout=360s
