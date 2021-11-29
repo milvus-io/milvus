@@ -290,8 +290,7 @@ SearchResultToJson(const SearchResult& sr) {
         std::vector<std::string> result;
         for (int k = 0; k < topk; ++k) {
             int index = q * topk + k;
-            result.emplace_back(std::to_string(sr.internal_seg_offsets_[index]) + "->" +
-                                std::to_string(sr.result_distances_[index]));
+            result.emplace_back(std::to_string(sr.ids_[index]) + "->" + std::to_string(sr.distances_[index]));
         }
         results.emplace_back(std::move(result));
     }

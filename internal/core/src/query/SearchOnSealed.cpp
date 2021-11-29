@@ -105,12 +105,12 @@ SearchOnSealed(const Schema& schema,
             distances[i] = round(distances[i] * multiplier) / multiplier;
         }
     }
-    result.internal_seg_offsets_.resize(total_num);
-    result.result_distances_.resize(total_num);
+    result.ids_.resize(total_num);
+    result.distances_.resize(total_num);
     result.num_queries_ = num_queries;
     result.topk_ = topk;
 
-    std::copy_n(ids, total_num, result.internal_seg_offsets_.data());
-    std::copy_n(distances, total_num, result.result_distances_.data());
+    std::copy_n(ids, total_num, result.ids_.data());
+    std::copy_n(distances, total_num, result.distances_.data());
 }
 }  // namespace milvus::query

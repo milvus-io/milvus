@@ -60,8 +60,8 @@ struct SearchResult {
     SearchResult() = default;
     SearchResult(int64_t num_queries, int64_t topk) : topk_(topk), num_queries_(num_queries) {
         auto count = get_row_count();
-        result_distances_.resize(count);
-        internal_seg_offsets_.resize(count);
+        distances_.resize(count);
+        ids_.resize(count);
     }
 
     int64_t
@@ -72,8 +72,8 @@ struct SearchResult {
  public:
     int64_t num_queries_;
     int64_t topk_;
-    std::vector<float> result_distances_;
-    std::vector<int64_t> internal_seg_offsets_;
+    std::vector<float> distances_;
+    std::vector<int64_t> ids_;
 
  public:
     // TODO(gexi): utilize these field
