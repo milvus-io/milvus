@@ -27,34 +27,34 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
     for (int64_t qn = 0; qn < num_queries_; ++qn) {
         auto offset = qn * topk_;
 
-        int64_t* __restrict__ left_labels = this->get_labels() + offset;
-        float* __restrict__ left_values = this->get_values() + offset;
+        int64_t* __restrict__ left_ids = this->get_ids() + offset;
+        float* __restrict__ left_distances = this->get_distances() + offset;
 
-        auto right_labels = right.get_labels() + offset;
-        auto right_values = right.get_values() + offset;
+        auto right_ids = right.get_ids() + offset;
+        auto right_distances = right.get_distances() + offset;
 
-        std::vector<float> buf_values(topk_);
-        std::vector<int64_t> buf_labels(topk_);
+        std::vector<float> buf_distances(topk_);
+        std::vector<int64_t> buf_ids(topk_);
 
         auto lit = 0;  // left iter
         auto rit = 0;  // right iter
 
         for (auto buf_iter = 0; buf_iter < topk_; ++buf_iter) {
-            auto left_v = left_values[lit];
-            auto right_v = right_values[rit];
+            auto left_v = left_distances[lit];
+            auto right_v = right_distances[rit];
             // optimize out at compiling
             if (is_desc ? (left_v >= right_v) : (left_v <= right_v)) {
-                buf_values[buf_iter] = left_values[lit];
-                buf_labels[buf_iter] = left_labels[lit];
+                buf_distances[buf_iter] = left_distances[lit];
+                buf_ids[buf_iter] = left_ids[lit];
                 ++lit;
             } else {
-                buf_values[buf_iter] = right_values[rit];
-                buf_labels[buf_iter] = right_labels[rit];
+                buf_distances[buf_iter] = right_distances[rit];
+                buf_ids[buf_iter] = right_ids[rit];
                 ++rit;
             }
         }
-        std::copy_n(buf_values.data(), topk_, left_values);
-        std::copy_n(buf_labels.data(), topk_, left_labels);
+        std::copy_n(buf_distances.data(), topk_, left_distances);
+        std::copy_n(buf_ids.data(), topk_, left_ids);
     }
 }
 
@@ -80,7 +80,7 @@ SubSearchResult::round_values() {
     if (round_decimal_ == -1)
         return;
     const float multiplier = pow(10.0, round_decimal_);
-    for (auto it = this->values_.begin(); it != this->values_.end(); it++) {
+    for (auto it = this->distances_.begin(); it != this->distances_.end(); it++) {
         *it = round(*it * multiplier) / multiplier;
     }
 }
