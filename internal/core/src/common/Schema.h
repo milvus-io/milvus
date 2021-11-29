@@ -173,6 +173,5 @@ class Schema {
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
-using idx_t = int64_t;
 
 }  // namespace milvus
