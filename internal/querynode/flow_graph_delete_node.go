@@ -20,6 +20,7 @@ func (dNode *deleteNode) Name() string {
 	return "dNode"
 }
 
+// Operate handles input messages, do delete operations
 func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
