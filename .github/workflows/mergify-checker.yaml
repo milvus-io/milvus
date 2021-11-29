@@ -1,0 +1,26 @@
+name: Mergify Checker
+# Validate mergify.yml
+# https://docs.mergify.com/configuration/#validation
+
+
+on:
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - '.github/mergify.yml'
+jobs:
+  check-mergify:
+    name: Mergify Checker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Validate Mergify
+        shell: bash
+        run: |
+          response=$(curl -L -F 'data=@.github/mergify.yml' https://engine.mergify.io/validate)
+          if [[ ${response} == "The configuration is valid" ]]; then 
+              exit 0
+          else 
+              exit 1
+          fi
