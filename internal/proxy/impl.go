@@ -143,6 +143,11 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateCollection")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	cct := &createCollectionTask{
 		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
@@ -150,43 +155,76 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		rootCoord:               node.rootCoord,
 	}
 
-	log.Debug("CreateCollection enqueue",
+	// avoid data race
+	lenOfSchema := len(request.Schema)
+
+	log.Debug("CreateCollection received",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
-		zap.Any("schema", request.Schema))
+		zap.Int("len(schema)", lenOfSchema),
+		zap.Int32("shards_num", request.ShardsNum))
+
 	err := node.sched.ddQueue.Enqueue(cct)
 	if err != nil {
+		log.Debug("CreateCollection failed to enqueue",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Int("len(schema)", lenOfSchema),
+			zap.Int32("shards_num", request.ShardsNum))
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
 
-	log.Debug("CreateCollection",
+	log.Debug("CreateCollection enqueued",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
+		zap.Int64("MsgID", cct.ID()),
+		zap.Uint64("BeginTs", cct.BeginTs()),
+		zap.Uint64("EndTs", cct.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp),
 		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
-	defer func() {
-		log.Debug("CreateCollection Done",
-			zap.Error(err),
-			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
-			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName),
-		)
-	}()
+		zap.String("collection", request.CollectionName),
+		zap.Int("len(schema)", lenOfSchema),
+		zap.Int32("shards_num", request.ShardsNum))
 
 	err = cct.WaitToFinish()
 	if err != nil {
+		log.Debug("CreateCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", cct.ID()),
+			zap.Uint64("BeginTs", cct.BeginTs()),
+			zap.Uint64("EndTs", cct.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Int("len(schema)", lenOfSchema),
+			zap.Int32("shards_num", request.ShardsNum))
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug("CreateCollection done",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", cct.ID()),
+		zap.Uint64("BeginTs", cct.BeginTs()),
+		zap.Uint64("EndTs", cct.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Int("len(schema)", lenOfSchema),
+		zap.Int32("shards_num", request.ShardsNum))
 
 	return cct.result, nil
 }
