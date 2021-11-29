@@ -37,7 +37,7 @@ import (
 // UniqueID is the type of message ID
 type UniqueID = typeutil.UniqueID
 
-// Rocksmq state
+// RmqState Rocksmq state
 type RmqState = int64
 
 // RocksmqPageSize is the size of a message page, default 2GB
