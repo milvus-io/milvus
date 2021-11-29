@@ -16,6 +16,7 @@ type deleteNode struct {
 	replica ReplicaInterface // historical
 }
 
+// Name returns the name of deleteNode
 func (dNode *deleteNode) Name() string {
 	return "dNode"
 }
