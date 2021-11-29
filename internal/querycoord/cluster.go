@@ -416,18 +416,18 @@ func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, 
 	if targetNode != nil {
 		err := targetNode.releaseCollection(ctx, in)
 		if err != nil {
-			log.Debug("ReleaseCollection: queryNode release collection error", zap.String("error", err.Error()))
+			log.Debug("releaseCollection: queryNode release collection error", zap.String("error", err.Error()))
 			return err
 		}
 		err = c.clusterMeta.releaseCollection(in.CollectionID)
 		if err != nil {
-			log.Debug("ReleaseCollection: meta release collection error", zap.String("error", err.Error()))
+			log.Debug("releaseCollection: meta release collection error", zap.String("error", err.Error()))
 			return err
 		}
 		return nil
 	}
 
-	return fmt.Errorf("ReleaseCollection: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releaseCollection: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error {
