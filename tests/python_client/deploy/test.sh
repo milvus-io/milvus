@@ -81,7 +81,7 @@ function check_healthy {
     while [[ $cnt -ne $Expect || $healthy -ne 1 ]];
     do
     printf "waiting all containers get running\n"
-    sleep 5s
+    sleep 5
     let time_cnt+=5
     # if time is greater than 300s, the condition still not satisfied, we regard it as a failure
     if [ $time_cnt -gt 300 ];
@@ -167,7 +167,7 @@ pushd ${Deploy_Dir}
 # uninstall milvus
 printf "start to uninstall milvus\n"
 docker-compose down
-sleep 10s
+sleep 10
 printf "check all containers removed\n"
 docker-compose ps
 
@@ -206,7 +206,7 @@ pushd ${Deploy_Dir}
 # clean env
 docker-compose ps
 docker-compose down
-sleep 10s
+sleep 10
 docker-compose ps
 echo "$pw"|sudo -S rm -rf ./volumes
 popd
