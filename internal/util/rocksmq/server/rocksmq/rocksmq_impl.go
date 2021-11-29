@@ -972,6 +972,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 	return nil
 }
 
+// CreateReader create a reader for topic and generate reader name
 func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool, subscriptionRolePrefix string) (string, error) {
 	if rmq.isClosed() {
 		return "", errors.New(RmqNotServingErrMsg)
