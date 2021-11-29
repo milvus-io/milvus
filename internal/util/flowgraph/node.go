@@ -68,9 +68,8 @@ func (nodeCtx *nodeCtx) work() {
 			return
 		default:
 			// inputs from inputsMessages for Operate
-			inputs := make([]Msg, 0)
 
-			var res []Msg
+			var inputs, res []Msg
 			if !nodeCtx.node.IsInputNode() {
 				nodeCtx.collectInputMessages()
 				inputs = nodeCtx.inputMessages
