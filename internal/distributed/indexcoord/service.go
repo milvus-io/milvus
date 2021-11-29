@@ -22,11 +22,13 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/types"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/indexcoord"
@@ -180,6 +182,15 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
+	var kaep = keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
+		PermitWithoutStream: true,            // Allow pings even when there are no active streams
+	}
+
+	var kasp = keepalive.ServerParameters{
+		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
+		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
+	}
 
 	log.Debug("IndexCoord", zap.String("network address", Params.IP), zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
@@ -194,6 +205,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
