@@ -2,8 +2,10 @@ import traceback
 import os
 from utils.util_log import test_log as log
 
-enable_traceback = os.getenv('ENABLE_TRACEBACK', "True")
-log.info(f"enable_traceback:{enable_traceback}")
+# enable_traceback = os.getenv('ENABLE_TRACEBACK', "True")
+# log.info(f"enable_traceback:{enable_traceback}")
+
+
 class Error:
     def __init__(self, error):
         self.code = getattr(error, 'code', -1)
@@ -18,7 +20,8 @@ def api_request_catch():
         def inner_wrapper(*args, **kwargs):
             try:
                 res = func(*args, **kwargs)
-                if enable_traceback == "True":
+                # if enable_traceback == "True":
+                if kwargs.get("enable_traceback", True):
                     res_str = str(res)
                     log_res = res_str[0:log_row_length] + '......' if len(res_str) > log_row_length else res_str
                     log.debug("(api_response) : %s " % log_res)
@@ -27,7 +30,8 @@ def api_request_catch():
             except Exception as e:
                 e_str = str(e)
                 log_e = e_str[0:log_row_length] + '......' if len(e_str) > log_row_length else e_str
-                if enable_traceback == "True":
+                # if enable_traceback == "True":
+                if kwargs.get("enable_traceback", True):
                     log.error(traceback.format_exc())
                     log.error("(api_response) : %s" % log_e)
                 return Error(e), False
