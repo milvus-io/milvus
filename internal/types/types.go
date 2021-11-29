@@ -227,6 +227,7 @@ type DataCoord interface {
 	ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
 	// GetCompactionState gets the state of a compaction
 	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
+	// GetCompactionStateWithPlans get the state of requested plan id
 	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
 
 	// WatchChannels notifies DataCoord to watch vchannels of a collection
