@@ -151,6 +151,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAll
 }
 
 func (m *MetaReplica) reloadFromKV() error {
+	log.Debug("start reload from kv")
 	collectionKeys, collectionValues, err := m.client.LoadWithPrefix(collectionMetaPrefix)
 	if err != nil {
 		return err
@@ -230,6 +231,7 @@ func (m *MetaReplica) reloadFromKV() error {
 		m.globalSeekPosition = position
 	}
 	//TODO::update partition states
+	log.Debug("reload from kv finished")
 
 	return nil
 }
@@ -1000,13 +1002,16 @@ func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.Vch
 	defer m.deltaChannelMu.Unlock()
 	_, ok := m.deltaChannelInfos[collectionID]
 	if ok {
+		log.Debug("delta channel already exist", zap.Any("collectionID", collectionID))
 		return nil
 	}
 
 	err := saveDeltaChannelInfo(collectionID, infos, m.client)
 	if err != nil {
+		log.Error("save delta channel info error", zap.Error(err))
 		return err
 	}
+	log.Debug("save delta channel infos to meta", zap.Any("collectionID", collectionID), zap.Any("infos", infos))
 	m.deltaChannelInfos[collectionID] = infos
 	return nil
 }

@@ -464,7 +464,10 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		Infos:        mergedDeltaChannels,
 	}
 	// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
-	lct.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+	err = lct.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+	if err != nil {
+		return err
+	}
 
 	internalTasks, err := assignInternalTask(ctx, collectionID, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, watchDeltaChannelReq, false, nil, nil)
 	if err != nil {
@@ -804,7 +807,10 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		Infos:        mergedDeltaChannels,
 	}
 	// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
-	lpt.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+	err := lpt.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+	if err != nil {
+		return err
+	}
 	internalTasks, err := assignInternalTask(ctx, collectionID, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmReqs, watchDeltaChannelReq, false, nil, nil)
 	if err != nil {
 		log.Warn("loadPartitionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
@@ -1591,7 +1597,10 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				Infos:        mergedDeltaChannels,
 			}
 			// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
-			ht.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+			err = ht.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+			if err != nil {
+				return err
+			}
 			internalTasks, err := assignInternalTask(ctx, collectionID, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{loadSegmentReq}, nil, watchDeltaChannelReq, true, nil, nil)
 			if err != nil {
 				log.Error("handoffTask: assign child task failed", zap.Any("segmentInfo", segmentInfo))
@@ -1819,7 +1828,10 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					Infos:        mergedDeltaChannel,
 				}
 				// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
-				lbt.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+				err = lbt.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+				if err != nil {
+					return err
+				}
 
 				internalTasks, err := assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, watchDeltaChannelReq, true, lbt.SourceNodeIDs, lbt.DstNodeIDs)
 				if err != nil {
@@ -1977,7 +1989,10 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 				Infos:        mergedDeltaChannels,
 			}
 			// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
-			lbt.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+			err = lbt.meta.setDeltaChannel(watchDeltaChannelReq.CollectionID, watchDeltaChannelReq.Infos)
+			if err != nil {
+				return err
+			}
 
 			// TODO:: assignInternalTask with multi collection
 			internalTasks, err := assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, nil, watchDeltaChannelReq, false, lbt.SourceNodeIDs, lbt.DstNodeIDs)
@@ -2227,5 +2242,9 @@ func mergeWatchDeltaChannelInfo(infos []*datapb.VchannelInfo) []*datapb.Vchannel
 	for _, index := range minPositions {
 		result = append(result, infos[index])
 	}
+	log.Debug("merge delta channels finished",
+		zap.Any("origin info length", len(infos)),
+		zap.Any("merged info length", len(result)),
+	)
 	return result
 }
