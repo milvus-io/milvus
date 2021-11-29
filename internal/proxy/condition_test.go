@@ -68,7 +68,7 @@ func TestTaskCondition_WaitToFinish(t *testing.T) {
 		err := c1.WaitToFinish()
 		assert.NotEqual(t, nil, err)
 	}()
-	c1.Notify(errors.New("TestTaskCondition"))
+	c1.Notify(errors.New("testTaskCondition"))
 	wg.Wait()
 
 	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Millisecond*100)
@@ -106,7 +106,7 @@ func TestTaskCondition_Notify(t *testing.T) {
 		err := c1.WaitToFinish()
 		assert.NotEqual(t, nil, err)
 	}()
-	c1.Notify(errors.New("TestTaskCondition"))
+	c1.Notify(errors.New("testTaskCondition"))
 	wg.Wait()
 
 	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Millisecond*100)
