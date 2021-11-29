@@ -146,7 +146,7 @@ func (kv *MinIOKV) FGetObject(key, localPath string) error {
 	return kv.minioClient.FGetObject(kv.ctx, kv.bucketName, key, localPath+key, minio.GetObjectOptions{})
 }
 
-// FGetObjects download file from minio to local storage system.
+// FGetObjects downloads files from minio to local storage system.
 // For parallell downloads file, n goroutines will be started to download n keys.
 func (kv *MinIOKV) FGetObjects(keys []string, localPath string) error {
 	var wg sync.WaitGroup
@@ -199,7 +199,7 @@ func (kv *MinIOKV) Save(key, value string) error {
 	return err
 }
 
-// MultiSave save multiple objects, the path is the key of @kvs.
+// MultiSave saves multiple objects, the path is the key of @kvs.
 // The object value is the value of @kvs.
 func (kv *MinIOKV) MultiSave(kvs map[string]string) error {
 	var resultErr error
@@ -214,7 +214,7 @@ func (kv *MinIOKV) MultiSave(kvs map[string]string) error {
 	return resultErr
 }
 
-// RemoveWithPrefix remove all objects with the same prefix @prefix from minio.
+// RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (kv *MinIOKV) RemoveWithPrefix(prefix string) error {
 	objectsCh := make(chan minio.ObjectInfo)
 
