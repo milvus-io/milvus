@@ -41,7 +41,7 @@ type task interface {
 	Execute(ctx context.Context) error
 	PostExecute(ctx context.Context) error
 	WaitToFinish() error
-	Notify(err error)
+	Notify(err error) // notify if task is terminated
 	OnEnqueue() error
 }
 
