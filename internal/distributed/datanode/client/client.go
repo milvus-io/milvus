@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -121,12 +122,19 @@ func (c *Client) Init() error {
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
+	var kacp = keepalive.ClientParameters{
+		Time:                60 * time.Second, // send pings every 60 seconds if there is no activity
+		Timeout:             6 * time.Second,  // wait 6 second for ping ack before considering the connection dead
+		PermitWithoutStream: true,             // send pings even without active streams
+	}
+
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("DataNode connect ", zap.String("address", c.addr))
 		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
 		defer cancel()
 		conn, err := grpc.DialContext(ctx, c.addr,
+			grpc.WithKeepaliveParams(kacp),
 			grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
