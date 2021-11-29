@@ -322,7 +322,7 @@ func (queue *dmTaskQueue) popPChanStats(t task) error {
 			}
 		}
 	} else {
-		return fmt.Errorf("Proxy dmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
+		return fmt.Errorf("proxy dmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
 	}
 	return nil
 }
