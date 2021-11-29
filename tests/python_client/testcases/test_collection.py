@@ -2949,6 +2949,7 @@ class TestReleaseAdvanced:
             connect.search(collection, **default_single_query)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue 12259")
     def test_release_partition_during_searching(self, connect, collection):
         """
         target: test release partition during searching
