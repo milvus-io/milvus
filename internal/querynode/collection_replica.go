@@ -337,6 +337,7 @@ func (colReplica *collectionReplica) getFieldsByCollectionIDPrivate(collectionID
 	return collection.Schema().Fields, nil
 }
 
+// getSegmentInfosByColID return segments info by collectionID
 func (colReplica *collectionReplica) getSegmentInfosByColID(collectionID UniqueID) ([]*querypb.SegmentInfo, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
