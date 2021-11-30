@@ -170,7 +170,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "collection %s doesn't exist!" % collection_w.name})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_missing(self):
         """
         target: test search with incomplete parameters
@@ -188,7 +188,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
             assert "missing 4 required positional arguments: 'data', " \
                    "'anns_field', 'param', and 'limit'" in str(e)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_vectors(self, get_invalid_vectors):
         """
         target: test search with invalid parameter values
@@ -207,7 +207,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "`search_data` value {} is illegal".format(invalid_vectors)})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_dim(self):
         """
         target: test search with invalid parameter values
@@ -227,7 +227,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "The dimension of query entities "
                                                     "is different from schema"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_field_type(self, get_invalid_fields_type):
         """
         target: test search with invalid parameter type
@@ -246,7 +246,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "`anns_field` value {} is illegal".format(invalid_search_field)})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_field_value(self, get_invalid_fields_value):
         """
         target: test search with invalid parameter values
