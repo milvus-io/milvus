@@ -264,31 +264,33 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	log.Debug("Rootcoord stop", zap.String("Address", Params.Address))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
-			log.Error("close opentracing", zap.Error(err))
+			log.Error("Failed to close opentracing", zap.Error(err))
 		}
 	}
 	if s.indexCoord != nil {
 		if err := s.indexCoord.Stop(); err != nil {
-			log.Debug("close indexCoord client", zap.Error(err))
+			log.Error("Failed to close indexCoord client", zap.Error(err))
 		}
 	}
 	if s.dataCoord != nil {
 		if err := s.dataCoord.Stop(); err != nil {
-			log.Debug("close dataCoord client", zap.Error(err))
+			log.Error("Failed to close dataCoord client", zap.Error(err))
 		}
 	}
 	if s.queryCoord != nil {
 		if err := s.queryCoord.Stop(); err != nil {
-			log.Debug("close queryCoord client", zap.Error(err))
+			log.Error("Failed to close queryCoord client", zap.Error(err))
 		}
 	}
 	if s.rootCoord != nil {
 		if err := s.rootCoord.Stop(); err != nil {
-			log.Debug("close rootCoord", zap.Error(err))
+			log.Error("Failed to close close rootCoord", zap.Error(err))
 		}
 	}
+	log.Debug("Rootcoord begin to stop grpc server")
 	s.cancel()
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
