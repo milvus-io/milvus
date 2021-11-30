@@ -33,7 +33,7 @@ minio:
   accessKeyID: minioadmin
   secretAccessKey: minioadmin # MinIO/S3 encryption string
   useSSL: false
-  bucketName: "a-bucket"
+  bucketName: "a-bucket" # Bucket name in MinIO/S3
   rootPath: files
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
