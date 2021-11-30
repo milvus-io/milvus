@@ -197,17 +197,19 @@ class TestChaos(TestChaosBase):
         log.info("chaos deleted")
         log.info(f'Alive threads: {threading.enumerate()}')
         sleep(2)
-
+        # wait all pods ready
+        log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={meta_name}")
+        chaos_res.wait_pods_ready(constants.CHAOS_NAMESPACE, f"app.kubernetes.io/instance={meta_name}")
+        log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label release={meta_name}")
+        chaos_res.wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={meta_name}")
+        log.info("all pods are ready")
         # reconnect if needed
         sleep(constants.WAIT_PER_OP * 2)
         cc.reconnect(connections, alias='default')
-
         # reset counting again
         cc.reset_counting(self.health_checkers)
-
         # wait 50s (varies by feature)
         sleep(constants.WAIT_PER_OP * 5)
-
         # assert statistic: all ops success again
         log.info("******3rd assert after chaos deleted: ")
         assert_statistic(self.health_checkers)

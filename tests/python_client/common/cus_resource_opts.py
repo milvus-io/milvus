@@ -109,10 +109,7 @@ class CustomResourceOperations(object):
                 api_response = api_instance.list_namespaced_pod(namespace=namespace,label_selector=label_selector)
                 all_pos_ready_flag = True
                 for item in api_response.items:
-                    print(item.status.phase)
                     for c in item.status.container_statuses:
-                        print(c.name)
-                        print(c.ready)
                         log.info(f"{c.name} statu is {c.ready}")
                         if c.ready is False:
                             all_pos_ready_flag = False
@@ -125,7 +122,6 @@ class CustomResourceOperations(object):
                 log.info(f"all pods in namespace {namespace} with label {label_selector} are ready")
             else:
                 log.info("timeout for waiting all pods in namespace {namespace} with label {label_selector} ready")
-            log.debug(f"list pods response: {api_response}")
         except ApiException as e:
             log.error("Exception when calling CoreV1Api->list_namespaced_pod: %s\n" % e)
             raise Exception(str(e))
