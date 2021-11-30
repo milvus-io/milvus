@@ -204,7 +204,7 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		if err != nil {
 			log.Warn("IndexNode checkIndexMeta CompareVersionAndSwap", zap.Error(err))
 		}
-		return err
+		return nil
 	}
 
 	err := retry.Do(ctx, fn, retry.Attempts(3))
