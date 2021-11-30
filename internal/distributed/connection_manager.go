@@ -70,6 +70,7 @@ type ConnectionManager struct {
 	closeCh chan struct{}
 }
 
+// NewConnectionManager creates a new connection manager.
 func NewConnectionManager(session *sessionutil.Session) *ConnectionManager {
 	return &ConnectionManager{
 		session: session,
