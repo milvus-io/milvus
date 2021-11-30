@@ -2421,6 +2421,14 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	wg.Add(1)
+	t.Run("CreateAlias fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.CreateAlias(shortCtx, &milvuspb.CreateAliasRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
 	wg.Wait()
 	cancel()
 }
