@@ -630,7 +630,7 @@ func (c *queryNodeCluster) getNodeInfoByID(nodeID int64) (Node, error) {
 		return nodeInfo, nil
 	}
 
-	return nil, fmt.Errorf("GetNodeByID: query node %d not exist", nodeID)
+	return nil, fmt.Errorf("getNodeInfoByID: query node %d not exist", nodeID)
 }
 
 func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
