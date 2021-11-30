@@ -269,6 +269,89 @@
       "type": "stat"
     },
     {
+      "datasource": "prometheus",
+      "description": "Current health state of QueryCoord",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "from": "-65535",
+              "id": 1,
+              "text": "UP",
+              "to": "-1",
+              "type": 2,
+              "value": "0"
+            },
+            {
+              "from": "0",
+              "id": 2,
+              "text": "DOWN",
+              "to": "1",
+              "type": 1,
+              "value": "0"
+            }
+          ],
+          "noValue": "N/A",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "dark-red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "id": 123222,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(up{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\",app_kubernetes_io_component=\"querycoord\"})*(-1)",
+          "format": "time_series",
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "QueryCoord Health",
+      "type": "stat"
+    },
+    {
       "collapsed": false,
       "datasource": null,
       "gridPos": {
@@ -5226,6 +5309,7 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "go_threads{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\"}",
           "interval": "",
           "intervalFactor": 2,
@@ -6176,5 +6260,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 171
+  "version": 174
 }
