@@ -39,7 +39,6 @@ raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
 
 
-# default_binary_query, _ = gen_search_vectors_params(binary_field_name, binary_entities, default_top_k, nq)
 
 
 class TestCollectionSearchInvalid(TestcaseBase):
