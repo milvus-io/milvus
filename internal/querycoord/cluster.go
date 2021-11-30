@@ -594,7 +594,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 	if _, ok := c.nodes[id]; !ok {
 		sessionJSON, err := json.Marshal(session)
 		if err != nil {
-			log.Debug("RegisterNode: marshal session error", zap.Int64("nodeID", id), zap.Any("address", session))
+			log.Debug("registerNode: marshal session error", zap.Int64("nodeID", id), zap.Any("address", session))
 			return err
 		}
 		key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, id)
@@ -604,7 +604,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		}
 		node, err := c.newNodeFn(ctx, session.Address, id, c.client)
 		if err != nil {
-			log.Debug("RegisterNode: create a new query node failed", zap.Int64("nodeID", id), zap.Error(err))
+			log.Debug("registerNode: create a new query node failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err
 		}
 		node.setState(state)
@@ -612,10 +612,10 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 			go node.start()
 		}
 		c.nodes[id] = node
-		log.Debug("RegisterNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
+		log.Debug("registerNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
 		return nil
 	}
-	return fmt.Errorf("RegisterNode: node %d alredy exists in cluster", id)
+	return fmt.Errorf("registerNode: node %d alredy exists in cluster", id)
 }
 
 func (c *queryNodeCluster) getNodeInfoByID(nodeID int64) (Node, error) {
