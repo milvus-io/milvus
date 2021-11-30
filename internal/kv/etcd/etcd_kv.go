@@ -308,6 +308,7 @@ func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	return rch
 }
 
+// WatchWithRevision starts watching a key with revision, returns a watch channel.
 func (kv *EtcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -316,6 +317,7 @@ func (kv *EtcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchCh
 	return rch
 }
 
+// MultiRemoveWithPrefix removes the keys with given prefix.
 func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(keys))
@@ -331,6 +333,7 @@ func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	return err
 }
 
+// MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
 func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(saves))
@@ -414,6 +417,7 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string
 	return nil
 }
 
+// CheckElapseAndWarn checks the elapsed time and warns if it is too long.
 func CheckElapseAndWarn(start time.Time, message string) bool {
 	elapsed := time.Since(start)
 	if elapsed.Milliseconds() > 2000 {
