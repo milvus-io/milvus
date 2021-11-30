@@ -1429,9 +1429,41 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.load()
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         assert len(res) > 0
+        segment_ids = []
         cnt = 0
         for r in res:
-            cnt += r.num_rows
+            log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows} ")
+            if r.segmentID not in segment_ids:
+                segment_ids.append(r.segmentID)
+                cnt += r.num_rows
+        assert cnt == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_get_sealed_query_segment_info_after_create_index(self):
+        """
+        target: test getting sealed query segment info of collection with data
+        method: init a collection, insert data, flush, create index, load, and get query segment info
+        expected:
+            1. length of segment is greater than 0
+            2. the sum num_rows of each segment is equal to num of entities
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        nb = 3000
+        df = cf.gen_default_dataframe_data(nb)
+        collection_w.insert(df)
+        collection_w.num_entities
+        collection_w.create_index(default_field_name, default_index_params)
+        collection_w.load()
+        res, _ = self.utility_wrap.get_query_segment_info(c_name)
+        assert len(res) > 0
+        segment_ids = []
+        cnt = 0
+        for r in res:
+            log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows} ")
+            if r.segmentID not in segment_ids:
+                segment_ids.append(r.segmentID)
+                cnt += r.num_rows
         assert cnt == nb
 
     @pytest.mark.tags(CaseLabel.Loadbalance)
