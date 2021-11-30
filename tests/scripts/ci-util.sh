@@ -18,6 +18,7 @@
 set -e
 # Check unset variables
 set -u
+# Print commands
 set -x
 
 SOURCE="${BASH_SOURCE[0]}"
