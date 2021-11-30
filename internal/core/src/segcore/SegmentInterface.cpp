@@ -11,8 +11,8 @@
 
 #include "segcore/SegmentInterface.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
+
 namespace milvus::segcore {
-class Naive;
 
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const {
