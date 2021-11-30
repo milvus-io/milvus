@@ -37,7 +37,7 @@ class TestPartitionParams(TestcaseBase):
         # check that the partition has been created
         assert collection_w.has_partition(partition_name)[0]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", [""])
     def test_partition_empty_name(self, partition_name):
         """
@@ -54,7 +54,7 @@ class TestPartitionParams(TestcaseBase):
                                            check_items={ct.err_code: 1,
                                                         ct.err_msg: "Partition name should not be empty"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_empty_description(self):
         """
         target: verify create a partition with empty description
@@ -77,7 +77,7 @@ class TestPartitionParams(TestcaseBase):
         # check that the partition has been created
         assert collection_w.has_partition(partition_name)[0]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_max_description_length(self):
         """
         target: verify create a partition with 255 length name and 1024 length description
@@ -119,7 +119,7 @@ class TestPartitionParams(TestcaseBase):
         assert partition_w1.name == partition_w2.name
         assert partition_w1.description == partition_w2.description
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("description", ct.get_invalid_strs)
     def test_partition_special_chars_description(self, description):
         """
@@ -161,7 +161,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w = self.init_partition_wrap(collection_w, ct.default_partition_name)
         assert collection.name == partition_w.name
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_max_length_name(self):
         """
         target: verify create a partition with max length(256) name
@@ -178,7 +178,7 @@ class TestPartitionParams(TestcaseBase):
                                            check_items={ct.err_code: 1, 'err_msg': "is illegal"}
                                            )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", ct.get_invalid_strs)
     def test_partition_invalid_name(self, partition_name):
         """
@@ -196,7 +196,7 @@ class TestPartitionParams(TestcaseBase):
                                            )
         # TODO: need an error code issue #5144 and assert independently
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_none_collection(self):
         """
         target: verify create a partition with none collection
@@ -484,7 +484,7 @@ class TestPartitionOperations(TestcaseBase):
             partition_w.drop()
             assert not collection_w.has_partition(partition_name)[0]
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_partition_drop_non_empty_partition(self):
         """
         target: verify drop a partition which has data inserted
@@ -539,7 +539,7 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.drop()
         assert not collection_w.has_partition(partition_name)[0]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_release_empty_partition(self):
         """
         target: verify release an empty partition
@@ -555,7 +555,7 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.release()
         # TODO: assert no more memory consumed
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_release_dropped_partition(self):
         """
         target: verify release a dropped partition
@@ -574,7 +574,7 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.release(check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_release_dropped_collection(self):
         """
         target: verify release a dropped collection
@@ -733,7 +733,7 @@ class TestPartitionOperations(TestcaseBase):
         # self._connect().flush([collection_w.name])
         assert partition_w.num_entities == max_size
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [ct.default_dim - 1, ct.default_dim + 1])
     def test_partition_insert_mismatched_dimensions(self, dim):
         """
