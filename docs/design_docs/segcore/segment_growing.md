@@ -14,7 +14,7 @@ Growing segment stores data in the form of chunk. The number of rows in each chu
 
 Rows per segment is controlled by parameters `size_per_Chunk ` config
 
-When insert, first allocate enough space to ensure `total_size <= num_chunk * size_per_chunk`, and then convert data from row format to column format.
+When inserting, first allocate enough space to ensure `total_size <= num_chunk * size_per_chunk`, and then convert data from row format to column format.
 
 During search, each 'chunk' will be searched, and the search results will be saved as 'subquery result', then reduced into TopK.
 
