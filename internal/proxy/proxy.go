@@ -244,7 +244,10 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics", zap.Error(err))
 					continue
 				}
-
+				if len(stats) == 0 {
+					// log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics stat empty")
+					continue
+				}
 				if ts == 0 {
 					log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics default timestamp equal 0")
 					continue
