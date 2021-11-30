@@ -124,6 +124,7 @@ type ConfAdapter interface {
 type BaseConfAdapter struct {
 }
 
+// CheckTrain returns true if the index can be built with the specific index parameters.
 func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
