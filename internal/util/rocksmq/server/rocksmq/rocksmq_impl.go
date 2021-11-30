@@ -116,7 +116,7 @@ func constructKey(metaName, topic string) (string, error) {
 	// Check metaName/topic
 	oldLen := len(metaName + topic)
 	if oldLen > FixedChannelNameLen {
-		return "", errors.New("Topic name exceeds limit")
+		return "", errors.New("topic name exceeds limit")
 	}
 
 	nameBytes := make([]byte, FixedChannelNameLen-oldLen)
