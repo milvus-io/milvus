@@ -1,4 +1,3 @@
-import pdb
 import logging
 from pymongo import MongoClient
 
