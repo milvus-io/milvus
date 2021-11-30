@@ -179,6 +179,9 @@ func TestRocksmq(t *testing.T) {
 	_ = rmq.DestroyConsumerGroup(channelName, groupName)
 	err = rmq.CreateConsumerGroup(channelName, groupName)
 	assert.Nil(t, err)
+	// double create consumer group
+	err = rmq.CreateConsumerGroup(channelName, groupName)
+	assert.Nil(t, err)
 	cMsgs, err := rmq.Consume(channelName, groupName, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 1)
