@@ -140,9 +140,11 @@ class TestChaosData:
         expected:
         """
         # init collection and insert 250 nb
-        nb = 50000  # vector size: 512*4*nb about 100Mi and create index need 600Mi memory
+        # nb = 50000  # vector size: 512*4*nb about 100Mi and create index need 600Mi memory
+        nb = 256000
         dim = 512
-        c_name = cf.gen_unique_str('chaos_memory')
+        # c_name = cf.gen_unique_str('chaos_memory')
+        c_name = 'chaos_memory_gKs8aSUu'
         index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 128}}
 
         collection_w = ApiCollectionWrapper()
