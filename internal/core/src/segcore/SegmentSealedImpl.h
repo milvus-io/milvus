@@ -10,24 +10,26 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+
+#include <deque>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
 
-#include <segcore/TimestampIndex.h>
-#include "segcore/SegmentSealed.h"
 #include "ConcurrentVector.h"
-#include "SealedIndexingRecord.h"
-#include "segcore/DeletedRecord.h"
+#include "DeletedRecord.h"
 #include "ScalarIndex.h"
-#include <deque>
-#include <map>
-#include <vector>
-#include <memory>
-#include <utility>
-#include <string>
+#include "SealedIndexingRecord.h"
+#include "SegmentSealed.h"
+#include "TimestampIndex.h"
 
 namespace milvus::segcore {
+
 class SegmentSealedImpl : public SegmentSealed {
  public:
     explicit SegmentSealedImpl(SchemaPtr schema);
