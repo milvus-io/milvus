@@ -48,6 +48,7 @@ default_nlist = 128
 compact_segment_num_threshold = 10
 # compact_delta_binlog_ratio is 0.2
 compact_delta_ratio_reciprocal = 5
+compact_retention_duration = 20  # compaction travel time retention range 20s
 
 Not_Exist = "Not_Exist"
 Connect_Object_Name = "Milvus"
@@ -207,4 +208,4 @@ class CaseLabel:
     L1 = "L1"
     L2 = "L2"
     L3 = "L3"
-    Loadbalance = "Loadbalance" # loadbalance testcases which need to be run in multi querynodes
+    Loadbalance = "Loadbalance"  # loadbalance testcases which need to be run in multi querynodes
