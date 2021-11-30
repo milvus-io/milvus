@@ -549,7 +549,7 @@ func (c *queryNodeCluster) getNumDmChannels(nodeID int64) (int, error) {
 	defer c.RUnlock()
 
 	if _, ok := c.nodes[nodeID]; !ok {
-		return 0, fmt.Errorf("GetNumDmChannels: Can't find query node by nodeID, nodeID = %d", nodeID)
+		return 0, fmt.Errorf("getNumDmChannels: Can't find query node by nodeID, nodeID = %d", nodeID)
 	}
 
 	numChannel := 0
