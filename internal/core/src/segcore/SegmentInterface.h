@@ -10,27 +10,31 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Types.h"
-#include "common/Schema.h"
-#include "query/Plan.h"
-#include "common/Span.h"
+
+#include <deque>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "FieldIndexing.h"
-#include <knowhere/index/vector_index/VecIndex.h>
+#include "common/Schema.h"
+#include "common/Span.h"
 #include "common/SystemProperty.h"
+#include "common/Types.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
-#include <memory>
-#include <deque>
-#include <vector>
-#include <utility>
-#include <string>
 
 namespace milvus::segcore {
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
 class SegmentInterface {
  public:
+    virtual ~SegmentInterface() = default;
+
     virtual void
     FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const = 0;
 
@@ -57,8 +61,6 @@ class SegmentInterface {
 
     virtual Status
     Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
-
-    virtual ~SegmentInterface() = default;
 };
 
 // internal API for DSL calculation
