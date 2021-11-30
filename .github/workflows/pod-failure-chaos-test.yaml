@@ -73,8 +73,8 @@ jobs:
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
           # check whether milvus server is healthy
-          wget https://raw.githubusercontent.com/milvus-io/pymilvus/v2.0.0rc6/examples/hello_milvus.py
-          python hello_milvus.py
+          python scripts/hello_milvus.py
+
       
       - name: Chaos Test
         timeout-minutes: 15
@@ -97,7 +97,7 @@ jobs:
           kubectl get pod -n chaos-testing
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
           kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s          
-          python hello_milvus.py
+          python scripts/hello_milvus.py
 
       - name: Data Consist Test
         timeout-minutes: 5
@@ -116,7 +116,7 @@ jobs:
           kubectl get pod -n chaos-testing
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
           kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s          
-          python hello_milvus.py
+          python scripts/hello_milvus.py
 
       - name: Export logs
         if: ${{ always() }}
