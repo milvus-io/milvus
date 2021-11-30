@@ -459,18 +459,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
-		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
-	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
-
-	getLockTime := time.Since(start).Milliseconds()
 
 	msgLen := len(messages)
 	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
@@ -503,6 +491,20 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 
 	opts := gorocksdb.NewDefaultWriteOptions()
 	defer opts.Destroy()
+
+	ll, ok := topicMu.Load(topicName)
+	if !ok {
+		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
+	}
+	lock, ok := ll.(*sync.Mutex)
+	if !ok {
+		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
+	}
+	lock.Lock()
+	defer lock.Unlock()
+
+	getLockTime := time.Since(start).Milliseconds()
+
 	err = rmq.store.Write(opts, batch)
 	if err != nil {
 		log.Debug("RocksMQ: write batch failed")
