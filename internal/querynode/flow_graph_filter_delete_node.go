@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// filterDeleteNode is one of the nodes in delta flow graph
 type filterDeleteNode struct {
 	baseNode
 	collectionID UniqueID
