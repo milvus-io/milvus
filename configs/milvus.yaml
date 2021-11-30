@@ -30,7 +30,7 @@ etcd:
 minio:
   address: localhost # Address of MinIO/S3
   port: 9000   # Port of MinIO/S3
-  accessKeyID: minioadmin
+  accessKeyID: minioadmin # accessKeyID of MinIO/S3
   secretAccessKey: minioadmin # MinIO/S3 encryption string
   useSSL: false
   bucketName: "a-bucket"
