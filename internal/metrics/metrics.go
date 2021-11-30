@@ -587,12 +587,12 @@ func RegisterProxy() {
 	prometheus.MustRegister(ProxyDmlChannelTimeTick)
 }
 
-//RegisterQueryCoord register QueryCoord metrics
+//RegisterQueryCoord registers QueryCoord metrics
 func RegisterQueryCoord() {
 
 }
 
-//RegisterQueryNode register QueryNode metrics
+//RegisterQueryNode registers QueryNode metrics
 func RegisterQueryNode() {
 
 }
@@ -609,13 +609,13 @@ var (
 	)
 )
 
-//RegisterDataCoord register DataCoord metrics
+//RegisterDataCoord registers DataCoord metrics
 func RegisterDataCoord() {
 	prometheus.MustRegister(DataCoordDataNodeList)
 }
 
 var (
-	// DataNodeFlushSegmentsCounter used to count the num of calls of FlushSegments
+	// DataNodeFlushSegmentsCounter counts the num of calls of FlushSegments
 	DataNodeFlushSegmentsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -624,7 +624,7 @@ var (
 			Help:      "Counter of flush segments",
 		}, []string{"type"})
 
-	// DataNodeWatchDmChannelsCounter used to count the num of calls of WatchDmChannels
+	// DataNodeWatchDmChannelsCounter counts the num of calls of WatchDmChannels
 	DataNodeWatchDmChannelsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -634,28 +634,28 @@ var (
 		}, []string{"type"})
 )
 
-//RegisterDataNode register DataNode metrics
+//RegisterDataNode registers DataNode metrics
 func RegisterDataNode() {
 	prometheus.MustRegister(DataNodeFlushSegmentsCounter)
 	prometheus.MustRegister(DataNodeWatchDmChannelsCounter)
 }
 
-//RegisterIndexCoord register IndexCoord metrics
+//RegisterIndexCoord registers IndexCoord metrics
 func RegisterIndexCoord() {
 
 }
 
-//RegisterIndexNode register IndexNode metrics
+//RegisterIndexNode registers IndexNode metrics
 func RegisterIndexNode() {
 
 }
 
-//RegisterMsgStreamCoord register MsgStreamCoord metrics
+//RegisterMsgStreamCoord registers MsgStreamCoord metrics
 func RegisterMsgStreamCoord() {
 
 }
 
-//ServeHTTP serve prometheus http service
+//ServeHTTP serves prometheus http service
 func ServeHTTP() {
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
