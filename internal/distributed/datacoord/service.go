@@ -294,10 +294,12 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	return s.dataCoord.GetCompactionState(ctx, req)
 }
 
+// GetCompactionStateWithPlans gets the state of a compaction by plan
 func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
 	return s.dataCoord.GetCompactionStateWithPlans(ctx, req)
 }
 
+// WatchChannels starts watch channels by give request
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	return s.dataCoord.WatchChannels(ctx, req)
 }
