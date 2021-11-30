@@ -296,9 +296,10 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   
 fi
 
-export MILVUS_IMAGE_TAG="${TAG}"
-export MILVUS_IMAGE_REPO="${HUB}/milvus"
-
+if [[ -n "${DISABLE_KIND:-}" ]]; then
+  export MILVUS_IMAGE_TAG="${TAG}"
+  export MILVUS_IMAGE_REPO="${HUB}/milvus"
+fi
 if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
 
   #[remove-kind] if disable_kind exist, do not need kind registry
@@ -310,8 +311,9 @@ if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
       if [[ "${running}" == 'true' ]]; then
         HUB="${KIND_REGISTRY}"
         export HUB
-        export MILVUS_IMAGE_REPO="${HUB}/milvus"
       fi
+      export MILVUS_IMAGE_REPO="${HUB}/milvus"
+      export MILVUS_IMAGE_TAG="${TAG}"
   fi
   
  
