@@ -175,7 +175,6 @@ def get_vector_type(data_type):
 
 
 def get_vector_type_from_metric(metric_type):
-    vector_type = ''
     if metric_type in ["hamming", "jaccard"]:
         vector_type = DataType.BINARY_VECTOR
     else:
