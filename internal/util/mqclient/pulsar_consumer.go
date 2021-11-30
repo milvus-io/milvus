@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// PulsarConsumer consumes from pulsar
 type PulsarConsumer struct {
 	c pulsar.Consumer
 	pulsar.Reader
@@ -30,10 +31,12 @@ type PulsarConsumer struct {
 	skip       bool
 }
 
+// Subscription get a subscription for the consumer
 func (pc *PulsarConsumer) Subscription() string {
 	return pc.c.Subscription()
 }
 
+// Chan returns a message channel
 func (pc *PulsarConsumer) Chan() <-chan Message {
 	if pc.msgChannel == nil {
 		pc.once.Do(func() {
@@ -88,11 +91,13 @@ func (pc *PulsarConsumer) Seek(id MessageID, inclusive bool) error {
 	return err
 }
 
+// Ack the consumption of a single message
 func (pc *PulsarConsumer) Ack(message Message) {
 	pm := message.(*pulsarMessage)
 	pc.c.Ack(pm.msg)
 }
 
+// Close the consumer and stop the broker to push more messages
 func (pc *PulsarConsumer) Close() {
 	pc.c.Close()
 	close(pc.closeCh)
