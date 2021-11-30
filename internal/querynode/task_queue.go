@@ -47,7 +47,7 @@ type baseTaskQueue struct {
 	scheduler *taskScheduler
 }
 
-type loadAndReleaseTaskQueue struct {
+type queryNodeTaskQueue struct {
 	baseTaskQueue
 	mu sync.Mutex
 }
@@ -148,15 +148,15 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	return queue.addUnissuedTask(t)
 }
 
-// loadAndReleaseTaskQueue
-func (queue *loadAndReleaseTaskQueue) Enqueue(t task) error {
+// queryNodeTaskQueue
+func (queue *queryNodeTaskQueue) Enqueue(t task) error {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
 	return queue.baseTaskQueue.Enqueue(t)
 }
 
-func newLoadAndReleaseTaskQueue(scheduler *taskScheduler) *loadAndReleaseTaskQueue {
-	return &loadAndReleaseTaskQueue{
+func newQueryNodeTaskQueue(scheduler *taskScheduler) *queryNodeTaskQueue {
+	return &queryNodeTaskQueue{
 		baseTaskQueue: baseTaskQueue{
 			unissuedTasks: list.New(),
 			activeTasks:   make(map[UniqueID]task),

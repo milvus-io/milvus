@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
 )
 
 type task interface {
@@ -44,6 +46,12 @@ type baseTask struct {
 	done chan error
 	ctx  context.Context
 	id   UniqueID
+}
+
+type addQueryChannelTask struct {
+	baseTask
+	req  *queryPb.AddQueryChannelRequest
+	node *QueryNode
 }
 
 type watchDmChannelsTask struct {
@@ -91,6 +99,105 @@ func (b *baseTask) WaitToFinish() error {
 
 func (b *baseTask) Notify(err error) {
 	b.done <- err
+}
+
+// addQueryChannel
+func (r *addQueryChannelTask) Timestamp() Timestamp {
+	if r.req.Base == nil {
+		log.Warn("nil base req in addQueryChannelTask", zap.Any("collectionID", r.req.CollectionID))
+		return 0
+	}
+	return r.req.Base.Timestamp
+}
+
+func (r *addQueryChannelTask) OnEnqueue() error {
+	if r.req == nil || r.req.Base == nil {
+		r.SetID(rand.Int63n(100000000000))
+	} else {
+		r.SetID(r.req.Base.MsgID)
+	}
+	return nil
+}
+
+func (r *addQueryChannelTask) PreExecute(ctx context.Context) error {
+	return nil
+}
+
+func (r *addQueryChannelTask) Execute(ctx context.Context) error {
+	log.Debug("Execute addQueryChannelTask",
+		zap.Any("collectionID", r.req.CollectionID))
+
+	collectionID := r.req.CollectionID
+	if r.node.queryService == nil {
+		errMsg := "null query service, collectionID = " + fmt.Sprintln(collectionID)
+		return errors.New(errMsg)
+	}
+
+	if r.node.queryService.hasQueryCollection(collectionID) {
+		log.Debug("queryCollection has been existed when addQueryChannel",
+			zap.Any("collectionID", collectionID),
+		)
+		return nil
+	}
+
+	// add search collection
+	err := r.node.queryService.addQueryCollection(collectionID)
+	if err != nil {
+		return err
+	}
+	log.Debug("add query collection", zap.Any("collectionID", collectionID))
+
+	// add request channel
+	sc, err := r.node.queryService.getQueryCollection(collectionID)
+	if err != nil {
+		return err
+	}
+	consumeChannels := []string{r.req.RequestChannelID}
+	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
+
+	if Params.skipQueryChannelRecovery {
+		log.Debug("Skip query channel seek back ", zap.Strings("channels", consumeChannels),
+			zap.String("seek position", string(r.req.SeekPosition.MsgID)),
+			zap.Uint64("ts", r.req.SeekPosition.Timestamp))
+		sc.queryMsgStream.AsConsumerWithPosition(consumeChannels, consumeSubName, mqclient.SubscriptionPositionLatest)
+	} else {
+		sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
+		if r.req.SeekPosition == nil || len(r.req.SeekPosition.MsgID) == 0 {
+			// as consumer
+			log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+		} else {
+			// seek query channel
+			err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{r.req.SeekPosition})
+			if err != nil {
+				return err
+			}
+			log.Debug("querynode seek query channel: ", zap.Any("consumeChannels", consumeChannels),
+				zap.String("seek position", string(r.req.SeekPosition.MsgID)))
+		}
+	}
+
+	// add result channel
+	producerChannels := []string{r.req.ResultChannelID}
+	sc.queryResultMsgStream.AsProducer(producerChannels)
+	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
+
+	// init global sealed segments
+	for _, segment := range r.req.GlobalSealedSegments {
+		sc.globalSegmentManager.addGlobalSegmentInfo(segment)
+	}
+
+	// start queryCollection, message stream need to asConsumer before start
+	sc.start()
+	log.Debug("start query collection", zap.Any("collectionID", collectionID))
+
+	log.Debug("addQueryChannelTask done",
+		zap.Any("collectionID", r.req.CollectionID),
+	)
+	return nil
+}
+
+func (r *addQueryChannelTask) PostExecute(ctx context.Context) error {
+	return nil
 }
 
 // watchDmChannelsTask
