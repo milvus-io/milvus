@@ -272,7 +272,7 @@ class TestCompactionOperation(TestcaseBase):
         method: 1.create collection with shard_num=1
                 2.insert data into two segments
                 3.delete and flush (new insert)
-                4.compact (
+                4.compact
                 5.load and search
         expected:
         """
