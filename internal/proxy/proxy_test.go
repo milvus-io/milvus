@@ -2169,6 +2169,14 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	wg.Add(1)
+	t.Run("CreateAlias fail, dd queue full", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.CreateAlias(ctx, &milvuspb.CreateAliasRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
 	proxy.sched.ddQueue.setMaxTaskNum(ddParallel)
 
 	dmParallelism := proxy.sched.dmQueue.getMaxTaskNum()
