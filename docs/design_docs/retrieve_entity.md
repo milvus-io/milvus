@@ -8,7 +8,7 @@ When creating a collection, you can specify using the primary key generated auto
 If a user sets to use the user-provided primary key, each entity inserted must contain the primary key field. Otherwise, the insertion fails.
 The primary keys will be returned after the insertion request is successful.
 
-Milvus currently only supports primary keys of int64 type.
+Milvus currently only supports primary keys of the int64 type.
 
 QueryNode subscribes to the insert channel and will determine whether to use the data extracted from the insert channel or data processed by DataNode to provide services according to the status of a segment.
 
@@ -27,7 +27,7 @@ QueryNode subscribes to the insert channel and will determine whether to use the
 
 When the DataNode processes each inserted entity, it updates the bloomfilter of the Segment to which the entity belongs. If it does not exist, it creates a bloomfilter in memory and updates it.
 
-Once DataNode receives a Flush command from DataCoord, it sorts the data in the segment in ascending order of primary key, records the maximum and minimum values of primary key, and writes the segment, statistics and bloomfilter to the storage system.
+Once DataNode receives a Flush command from DataCoord, it sorts the data in the segment in ascending order of primary key, records the maximum and minimum values of a primary key, and writes the segment, statistics and bloomfilter to the storage system.
 
 - Key of binlog file: `${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/_${log_idx}`
 - Key of statistics file: `${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/stats_${log_idx}`
