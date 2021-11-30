@@ -213,7 +213,7 @@ log:
   file:
     rootPath: "" # default to stdout, stderr
     maxSize: 300 # MB
-    maxAge: 10 # day
+    maxAge: 10 # Maximum time for log retention in day.
     maxBackups: 20
   format: text # text/json
 
