@@ -123,7 +123,7 @@ pipeline {
                                                     --skip-test \
                                                     --skip-build \
                                                     --skip-build-image \
-                                                    --install-extra-arg "--set etcd.persistence.storageClass=local-path  \
+                                                    --install-extra-arg "--set etcd.persistence.storageClass=local-path --set minio.persistence.storageClass=local-path \
                                                     --set metrics.serviceMonitor.enabled=true" 
                                                     """
                                                 }
