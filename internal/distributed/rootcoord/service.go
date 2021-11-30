@@ -401,6 +401,8 @@ func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	return s.rootCoord.ReleaseDQLMessageStream(ctx, in)
 }
+
+// SegmentFlushCompleted notifies RootCoord that specified segment has been flushed.
 func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	return s.rootCoord.SegmentFlushCompleted(ctx, in)
 }
