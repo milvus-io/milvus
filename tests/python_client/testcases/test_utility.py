@@ -1401,9 +1401,13 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.search(vectors, default_field_name, ct.default_search_params, ct.default_limit)
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         assert len(res) > 0
+        segment_ids = []
         cnt = 0
         for r in res:
-            cnt += r.num_rows
+            log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows} ")
+            if r.segmentID not in segment_ids:
+                segment_ids.append(r.segmentID)
+                cnt += r.num_rows
         assert cnt == nb
 
     @pytest.mark.tags(CaseLabel.L1)
