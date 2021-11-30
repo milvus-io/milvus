@@ -22,6 +22,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT="$( cd -P "$( dirname "$SOURCE" )/../.." && pwd )"
 
+# Exit immediately for non zero status
 set -e
 set -u
 set -x
