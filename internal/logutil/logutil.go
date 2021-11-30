@@ -34,6 +34,7 @@ type zapWrapper struct {
 	logger *zap.Logger
 }
 
+// Info logs a message at InfoLevel.
 func (w *zapWrapper) Info(args ...interface{}) {
 	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
 }
