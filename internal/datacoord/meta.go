@@ -36,6 +36,7 @@ import (
 const (
 	metaPrefix           = "datacoord-meta"
 	segmentPrefix        = metaPrefix + "/s"
+	channelRemovePrefix  = metaPrefix + "/channel-removal"
 	handoffSegmentPrefix = "querycoord-handoff"
 )
 
@@ -169,10 +170,10 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 	if segment == nil {
 		return nil
 	}
-	m.segments.DropSegment(segmentID)
 	if err := m.removeSegmentInfo(segment); err != nil {
 		return err
 	}
+	m.segments.DropSegment(segmentID)
 	return nil
 }
 
@@ -334,41 +335,177 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	return nil
 }
 
-// ListSegmentFiles lists all segment related file paths in valid & dropped list
-func (m *meta) ListSegmentFiles() (valid []string, dropped []string, droppedAt []uint64) {
+// UpdateDropChannelSegmentInfo updates segment checkpoints and binlogs before drop
+// reusing segment info to pass segment id, binlogs, statslog, deltalog, start position and checkpoint
+func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentInfo) error {
+	m.Lock()
+	defer m.Unlock()
+
+	modSegments := make(map[UniqueID]*SegmentInfo)
+
+	for _, seg2Drop := range segments {
+		segment := m.mergeDropSegment(seg2Drop)
+		if segment != nil {
+			modSegments[seg2Drop.GetID()] = segment
+		}
+	}
+
+	return m.batchSaveDropSegments(channel, modSegments)
+}
+
+// mergeDropSegment merges drop segment information with meta segments
+func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) *SegmentInfo {
+	segment := m.segments.GetSegment(seg2Drop.ID)
+	// healthy check makes sure the Idempotence
+	if segment == nil || !isSegmentHealthy(segment) {
+		log.Warn("UpdateDropChannel skipping nil or unhealthy", zap.Bool("is nil", segment == nil),
+			zap.Bool("isHealthy", isSegmentHealthy(segment)))
+		return nil
+	}
+
+	clonedSegment := segment.Clone()
+	clonedSegment.State = commonpb.SegmentState_Dropped
+
+	currBinlogs := clonedSegment.GetBinlogs()
+
+	var getFieldBinlogs = func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
+		for _, binlog := range binlogs {
+			if id == binlog.GetFieldID() {
+				return binlog
+			}
+		}
+		return nil
+	}
+	// binlogs
+	for _, tBinlogs := range seg2Drop.GetBinlogs() {
+		fieldBinlogs := getFieldBinlogs(tBinlogs.GetFieldID(), currBinlogs)
+		if fieldBinlogs == nil {
+			currBinlogs = append(currBinlogs, tBinlogs)
+		} else {
+			fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, tBinlogs.Binlogs...)
+		}
+	}
+	clonedSegment.Binlogs = currBinlogs
+	// statlogs
+	currStatsLogs := clonedSegment.GetStatslogs()
+	for _, tStatsLogs := range seg2Drop.GetStatslogs() {
+		fieldStatsLog := getFieldBinlogs(tStatsLogs.GetFieldID(), currStatsLogs)
+		if fieldStatsLog == nil {
+			currStatsLogs = append(currStatsLogs, tStatsLogs)
+		} else {
+			fieldStatsLog.Binlogs = append(fieldStatsLog.Binlogs, tStatsLogs.Binlogs...)
+		}
+	}
+	clonedSegment.Statslogs = currStatsLogs
+	// deltalogs
+	clonedSegment.Deltalogs = append(clonedSegment.Deltalogs, seg2Drop.GetDeltalogs()...)
+
+	// start position
+	if seg2Drop.GetStartPosition() != nil {
+		clonedSegment.StartPosition = seg2Drop.GetStartPosition()
+	}
+	// checkpoint
+	if seg2Drop.GetDmlPosition() != nil {
+		clonedSegment.DmlPosition = seg2Drop.GetDmlPosition()
+	}
+	clonedSegment.currRows = seg2Drop.currRows
+	return clonedSegment
+}
+
+// batchSaveDropSegments saves drop segments info with channel removal flag
+// since the channel unwatching operation is not atomic here
+// ** the removal flag is always with last batch
+// ** the last batch must contains at least one segment
+// 1. when failure occurs between batches, failover mechanism will continue with the earlist  checkpoint of this channel
+//   since the flag is not marked so data node can re-consume the drop collection msg
+// 2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode  watch this channel
+func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*SegmentInfo) error {
+
+	// the limitation of etcd operations number per transaction is 128, since segment number might be enormous so we shall split
+	// all save operations into batches
+
+	// since the removal flag shall always be with the last batch, so the last batch shall be maxOperationNumber - 1
+	for len(modSegments) > maxOperationsPerTxn-1 {
+		err := m.saveDropSegmentAndRemove(channel, modSegments, false, func(kv map[string]string, modSegments map[int64]*SegmentInfo) bool {
+			// batch filled or only one segment left
+			// since the last batch must contains at least on segment
+			return len(kv) == maxOperationsPerTxn || len(modSegments) == 1
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	// removal flag should be saved with last batch
+	return m.saveDropSegmentAndRemove(channel, modSegments, true, func(_ map[string]string, _ map[int64]*SegmentInfo) bool { return false })
+}
+
+func (m *meta) saveDropSegmentAndRemove(channel string, modSegments map[int64]*SegmentInfo, withFlag bool, stopper func(kv map[string]string, modSegment map[int64]*SegmentInfo) bool) error {
+	kv := make(map[string]string)
+	update := make([]*SegmentInfo, 0, maxOperationsPerTxn)
+	for id, s := range modSegments {
+		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
+		delete(modSegments, id)
+		segBytes, err := proto.Marshal(s.SegmentInfo)
+		if err != nil {
+			return fmt.Errorf("DataCoord UpdateDropChannelSegmentInfo segmentID:%d, marshal failed:%w", s.GetID(), err)
+		}
+		kv[key] = string(segBytes)
+		update = append(update, s)
+		if stopper(kv, modSegments) {
+			break
+		}
+	}
+	if withFlag {
+		// add removal flag into meta, preventing non-atomic removal channel failure
+		removalFlag := buildChannelRemovePath(channel)
+
+		kv[removalFlag] = ""
+	}
+
+	err := m.saveKvTxn(kv)
+	if err != nil {
+		log.Warn("Failed to txn save segment info batch for DropChannel", zap.Error(err))
+		return err
+	}
+
+	// update memory info
+	for _, s := range update {
+		m.segments.SetSegment(s.GetID(), s)
+	}
+	return nil
+}
+
+// FinishRemoveChannel removes channel remove flag after whole procedure is finished
+func (m *meta) FinishRemoveChannel(channel string) error {
+	key := buildChannelRemovePath(channel)
+	return m.client.Remove(key)
+}
+
+// ListSegmentFiles lists all segments' logs
+func (m *meta) ListSegmentFiles() []string {
 	m.RLock()
 	defer m.RUnlock()
 
+	var logs []string
+
 	for _, segment := range m.segments.GetSegments() {
+		if !isSegmentHealthy(segment) {
+			continue
+		}
 		for _, binlog := range segment.GetBinlogs() {
-			if segment.State != commonpb.SegmentState_Dropped {
-				valid = append(valid, binlog.Binlogs...)
-			} else {
-				dropped = append(dropped, binlog.Binlogs...)
-				droppedAt = append(droppedAt, segment.DroppedAt)
-			}
+			logs = append(logs, binlog.Binlogs...)
 		}
 
 		for _, statLog := range segment.GetStatslogs() {
-			if segment.State != commonpb.SegmentState_Dropped {
-				valid = append(valid, statLog.Binlogs...)
-			} else {
-				dropped = append(dropped, statLog.Binlogs...)
-				droppedAt = append(droppedAt, segment.DroppedAt)
-			}
+			logs = append(logs, statLog.Binlogs...)
 		}
 
 		for _, deltaLog := range segment.GetDeltalogs() {
-			if segment.State != commonpb.SegmentState_Dropped {
-				valid = append(valid, deltaLog.GetDeltaLogPath())
-			} else {
-				dropped = append(dropped, deltaLog.GetDeltaLogPath())
-				droppedAt = append(droppedAt, segment.DroppedAt)
-			}
-
+			logs = append(logs, deltaLog.GetDeltaLogPath())
 		}
 	}
-	return valid, dropped, droppedAt
+	return logs
 }
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`
@@ -537,14 +674,19 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
 			cloned := segment.Clone()
 			cloned.State = commonpb.SegmentState_Dropped
+			cloned.DroppedAt = uint64(time.Now().UnixNano())
 			segments = append(segments, cloned)
 		}
 	}
 
-	var dmlPosition *internalpb.MsgPosition
+	var startPosition, dmlPosition *internalpb.MsgPosition
 	for _, s := range segments {
 		if dmlPosition == nil || s.GetDmlPosition().Timestamp > dmlPosition.Timestamp {
 			dmlPosition = s.GetDmlPosition()
+		}
+
+		if startPosition == nil || s.GetStartPosition().Timestamp < startPosition.Timestamp {
+			startPosition = s.GetStartPosition()
 		}
 	}
 
@@ -579,6 +721,7 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 			Binlogs:             result.GetInsertLogs(),
 			Statslogs:           result.GetField2StatslogPaths(),
 			Deltalogs:           deltalogs,
+			StartPosition:       startPosition,
 			DmlPosition:         dmlPosition,
 			CreatedByCompaction: true,
 			CompactionFrom:      compactionFrom,
@@ -763,6 +906,11 @@ func buildQuerySegmentPath(collectionID UniqueID, partitionID UniqueID, segmentI
 	return fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, collectionID, partitionID, segmentID)
 }
 
+// buildChannelRemovePat builds vchannel remove flag path
+func buildChannelRemovePath(channel string) string {
+	return fmt.Sprintf("%s/%s", channelRemovePrefix, channel)
+}
+
 // buildSegment utility function for compose datapb.SegmentInfo struct with provided info
 func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) *SegmentInfo {
 	info := &datapb.SegmentInfo{
@@ -777,6 +925,7 @@ func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 }
 
 func isSegmentHealthy(segment *SegmentInfo) bool {
-	return segment.GetState() != commonpb.SegmentState_NotExist &&
+	return segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
+		segment.GetState() != commonpb.SegmentState_NotExist &&
 		segment.GetState() != commonpb.SegmentState_Dropped
 }

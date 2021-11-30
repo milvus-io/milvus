@@ -18,12 +18,21 @@ package datacoord
 
 import (
 	"context"
+	"path"
 	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
+)
+
+const (
+	//TODO silverxia change to configuration
+	insertLogPrefix = `insert_log`
+	statsLogPrefix  = `stats_log`
+	deltaLogPrefix  = `delta_log`
 )
 
 // GcOption garbage collection options
@@ -81,6 +90,7 @@ func (gc *garbageCollector) work() {
 	for {
 		select {
 		case <-ticker:
+			gc.clearEtcd()
 			gc.scan()
 		case <-gc.closeCh:
 			log.Warn("garbage collector quit")
@@ -97,49 +107,88 @@ func (gc *garbageCollector) close() {
 }
 
 // scan load meta file info and compares OSS keys
-// if drop found or missing found, performs gc cleanup
+// if missing found, performs gc cleanup
 func (gc *garbageCollector) scan() {
-	var v, d, m, e int
-	valid, dropped, droppedAt := gc.meta.ListSegmentFiles()
+	var v, m, e int
+	valid := gc.meta.ListSegmentFiles()
 	vm := make(map[string]struct{})
-	dm := make(map[string]uint64)
 	for _, k := range valid {
 		vm[k] = struct{}{}
 	}
-	for i, k := range dropped {
-		dm[k] = droppedAt[i]
-	}
 
-	for info := range gc.option.cli.ListObjects(context.TODO(), gc.option.bucketName, minio.ListObjectsOptions{
-		Prefix:    gc.option.rootPath,
-		Recursive: true,
-	}) {
-		log.Warn(info.Key)
-		_, has := vm[info.Key]
-		if has {
-			v++
-			continue
-		}
-		// dropped
-		droppedTs, has := dm[info.Key]
-		if has {
-			d++
-			droppedTime := time.Unix(0, int64(droppedTs))
-			// check file last modified time exceeds tolerance duration
-			if time.Since(droppedTime) > gc.option.dropTolerance {
+	// walk only data cluster related prefixes
+	prefixes := make([]string, 0, 3)
+	prefixes = append(prefixes, path.Join(gc.option.rootPath, insertLogPrefix))
+	prefixes = append(prefixes, path.Join(gc.option.rootPath, statsLogPrefix))
+	prefixes = append(prefixes, path.Join(gc.option.rootPath, deltaLogPrefix))
+
+	for _, prefix := range prefixes {
+		for info := range gc.option.cli.ListObjects(context.TODO(), gc.option.bucketName, minio.ListObjectsOptions{
+			Prefix:    prefix,
+			Recursive: true,
+		}) {
+			_, has := vm[info.Key]
+			if has {
+				v++
+				continue
+			}
+			m++
+			// not found in meta, check last modified time exceeds tolerance duration
+			if time.Since(info.LastModified) > gc.option.missingTolerance {
 				e++
 				// ignore error since it could be cleaned up next time
 				_ = gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, info.Key, minio.RemoveObjectOptions{})
 			}
-			continue
-		}
-		m++
-		// not found in meta, check last modified time exceeds tolerance duration
-		if time.Since(info.LastModified) > gc.option.missingTolerance {
-			e++
-			// ignore error since it could be cleaned up next time
-			_ = gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, info.Key, minio.RemoveObjectOptions{})
 		}
 	}
-	log.Warn("scan result", zap.Int("valid", v), zap.Int("dropped", d), zap.Int("missing", m), zap.Int("removed", e))
+	log.Warn("scan result", zap.Int("valid", v), zap.Int("missing", m), zap.Int("removed", e))
+}
+
+func (gc *garbageCollector) clearEtcd() {
+	drops := gc.meta.SelectSegments(func(segment *SegmentInfo) bool {
+		return segment.GetState() == commonpb.SegmentState_Dropped
+	})
+
+	for _, sinfo := range drops {
+		if !gc.isExpire(sinfo.GetDroppedAt()) {
+			continue
+		}
+		logs := getLogs(sinfo)
+		if gc.removeLogs(logs) {
+			_ = gc.meta.DropSegment(sinfo.GetID())
+		}
+	}
+}
+
+func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
+	droptime := time.Unix(0, int64(dropts))
+	return time.Since(droptime) > gc.option.dropTolerance
+}
+
+func getLogs(sinfo *SegmentInfo) []string {
+	var logs []string
+	for _, flog := range sinfo.GetBinlogs() {
+		logs = append(logs, flog.GetBinlogs()...)
+	}
+
+	for _, flog := range sinfo.GetStatslogs() {
+		logs = append(logs, flog.GetBinlogs()...)
+	}
+
+	for _, dlog := range sinfo.GetDeltalogs() {
+		logs = append(logs, dlog.GetDeltaLogPath())
+	}
+	return logs
+}
+
+func (gc *garbageCollector) removeLogs(logs []string) bool {
+	delFlag := true
+	for _, l := range logs {
+		err := gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, l, minio.RemoveObjectOptions{})
+		errResp := minio.ToErrorResponse(err)
+		if errResp.Code != "" && errResp.Code != "NoSuchKey" {
+			delFlag = false
+		}
+	}
+	return delFlag
 }

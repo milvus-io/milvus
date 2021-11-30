@@ -63,7 +63,6 @@ func (vcm *VectorChunkManager) downloadVectorFile(key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer insertCodec.Close()
 
 	var results []byte
 	for _, singleData := range data.Data {

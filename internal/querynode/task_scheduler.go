@@ -32,7 +32,7 @@ func newTaskScheduler(ctx context.Context) *taskScheduler {
 		ctx:    ctx1,
 		cancel: cancel,
 	}
-	s.queue = newLoadAndReleaseTaskQueue(s)
+	s.queue = newQueryNodeTaskQueue(s)
 	return s
 }
 
@@ -61,7 +61,7 @@ func (s *taskScheduler) processTask(t task, q taskQueue) {
 	err = t.PostExecute(s.ctx)
 }
 
-func (s *taskScheduler) loadAndReleaseLoop() {
+func (s *taskScheduler) taskLoop() {
 	defer s.wg.Done()
 	for {
 		select {
@@ -78,7 +78,7 @@ func (s *taskScheduler) loadAndReleaseLoop() {
 
 func (s *taskScheduler) Start() {
 	s.wg.Add(1)
-	go s.loadAndReleaseLoop()
+	go s.taskLoop()
 }
 
 func (s *taskScheduler) Close() {

@@ -36,12 +36,12 @@ type task interface {
 	Ctx() context.Context
 	ID() UniqueID       // return ReqID
 	SetID(uid UniqueID) // set ReqID
-	Name() string
+	Name() string       // set task name
 	PreExecute(ctx context.Context) error
 	Execute(ctx context.Context) error
 	PostExecute(ctx context.Context) error
 	WaitToFinish() error // waiting until task terminated
-	Notify(err error)
+	Notify(err error) // notify if task is terminated
 	OnEnqueue() error
 }
 

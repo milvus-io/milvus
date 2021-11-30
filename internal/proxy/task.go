@@ -829,7 +829,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		channelName := channelNames[channelID]
 		if channelName == "" {
-			return nil, fmt.Errorf("Proxy, repack_func, can not found channelName")
+			return nil, fmt.Errorf("proxy, repack_func, can not found channelName")
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
@@ -1539,7 +1539,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			for _, field := range schema.Fields {
 				if field.Name == name {
 					if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
-						return errors.New("Search doesn't support vector field as output_fields")
+						return errors.New("search doesn't support vector field as output_fields")
 					}
 
 					st.SearchRequest.OutputFieldsId = append(st.SearchRequest.OutputFieldsId, field.FieldID)
@@ -1891,7 +1891,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 						Reason:    filterReason,
 					},
 				}
-				return fmt.Errorf("No Available Query node result, filter reason %s: id %d", filterReason, st.ID())
+				return fmt.Errorf("no Available Query node result, filter reason %s: id %d", filterReason, st.ID())
 			}
 
 			validSearchResults, err := decodeSearchResults(filterSearchResults)
@@ -4062,7 +4062,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 		}
 		resp, err := ft.dataCoord.Flush(ctx, flushReq)
 		if err != nil {
-			return fmt.Errorf("Failed to call flush to data coordinator: %s", err.Error())
+			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
 		}
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return errors.New(resp.Status.Reason)
@@ -4499,6 +4499,43 @@ func (dt *deleteTask) SetTs(ts Timestamp) {
 func (dt *deleteTask) OnEnqueue() error {
 	dt.DeleteRequest.Base = &commonpb.MsgBase{}
 	return nil
+}
+
+func (dt *deleteTask) getPChanStats() (map[pChan]pChanStatistics, error) {
+	ret := make(map[pChan]pChanStatistics)
+
+	channels, err := dt.getChannels()
+	if err != nil {
+		return ret, err
+	}
+
+	beginTs := dt.BeginTs()
+	endTs := dt.EndTs()
+
+	for _, channel := range channels {
+		ret[channel] = pChanStatistics{
+			minTs: beginTs,
+			maxTs: endTs,
+		}
+	}
+	return ret, nil
+}
+
+func (dt *deleteTask) getChannels() ([]pChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+	var channels []pChan
+	channels, err = dt.chMgr.getChannels(collID)
+	if err != nil {
+		err = dt.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return nil, err
+		}
+		channels, err = dt.chMgr.getChannels(collID)
+	}
+	return channels, err
 }
 
 func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res []int64, err error) {

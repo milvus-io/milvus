@@ -49,12 +49,12 @@ func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNode
 	if seekPos != nil {
 		seekPos.ChannelName = pchannelName
 		start := time.Now()
-		log.Debug("datanode begin to seek: " + seekPos.GetChannelName())
+		log.Debug("datanode begin to seek", zap.String("Channel Name", seekPos.GetChannelName()))
 		err = insertStream.Seek([]*internalpb.MsgPosition{seekPos})
 		if err != nil {
 			return nil, err
 		}
-		log.Debug("datanode Seek successfully: "+seekPos.GetChannelName(), zap.Int64("elapse ", time.Since(start).Milliseconds()))
+		log.Debug("datanode Seek successfully", zap.String("Channel Name", seekPos.GetChannelName()), zap.Duration("elapse", time.Since(start)))
 	}
 
 	node := flowgraph.NewInputNode(insertStream, "dmInputNode", dmNodeConfig.maxQueueLength, dmNodeConfig.maxParallelism)

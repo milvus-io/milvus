@@ -58,6 +58,7 @@ type ddNode struct {
 
 	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
 	flushedSegments []*datapb.SegmentInfo
+	droppedSegments []*datapb.SegmentInfo
 	vchannelName    string
 
 	deltaMsgStream msgstream.MsgStream
@@ -114,17 +115,18 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
-				log.Info("Receiving DropCollection msg", zap.Any("collectionID", ddn.collectionID))
+				log.Info("Receiving DropCollection msg",
+					zap.Any("collectionID", ddn.collectionID),
+					zap.String("vChannelName", ddn.vchannelName))
 				ddn.dropMode.Store(true)
 				fgMsg.dropCollection = true
 			}
 		case commonpb.MsgType_Insert:
-			log.Debug("DDNode receive insert messages")
 			imsg := msg.(*msgstream.InsertMsg)
 			if imsg.CollectionID != ddn.collectionID {
-				//log.Debug("filter invalid InsertMsg, collection mis-match",
-				//	zap.Int64("Get msg collID", imsg.CollectionID),
-				//	zap.Int64("Expected collID", ddn.collectionID))
+				log.Warn("filter invalid InsertMsg, collection mis-match",
+					zap.Int64("Get collID", imsg.CollectionID),
+					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 			if msg.EndTs() < FilterThreshold {
@@ -136,6 +138,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					continue
 				}
 			}
+			log.Debug("DDNode receive insert messages",
+				zap.Int("numRows", len(imsg.GetRowIDs())),
+				zap.String("vChannelName", ddn.vchannelName))
 			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
 		case commonpb.MsgType_Delete:
 			log.Debug("DDNode receive delete messages")
@@ -145,9 +150,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 			forwardMsgs = append(forwardMsgs, dmsg)
 			if dmsg.CollectionID != ddn.collectionID {
-				//log.Debug("filter invalid DeleteMsg, collection mis-match",
-				//	zap.Int64("Get msg collID", dmsg.CollectionID),
-				//	zap.Int64("Expected collID", ddn.collectionID))
+				log.Warn("filter invalid DeleteMsg, collection mis-match",
+					zap.Int64("Get collID", dmsg.CollectionID),
+					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
@@ -170,7 +175,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 }
 
 func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) bool {
-	if ddn.isFlushed(msg.GetSegmentID()) {
+	if ddn.isFlushed(msg.GetSegmentID()) || ddn.isDropped(msg.GetSegmentID()) {
 		return true
 	}
 
@@ -187,6 +192,15 @@ func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) 
 func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
 	for _, s := range ddn.flushedSegments {
 		if s.ID == segmentID {
+			return true
+		}
+	}
+	return false
+}
+
+func (ddn *ddNode) isDropped(segID UniqueID) bool {
+	for _, droppedSegment := range ddn.droppedSegments {
+		if droppedSegment.GetID() == segID {
 			return true
 		}
 	}
@@ -277,6 +291,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 		BaseNode:        baseNode,
 		collectionID:    collID,
 		flushedSegments: fs,
+		droppedSegments: vchanInfo.GetDroppedSegments(),
 		vchannelName:    vchanInfo.ChannelName,
 		deltaMsgStream:  deltaMsgStream,
 	}

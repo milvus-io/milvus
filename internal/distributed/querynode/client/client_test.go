@@ -97,8 +97,7 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 
-	err = client.Init()
-	assert.Nil(t, err)
+	Params.Init()
 
 	err = client.Start()
 	assert.Nil(t, err)

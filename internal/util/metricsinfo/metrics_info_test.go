@@ -40,6 +40,9 @@ func TestBaseComponentInfos_Codec(t *testing.T) {
 		SystemInfo: DeployMetrics{
 			SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
 			DeployMode:    ClusterDeployMode,
+			BuildVersion:  "2.0.0-rc8",
+			BuildTime:     "2021-11-24, 11:37:25",
+			UsedGoVersion: "go version go1.15.2 linux/amd64",
 		},
 		CreatedTime: time.Now().String(),
 		UpdatedTime: time.Now().String(),
@@ -74,6 +77,9 @@ func TestQueryNodeInfos_Codec(t *testing.T) {
 			SystemInfo: DeployMetrics{
 				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
 				DeployMode:    ClusterDeployMode,
+				BuildVersion:  "2.0.0-rc8",
+				BuildTime:     "2021-11-24, 11:37:25",
+				UsedGoVersion: "go version go1.15.2 linux/amd64",
 			},
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
@@ -119,6 +125,9 @@ func TestQueryCoordInfos_Codec(t *testing.T) {
 			SystemInfo: DeployMetrics{
 				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
 				DeployMode:    ClusterDeployMode,
+				BuildVersion:  "2.0.0-rc8",
+				BuildTime:     "2021-11-24, 11:37:25",
+				UsedGoVersion: "go version go1.15.2 linux/amd64",
 			},
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
@@ -158,6 +167,9 @@ func TestIndexNodeInfos_Codec(t *testing.T) {
 			SystemInfo: DeployMetrics{
 				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
 				DeployMode:    ClusterDeployMode,
+				BuildVersion:  "2.0.0-rc8",
+				BuildTime:     "2021-11-24, 11:37:25",
+				UsedGoVersion: "go version go1.15.2 linux/amd64",
 			},
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
@@ -198,6 +210,9 @@ func TestIndexCoordInfos_Codec(t *testing.T) {
 			SystemInfo: DeployMetrics{
 				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
 				DeployMode:    ClusterDeployMode,
+				BuildVersion:  "2.0.0-rc8",
+				BuildTime:     "2021-11-24, 11:37:25",
+				UsedGoVersion: "go version go1.15.2 linux/amd64",
 			},
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
@@ -236,6 +251,9 @@ func TestDataNodeInfos_Codec(t *testing.T) {
 			SystemInfo: DeployMetrics{
 				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
 				DeployMode:    ClusterDeployMode,
+				BuildVersion:  "2.0.0-rc8",
+				BuildTime:     "2021-11-24, 11:37:25",
+				UsedGoVersion: "go version go1.15.2 linux/amd64",
 			},
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
@@ -274,6 +292,9 @@ func TestDataCoordInfos_Codec(t *testing.T) {
 			SystemInfo: DeployMetrics{
 				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
 				DeployMode:    ClusterDeployMode,
+				BuildVersion:  "2.0.0-rc8",
+				BuildTime:     "2021-11-24, 11:37:25",
+				UsedGoVersion: "go version go1.15.2 linux/amd64",
 			},
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),
@@ -312,6 +333,9 @@ func TestRootCoordInfos_Codec(t *testing.T) {
 			SystemInfo: DeployMetrics{
 				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
 				DeployMode:    ClusterDeployMode,
+				BuildVersion:  "2.0.0-rc8",
+				BuildTime:     "2021-11-24, 11:37:25",
+				UsedGoVersion: "go version go1.15.2 linux/amd64",
 			},
 			CreatedTime: time.Now().String(),
 			UpdatedTime: time.Now().String(),

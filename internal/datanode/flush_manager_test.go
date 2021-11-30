@@ -177,23 +177,20 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
-	packs := make([]*segmentFlushPack, 0, size+1)
+	var packMut sync.Mutex
+	packs := make([]*segmentFlushPack, 0, size+3)
 	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+		packMut.Lock()
 		packs = append(packs, pack)
+		packMut.Unlock()
 		counter.Inc()
 		finish.Done()
 	})
 
-	injected := make(chan struct{})
-	injectOver := make(chan bool)
-	m.injectFlush(taskInjection{
-		injected:   injected,
-		injectOver: injectOver,
-		postInjection: func(*segmentFlushPack) {
-		},
-	}, 1)
-	<-injected
-	injectOver <- true
+	ti := newTaskInjection(1, func(*segmentFlushPack) {})
+	m.injectFlush(ti, 1)
+	<-ti.injected
+	ti.injectDone(true)
 
 	ids := make([][]byte, 0, size)
 	for i := 0; i < size; i++ {
@@ -218,44 +215,60 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 
 	assert.EqualValues(t, size, counter.Load())
 
-	finish.Add(1)
+	finish.Add(2)
 	id := make([]byte, 10)
+	rand.Read(id)
+	id2 := make([]byte, 10)
+	rand.Read(id2)
 	rand.Read(id)
 	m.flushBufferData(nil, 2, true, false, &internalpb.MsgPosition{
 		MsgID: id,
 	})
+	m.flushBufferData(nil, 3, true, false, &internalpb.MsgPosition{
+		MsgID: id2,
+	})
 
-	m.injectFlush(taskInjection{
-		injected:   injected,
-		injectOver: injectOver,
-		postInjection: func(pack *segmentFlushPack) {
-			pack.segmentID = 3
-		},
-	}, 2)
+	ti = newTaskInjection(2, func(pack *segmentFlushPack) {
+		pack.segmentID = 4
+	})
+	m.injectFlush(ti, 2, 3)
 
 	go func() {
-		<-injected
-		injectOver <- true
+		<-ti.injected
+		ti.injectDone(true)
 	}()
 	m.flushDelData(nil, 2, &internalpb.MsgPosition{
 		MsgID: id,
 	})
+	m.flushDelData(nil, 3, &internalpb.MsgPosition{
+		MsgID: id2,
+	})
 
 	finish.Wait()
-	assert.EqualValues(t, size+1, counter.Load())
-	assert.EqualValues(t, 3, packs[size].segmentID)
+	assert.EqualValues(t, size+2, counter.Load())
+	assert.EqualValues(t, 4, packs[size].segmentID)
 
 	finish.Add(1)
 	rand.Read(id)
+
 	m.flushBufferData(nil, 2, false, false, &internalpb.MsgPosition{
 		MsgID: id,
 	})
+	ti = newTaskInjection(1, func(pack *segmentFlushPack) {
+		pack.segmentID = 5
+	})
+	go func() {
+		<-ti.injected
+		ti.injectDone(false) // inject fail, segment id shall not be changed to 5
+	}()
+	m.injectFlush(ti, 2)
+
 	m.flushDelData(nil, 2, &internalpb.MsgPosition{
 		MsgID: id,
 	})
 	finish.Wait()
-	assert.EqualValues(t, size+2, counter.Load())
-	assert.EqualValues(t, 3, packs[size+1].segmentID)
+	assert.EqualValues(t, size+3, counter.Load())
+	assert.EqualValues(t, 4, packs[size+1].segmentID)
 
 }
 

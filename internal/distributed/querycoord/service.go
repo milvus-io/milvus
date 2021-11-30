@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"google.golang.org/grpc/keepalive"
 )
 
 // Server is the grpc server of QueryCoord.
@@ -139,7 +140,7 @@ func (s *Server) init() error {
 	}
 	// wait for master init or healthy
 	log.Debug("QueryCoord try to wait for RootCoord ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		log.Debug("QueryCoord wait for RootCoord ready failed", zap.Error(err))
 		panic(err)
@@ -168,7 +169,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	log.Debug("QueryCoord try to wait for DataCoord ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		log.Debug("QueryCoord wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
@@ -220,7 +221,15 @@ func (s *Server) init() error {
 func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
+	var kaep = keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
+		PermitWithoutStream: true,            // Allow pings even when there are no active streams
+	}
 
+	var kasp = keepalive.ServerParameters{
+		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
+		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
+	}
 	log.Debug("network", zap.String("port", strconv.Itoa(grpcPort)))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
@@ -234,6 +243,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(

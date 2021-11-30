@@ -42,7 +42,7 @@ func (tc *TaskCondition) WaitToFinish() error {
 	for {
 		select {
 		case <-tc.ctx.Done():
-			return errors.New("Proxy TaskCondition context Done")
+			return errors.New("proxy TaskCondition context Done")
 		case err := <-tc.done:
 			return err
 		}

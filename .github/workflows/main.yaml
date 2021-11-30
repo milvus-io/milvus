@@ -68,7 +68,7 @@ jobs:
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make unittest"
       - name: Upload coverage to Codecov
-        if: github.repository == 'milvus-io/milvus'
+        if: "github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

@@ -115,6 +115,11 @@ func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
 
 	pcm := newProxyClientManager(core)
 
+	ch := make(chan struct{})
+	pcm.helper = proxyClientManagerHelper{
+		afterConnect: func() { ch <- struct{}{} },
+	}
+
 	pcm.ReleaseDQLMessageStream(ctx, nil)
 
 	core.SetNewProxyClient(
@@ -129,6 +134,7 @@ func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
 	}
 
 	pcm.AddProxyClient(session)
+	<-ch
 
 	assert.Panics(t, func() { pcm.ReleaseDQLMessageStream(ctx, nil) })
 }

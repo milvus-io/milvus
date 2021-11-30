@@ -296,17 +296,13 @@ func (t *compactionTask) compact() error {
 	}
 
 	// Inject to stop flush
-	ti := taskInjection{
-		injected:   make(chan struct{}),
-		injectOver: make(chan bool),
-		postInjection: func(pack *segmentFlushPack) {
-			pack.segmentID = targetSegID
-		},
-	}
+	ti := newTaskInjection(len(segIDs), func(pack *segmentFlushPack) {
+		pack.segmentID = targetSegID
+	})
 	defer close(ti.injectOver)
 
 	t.injectFlush(ti, segIDs...)
-	<-ti.injected
+	<-ti.Injected()
 
 	var (
 		iItr = make([]iterator, 0)
@@ -449,7 +445,7 @@ func (t *compactionTask) compact() error {
 		}
 	}
 
-	ti.injectOver <- true
+	ti.injectDone(true)
 	log.Info("compaction done", zap.Int64("planID", t.plan.GetPlanID()),
 		zap.Any("num of binlog paths", len(cpaths.inPaths)),
 		zap.Any("num of stats paths", len(cpaths.statsPaths)),
@@ -571,15 +567,15 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 	case schemapb.DataType_FloatVector:
 		var data = &storage.FloatVectorFieldData{
 			NumRows: numOfRows,
-			Data:    make([]float32, 0, len(content)),
+			Data:    []float32{},
 		}
 
 		for _, c := range content {
-			r, ok := c.(float32)
+			r, ok := c.([]float32)
 			if !ok {
 				return nil, errTransferType
 			}
-			data.Data = append(data.Data, r)
+			data.Data = append(data.Data, r...)
 		}
 
 		data.Dim = len(data.Data) / int(numRows)
@@ -588,15 +584,15 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 	case schemapb.DataType_BinaryVector:
 		var data = &storage.BinaryVectorFieldData{
 			NumRows: numOfRows,
-			Data:    make([]byte, 0, len(content)),
+			Data:    []byte{},
 		}
 
 		for _, c := range content {
-			r, ok := c.(byte)
+			r, ok := c.([]byte)
 			if !ok {
 				return nil, errTransferType
 			}
-			data.Data = append(data.Data, r)
+			data.Data = append(data.Data, r...)
 		}
 
 		data.Dim = len(data.Data) * 8 / int(numRows)

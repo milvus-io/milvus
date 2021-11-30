@@ -113,6 +113,13 @@ func (m *MockDataCoordClient) GetCompactionStateWithPlans(ctx context.Context, r
 func (m *MockDataCoordClient) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest, opts ...grpc.CallOption) (*datapb.WatchChannelsResponse, error) {
 	return &datapb.WatchChannelsResponse{}, m.err
 }
+func (m *MockDataCoordClient) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
+	return &milvuspb.GetFlushStateResponse{}, m.err
+}
+
+func (m *MockDataCoordClient) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
+	return &datapb.DropVirtualChannelResponse{}, m.err
+}
 
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
@@ -201,6 +208,9 @@ func Test_NewClient(t *testing.T) {
 
 		r20, err := client.WatchChannels(ctx, nil)
 		retCheck(retNotNil, r20, err)
+
+		r21, err := client.DropVirtualChannel(ctx, nil)
+		retCheck(retNotNil, r21, err)
 	}
 
 	client.getGrpcClient = func() (datapb.DataCoordClient, error) {

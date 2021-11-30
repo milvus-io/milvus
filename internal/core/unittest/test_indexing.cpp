@@ -242,8 +242,8 @@ TEST(Indexing, BinaryBruteForce) {
     SearchResult sr;
     sr.num_queries_ = num_queries;
     sr.topk_ = topk;
-    sr.internal_seg_offsets_ = std::move(sub_result.mutable_labels());
-    sr.result_distances_ = std::move(sub_result.mutable_values());
+    sr.ids_ = std::move(sub_result.mutable_ids());
+    sr.distances_ = std::move(sub_result.mutable_distances());
 
     auto json = SearchResultToJson(sr);
     std::cout << json.dump(2);

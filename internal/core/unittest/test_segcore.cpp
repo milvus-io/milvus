@@ -13,7 +13,7 @@
 #include <random>
 #include <string>
 
-#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
 
 using namespace milvus;
 
@@ -42,13 +42,6 @@ generate_data(int N) {
     return std::make_tuple(raw_data, timestamps, uids);
 }
 }  // namespace
-
-TEST(SegmentCoreTest, TestABI) {
-    using namespace milvus::engine;
-    using namespace milvus::segcore;
-    ASSERT_EQ(TestABI(), 42);
-    assert(true);
-}
 
 TEST(SegmentCoreTest, NormalDistributionTest) {
     using namespace milvus::segcore;

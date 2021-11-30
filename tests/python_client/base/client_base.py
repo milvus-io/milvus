@@ -195,3 +195,22 @@ class TestcaseBase(Base):
         conn.flush([collection_w.name])
         collection_w.load()
         return collection_w, partition_w, df_partition, df_default
+
+    def collection_insert_multi_segments_one_shard(self, collection_prefix, num_of_segment=2, nb_of_segment=1,
+                                                   is_dup=True):
+        """
+        init collection with one shard, insert data into two segments on one shard (they can be merged)
+        :param collection_prefix: collection name prefix
+        :param num_of_segment: number of segments
+        :param nb_of_segment: number of entities per segment
+        :param is_dup: whether the primary keys of each segment is duplicated
+        :return: collection wrap and partition wrap
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(collection_prefix), shards_num=1)
+
+        for i in range(num_of_segment):
+            start = 0 if is_dup else i * nb_of_segment
+            df = cf.gen_default_dataframe_data(nb_of_segment, start=start)
+            collection_w.insert(df)
+            assert collection_w.num_entities == nb_of_segment * (i + 1)
+        return collection_w

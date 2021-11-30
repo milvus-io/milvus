@@ -58,6 +58,10 @@ type proxyMock struct {
 	mutex     sync.Mutex
 }
 
+func (p *proxyMock) Stop() error {
+	return nil
+}
+
 func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -327,7 +331,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	vchanNames := make([]string, t.ShardsNum)
 	chanNames := make([]string, t.ShardsNum)
 	for i := int32(0); i < t.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.dmlChannels.GetDmlMsgStreamName(), collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.chanTimeTick.getDmlChannelName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
@@ -389,9 +393,9 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		core.ddlLock.Lock()
 		defer core.ddlLock.Unlock()
 
-		core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		err = core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
 		if err != nil {
@@ -680,7 +684,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		assert.Equal(t, shardsNum, int32(core.dmlChannels.GetNumChannels()))
+		assert.Equal(t, shardsNum, int32(core.chanTimeTick.getDmlChannelNum()))
 
 		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
@@ -720,14 +724,11 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, len(core.chanTimeTick.proxyTimeTick), 2)
 		pt, ok := core.chanTimeTick.proxyTimeTick[core.session.ServerID]
 		assert.True(t, ok)
-		assert.Equal(t, shardsNum, int32(len(pt.in.ChannelNames)))
-		assert.Equal(t, shardsNum, int32(len(pt.in.Timestamps)))
-		assert.Equal(t, shardsNum, int32(len(pt.timeTick)))
-		assert.ElementsMatch(t, pt.in.ChannelNames, createMeta.PhysicalChannelNames)
-		assert.Equal(t, pt.in.Timestamps[0], pt.in.Timestamps[1])
-		assert.Equal(t, pt.in.Timestamps[0], pt.in.DefaultTimestamp)
-		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[0]], pt.in.DefaultTimestamp)
-		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[1]], pt.in.DefaultTimestamp)
+		assert.Equal(t, shardsNum, int32(len(pt.chanTs)))
+		for chanName, ts := range pt.chanTs {
+			assert.Contains(t, createMeta.PhysicalChannelNames, chanName)
+			assert.Equal(t, pt.defaultTs, ts)
+		}
 		core.chanTimeTick.lock.Unlock()
 
 		// check DD operation info
@@ -1713,7 +1714,7 @@ func TestRootCoord(t *testing.T) {
 			ts1            = uint64(120)
 			ts2            = uint64(150)
 		)
-		numChan := core.chanTimeTick.GetChanNum()
+		numChan := core.chanTimeTick.getDmlChannelNum()
 		p1 := sessionutil.Session{
 			ServerID: 100,
 		}
@@ -1735,15 +1736,15 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		cn0 := core.dmlChannels.GetDmlMsgStreamName()
-		cn1 := core.dmlChannels.GetDmlMsgStreamName()
-		cn2 := core.dmlChannels.GetDmlMsgStreamName()
-		core.dmlChannels.AddProducerChannels(cn0, cn1, cn2)
+		cn0 := core.chanTimeTick.getDmlChannelName()
+		cn1 := core.chanTimeTick.getDmlChannelName()
+		cn2 := core.chanTimeTick.getDmlChannelName()
+		core.chanTimeTick.addDmlChannels(cn0, cn1, cn2)
 
-		dn0 := core.deltaChannels.GetDmlMsgStreamName()
-		dn1 := core.deltaChannels.GetDmlMsgStreamName()
-		dn2 := core.deltaChannels.GetDmlMsgStreamName()
-		core.deltaChannels.AddProducerChannels(dn0, dn1, dn2)
+		dn0 := core.chanTimeTick.getDeltaChannelName()
+		dn1 := core.chanTimeTick.getDeltaChannelName()
+		dn2 := core.chanTimeTick.getDeltaChannelName()
+		core.chanTimeTick.addDeltaChannels(dn0, dn1, dn2)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1783,10 +1784,10 @@ func TestRootCoord(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 
 		// 2 proxy, 1 rootcoord
-		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
+		assert.Equal(t, 3, core.chanTimeTick.getProxyNum())
 
 		// add 3 proxy channels
-		assert.Equal(t, 3, core.chanTimeTick.GetChanNum()-numChan)
+		assert.Equal(t, 3, core.chanTimeTick.getDmlChannelNum()-numChan)
 
 		_, err = core.etcdCli.Delete(ctx2, proxy1)
 		assert.Nil(t, err)
@@ -2714,4 +2715,18 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	})
 	err = core.Stop()
 	assert.Nil(t, err)
+}
+
+func TestCore_GetComponentStates(t *testing.T) {
+	n := &Core{}
+	n.stateCode.Store(internalpb.StateCode_Healthy)
+	resp, err := n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	n.session = &sessionutil.Session{}
+	n.session.UpdateRegistered(true)
+	resp, err = n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }

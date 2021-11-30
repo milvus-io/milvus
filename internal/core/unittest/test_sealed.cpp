@@ -100,8 +100,8 @@ TEST(Sealed, without_predicate) {
     std::vector<int64_t> vec_ids(ids, ids + topK * num_queries);
     std::vector<float> vec_dis(dis, dis + topK * num_queries);
 
-    sr.internal_seg_offsets_ = vec_ids;
-    sr.result_distances_ = vec_dis;
+    sr.ids_ = vec_ids;
+    sr.distances_ = vec_dis;
     auto ref_result = SearchResultToJson(sr);
 
     LoadIndexInfo load_info;
@@ -208,8 +208,8 @@ TEST(Sealed, with_predicate) {
     auto post_sr = sr;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
-        ASSERT_EQ(post_sr.internal_seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(post_sr.result_distances_[offset], 0.0);
+        ASSERT_EQ(post_sr.ids_[offset], 42000 + i);
+        ASSERT_EQ(post_sr.distances_[offset], 0.0);
     }
 }
 

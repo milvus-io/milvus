@@ -472,13 +472,21 @@ func TestQueryCollection_serviceableTime(t *testing.T) {
 	assert.Equal(t, st+gracefulTime, resST)
 }
 
-func TestQueryCollection_addTSafeWatcher(t *testing.T) {
+func TestQueryCollection_tSafeWatcher(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 	assert.NoError(t, err)
 
-	queryCollection.addTSafeWatcher(defaultVChannel)
+	err = queryCollection.addTSafeWatcher(defaultVChannel)
+	assert.NoError(t, err)
+
+	err = queryCollection.removeTSafeWatcher(defaultVChannel)
+	assert.NoError(t, err)
+
+	// no tSafe watcher
+	err = queryCollection.removeTSafeWatcher(defaultVChannel)
+	assert.Error(t, err)
 }
 
 func TestQueryCollection_waitNewTSafe(t *testing.T) {

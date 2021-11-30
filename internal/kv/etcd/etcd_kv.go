@@ -33,7 +33,7 @@ const (
 	RequestTimeout = 10 * time.Second
 )
 
-// EtcdKV implements TxnKv interface, it supports to process multiple kvs in a transactions
+// EtcdKV implements TxnKv interface, it supports to process multiple kvs in a transaction.
 type EtcdKV struct {
 	client   *clientv3.Client
 	rootPath string
@@ -75,7 +75,7 @@ func (kv *EtcdKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
 }
 
-// LoadWithPrefix returns all the the keys and values with the given prefix
+// LoadWithPrefix returns all the the keys and values with the given key prefix.
 func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -96,7 +96,7 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
-// LoadWithPrefix2 returns all the the keys,values and key versions with the given prefix
+// LoadWithPrefix2 returns all the the keys,values and key versions with the given key prefix.
 func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)

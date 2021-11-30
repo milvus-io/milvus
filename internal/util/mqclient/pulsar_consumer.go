@@ -27,6 +27,7 @@ type PulsarConsumer struct {
 	AtLatest   bool
 	closeCh    chan struct{}
 	once       sync.Once
+	skip       bool
 }
 
 func (pc *PulsarConsumer) Subscription() string {
@@ -58,7 +59,11 @@ func (pc *PulsarConsumer) Chan() <-chan Message {
 							log.Debug("pulsar consumer channel closed")
 							return
 						}
-						pc.msgChannel <- &pulsarMessage{msg: msg}
+						if !pc.skip {
+							pc.msgChannel <- &pulsarMessage{msg: msg}
+						} else {
+							pc.skip = false
+						}
 					case <-pc.closeCh: // workaround for pulsar consumer.receiveCh not closed
 						close(pc.msgChannel)
 						return
@@ -72,18 +77,15 @@ func (pc *PulsarConsumer) Chan() <-chan Message {
 
 // Seek seek consume position to the pointed messageID,
 // the pointed messageID will be consumed after the seek in pulsar
-func (pc *PulsarConsumer) Seek(id MessageID) error {
+func (pc *PulsarConsumer) Seek(id MessageID, inclusive bool) error {
 	messageID := id.(*pulsarID).messageID
 	err := pc.c.Seek(messageID)
 	if err == nil {
 		pc.hasSeek = true
+		// skip the first message when consume
+		pc.skip = !inclusive
 	}
 	return err
-}
-
-// ConsumeAfterSeek defines pulsar consumer SHOULD consume after seek
-func (pc *PulsarConsumer) ConsumeAfterSeek() bool {
-	return true
 }
 
 func (pc *PulsarConsumer) Ack(message Message) {

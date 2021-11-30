@@ -24,12 +24,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
@@ -78,7 +81,6 @@ func TestIndexNode(t *testing.T) {
 
 	t.Run("CreateIndex FloatVector", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -194,7 +196,6 @@ func TestIndexNode(t *testing.T) {
 	})
 	t.Run("CreateIndex BinaryVector", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -307,7 +308,6 @@ func TestIndexNode(t *testing.T) {
 
 	t.Run("Create Deleted_Index", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -486,7 +486,6 @@ func TestCreateIndexFailed(t *testing.T) {
 
 	t.Run("CreateIndex error", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -605,7 +604,6 @@ func TestCreateIndexFailed(t *testing.T) {
 
 	t.Run("Invalid Param", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -810,4 +808,18 @@ func TestIndexNode_InitError(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
+}
+
+func TestIndexNode_GetComponentStates(t *testing.T) {
+	n := &IndexNode{}
+	n.stateCode.Store(internalpb.StateCode_Healthy)
+	resp, err := n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	n.session = &sessionutil.Session{}
+	n.session.UpdateRegistered(true)
+	resp, err = n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }

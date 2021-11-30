@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"context"
-	"os"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -42,10 +41,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 				Disk:         metricsinfo.GetDiskCount(),
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
-			SystemInfo: metricsinfo.DeployMetrics{
-				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-			},
+			SystemInfo:  metricsinfo.DeployMetrics{},
 			CreatedTime: Params.CreatedTime.String(),
 			UpdatedTime: Params.UpdatedTime.String(),
 			Type:        typeutil.QueryNodeRole,
@@ -62,6 +58,8 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			SimdType: Params.SimdType,
 		},
 	}
+	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
+
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{

@@ -67,7 +67,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             auto sub_qr = SearchOnIndex(search_dataset, *indexing, search_conf, sub_view);
 
             // convert chunk uid to segment uid
-            for (auto& x : sub_qr.mutable_labels()) {
+            for (auto& x : sub_qr.mutable_ids()) {
                 if (x != -1) {
                     x += chunk_id * size_per_chunk;
                 }
@@ -93,7 +93,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         auto sub_qr = FloatSearchBruteForce(search_dataset, chunk.data(), size_per_chunk, sub_view);
 
         // convert chunk uid to segment uid
-        for (auto& x : sub_qr.mutable_labels()) {
+        for (auto& x : sub_qr.mutable_ids()) {
             if (x != -1) {
                 x += chunk_id * vec_size_per_chunk;
             }
@@ -101,8 +101,8 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         final_qr.merge(sub_qr);
     }
     current_chunk_id = max_chunk;
-    results.result_distances_ = std::move(final_qr.mutable_values());
-    results.internal_seg_offsets_ = std::move(final_qr.mutable_labels());
+    results.distances_ = std::move(final_qr.mutable_distances());
+    results.ids_ = std::move(final_qr.mutable_ids());
     results.topk_ = topk;
     results.num_queries_ = num_queries;
 
@@ -155,7 +155,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
         auto sub_result = BinarySearchBruteForce(search_dataset, chunk.data(), nsize, sub_view);
 
         // convert chunk uid to segment uid
-        for (auto& x : sub_result.mutable_labels()) {
+        for (auto& x : sub_result.mutable_ids()) {
             if (x != -1) {
                 x += chunk_id * vec_size_per_chunk;
             }
@@ -164,8 +164,8 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     }
 
     final_result.round_values();
-    results.result_distances_ = std::move(final_result.mutable_values());
-    results.internal_seg_offsets_ = std::move(final_result.mutable_labels());
+    results.distances_ = std::move(final_result.mutable_distances());
+    results.ids_ = std::move(final_result.mutable_ids());
     results.topk_ = topk;
     results.num_queries_ = num_queries;
 

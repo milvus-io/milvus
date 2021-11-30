@@ -17,11 +17,198 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+func TestTask_AddQueryChannel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	genAddQueryChanelRequest := func() *querypb.AddQueryChannelRequest {
+		return &querypb.AddQueryChannelRequest{
+			Base:             genCommonMsgBase(commonpb.MsgType_LoadCollection),
+			NodeID:           0,
+			CollectionID:     defaultCollectionID,
+			RequestChannelID: genQueryChannel(),
+			ResultChannelID:  genQueryResultChannel(),
+		}
+	}
+
+	t.Run("test timestamp", func(t *testing.T) {
+		task := addQueryChannelTask{
+			req: genAddQueryChanelRequest(),
+		}
+		timestamp := Timestamp(1000)
+		task.req.Base.Timestamp = timestamp
+		resT := task.Timestamp()
+		assert.Equal(t, timestamp, resT)
+		task.req.Base = nil
+		resT = task.Timestamp()
+		assert.Equal(t, Timestamp(0), resT)
+	})
+
+	t.Run("test OnEnqueue", func(t *testing.T) {
+		task := addQueryChannelTask{
+			req: genAddQueryChanelRequest(),
+		}
+		err := task.OnEnqueue()
+		assert.NoError(t, err)
+		task.req.Base = nil
+		err = task.OnEnqueue()
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := addQueryChannelTask{
+			req:  genAddQueryChanelRequest(),
+			node: node,
+		}
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute has queryCollection", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		task := addQueryChannelTask{
+			req:  genAddQueryChanelRequest(),
+			node: node,
+		}
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute nil query service", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		node.queryService = nil
+
+		task := addQueryChannelTask{
+			req:  genAddQueryChanelRequest(),
+			node: node,
+		}
+
+		err = task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("test execute add query collection failed", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.streaming.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+		err = node.historical.replica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		task := addQueryChannelTask{
+			req:  genAddQueryChanelRequest(),
+			node: node,
+		}
+
+		err = task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("test execute init global sealed segments", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := addQueryChannelTask{
+			req:  genAddQueryChanelRequest(),
+			node: node,
+		}
+
+		task.req.GlobalSealedSegments = []*querypb.SegmentInfo{{
+			SegmentID:    defaultSegmentID,
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+		}}
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute not init global sealed segments", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := addQueryChannelTask{
+			req:  genAddQueryChanelRequest(),
+			node: node,
+		}
+
+		task.req.GlobalSealedSegments = []*querypb.SegmentInfo{{
+			SegmentID:    defaultSegmentID,
+			CollectionID: 1000,
+			PartitionID:  defaultPartitionID,
+		}}
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute seek error", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		position := &internalpb.MsgPosition{
+			ChannelName: genQueryChannel(),
+			MsgID:       []byte{1, 2, 3},
+			MsgGroup:    defaultSubName,
+			Timestamp:   0,
+		}
+
+		task := addQueryChannelTask{
+			req:  genAddQueryChanelRequest(),
+			node: node,
+		}
+
+		task.req.SeekPosition = position
+
+		err = task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("test execute skipQueryChannelRecovery", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		position := &internalpb.MsgPosition{
+			ChannelName: genQueryChannel(),
+			MsgID:       []byte{1, 2, 3},
+			MsgGroup:    defaultSubName,
+			Timestamp:   0,
+		}
+
+		task := addQueryChannelTask{
+			req:  genAddQueryChanelRequest(),
+			node: node,
+		}
+
+		task.req.SeekPosition = position
+
+		Params.skipQueryChannelRecovery = true
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+}
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -143,6 +330,71 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	//	err = task.Execute(ctx)
 	//	assert.Error(t, err)
 	//})
+
+	t.Run("test add excluded segment for flushed segment", func(t *testing.T) {
+
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDmChannelsTask{
+			req:  genWatchDMChannelsRequest(),
+			node: node,
+		}
+		tmpChannel := defaultVChannel + "_1"
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID: defaultCollectionID,
+				ChannelName:  defaultVChannel,
+				SeekPosition: &msgstream.MsgPosition{
+					ChannelName: tmpChannel,
+					Timestamp:   0,
+					MsgID:       []byte{1, 2, 3},
+				},
+				FlushedSegments: []*datapb.SegmentInfo{
+					{
+						DmlPosition: &internalpb.MsgPosition{
+							ChannelName: tmpChannel,
+							Timestamp:   typeutil.MaxTimestamp,
+						},
+					},
+				},
+			},
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test add excluded segment for dropped segment", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDmChannelsTask{
+			req:  genWatchDMChannelsRequest(),
+			node: node,
+		}
+		tmpChannel := defaultVChannel + "_1"
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID: defaultCollectionID,
+				ChannelName:  defaultVChannel,
+				SeekPosition: &msgstream.MsgPosition{
+					ChannelName: tmpChannel,
+					Timestamp:   0,
+					MsgID:       []byte{1, 2, 3},
+				},
+				DroppedSegments: []*datapb.SegmentInfo{
+					{
+						DmlPosition: &internalpb.MsgPosition{
+							ChannelName: tmpChannel,
+							Timestamp:   typeutil.MaxTimestamp,
+						},
+					},
+				},
+			},
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
 }
 
 func TestTask_loadSegmentsTask(t *testing.T) {
@@ -323,6 +575,9 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
 		task := releaseCollectionTask{
 			req:  genReleaseCollectionRequest(),
 			node: node,
@@ -346,6 +601,25 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 		}
 		err = task.Execute(ctx)
 		assert.Error(t, err)
+	})
+
+	t.Run("test execute remove deltaVChannel tSafe", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.addVDeltaChannels([]Channel{defaultHistoricalVChannel})
+
+		task := releaseCollectionTask{
+			req:  genReleaseCollectionRequest(),
+			node: node,
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
 	})
 }
 
@@ -390,6 +664,9 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
 		task := releasePartitionsTask{
 			req:  genReleasePartitionsRequest(),
 			node: node,
@@ -419,4 +696,30 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("test execute, remove deltaVChannel", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+
+		err = node.historical.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		col.addVDeltaChannels([]Channel{defaultHistoricalVChannel})
+		col.setLoadType(loadTypePartition)
+
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		task := releasePartitionsTask{
+			req:  genReleasePartitionsRequest(),
+			node: node,
+		}
+		task.node.dataSyncService.addPartitionFlowGraph(defaultCollectionID,
+			defaultPartitionID,
+			[]Channel{defaultVChannel})
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
 }

@@ -71,7 +71,7 @@ class TestCreateBase:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "create partition failed: partition name = %s already exists" % default_tag
+            assert message == "CreatePartition failed: partition name = %s already exists" % default_tag
         assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -88,7 +88,7 @@ class TestCreateBase:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "create partition failed: can't find collection: %s" % collection_name
+            assert message == "CreatePartition failed: can't find collection: %s" % collection_name
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_name_name_none(self, connect, collection):

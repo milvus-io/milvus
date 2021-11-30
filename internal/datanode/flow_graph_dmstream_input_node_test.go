@@ -67,6 +67,7 @@ func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
 }
 
 func (mtm *mockTtMsgStream) AsProducer(channels []string)                 {}
+func (mtm *mockTtMsgStream) AsReader(channels []string, subName string)   {}
 func (mtm *mockTtMsgStream) AsConsumer(channels []string, subName string) {}
 func (mtm *mockTtMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 }
@@ -95,6 +96,16 @@ func (mtm *mockTtMsgStream) Consume() *msgstream.MsgPack {
 }
 func (mtm *mockTtMsgStream) Seek(offset []*internalpb.MsgPosition) error {
 	return nil
+}
+func (mtm *mockTtMsgStream) SeekReaders(msgPositions []*internalpb.MsgPosition) error {
+	return nil
+}
+
+func (mtm *mockTtMsgStream) Next(ctx context.Context, channelName string) (msgstream.TsMsg, error) {
+	return nil, nil
+}
+func (mtm *mockTtMsgStream) HasNext(channelName string) bool {
+	return true
 }
 
 func TestNewDmInputNode(t *testing.T) {

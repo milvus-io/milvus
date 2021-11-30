@@ -12,6 +12,7 @@
 package mqclient
 
 import (
+	"errors"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -43,6 +44,25 @@ func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	}
 	rp := rmqProducer{p: pp}
 	return &rp, nil
+}
+
+//TODO fishpenguin: implementation
+func (rc *rmqClient) CreateReader(options ReaderOptions) (Reader, error) {
+	opts := rocksmq.ReaderOptions{
+		Topic:                   options.Topic,
+		StartMessageID:          options.StartMessageID.(*rmqID).messageID,
+		StartMessageIDInclusive: options.StartMessageIDInclusive,
+		SubscriptionRolePrefix:  options.SubscriptionRolePrefix,
+	}
+	pr, err := rc.client.CreateReader(opts)
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil {
+		return nil, errors.New("pulsar is not ready, producer is nil")
+	}
+	reader := &rmqReader{r: pr}
+	return reader, nil
 }
 
 // Subscribe subscribes a consumer in rmq client

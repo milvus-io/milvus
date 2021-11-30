@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pymilvus import utility
 import sys
 
@@ -118,3 +120,8 @@ class ApiUtilityWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        timeout=timeout, using=using).run()
         return res, check_result
+
+    def mkts_from_datetime(self, d_time=None, milliseconds=0., delta=None):
+        d_time = datetime.now() if d_time is None else d_time
+        res, is_succ = api_request([self.ut.mkts_from_datetime, d_time, milliseconds, delta])
+        return res

@@ -41,7 +41,7 @@ message CollectionSchema {
 
 ```
 
-2. When received the `CreateCollection` request, the `Proxy` would wrap this request into `CreateCollectionTask`, and pushes this task into `DdTaskQueue` queue. After that, `Proxy` would call `WaitToFinish` method to wait until the task is finished.
+2. When received the `CreateCollection` request, `Proxy` would wrap this request into `CreateCollectionTask`, and pushes this task into `DdTaskQueue` queue. After that, `Proxy` would call `WaitToFinish` method to wait until the task is finished.
 
 ```go
 type task interface {
@@ -129,12 +129,12 @@ message CreateCollectionRequest {
 
 ```
 
-9. After all these operations, `RootCoord` would update the internal timestamp and return, so the `Proxy` would get the response.
+9. After all these operations, `RootCoord` would update the internal timestamp and return, so `Proxy` would get the response.
 
 _Notes:_
 
 1. In `Proxy`, all `DDL` requests will be wrapped into `task`, and push the `task` into `DdTaskQueue`. 
    A background service will read a new `task` from `DdTaskQueue` only when the previous one is finished. 
-   So all the `DDL` requests are executed serially on the `Proxy`
+   So all the `DDL` requests are executed serially on `Proxy`
 
 2. In `RootCoord`, all `DDL` requests will be wrapped into `reqTask`, but there is no task queue, so the `DDL` requests will be executed in parallel on `RootCoord`.

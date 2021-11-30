@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -356,32 +358,33 @@ func TestDataNode(t *testing.T) {
 			zap.String("response", resp.Response))
 	})
 
-	t.Run("Test BackGroundGC", func(te *testing.T) {
+	t.Run("Test BackGroundGC", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		node := newIDLEDataNodeMock(ctx)
 
-		collIDCh := make(chan UniqueID)
-		node.clearSignal = collIDCh
-		go node.BackGroundGC(collIDCh)
+		vchanNameCh := make(chan string)
+		node.clearSignal = vchanNameCh
+		go node.BackGroundGC(vchanNameCh)
 
 		testDataSyncs := []struct {
-			collID        UniqueID
 			dmChannelName string
 		}{
-			{1, "fake-by-dev-rootcoord-dml-backgroundgc-1"},
-			{2, "fake-by-dev-rootcoord-dml-backgroundgc-2"},
-			{3, "fake-by-dev-rootcoord-dml-backgroundgc-3"},
-			{4, ""},
-			{1, ""},
+			{"fake-by-dev-rootcoord-dml-backgroundgc-1"},
+			{"fake-by-dev-rootcoord-dml-backgroundgc-2"},
+			{"fake-by-dev-rootcoord-dml-backgroundgc-3"},
+			{""},
+			{""},
 		}
 
-		for i, t := range testDataSyncs {
+		for i, test := range testDataSyncs {
 			if i <= 2 {
-				err = node.NewDataSyncService(&datapb.VchannelInfo{CollectionID: t.collID, ChannelName: t.dmChannelName})
-				assert.Nil(te, err)
-			}
 
-			collIDCh <- t.collID
+				err = node.NewDataSyncService(&datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName})
+
+				assert.Nil(t, err)
+
+				vchanNameCh <- test.dmChannelName
+			}
 		}
 
 		assert.Eventually(t, func() bool {
@@ -583,4 +586,18 @@ func TestWatchChannel(t *testing.T) {
 		node.chanMut.RUnlock()
 
 	})
+}
+
+func TestDataNode_GetComponentStates(t *testing.T) {
+	n := &DataNode{}
+	n.State.Store(internalpb.StateCode_Healthy)
+	resp, err := n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	n.session = &sessionutil.Session{}
+	n.session.UpdateRegistered(true)
+	resp, err = n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }

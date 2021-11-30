@@ -6,7 +6,7 @@ String cron_timezone = 'TZ=Asia/Shanghai'
 String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 int total_timeout_minutes = 660
-
+def imageTag=''
 pipeline {
     triggers {
         cron """${cron_timezone}
@@ -17,6 +17,7 @@ pipeline {
         timeout(time: total_timeout_minutes, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
     // parallelsAlwaysFailFast()
+        preserveStashes(buildCount: 5)
     }
     agent {
         kubernetes {
@@ -50,10 +51,11 @@ pipeline {
                         script {
                             sh 'printenv'
                             def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                            def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()                           
+                            def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()  
+                            imageTag="${env.BRANCH_NAME}-${date}-${gitShortCommit}"                           
                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                 sh """
-                                TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}" \
+                                TAG="${imageTag}" \
                                 ./e2e-k8s.sh \
                                 --skip-export-logs \
                                 --skip-install \
@@ -61,7 +63,9 @@ pipeline {
                                 --skip-setup \
                                 --skip-test                               
                                 """
-                    
+                            // stash imageTag info for rebuild install & E2E Test only
+                            sh "echo ${imageTag} > imageTag.txt"
+                            stash includes: 'imageTag.txt', name: 'imageTag'
                             }
                         }
                     }
@@ -91,19 +95,27 @@ pipeline {
                                         script {
                                             sh 'printenv'
                                             def clusterEnabled = "false"
-                                            def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
+                                            // def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
                                             if ("${MILVUS_SERVER_TYPE}" == "distributed") {
                                                 clusterEnabled = "true"
-                                                setMemoryResourceLimitArgs="--set queryNode.resources.limits.memory=4Gi"
+                                                // setMemoryResourceLimitArgs="--set queryNode.resources.limits.memory=4Gi"
                                             }
-
-                                            def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                                            def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                                             if ("${MILVUS_CLIENT}" == "pymilvus") {
+                                                if ("${imageTag}"==''){
+                                                    dir ("imageTag"){
+                                                        try{
+                                                            unstash 'imageTag'
+                                                            imageTag=sh(returnStdout: true, script: 'cat imageTag.txt | tr -d \'\n\r\'')
+                                                        }catch(e){
+                                                            print "No Image Tag info remained ,please rerun build to build new image."
+                                                            exit 1
+                                                        }
+                                                    }
+                                                }
                                                 withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                     sh """
                                                     MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                                    TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}" \
+                                                    TAG="${imageTag}" \
                                                     ./e2e-k8s.sh \
                                                     --skip-export-logs \
                                                     --skip-cleanup \
@@ -111,7 +123,7 @@ pipeline {
                                                     --skip-test \
                                                     --skip-build \
                                                     --skip-build-image \
-                                                    --install-extra-arg "--set etcd.persistence.storageClass=local-path ${setMemoryResourceLimitArgs} \
+                                                    --install-extra-arg "--set etcd.persistence.storageClass=local-path  \
                                                     --set metrics.serviceMonitor.enabled=true" 
                                                     """
                                                 }
@@ -139,14 +151,8 @@ pipeline {
                                                         sh """ 
                                                         MILVUS_HELM_RELEASE_NAME="${release_name}" \
                                                         MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
-                                                        ./e2e-k8s.sh \
-                                                        --skip-export-logs \
-                                                        --skip-install \
-                                                        --skip-cleanup \
-                                                        --skip-setup \
-                                                        --skip-build \
-                                                        --skip-build-image --test-extra-arg "-n 4 --tags L0 L1 L2 --repeat-scope=session" \
-                                                        --test-timeout ${e2e_timeout_seconds}
+                                                        TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                        ./ci_e2e.sh  "-n 4 --tags L0 L1 L2 --repeat-scope=session"
                                                         """
                                                     } else {
                                                     error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
@@ -166,17 +172,13 @@ pipeline {
                                 body: '$DEFAULT_CONTENT',
                                 recipientProviders: [requestor()],
                                 replyTo: '$DEFAULT_REPLYTO',
-                                to: "qa@zilliz.com"
+                                to: "qa@zilliz.com,devops@zilliz.com"
                             }
                         }
                     }
                     success {
                         container('main') {
                             script {
-
-                                def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                                def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-                                def imageTag= "${env.BRANCH_NAME}-${date}-${gitShortCommit}"
                                 withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                                     sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}'
 

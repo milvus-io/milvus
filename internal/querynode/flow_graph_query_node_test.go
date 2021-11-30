@@ -43,6 +43,8 @@ func TestQueryNodeFlowGraph_consumerFlowGraph(t *testing.T) {
 
 	err = fg.consumerFlowGraph(defaultVChannel, defaultSubName)
 	assert.NoError(t, err)
+
+	fg.close()
 }
 
 func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
@@ -74,4 +76,6 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 	}
 	err = fg.seekQueryNodeFlowGraph(position)
 	assert.Error(t, err)
+
+	fg.close()
 }

@@ -32,8 +32,8 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
     SubSearchResult sub_qr(num_queries, topK, metric_type, round_decimal);
-    std::copy_n(dis, num_queries * topK, sub_qr.get_values());
-    std::copy_n(uids, num_queries * topK, sub_qr.get_labels());
+    std::copy_n(dis, num_queries * topK, sub_qr.get_distances());
+    std::copy_n(uids, num_queries * topK, sub_qr.get_ids());
     sub_qr.round_values();
     return sub_qr;
 }

@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -110,16 +111,23 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 // Init initializes QueryNode's grpc client.
 func (c *Client) Init() error {
 	Params.Init()
-	return nil
+	_, err := c.getGrpcClient()
+	return err
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
+	var kacp = keepalive.ClientParameters{
+		Time:                60 * time.Second, // send pings every 60 seconds if there is no activity
+		Timeout:             6 * time.Second,  // wait 6 second for ping ack before considering the connection dead
+		PermitWithoutStream: true,             // send pings even without active streams
+	}
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("QueryNodeClient try connect ", zap.String("address", c.addr))
 		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
 		defer cancel()
 		conn, err := grpc.DialContext(ctx, c.addr,
+			grpc.WithKeepaliveParams(kacp),
 			grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
@@ -163,15 +171,15 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	if err == context.Canceled || err == context.DeadlineExceeded {
-		return nil, err
+		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
 	}
 	log.Debug("QueryNode Client grpc error", zap.Error(err))
 
 	c.resetConnection()
 
 	ret, err = caller()
-	if err == nil {
-		return ret, nil
+	if err != nil {
+		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
 	}
 	return ret, err
 }

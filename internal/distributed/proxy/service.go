@@ -45,12 +45,15 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
+	"google.golang.org/grpc/keepalive"
 )
 
 const (
+	// GRPCMaxMagSize is the max size of grpc message.
 	GRPCMaxMagSize = 2 << 30
 )
 
+// Server is the Proxy Server
 type Server struct {
 	ctx        context.Context
 	wg         sync.WaitGroup
@@ -88,6 +91,16 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
 
+	var kaep = keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
+		PermitWithoutStream: true,            // Allow pings even when there are no active streams
+	}
+
+	var kasp = keepalive.ServerParameters{
+		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
+		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
+	}
+
 	log.Debug("proxy", zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
@@ -101,6 +114,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.MaxRecvMsgSize(GRPCMaxMagSize),
@@ -118,6 +133,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 }
 
+// Start start the Proxy Server
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
@@ -251,6 +267,7 @@ func (s *Server) start() error {
 	return s.proxy.Start()
 }
 
+// Stop stop the Proxy Server
 func (s *Server) Stop() error {
 	var err error
 	if s.closer != nil {
@@ -273,34 +290,42 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// GetComponentStates get the component states
 func (s *Server) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.proxy.GetComponentStates(ctx)
 }
 
+// GetStatisticsChannel get the statistics channel
 func (s *Server) GetStatisticsChannel(ctx context.Context, request *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.proxy.GetStatisticsChannel(ctx)
 }
 
+// InvalidateCollectionMetaCache notifies Proxy to clear all the meta cache of specific collection.
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return s.proxy.InvalidateCollectionMetaCache(ctx, request)
 }
 
+// ReleaseDQLMessageStream notifies Proxy to release and close the search message stream of specific collection.
 func (s *Server) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	return s.proxy.ReleaseDQLMessageStream(ctx, request)
 }
 
+// CreateCollection notifies Proxy to create a collection
 func (s *Server) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateCollection(ctx, request)
 }
 
+// DropCollection notifies Proxy to drop a collection
 func (s *Server) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.DropCollection(ctx, request)
 }
 
+// HasCollection notifies Proxy to check a collection's existence at specified timestamp
 func (s *Server) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return s.proxy.HasCollection(ctx, request)
 }
 
+// LoadCollection notifies Proxy to load a collection's data
 func (s *Server) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.LoadCollection(ctx, request)
 }
@@ -309,10 +334,12 @@ func (s *Server) ReleaseCollection(ctx context.Context, request *milvuspb.Releas
 	return s.proxy.ReleaseCollection(ctx, request)
 }
 
+// ReleaseCollection notifies Proxy to release a collection's data
 func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.proxy.DescribeCollection(ctx, request)
 }
 
+// ReleaseCollection notifies Proxy to release a collection's data
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	return s.proxy.GetCollectionStatistics(ctx, request)
 }
@@ -446,4 +473,8 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
 	return s.proxy.GetCompactionStateWithPlans(ctx, req)
+}
+
+func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	return s.proxy.GetFlushState(ctx, req)
 }

@@ -58,7 +58,6 @@ func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID) (*InsertBinlogIt
 	reader := NewInsertCodec(nil)
 
 	_, _, serData, err := reader.Deserialize(blobs)
-	defer reader.Close()
 
 	if err != nil {
 		return nil, err
@@ -84,13 +83,13 @@ func (itr *InsertBinlogIterator) Next() (interface{}, error) {
 
 	m := make(map[FieldID]interface{})
 	for fieldID, fieldData := range itr.data.Data {
-		m[fieldID] = fieldData.Get(itr.pos)
+		m[fieldID] = fieldData.GetRow(itr.pos)
 	}
 
 	v := &Value{
-		ID:        itr.data.Data[rootcoord.RowIDField].Get(itr.pos).(int64),
-		Timestamp: itr.data.Data[rootcoord.TimeStampField].Get(itr.pos).(int64),
-		PK:        itr.data.Data[itr.PKfieldID].Get(itr.pos).(int64),
+		ID:        itr.data.Data[rootcoord.RowIDField].GetRow(itr.pos).(int64),
+		Timestamp: itr.data.Data[rootcoord.TimeStampField].GetRow(itr.pos).(int64),
+		PK:        itr.data.Data[itr.PKfieldID].GetRow(itr.pos).(int64),
 		IsDeleted: false,
 		Value:     m,
 	}
@@ -108,7 +107,7 @@ func (itr *InsertBinlogIterator) hasNext() bool {
 	if !ok {
 		return false
 	}
-	return itr.pos < itr.data.Data[rootcoord.RowIDField].Length()
+	return itr.pos < itr.data.Data[rootcoord.RowIDField].RowNum()
 }
 
 func (itr *InsertBinlogIterator) isDisposed() bool {

@@ -193,15 +193,36 @@ func (q *queryCollection) addTSafeWatcher(vChannel Channel) error {
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", vChannel),
 	)
-	go q.startWatcher(q.tSafeWatchers[vChannel].watcherChan())
+	go q.startWatcher(q.tSafeWatchers[vChannel].watcherChan(), q.tSafeWatchers[vChannel].closeCh)
 	return nil
 }
 
-// TODO: add stopWatcher(), add close() to tSafeWatcher
-func (q *queryCollection) startWatcher(channel <-chan bool) {
+func (q *queryCollection) removeTSafeWatcher(channel Channel) error {
+	q.tSafeWatchersMu.Lock()
+	defer q.tSafeWatchersMu.Unlock()
+	if _, ok := q.tSafeWatchers[channel]; !ok {
+		err := errors.New(fmt.Sprintln("tSafeWatcher of queryCollection not exists, ",
+			"collectionID = ", q.collectionID, ", ",
+			"channel = ", channel))
+		return err
+	}
+	q.tSafeWatchers[channel].close()
+	delete(q.tSafeWatchers, channel)
+	log.Debug("remove tSafeWatcher from queryCollection",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", channel),
+	)
+	return nil
+}
+
+func (q *queryCollection) startWatcher(channel <-chan bool, closeCh <-chan struct{}) {
 	for {
 		select {
 		case <-q.releaseCtx.Done():
+			log.Debug("stop queryCollection watcher because queryCollection ctx done", zap.Any("collectionID", q.collectionID))
+			return
+		case <-closeCh:
+			log.Debug("stop queryCollection watcher because watcher closed", zap.Any("collectionID", q.collectionID))
 			return
 		case <-channel:
 			// TODO: check if channel is closed
@@ -248,6 +269,12 @@ func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
 			t = ts
 		}
 	}
+	p, _ := tsoutil.ParseTS(t)
+	log.Debug("waitNewTSafe",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("tSafe", t),
+		zap.Any("tSafe_p", p),
+	)
 	return t, nil
 }
 
@@ -508,7 +535,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			//time.Sleep(10 * time.Millisecond)
 			serviceTime, err := q.waitNewTSafe()
 			if err != nil {
-				log.Error(err.Error())
+				log.Error("[should not happen!] stop doUnsolvedMsg, err = " + err.Error())
 				return
 			}
 			//st, _ := tsoutil.ParseTS(serviceTime)

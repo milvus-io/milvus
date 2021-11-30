@@ -183,10 +183,7 @@ func TransferColumnBasedInsertDataToRowBased(data *InsertData) (
 	tss := data.Data[common.TimeStampField].(*Int64FieldData)
 	rowIds := data.Data[common.RowIDField].(*Int64FieldData)
 
-	ls := fieldDataList{
-		IDs:   make([]FieldID, 0),
-		datas: make([]FieldData, 0),
-	}
+	ls := fieldDataList{}
 	for fieldID := range data.Data {
 		if fieldID == common.TimeStampField || fieldID == common.RowIDField {
 			continue
@@ -209,9 +206,7 @@ func TransferColumnBasedInsertDataToRowBased(data *InsertData) (
 	numRows := tss.RowNum()
 	rows := make([]*commonpb.Blob, numRows)
 	for i := 0; i < numRows; i++ {
-		blob := &commonpb.Blob{
-			Value: make([]byte, 0),
-		}
+		blob := &commonpb.Blob{}
 		var buffer bytes.Buffer
 
 		for j := 0; j < ls.Len(); j++ {

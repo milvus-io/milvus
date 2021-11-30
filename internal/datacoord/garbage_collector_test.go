@@ -37,7 +37,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
 	rootPath := `gc` + funcutil.RandomString(8)
 	//TODO change to Params
-	cli, _, err := initUtOSSEnv(bucketName, rootPath, 0)
+	cli, _, _, _, _, err := initUtOSSEnv(bucketName, rootPath, 0)
 	require.NoError(t, err)
 
 	mockAllocator := newMockAllocator()
@@ -83,11 +83,19 @@ func Test_garbageCollector_basic(t *testing.T) {
 
 }
 
+func validateMinioPrefixElements(t *testing.T, cli *minio.Client, bucketName string, prefix string, elements []string) {
+	var current []string
+	for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		current = append(current, info.Key)
+	}
+	assert.ElementsMatch(t, elements, current)
+}
+
 func Test_garbageCollector_scan(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
 	rootPath := `gc` + funcutil.RandomString(8)
 	//TODO change to Params
-	cli, files, err := initUtOSSEnv(bucketName, rootPath, 6)
+	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 4)
 	require.NoError(t, err)
 
 	mockAllocator := newMockAllocator()
@@ -106,18 +114,19 @@ func Test_garbageCollector_scan(t *testing.T) {
 		})
 		gc.scan()
 
-		current := make([]string, 0, 6)
-		for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: rootPath, Recursive: true}) {
-			current = append(current, info.Key)
-		}
-		assert.ElementsMatch(t, files, current)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+
+		gc.close()
 	})
 	t.Run("hit, no gc", func(t *testing.T) {
 		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Flushed
-		segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{files[0]}}}
-		segment.Statslogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{files[1]}}}
-		segment.Deltalogs = []*datapb.DeltaLogInfo{{DeltaLogPath: files[2]}}
+		segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{inserts[0]}}}
+		segment.Statslogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{stats[0]}}}
+		segment.Deltalogs = []*datapb.DeltaLogInfo{{DeltaLogPath: delta[0]}}
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
@@ -132,12 +141,11 @@ func Test_garbageCollector_scan(t *testing.T) {
 		})
 		gc.start()
 		gc.scan()
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
-		current := make([]string, 0, 6)
-		for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: rootPath, Recursive: true}) {
-			current = append(current, info.Key)
-		}
-		assert.ElementsMatch(t, files, current)
 		gc.close()
 	})
 
@@ -145,9 +153,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Dropped
 		segment.DroppedAt = uint64(time.Now().Add(-time.Hour).UnixNano())
-		segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{files[0]}}}
-		segment.Statslogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{files[1]}}}
-		segment.Deltalogs = []*datapb.DeltaLogInfo{{DeltaLogPath: files[2]}}
+		segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{inserts[0]}}}
+		segment.Statslogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{stats[0]}}}
+		segment.Deltalogs = []*datapb.DeltaLogInfo{{DeltaLogPath: delta[0]}}
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
@@ -160,14 +168,12 @@ func Test_garbageCollector_scan(t *testing.T) {
 			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
-		gc.start()
-		gc.scan()
+		gc.clearEtcd()
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
-		current := make([]string, 0, 3)
-		for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: rootPath, Recursive: true}) {
-			current = append(current, info.Key)
-		}
-		assert.ElementsMatch(t, files[3:], current)
 		gc.close()
 	})
 	t.Run("missing gc all", func(t *testing.T) {
@@ -182,12 +188,12 @@ func Test_garbageCollector_scan(t *testing.T) {
 		})
 		gc.start()
 		gc.scan()
+		gc.clearEtcd()
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), []string{})
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), []string{})
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), []string{})
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
-		current := make([]string, 0, 3)
-		for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: rootPath, Recursive: true}) {
-			current = append(current, info.Key)
-		}
-		assert.Equal(t, 0, len(current))
 		gc.close()
 	})
 
@@ -195,38 +201,66 @@ func Test_garbageCollector_scan(t *testing.T) {
 }
 
 // initialize unit test sso env
-func initUtOSSEnv(bucket, root string, n int) (*minio.Client, []string, error) {
+func initUtOSSEnv(bucket, root string, n int) (cli *minio.Client, inserts []string, stats []string, delta []string, other []string, err error) {
 	Params.Init()
-	cli, err := minio.New(Params.MinioAddress, &minio.Options{
+	cli, err = minio.New(Params.MinioAddress, &minio.Options{
 		Creds:  credentials.NewStaticV4(Params.MinioAccessKeyID, Params.MinioSecretAccessKey, ""),
 		Secure: Params.MinioUseSSL,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	has, err := cli.BucketExists(context.TODO(), bucket)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	if !has {
 		err = cli.MakeBucket(context.TODO(), bucket, minio.MakeBucketOptions{})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 	}
-	keys := make([]string, 0, n)
+	inserts = make([]string, 0, n)
+	stats = make([]string, 0, n)
+	delta = make([]string, 0, n)
+	other = make([]string, 0, n)
+
 	content := []byte("test")
 	for i := 0; i < n; i++ {
 		reader := bytes.NewReader(content)
 		token := funcutil.RandomString(8)
-		token = path.Join(root, token)
-		info, err := cli.PutObject(context.TODO(), bucket, token, reader, int64(len(content)), minio.PutObjectOptions{})
+		// insert
+		filePath := path.Join(root, insertLogPrefix, token)
+		info, err := cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
-		keys = append(keys, info.Key)
+		inserts = append(inserts, info.Key)
+		// stats
+		filePath = path.Join(root, statsLogPrefix, token)
+		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		stats = append(stats, info.Key)
+
+		// delta
+		filePath = path.Join(root, deltaLogPrefix, token)
+		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		delta = append(delta, info.Key)
+
+		// other
+		filePath = path.Join(root, `indexes`, token)
+		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		other = append(other, info.Key)
 	}
-	return cli, keys, nil
+	return cli, inserts, stats, delta, other, nil
 }
 
 func cleanupOSS(cli *minio.Client, bucket, root string) {

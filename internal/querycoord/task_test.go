@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
@@ -1028,4 +1029,84 @@ func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func TestMergeWatchDeltaChannelInfo(t *testing.T) {
+	infos := []*datapb.VchannelInfo{
+		{
+			ChannelName: "test-1",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-1",
+				Timestamp:   9,
+			},
+		},
+		{
+			ChannelName: "test-2",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-2",
+				Timestamp:   10,
+			},
+		},
+		{
+			ChannelName: "test-1",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-1",
+				Timestamp:   15,
+			},
+		},
+		{
+			ChannelName: "test-2",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-2",
+				Timestamp:   16,
+			},
+		},
+		{
+			ChannelName: "test-1",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-1",
+				Timestamp:   5,
+			},
+		},
+		{
+			ChannelName: "test-2",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-2",
+				Timestamp:   4,
+			},
+		},
+		{
+			ChannelName: "test-1",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-1",
+				Timestamp:   3,
+			},
+		},
+		{
+			ChannelName: "test-2",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-2",
+				Timestamp:   5,
+			},
+		},
+	}
+
+	results := mergeWatchDeltaChannelInfo(infos)
+	expected := []*datapb.VchannelInfo{
+		{
+			ChannelName: "test-1",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-1",
+				Timestamp:   3,
+			},
+		},
+		{
+			ChannelName: "test-2",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "test-2",
+				Timestamp:   4,
+			},
+		},
+	}
+	assert.ElementsMatch(t, expected, results)
 }

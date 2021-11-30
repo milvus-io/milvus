@@ -41,7 +41,7 @@ type flushManager interface {
 	// notify flush manager del buffer data
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
 	// injectFlush injects compaction or other blocking task before flush sync
-	injectFlush(injection taskInjection, segments ...UniqueID)
+	injectFlush(injection *taskInjection, segments ...UniqueID)
 	// close handles resource clean up
 	close()
 }
@@ -73,7 +73,7 @@ var _ flushManager = (*rendezvousFlushManager)(nil)
 type orderFlushQueue struct {
 	sync.Once
 	segmentID UniqueID
-	injectCh  chan taskInjection
+	injectCh  chan *taskInjection
 
 	// MsgID => flushTask
 	working    sync.Map
@@ -93,7 +93,7 @@ func newOrderFlushQueue(segID UniqueID, f notifyMetaFunc) *orderFlushQueue {
 	q := &orderFlushQueue{
 		segmentID:  segID,
 		notifyFunc: f,
-		injectCh:   make(chan taskInjection, 100),
+		injectCh:   make(chan *taskInjection, 100),
 	}
 	return q
 }
@@ -159,7 +159,7 @@ func (q *orderFlushQueue) enqueueDelFlush(task flushDeleteTask, deltaLogs *DelDa
 // inject performs injection for current task queue
 // send into injectCh in there is running task
 // or perform injection logic here if there is no injection
-func (q *orderFlushQueue) inject(inject taskInjection) {
+func (q *orderFlushQueue) inject(inject *taskInjection) {
 	q.injectCh <- inject
 }
 
@@ -187,8 +187,13 @@ func (h *injectHandler) handleInjection(q *orderFlushQueue) {
 			injectDone := make(chan struct{})
 			q.tailCh = injectDone
 			q.tailMut.Unlock()
-			inject.injected <- struct{}{}
-			<-inject.injectOver
+			// notify one injection done
+			inject.injectOne()
+			ok := <-inject.injectOver
+			// apply injection
+			if ok {
+				q.postInjection = inject.postInjection
+			}
 			close(injectDone)
 		case <-h.done:
 			return
@@ -346,7 +351,8 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 }
 
 // injectFlush inject process before task finishes
-func (m *rendezvousFlushManager) injectFlush(injection taskInjection, segments ...UniqueID) {
+func (m *rendezvousFlushManager) injectFlush(injection *taskInjection, segments ...UniqueID) {
+	go injection.waitForInjected()
 	for _, segmentID := range segments {
 		m.getFlushQueue(segmentID).inject(injection)
 	}
@@ -463,6 +469,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 			zap.Int("Length of Field2Stats", len(fieldStats)),
 			zap.Int("Length of Field2Deltalogs", len(deltaInfos)),
+			zap.String("vChannelName", dsService.vchannelName),
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{

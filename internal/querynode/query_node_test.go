@@ -199,7 +199,7 @@ func newQueryNodeMock() *QueryNode {
 	svr.streaming = newStreaming(ctx, streamingReplica, msFactory, etcdKV, tsReplica)
 	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, msFactory)
 	svr.statsService = newStatsService(ctx, svr.historical.replica, nil, msFactory)
-	svr.loader = newSegmentLoader(ctx, nil, nil, svr.historical.replica, svr.streaming.replica, etcdKV)
+	svr.loader = newSegmentLoader(ctx, nil, nil, svr.historical.replica, svr.streaming.replica, etcdKV, msgstream.NewPmsFactory())
 	svr.etcdKV = etcdKV
 
 	return svr

@@ -39,6 +39,8 @@ service DataCoord {
   rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
 
   rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
+  rpc GetFlushState(milvus.GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
+  rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 }
 
 service DataNode {
@@ -166,6 +168,7 @@ message VchannelInfo {
   internal.MsgPosition seek_position = 3;
   repeated SegmentInfo unflushedSegments = 4;
   repeated SegmentInfo flushedSegments = 5;
+  repeated SegmentInfo dropped_segments = 6;
 }
 
 message WatchDmChannelsRequest {
@@ -360,5 +363,26 @@ message WatchChannelsRequest {
 }
 
 message WatchChannelsResponse {
+  common.Status status = 1;
+}
+
+message DropVirtualChannelRequest {
+  common.MsgBase base = 1; 
+  string channel_name = 2; 
+  repeated DropVirtualChannelSegment segments = 3;
+}
+
+message DropVirtualChannelSegment {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  repeated FieldBinlog field2BinlogPaths = 3;
+  repeated FieldBinlog field2StatslogPaths = 4;
+  repeated DeltaLogInfo deltalogs = 5;
+  internal.MsgPosition startPosition = 6;
+  internal.MsgPosition checkPoint = 7;
+  int64 numOfRows = 8;
+}
+
+message DropVirtualChannelResponse {
   common.Status status = 1;
 }

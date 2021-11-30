@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math"
 	"sort"
+	"syscall"
 
 	"fmt"
 	"math/rand"
@@ -209,6 +210,8 @@ func (qc *QueryCoord) Start() error {
 		if err := qc.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 
 	return nil

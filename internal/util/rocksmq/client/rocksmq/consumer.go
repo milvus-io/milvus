@@ -47,7 +47,7 @@ type ConsumerOptions struct {
 	MessageChannel chan Message
 }
 
-// ConsumerMessage is the message content of a consumer message
+// Message is the message content of a consumer message
 type Message struct {
 	Consumer
 	MsgID   UniqueID

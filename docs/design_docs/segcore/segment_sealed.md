@@ -18,9 +18,9 @@ Search is executable as long as all the columns involved in the search are loade
    2. All the other columns loaded must match the same row count
 3. `xxx_ready_bitset_` & `system_ready_count_`
    1. Used to record whether the corresponding column is loaded. Bitset corresponds to FieldOffset
-   2. Query is executable if and only if the following conditions are met:
+   2. Query is executable if and only if all the following conditions are met:
       1. system_ready_count_ == 2， which means all the system columns' RowId/Timestamp are loaded
-      2. The scalar columns involved in the query has been loaded
+      2. The scalar columns involved in the query is loaded
       3. For the vector columns involved in the query, either the original data or the index is loaded
 4. `scalar_indexings_`: store scalar index
 

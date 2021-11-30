@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"os"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
@@ -48,6 +47,7 @@ func getSystemInfoMetrics(
 
 	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyID)
 	identifierMap[proxyRoleName] = int(node.session.ServerID)
+
 	proxyTopologyNode := metricsinfo.SystemTopologyNode{
 		Identifier: int(node.session.ServerID),
 		Connected:  make([]metricsinfo.ConnectionEdge, 0),
@@ -65,10 +65,7 @@ func getSystemInfoMetrics(
 					Disk:         metricsinfo.GetDiskCount(),
 					DiskUsage:    metricsinfo.GetDiskUsage(),
 				},
-				SystemInfo: metricsinfo.DeployMetrics{
-					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-				},
+				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: Params.CreatedTime.String(),
 				UpdatedTime: Params.UpdatedTime.String(),
 				Type:        typeutil.ProxyRole,
@@ -80,6 +77,7 @@ func getSystemInfoMetrics(
 			},
 		},
 	}
+	metricsinfo.FillDeployMetricsWithEnv(&(proxyTopologyNode.Infos.(*metricsinfo.ProxyInfos).SystemInfo))
 
 	queryCoordResp, queryCoordErr := node.queryCoord.GetMetrics(ctx, request)
 	queryCoordRoleName := ""

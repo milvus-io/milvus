@@ -351,8 +351,8 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     }();
 
     SearchResult results;
-    results.result_distances_ = std::move(sub_qr.mutable_values());
-    results.internal_seg_offsets_ = std::move(sub_qr.mutable_labels());
+    results.distances_ = std::move(sub_qr.mutable_distances());
+    results.ids_ = std::move(sub_qr.mutable_ids());
     results.topk_ = dataset.topk;
     results.num_queries_ = dataset.num_queries;
 
@@ -637,11 +637,6 @@ SegmentSealedImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, T
     }
     auto mask = TimestampIndex::GenerateBitset(timestamp, range, this->timestamps_.data(), this->timestamps_.size());
     bitset_chunk &= mask;
-}
-
-SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema) {
-    return std::make_unique<SegmentSealedImpl>(schema);
 }
 
 }  // namespace milvus::segcore

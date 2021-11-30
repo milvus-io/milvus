@@ -17,7 +17,6 @@
 package msgstream
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,7 +25,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -35,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
 )
 
 var _ MsgStream = (*mqMsgStream)(nil)
@@ -46,6 +45,8 @@ type mqMsgStream struct {
 	producerChannels []string
 	consumers        map[string]mqclient.Consumer
 	consumerChannels []string
+	readers          map[string]mqclient.Reader
+	readerChannels   []string
 	repackFunc       RepackFunc
 	unmarshal        UnmarshalDispatcher
 	receiveBuf       chan *MsgPack
@@ -54,6 +55,7 @@ type mqMsgStream struct {
 	bufSize          int64
 	producerLock     *sync.Mutex
 	consumerLock     *sync.Mutex
+	readerLock       *sync.Mutex
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
@@ -66,8 +68,10 @@ func NewMqMsgStream(ctx context.Context,
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	producers := make(map[string]mqclient.Producer)
 	consumers := make(map[string]mqclient.Consumer)
+	readers := make(map[string]mqclient.Reader)
 	producerChannels := make([]string, 0)
 	consumerChannels := make([]string, 0)
+	readerChannels := make([]string, 0)
 	receiveBuf := make(chan *MsgPack, receiveBufSize)
 
 	stream := &mqMsgStream{
@@ -77,12 +81,15 @@ func NewMqMsgStream(ctx context.Context,
 		producerChannels: producerChannels,
 		consumers:        consumers,
 		consumerChannels: consumerChannels,
+		readers:          readers,
+		readerChannels:   readerChannels,
 		unmarshal:        unmarshal,
 		bufSize:          bufSize,
 		receiveBuf:       receiveBuf,
 		streamCancel:     streamCancel,
 		producerLock:     &sync.Mutex{},
 		consumerLock:     &sync.Mutex{},
+		readerLock:       &sync.Mutex{},
 		wait:             &sync.WaitGroup{},
 	}
 
@@ -125,19 +132,18 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 }
 
 // Create consumer to receive message from channels, with initial position
+// if initial position is set to latest, last message in the channel is exclusive
 func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
 		}
 		fn := func() error {
-			receiveChannel := make(chan mqclient.Message, ms.bufSize)
 			pc, err := ms.client.Subscribe(mqclient.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
-				Type:                        mqclient.KeyShared,
+				Type:                        mqclient.Exclusive,
 				SubscriptionInitialPosition: position,
-				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
 				return err
@@ -155,6 +161,40 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200))
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
+			panic(errMsg)
+		}
+	}
+}
+
+// AsProducer create producer to send message to channels
+func (ms *mqMsgStream) AsReader(channels []string, subName string) {
+	for _, channel := range channels {
+		if len(channel) == 0 {
+			log.Error("MsgStream asProducer's channel is a empty string")
+			break
+		}
+		fn := func() error {
+			r, err := ms.client.CreateReader(mqclient.ReaderOptions{
+				Topic:                  channel,
+				StartMessageID:         ms.client.EarliestMessageID(),
+				SubscriptionRolePrefix: subName,
+			})
+			if err != nil {
+				return err
+			}
+			if r == nil {
+				return errors.New("reader is nil")
+			}
+
+			ms.readerLock.Lock()
+			defer ms.readerLock.Unlock()
+			ms.readers[channel] = r
+			ms.readerChannels = append(ms.readerChannels, channel)
+			return nil
+		}
+		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200))
+		if err != nil {
+			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
 	}
@@ -445,13 +485,19 @@ func (ms *mqMsgStream) Consume() *MsgPack {
 
 func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg mqclient.Message) (TsMsg, error) {
 	header := commonpb.MsgHeader{}
+	if msg.Payload() == nil {
+		return nil, fmt.Errorf("failed to unmarshal message header, payload is empty")
+	}
 	err := proto.Unmarshal(msg.Payload(), &header)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to unmarshal message header, err %s", err.Error())
+		return nil, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
+	}
+	if header.Base == nil {
+		return nil, fmt.Errorf("failed to unmarshal message, header is uncomplete")
 	}
 	tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), header.Base.MsgType)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to unmarshal tsMsg, err %s", err.Error())
+		return nil, fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
 	}
 
 	// set msg info to tsMsg
@@ -475,7 +521,10 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				return
 			}
 			consumer.Ack(msg)
-
+			if msg.Payload() == nil {
+				log.Warn("MqMsgStream get msg whose payload is nil")
+				continue
+			}
 			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
 			if err != nil {
 				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
@@ -510,7 +559,61 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 	return ms.receiveBuf
 }
 
-// Seek reset the subscription associated with this consumer to a specific position
+func (ms *mqMsgStream) SeekReaders(msgPositions []*internalpb.MsgPosition) error {
+	for _, mp := range msgPositions {
+		reader, ok := ms.readers[mp.ChannelName]
+		if !ok {
+			return fmt.Errorf("channel %s not subscribed", mp.ChannelName)
+		}
+		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
+		if err != nil {
+			return err
+		}
+		log.Debug("MsgStream reader begin to seek", zap.Any("MessageID", mp.MsgID))
+		err = reader.Seek(messageID)
+		if err != nil {
+			log.Debug("Failed to seek", zap.Error(err))
+			return err
+		}
+	}
+	return nil
+}
+
+func (ms *mqMsgStream) Next(ctx context.Context, channelName string) (TsMsg, error) {
+	reader, ok := ms.readers[channelName]
+	if !ok {
+		return nil, fmt.Errorf("reader for channel %s is not exist", channelName)
+	}
+	msg, err := reader.Next(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Payload() == nil {
+		log.Warn("mqMsgStream reader Next get msg whose payload is nil")
+		return nil, nil
+	}
+	tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
+	if err != nil {
+		log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+		return nil, errors.New("Failed to getTsMsgFromConsumerMsg")
+	}
+	pos := tsMsg.Position()
+	tsMsg.SetPosition(&MsgPosition{
+		ChannelName: pos.ChannelName,
+		MsgID:       pos.MsgID,
+		Timestamp:   tsMsg.BeginTs(),
+	})
+	return tsMsg, nil
+}
+func (ms *mqMsgStream) HasNext(channelName string) bool {
+	reader, ok := ms.readers[channelName]
+	if !ok {
+		return false
+	}
+	return reader.HasNext()
+}
+
+// Seek reset the subscription associated with this consumer to a specific position, the seek position is exclusive
 // User has to ensure mq_msgstream is not closed before seek, and the seek position is already written.
 func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	for _, mp := range msgPositions {
@@ -523,25 +626,12 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 			return err
 		}
 		log.Debug("MsgStream begin to seek", zap.Any("MessageID", mp.MsgID))
-		err = consumer.Seek(messageID)
+		err = consumer.Seek(messageID, false)
 		if err != nil {
 			log.Debug("Failed to seek", zap.Error(err))
 			return err
 		}
 		log.Debug("MsgStream seek finished", zap.Any("MessageID", messageID))
-		if consumer.ConsumeAfterSeek() {
-			log.Debug("MsgStream start to pop one message after seek")
-			msg, ok := <-consumer.Chan()
-			if !ok {
-				return errors.New("consumer closed")
-			}
-			log.Debug("MsgStream finish to pop one message after seek")
-			consumer.Ack(msg)
-			if !bytes.Equal(msg.ID().Serialize(), messageID.Serialize()) {
-				err = fmt.Errorf("seek msg not correct")
-				log.Error("msMsgStream seek", zap.Error(err))
-			}
-		}
 	}
 	return nil
 }
@@ -619,13 +709,11 @@ func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName strin
 			continue
 		}
 		fn := func() error {
-			receiveChannel := make(chan mqclient.Message, ms.bufSize)
 			pc, err := ms.client.Subscribe(mqclient.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
-				Type:                        mqclient.KeyShared,
+				Type:                        mqclient.Exclusive,
 				SubscriptionInitialPosition: position,
-				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
 				return err
@@ -669,6 +757,11 @@ func (ms *MqTtMsgStream) Close() {
 	for _, consumer := range ms.consumers {
 		if consumer != nil {
 			consumer.Close()
+		}
+	}
+	for _, reader := range ms.readers {
+		if reader != nil {
+			reader.Close()
 		}
 	}
 }
@@ -788,6 +881,10 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
 			}
 			consumer.Ack(msg)
 
+			if msg.Payload() == nil {
+				log.Warn("MqTtMsgStream get msg whose payload is nil")
+				continue
+			}
 			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
 			if err != nil {
 				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
@@ -861,7 +958,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if err != nil {
 			return err
 		}
-		err = consumer.Seek(seekMsgID)
+		err = consumer.Seek(seekMsgID, true)
 		if err != nil {
 			return err
 		}
@@ -881,16 +978,10 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 			return fmt.Errorf("Failed to seek, error %s", err.Error())
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
-		ms.chanMsgPos[consumer] = mp
+		ms.chanMsgPos[consumer] = (proto.Clone(mp)).(*MsgPosition)
 
-		// rmq seek behavior (position, ...)
-		// pulsar seek behavior [position, ...)
-		// skip one tt for pulsar
-
-		runLoop := false
-		if consumer.ConsumeAfterSeek() {
-			runLoop = true
-		}
+		// skip all data before current tt
+		runLoop := true
 		for runLoop {
 			select {
 			case <-ms.ctx.Done():

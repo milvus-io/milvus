@@ -250,8 +250,11 @@ func TestExprMultiRange_Str(t *testing.T) {
 		"BoolN1 == True",
 		"True == BoolN1",
 		"BoolN1 == False",
+	}
+	invalidExprs := []string{
 		"BoolN1 == 1",
 		"BoolN1 == 0",
+		"BoolN1 > 0",
 	}
 
 	fields := []*schemapb.FieldSchema{
@@ -280,6 +283,13 @@ func TestExprMultiRange_Str(t *testing.T) {
 		fmt.Printf("case %d: %s\n", offset, exprStr)
 		planProto, err := createQueryPlan(schema, exprStr, "fakevec", queryInfo)
 		assert.Nil(t, err)
+		dbgStr := proto.MarshalTextString(planProto)
+		println(dbgStr)
+	}
+	for offset, exprStr := range invalidExprs {
+		fmt.Printf("invalid case %d: %s\n", offset, exprStr)
+		planProto, err := createQueryPlan(schema, exprStr, "fakevec", queryInfo)
+		assert.Error(t, err)
 		dbgStr := proto.MarshalTextString(planProto)
 		println(dbgStr)
 	}

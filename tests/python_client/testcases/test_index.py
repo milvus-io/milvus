@@ -1275,7 +1275,7 @@ class TestIndexAsync:
         result = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, default_index, _async=True)
         connect.drop_collection(collection)
-        with pytest.raises(Exception, match=f'DescribeIndex failed, error = collection {collection} not found'):
+        with pytest.raises(Exception, match=f'DescribeIndex failed: collection {collection} not found'):
             connect.describe_index(collection, "")
 
     @pytest.mark.tags(CaseLabel.L2)

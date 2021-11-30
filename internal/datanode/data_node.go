@@ -30,7 +30,10 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/common"
 
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -103,7 +106,7 @@ type DataNode struct {
 	vchan2SyncService map[string]*dataSyncService // vchannel name
 	vchan2FlushChs    map[string]chan flushMsg    // vchannel name to flush channels
 
-	clearSignal        chan UniqueID // collection ID
+	clearSignal        chan string // vchannel name
 	segmentCache       *Cache
 	compactionExecutor *compactionExecutor
 
@@ -136,7 +139,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 
 		vchan2SyncService: make(map[string]*dataSyncService),
 		vchan2FlushChs:    make(map[string]chan flushMsg),
-		clearSignal:       make(chan UniqueID, 100),
+		clearSignal:       make(chan string, 100),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
@@ -184,6 +187,8 @@ func (node *DataNode) Register() error {
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 
 	Params.initMsgChannelSubName()
@@ -346,16 +351,14 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 }
 
 // BackGroundGC runs in background to release datanode resources
-func (node *DataNode) BackGroundGC(collIDCh <-chan UniqueID) {
+func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 	log.Info("DataNode Background GC Start")
 	for {
 		select {
-		case collID := <-collIDCh:
-			log.Info("GC collection", zap.Int64("ID", collID))
-			node.stopCompactionOfCollection(collID)
-			for _, vchanName := range node.getChannelNamesbyCollectionID(collID) {
-				node.ReleaseDataSyncService(vchanName)
-			}
+		case vChan := <-vChannelCh:
+			log.Info("GC flowgraph", zap.String("vChan", vChan))
+			node.stopCompactionOfVChannel(vChan)
+			node.ReleaseDataSyncService(vChan)
 		case <-node.ctx.Done():
 			log.Info("DataNode ctx done")
 			return
@@ -473,9 +476,14 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 // GetComponentStates will return current state of DataNode
 func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
+	nodeID := common.NotRegisteredID
+	if node.session != nil && node.session.Registered() {
+		nodeID = node.session.ServerID
+	}
 	states := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
-			NodeID:    Params.NodeID,
+			// NodeID:    Params.NodeID, // will race with DataNode.Register()
+			NodeID:    nodeID,
 			Role:      node.Role,
 			StateCode: node.State.Load().(internalpb.StateCode),
 		},
@@ -636,6 +644,10 @@ func (node *DataNode) Stop() error {
 	}
 
 	node.session.Revoke(time.Second)
+
+	// https://github.com/milvus-io/milvus/issues/12282
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	return nil
 }
 
@@ -729,10 +741,10 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	}, nil
 }
 
-func (node *DataNode) stopCompactionOfCollection(collID UniqueID) {
-	log.Debug("Stop compaction of collection", zap.Int64("collection ID", collID))
+func (node *DataNode) stopCompactionOfVChannel(vChan string) {
+	log.Debug("Stop compaction of vChannel", zap.String("vChannelName", vChan))
 
-	node.compactionExecutor.stopExecutingtaskByCollectionID(collID)
+	node.compactionExecutor.stopExecutingtaskByVChannelName(vChan)
 }
 
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {

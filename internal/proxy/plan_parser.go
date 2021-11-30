@@ -567,15 +567,6 @@ func (pc *parserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType schemap
 					Int64Val: int64(node.Value),
 				},
 			}
-		} else if dataType == schemapb.DataType_Bool {
-			gv = &planpb.GenericValue{
-				Val: &planpb.GenericValue_BoolVal{},
-			}
-			if node.Value == 1 {
-				gv.Val.(*planpb.GenericValue_BoolVal).BoolVal = true
-			} else {
-				gv.Val.(*planpb.GenericValue_BoolVal).BoolVal = false
-			}
 		} else {
 			return nil, fmt.Errorf("type mismatch")
 		}

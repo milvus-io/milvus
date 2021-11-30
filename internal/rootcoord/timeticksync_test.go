@@ -13,90 +13,99 @@ package rootcoord
 
 import (
 	"context"
-	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
 )
 
-func TestTimetickSync_sendToChannel(t *testing.T) {
-	tt := newTimeTickSync(nil)
-	tt.sendToChannel()
+func TestTimetickSync(t *testing.T) {
+	ctx := context.Background()
 
-	ctt := &internalpb.ChannelTimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_TimeTick,
-		},
+	session := &sessionutil.Session{
+		ServerID: 100,
 	}
 
-	cttm := newChannelTimeTickMsg(ctt)
-	tt.proxyTimeTick[1] = cttm
-	tt.sendToChannel()
-
-	tt.proxyTimeTick[2] = nil
-	tt.sendToChannel()
-}
-
-func TestTimetickSync_RemoveDdlTimeTick(t *testing.T) {
-	tt := newTimeTickSync(nil)
-	tt.AddDdlTimeTick(uint64(1), "1")
-	tt.AddDdlTimeTick(uint64(2), "2")
-	tt.RemoveDdlTimeTick(uint64(1), "1")
-	assert.Equal(t, tt.ddlMinTs, uint64(2))
-}
-
-func TestTimetickSync_UpdateTimeTick(t *testing.T) {
-	tt := newTimeTickSync(nil)
-
-	ctt := &internalpb.ChannelTimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_TimeTick,
-		},
-		DefaultTimestamp: 0,
-	}
-
-	err := tt.UpdateTimeTick(ctt, "1")
+	factory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"pulsarAddress":  Params.PulsarAddress,
+		"receiveBufSize": 1024,
+		"pulsarBufSize":  1024}
+	err := factory.SetParams(m)
 	assert.Nil(t, err)
 
-	ctt.ChannelNames = append(ctt.ChannelNames, "a")
-	err = tt.UpdateTimeTick(ctt, "1")
-	assert.Error(t, err)
+	//chanMap := map[typeutil.UniqueID][]string{
+	//	int64(1): {"rootcoord-dml_0"},
+	//}
 
-	core := &Core{
-		ctx:       context.TODO(),
-		cancel:    nil,
-		ddlLock:   sync.Mutex{},
-		msFactory: nil,
-		session: &sessionutil.Session{
-			ServerID: 100,
-		},
-	}
-	tt.core = core
+	Params.DmlChannelNum = 2
+	Params.DmlChannelName = "rootcoord-dml"
+	Params.DeltaChannelName = "rootcoord-delta"
+	ttSync := newTimeTickSync(ctx, session, factory, nil)
 
-	ctt.Timestamps = append(ctt.Timestamps, uint64(2))
-	ctt.Base.SourceID = int64(1)
-	cttm := newChannelTimeTickMsg(ctt)
-	tt.proxyTimeTick[ctt.Base.SourceID] = cttm
-	ctt.DefaultTimestamp = uint64(200)
-	tt.ddlMinTs = uint64(100)
-	err = tt.UpdateTimeTick(ctt, "1")
-	assert.Nil(t, err)
+	t.Run("sendToChannel", func(t *testing.T) {
+		ttSync.sendToChannel()
 
-	tt.ddlMinTs = uint64(300)
-	tt.proxyTimeTick[ctt.Base.SourceID].in.DefaultTimestamp = uint64(1)
-	tt.core.session.ServerID = int64(1)
-	err = tt.UpdateTimeTick(ctt, "1")
-	assert.Nil(t, err)
-}
+		ttSync.proxyTimeTick[1] = nil
+		ttSync.sendToChannel()
 
-func Test_minTimeTick(t *testing.T) {
-	tts := make([]uint64, 2)
-	tts[0] = uint64(5)
-	tts[1] = uint64(3)
+		msg := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_TimeTick,
+			},
+		}
+		ttSync.proxyTimeTick[1] = newChanTsMsg(msg, 1)
+		ttSync.sendToChannel()
+	})
 
-	ret := minTimeTick(tts...)
-	assert.Equal(t, ret, tts[1])
+	t.Run("RemoveDdlTimeTick", func(t *testing.T) {
+		ttSync.addDdlTimeTick(uint64(1), "1")
+		ttSync.addDdlTimeTick(uint64(2), "2")
+		ttSync.removeDdlTimeTick(uint64(1), "1")
+		assert.Equal(t, ttSync.ddlMinTs, uint64(2))
+	})
+
+	t.Run("UpdateTimeTick", func(t *testing.T) {
+		msg := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: int64(1),
+			},
+			DefaultTimestamp: 0,
+		}
+
+		err := ttSync.updateTimeTick(msg, "1")
+		assert.Nil(t, err)
+
+		msg.ChannelNames = append(msg.ChannelNames, "a")
+		err = ttSync.updateTimeTick(msg, "1")
+		assert.Error(t, err)
+
+		msg.Timestamps = append(msg.Timestamps, uint64(2))
+		msg.DefaultTimestamp = uint64(200)
+		cttMsg := newChanTsMsg(msg, 1)
+		ttSync.proxyTimeTick[msg.Base.SourceID] = cttMsg
+
+		ttSync.ddlMinTs = uint64(100)
+		err = ttSync.updateTimeTick(msg, "1")
+		assert.Nil(t, err)
+
+		ttSync.ddlMinTs = uint64(300)
+		ttSync.session.ServerID = int64(1)
+		err = ttSync.updateTimeTick(msg, "1")
+		assert.Nil(t, err)
+	})
+
+	t.Run("minTimeTick", func(t *testing.T) {
+		tts := make([]uint64, 2)
+		tts[0] = uint64(5)
+		tts[1] = uint64(3)
+
+		ret := minTimeTick(tts...)
+		assert.Equal(t, ret, tts[1])
+	})
 }

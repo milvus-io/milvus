@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -738,11 +739,12 @@ func TestStream_PulsarTtMsgStream_NoSeek(t *testing.T) {
 	assert.Equal(t, o3.BeginTs, p3.BeginTs)
 
 }
+
 func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
-	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
-	producerChannels := []string{c1, c2}
-	consumerChannels := []string{c1, c2}
+	c1 := funcutil.RandomString(8)
+	producerChannels := []string{c1}
+	consumerChannels := []string{c1}
 	consumerSubName := funcutil.RandomString(8)
 
 	msgPack0 := MsgPack{}
@@ -750,6 +752,7 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 
 	msgPack1 := MsgPack{}
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 19))
 
 	msgPack2 := MsgPack{}
@@ -763,7 +766,14 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	msgPack4.Msgs = append(msgPack4.Msgs, getTimeTickMsg(11))
 
 	msgPack5 := MsgPack{}
-	msgPack5.Msgs = append(msgPack5.Msgs, getTimeTickMsg(15))
+	msgPack5.Msgs = append(msgPack5.Msgs, getTsMsg(commonpb.MsgType_Insert, 12))
+	msgPack5.Msgs = append(msgPack5.Msgs, getTsMsg(commonpb.MsgType_Insert, 13))
+
+	msgPack6 := MsgPack{}
+	msgPack6.Msgs = append(msgPack6.Msgs, getTimeTickMsg(15))
+
+	msgPack7 := MsgPack{}
+	msgPack7.Msgs = append(msgPack7.Msgs, getTimeTickMsg(20))
 
 	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
 	outputStream := getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
@@ -778,18 +788,66 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	assert.Nil(t, err)
 	err = inputStream.Broadcast(&msgPack4)
 	assert.Nil(t, err)
-
-	outputStream.Consume()
-	receivedMsg := outputStream.Consume()
-	outputStream.Close()
-	outputStream = getPulsarTtOutputStreamAndSeek(pulsarAddress, receivedMsg.EndPositions)
-
-	err = inputStream.Broadcast(&msgPack5)
+	err = inputStream.Produce(&msgPack5)
 	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack6)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack7)
+	assert.Nil(t, err)
+
+	receivedMsg := outputStream.Consume()
+	assert.Equal(t, len(receivedMsg.Msgs), 2)
+	assert.Equal(t, receivedMsg.BeginTs, uint64(0))
+	assert.Equal(t, receivedMsg.EndTs, uint64(5))
+
+	assert.Equal(t, receivedMsg.StartPositions[0].Timestamp, uint64(0))
+	assert.Equal(t, receivedMsg.EndPositions[0].Timestamp, uint64(5))
+
+	receivedMsg2 := outputStream.Consume()
+	assert.Equal(t, len(receivedMsg2.Msgs), 1)
+	assert.Equal(t, receivedMsg2.BeginTs, uint64(5))
+	assert.Equal(t, receivedMsg2.EndTs, uint64(11))
+	assert.Equal(t, receivedMsg2.StartPositions[0].Timestamp, uint64(5))
+	assert.Equal(t, receivedMsg2.EndPositions[0].Timestamp, uint64(11))
+
+	receivedMsg3 := outputStream.Consume()
+	assert.Equal(t, len(receivedMsg3.Msgs), 3)
+	assert.Equal(t, receivedMsg3.BeginTs, uint64(11))
+	assert.Equal(t, receivedMsg3.EndTs, uint64(15))
+	assert.Equal(t, receivedMsg3.StartPositions[0].Timestamp, uint64(11))
+	assert.Equal(t, receivedMsg3.EndPositions[0].Timestamp, uint64(15))
+
+	receivedMsg4 := outputStream.Consume()
+	assert.Equal(t, len(receivedMsg4.Msgs), 1)
+	assert.Equal(t, receivedMsg4.BeginTs, uint64(15))
+	assert.Equal(t, receivedMsg4.EndTs, uint64(20))
+	assert.Equal(t, receivedMsg4.StartPositions[0].Timestamp, uint64(15))
+	assert.Equal(t, receivedMsg4.EndPositions[0].Timestamp, uint64(20))
+
+	outputStream.Close()
+
+	outputStream = getPulsarTtOutputStreamAndSeek(pulsarAddress, receivedMsg3.StartPositions)
+
 	seekMsg := outputStream.Consume()
-	for _, msg := range seekMsg.Msgs {
-		assert.Equal(t, msg.BeginTs(), uint64(14))
+	assert.Equal(t, len(seekMsg.Msgs), 3)
+	result := []uint64{14, 12, 13}
+	for i, msg := range seekMsg.Msgs {
+		assert.Equal(t, msg.BeginTs(), result[i])
 	}
+	seekMsg2 := outputStream.Consume()
+	assert.Equal(t, len(seekMsg2.Msgs), 1)
+	for _, msg := range seekMsg2.Msgs {
+		assert.Equal(t, msg.BeginTs(), uint64(19))
+	}
+	//outputStream.Close()
+	outputStream = getPulsarTtOutputStreamAndSeek(pulsarAddress, receivedMsg3.EndPositions)
+
+	seekMsg = outputStream.Consume()
+	assert.Equal(t, len(seekMsg.Msgs), 1)
+	for _, msg := range seekMsg.Msgs {
+		assert.Equal(t, msg.BeginTs(), uint64(19))
+	}
+
 	inputStream.Close()
 	outputStream.Close()
 }
@@ -1061,12 +1119,68 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
-	consumerSubName := funcutil.RandomString(8)
 
 	msgPack := &MsgPack{}
 	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
-	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+	defer inputStream.Close()
+	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, funcutil.RandomString(8))
+	defer outputStream.Close()
+	for i := 0; i < 10; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
 
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+	var seekPosition *internalpb.MsgPosition
+	for i := 0; i < 10; i++ {
+		result := outputStream.Consume()
+		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+		seekPosition = result.EndPositions[0]
+	}
+
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumer(consumerChannels, funcutil.RandomString(8))
+	defer outputStream2.Close()
+	messageID, _ := pulsar.DeserializeMessageID(seekPosition.MsgID)
+	// try to seek to not written position
+	patchMessageID(&messageID, 13)
+
+	p := []*internalpb.MsgPosition{
+		{
+			ChannelName: seekPosition.ChannelName,
+			Timestamp:   seekPosition.Timestamp,
+			MsgGroup:    seekPosition.MsgGroup,
+			MsgID:       messageID.Serialize(),
+		},
+	}
+
+	err = outputStream2.Seek(p)
+	assert.Nil(t, err)
+	outputStream2.Start()
+
+	for i := 10; i < 20; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+	err = inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+	result := outputStream2.Consume()
+	assert.Equal(t, result.Msgs[0].ID(), int64(1))
+}
+
+func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
+	rocksdbName := "/tmp/rocksmq_tt_msg_seekInvalid"
+	etcdKV := initRmq(rocksdbName)
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	consumerChannels := []string{c}
+	consumerSubName := funcutil.RandomString(8)
+	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerSubName)
+
+	msgPack := &MsgPack{}
 	for i := 0; i < 10; i++ {
 		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
@@ -1083,30 +1197,38 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 	outputStream.Close()
 
 	factory := ProtoUDFactory{}
-	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
-	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	outputStream2.AsConsumer(consumerChannels, consumerSubName)
+	rmqClient2, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumer(consumerChannels, funcutil.RandomString(8))
 
-	messageID, _ := pulsar.DeserializeMessageID(seekPosition.MsgID)
-	// try to seek to not written position
-	patchMessageID(&messageID, 11)
-
+	id := common.Endian.Uint64(seekPosition.MsgID) + 10
+	bs := make([]byte, 8)
+	common.Endian.PutUint64(bs, id)
 	p := []*internalpb.MsgPosition{
 		{
 			ChannelName: seekPosition.ChannelName,
 			Timestamp:   seekPosition.Timestamp,
 			MsgGroup:    seekPosition.MsgGroup,
-			MsgID:       messageID.Serialize(),
+			MsgID:       bs,
 		},
 	}
 
-	go func() {
-		time.Sleep(1 * time.Second)
-		outputStream2.Close()
-	}()
-
 	err = outputStream2.Seek(p)
-	assert.Error(t, err)
+	assert.Nil(t, err)
+	outputStream2.Start()
+
+	for i := 10; i < 20; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+	err = inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+
+	result := outputStream2.Consume()
+	assert.Equal(t, result.Msgs[0].ID(), int64(1))
+
+	Close(rocksdbName, inputStream, outputStream2, etcdKV)
+
 }
 
 func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
@@ -1146,6 +1268,70 @@ func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
 		assert.Equal(t, result.Msgs[0].ID(), int64(i))
 	}
 	outputStream2.Close()
+}
+
+func TestStream_MqMsgStream_Reader(t *testing.T) {
+	ctx := context.Background()
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	readerChannels := []string{c}
+
+	msgPack := &MsgPack{}
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+	defer inputStream.Close()
+
+	n := 10
+	p := 5
+
+	for i := 0; i < n; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+
+	readStream := getPulsarReader(pulsarAddress, readerChannels)
+	defer readStream.Close()
+	var seekPosition *internalpb.MsgPosition
+	for i := 0; i < n; i++ {
+		hasNext := readStream.HasNext(c)
+		assert.True(t, hasNext)
+		result, err := readStream.Next(ctx, c)
+		assert.Nil(t, err)
+		assert.Equal(t, result.ID(), int64(i))
+		if i == p {
+			seekPosition = result.Position()
+		}
+	}
+	hasNext := readStream.HasNext(c)
+	assert.False(t, hasNext)
+	timeoutCtx1, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	result, err := readStream.Next(timeoutCtx1, c)
+	assert.NotNil(t, err)
+	assert.Nil(t, result)
+
+	readStream2 := getPulsarReader(pulsarAddress, readerChannels)
+	defer readStream2.Close()
+	readStream2.SeekReaders([]*internalpb.MsgPosition{seekPosition})
+
+	for i := p; i < 10; i++ {
+		hasNext := readStream2.HasNext(c)
+		assert.True(t, hasNext)
+		result, err := readStream2.Next(ctx, c)
+		assert.Nil(t, err)
+		assert.Equal(t, result.ID(), int64(i))
+	}
+	hasNext = readStream2.HasNext(c)
+	assert.False(t, hasNext)
+	timeoutCtx2, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	result2, err := readStream2.Next(timeoutCtx2, c)
+	assert.NotNil(t, err)
+	assert.Nil(t, result2)
+
 }
 
 /****************************************Rmq test******************************************/
@@ -1277,6 +1463,118 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(outputStream, len(msgPack1.Msgs))
+	Close(rocksdbName, inputStream, outputStream, etcdKV)
+}
+
+func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
+	rocksdbName := "/tmp/rocksmq_tt_msg_seek"
+	etcdKV := initRmq(rocksdbName)
+
+	c1 := funcutil.RandomString(8)
+	producerChannels := []string{c1}
+	consumerChannels := []string{c1}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack0 := MsgPack{}
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
+
+	msgPack1 := MsgPack{}
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 19))
+
+	msgPack2 := MsgPack{}
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
+
+	msgPack3 := MsgPack{}
+	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 14))
+	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 9))
+
+	msgPack4 := MsgPack{}
+	msgPack4.Msgs = append(msgPack4.Msgs, getTimeTickMsg(11))
+
+	msgPack5 := MsgPack{}
+	msgPack5.Msgs = append(msgPack5.Msgs, getTsMsg(commonpb.MsgType_Insert, 12))
+	msgPack5.Msgs = append(msgPack5.Msgs, getTsMsg(commonpb.MsgType_Insert, 13))
+
+	msgPack6 := MsgPack{}
+	msgPack6.Msgs = append(msgPack6.Msgs, getTimeTickMsg(15))
+
+	msgPack7 := MsgPack{}
+	msgPack7.Msgs = append(msgPack7.Msgs, getTimeTickMsg(20))
+
+	inputStream, outputStream := initRmqTtStream(producerChannels, consumerChannels, consumerSubName)
+
+	err := inputStream.Broadcast(&msgPack0)
+	assert.Nil(t, err)
+	err = inputStream.Produce(&msgPack1)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack2)
+	assert.Nil(t, err)
+	err = inputStream.Produce(&msgPack3)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack4)
+	assert.Nil(t, err)
+	err = inputStream.Produce(&msgPack5)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack6)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack7)
+	assert.Nil(t, err)
+
+	receivedMsg := outputStream.Consume()
+	assert.Equal(t, len(receivedMsg.Msgs), 2)
+	assert.Equal(t, receivedMsg.BeginTs, uint64(0))
+	assert.Equal(t, receivedMsg.EndTs, uint64(5))
+
+	assert.Equal(t, receivedMsg.StartPositions[0].Timestamp, uint64(0))
+	assert.Equal(t, receivedMsg.EndPositions[0].Timestamp, uint64(5))
+
+	receivedMsg2 := outputStream.Consume()
+	assert.Equal(t, len(receivedMsg2.Msgs), 1)
+	assert.Equal(t, receivedMsg2.BeginTs, uint64(5))
+	assert.Equal(t, receivedMsg2.EndTs, uint64(11))
+	assert.Equal(t, receivedMsg2.StartPositions[0].Timestamp, uint64(5))
+	assert.Equal(t, receivedMsg2.EndPositions[0].Timestamp, uint64(11))
+
+	receivedMsg3 := outputStream.Consume()
+	assert.Equal(t, len(receivedMsg3.Msgs), 3)
+	assert.Equal(t, receivedMsg3.BeginTs, uint64(11))
+	assert.Equal(t, receivedMsg3.EndTs, uint64(15))
+	assert.Equal(t, receivedMsg3.StartPositions[0].Timestamp, uint64(11))
+	assert.Equal(t, receivedMsg3.EndPositions[0].Timestamp, uint64(15))
+
+	receivedMsg4 := outputStream.Consume()
+	assert.Equal(t, len(receivedMsg4.Msgs), 1)
+	assert.Equal(t, receivedMsg4.BeginTs, uint64(15))
+	assert.Equal(t, receivedMsg4.EndTs, uint64(20))
+	assert.Equal(t, receivedMsg4.StartPositions[0].Timestamp, uint64(15))
+	assert.Equal(t, receivedMsg4.EndPositions[0].Timestamp, uint64(20))
+
+	outputStream.Close()
+
+	factory := ProtoUDFactory{}
+
+	rmqClient, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	outputStream, _ = NewMqTtMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+	consumerSubName = funcutil.RandomString(8)
+	outputStream.AsConsumer(consumerChannels, consumerSubName)
+
+	outputStream.Seek(receivedMsg3.StartPositions)
+	outputStream.Start()
+	seekMsg := outputStream.Consume()
+	assert.Equal(t, len(seekMsg.Msgs), 3)
+	result := []uint64{14, 12, 13}
+	for i, msg := range seekMsg.Msgs {
+		assert.Equal(t, msg.BeginTs(), result[i])
+	}
+
+	seekMsg2 := outputStream.Consume()
+	assert.Equal(t, len(seekMsg2.Msgs), 1)
+	for _, msg := range seekMsg2.Msgs {
+		assert.Equal(t, msg.BeginTs(), uint64(19))
+	}
+
 	Close(rocksdbName, inputStream, outputStream, etcdKV)
 }
 
@@ -1645,6 +1943,14 @@ func getPulsarOutputStream(pulsarAddress string, consumerChannels []string, cons
 	return outputStream
 }
 
+func getPulsarReader(pulsarAddress string, consumerChannels []string) MsgStream {
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream.AsReader(consumerChannels, "pulsar-reader-prefix-")
+	return outputStream
+}
+
 func getPulsarTtOutputStream(pulsarAddress string, consumerChannels []string, consumerSubName string) MsgStream {
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
@@ -1662,7 +1968,7 @@ func getPulsarTtOutputStreamAndSeek(pulsarAddress string, positions []*MsgPositi
 	for _, c := range positions {
 		consumerName = append(consumerName, c.ChannelName)
 	}
-	outputStream.AsConsumer(consumerName, positions[0].MsgGroup)
+	outputStream.AsConsumer(consumerName, funcutil.RandomString(8))
 	outputStream.Seek(positions)
 	outputStream.Start()
 	return outputStream

@@ -891,4 +891,28 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		_, _, err = r.GetFloatVectorFromPayload()
 		assert.NotNil(t, err)
 	})
+
+	t.Run("TestWriteLargeSizeData", func(t *testing.T) {
+		t.Skip("Large data skip for online ut")
+		size := 1 << 29 // 512M
+		var vec []float32
+		for i := 0; i < size/4; i++ {
+			vec = append(vec, 1)
+		}
+
+		w, err := NewPayloadWriter(schemapb.DataType_FloatVector)
+		assert.Nil(t, err)
+
+		err = w.AddFloatVectorToPayload(vec, 128)
+		assert.Nil(t, err)
+
+		err = w.FinishPayloadWriter()
+		assert.Nil(t, err)
+
+		_, err = w.GetPayloadBufferFromWriter()
+		assert.Nil(t, err)
+
+		err = w.ReleasePayloadWriter()
+		assert.Nil(t, err)
+	})
 }

@@ -58,8 +58,9 @@ func (pc *pulsarClient) CreateProducer(options ProducerOptions) (Producer, error
 func (pc *pulsarClient) CreateReader(options ReaderOptions) (Reader, error) {
 	opts := pulsar.ReaderOptions{
 		Topic:                   options.Topic,
-		StartMessageID:          options.StartMessageID,
+		StartMessageID:          options.StartMessageID.(*pulsarID).messageID,
 		StartMessageIDInclusive: options.StartMessageIDInclusive,
+		SubscriptionRolePrefix:  options.SubscriptionRolePrefix,
 	}
 	pr, err := pc.client.CreateReader(opts)
 	if err != nil {

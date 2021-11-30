@@ -23,6 +23,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -65,8 +67,13 @@ func (node *Proxy) GetComponentStates(ctx context.Context) (*internalpb.Componen
 		}
 		return stats, errors.New(errMsg)
 	}
+	nodeID := common.NotRegisteredID
+	if node.session != nil && node.session.Registered() {
+		nodeID = node.session.ServerID
+	}
 	info := &internalpb.ComponentInfo{
-		NodeID:    Params.ProxyID,
+		// NodeID:    Params.ProxyID, // will race with Proxy.Register()
+		NodeID:    nodeID,
 		Role:      typeutil.ProxyRole,
 		StateCode: code,
 	}
@@ -526,11 +533,25 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		rootCoord:              node.rootCoord,
 	}
 
-	log.Debug("ShowCollections enqueue",
+	log.Debug("ShowCollections received",
 		zap.String("role", Params.RoleName),
-		zap.Any("request", request))
+		zap.String("DbName", request.DbName),
+		zap.Uint64("TimeStamp", request.TimeStamp),
+		zap.String("ShowType", request.Type.String()),
+		zap.Any("CollectionNames", request.CollectionNames),
+	)
+
 	err := node.sched.ddQueue.Enqueue(sct)
 	if err != nil {
+		log.Warn("ShowCollections failed to enqueue",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.String("DbName", request.DbName),
+			zap.Uint64("TimeStamp", request.TimeStamp),
+			zap.String("ShowType", request.Type.String()),
+			zap.Any("CollectionNames", request.CollectionNames),
+		)
+
 		return &milvuspb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -539,21 +560,27 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		}, nil
 	}
 
-	log.Debug("ShowCollections",
+	log.Debug("ShowCollections enqueued",
 		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", sct.ID()),
 		zap.String("DbName", sct.ShowCollectionsRequest.DbName),
+		zap.Uint64("TimeStamp", request.TimeStamp),
 		zap.String("ShowType", sct.ShowCollectionsRequest.Type.String()),
 		zap.Any("CollectionNames", sct.ShowCollectionsRequest.CollectionNames),
 	)
-	defer func() {
-		log.Debug("ShowCollections Done",
-			zap.Error(err),
-			zap.String("role", Params.RoleName),
-			zap.Any("result", sct.result))
-	}()
 
 	err = sct.WaitToFinish()
 	if err != nil {
+		log.Warn("ShowCollections failed to WaitToFinish",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", sct.ID()),
+			zap.String("DbName", request.DbName),
+			zap.Uint64("TimeStamp", request.TimeStamp),
+			zap.String("ShowType", request.Type.String()),
+			zap.Any("CollectionNames", request.CollectionNames),
+		)
+
 		return &milvuspb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -561,6 +588,16 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 			},
 		}, nil
 	}
+
+	log.Debug("ShowCollections Done",
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", sct.ID()),
+		zap.String("DbName", request.DbName),
+		zap.Uint64("TimeStamp", request.TimeStamp),
+		zap.String("ShowType", request.Type.String()),
+		zap.Any("CollectionNames", request.CollectionNames),
+		zap.Any("result", sct.result),
+	)
 
 	return sct.result, nil
 }
@@ -1473,8 +1510,11 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
+
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
 	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -1491,7 +1531,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		qc:        node.queryCoord,
 	}
 
-	log.Debug("Search enqueue",
+	log.Debug("Search received",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1499,8 +1540,21 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Any("dsl", request.Dsl),
 		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
 		zap.Any("OutputFields", request.OutputFields))
+
 	err := node.sched.dqQueue.Enqueue(qt)
 	if err != nil {
+		log.Debug("Search failed to enqueue",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("partitions", request.PartitionNames),
+			zap.Any("dsl", request.Dsl),
+			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+			zap.Any("OutputFields", request.OutputFields),
+		)
+
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1509,9 +1563,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		}, nil
 	}
 
-	log.Debug("Search",
+	log.Debug("Search enqueued",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", qt.Base.MsgID),
+		zap.Int64("msgID", qt.ID()),
 		zap.Uint64("timestamp", qt.Base.Timestamp),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1519,33 +1574,22 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Any("dsl", request.Dsl),
 		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
 		zap.Any("OutputFields", request.OutputFields))
-	defer func() {
-		log.Debug("Search Done",
+
+	err = qt.WaitToFinish()
+
+	if err != nil {
+		log.Debug("Search failed to WaitToFinish",
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", qt.Base.MsgID),
-			zap.Uint64("timestamp", qt.Base.Timestamp),
+			zap.Int64("msgID", qt.ID()),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames),
 			zap.Any("dsl", request.Dsl),
 			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
 			zap.Any("OutputFields", request.OutputFields))
-	}()
 
-	err = qt.WaitToFinish()
-	log.Debug("Search Finished",
-		zap.Error(err),
-		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", qt.Base.MsgID),
-		zap.Uint64("timestamp", qt.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames),
-		zap.Any("dsl", request.Dsl),
-		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
-
-	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1553,6 +1597,17 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			},
 		}, nil
 	}
+
+	log.Debug("Search Done",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", qt.ID()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames),
+		zap.Any("dsl", request.Dsl),
+		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+		zap.Any("OutputFields", request.OutputFields))
 
 	return qt.result, nil
 }
@@ -1834,6 +1889,12 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 
 // CalcDistance calculates the distances between vectors.
 func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
+	if !node.checkHealthy() {
+		return &milvuspb.CalcDistanceResults{
+			Status: unhealthyStatus(),
+		}, nil
+	}
+
 	param, _ := funcutil.GetAttrByKeyFromRepeatedKV("metric", request.GetParams())
 	metric, err := distance.ValidateMetricType(param)
 	if err != nil {
@@ -1844,6 +1905,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			},
 		}, nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CalcDistance")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	query := func(ids *milvuspb.VectorIDs) (*milvuspb.QueryResults, error) {
 		outputFields := []string{ids.FieldName}
@@ -1874,6 +1939,14 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 
 		err := node.sched.dqQueue.Enqueue(qt)
 		if err != nil {
+			log.Debug("CalcDistance queryTask failed to enqueue",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName),
+				zap.String("db", queryRequest.DbName),
+				zap.String("collection", queryRequest.CollectionName),
+				zap.Any("partitions", queryRequest.PartitionNames))
+
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1882,8 +1955,29 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, err
 		}
 
+		log.Debug("CalcDistance queryTask enqueued",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", qt.Base.MsgID),
+			zap.Uint64("timestamp", qt.Base.Timestamp),
+			zap.String("db", queryRequest.DbName),
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames),
+			zap.Any("OutputFields", queryRequest.OutputFields))
+
 		err = qt.WaitToFinish()
 		if err != nil {
+			log.Debug("CalcDistance queryTask failed to WaitToFinish",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName),
+				zap.Int64("msgID", qt.Base.MsgID),
+				zap.Uint64("timestamp", qt.Base.Timestamp),
+				zap.String("db", queryRequest.DbName),
+				zap.String("collection", queryRequest.CollectionName),
+				zap.Any("partitions", queryRequest.PartitionNames),
+				zap.Any("OutputFields", queryRequest.OutputFields))
+
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1891,6 +1985,16 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, err
 		}
+
+		log.Debug("CalcDistance queryTask Done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", qt.Base.MsgID),
+			zap.Uint64("timestamp", qt.Base.Timestamp),
+			zap.String("db", queryRequest.DbName),
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames),
+			zap.Any("OutputFields", queryRequest.OutputFields))
 
 		return &milvuspb.QueryResults{
 			Status:     qt.result.Status,
@@ -1912,7 +2016,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}
 
 		if retrievedIds == nil || retrievedVectors == nil {
-			return nil, errors.New("Failed to fetch vectors")
+			return nil, errors.New("failed to fetch vectors")
 		}
 
 		dict := make(map[int64]int)
@@ -1929,7 +2033,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				index, ok := dict[id]
 				if !ok {
 					log.Error("id not found in CalcDistance", zap.Int64("id", id))
-					return nil, errors.New("Failed to fetch vectors by id: " + fmt.Sprintln(id))
+					return nil, errors.New("failed to fetch vectors by id: " + fmt.Sprintln(id))
 				}
 				result = append(result, floatArr[int64(index)*element:int64(index+1)*element]...)
 			}
@@ -1956,7 +2060,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				index, ok := dict[id]
 				if !ok {
 					log.Error("id not found in CalcDistance", zap.Int64("id", id))
-					return nil, errors.New("Failed to fetch vectors by id: " + fmt.Sprintln(id))
+					return nil, errors.New("failed to fetch vectors by id: " + fmt.Sprintln(id))
 				}
 				result = append(result, binaryArr[int64(index)*element:int64(index+1)*element]...)
 			}
@@ -1969,14 +2073,28 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, nil
 		}
 
-		return nil, errors.New("Failed to fetch vectors")
+		return nil, errors.New("failed to fetch vectors")
 	}
+
+	log.Debug("CalcDistance received",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.String("metric", metric))
 
 	vectorsLeft := request.GetOpLeft().GetDataArray()
 	opLeft := request.GetOpLeft().GetIdArray()
 	if opLeft != nil {
+		log.Debug("OpLeft IdArray not empty, Get vectors by id",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		result, err := query(opLeft)
 		if err != nil {
+			log.Debug("Failed to get left vectors by id",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1984,9 +2102,18 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("OpLeft IdArray not empty, Get vectors by id done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 
 		vectorsLeft, err = arrangeFunc(opLeft, result.FieldsData)
 		if err != nil {
+			log.Debug("Failed to re-arrange left vectors",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1994,13 +2121,22 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("Re-arrange left vectors done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 	}
 
 	if vectorsLeft == nil {
+		msg := "Left vectors array is empty"
+		log.Debug(msg,
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		return &milvuspb.CalcDistanceResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "Left vectors array is empty",
+				Reason:    msg,
 			},
 		}, nil
 	}
@@ -2008,8 +2144,17 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	vectorsRight := request.GetOpRight().GetDataArray()
 	opRight := request.GetOpRight().GetIdArray()
 	if opRight != nil {
+		log.Debug("OpRight IdArray not empty, Get vectors by id",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		result, err := query(opRight)
 		if err != nil {
+			log.Debug("Failed to get right vectors by id",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2017,9 +2162,18 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("OpRight IdArray not empty, Get vectors by id done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 
 		vectorsRight, err = arrangeFunc(opRight, result.FieldsData)
 		if err != nil {
+			log.Debug("Failed to re-arrange right vectors",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2027,22 +2181,36 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("Re-arrange right vectors done",
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 	}
 
 	if vectorsRight == nil {
+		msg := "Right vectors array is empty"
+		log.Debug(msg,
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		return &milvuspb.CalcDistanceResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "Right vectors array is empty",
+				Reason:    msg,
 			},
 		}, nil
 	}
 
 	if vectorsLeft.Dim != vectorsRight.Dim {
+		msg := "Vectors dimension is not equal"
+		log.Debug(msg,
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
+
 		return &milvuspb.CalcDistanceResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "Vectors dimension is not equal",
+				Reason:    msg,
 			},
 		}, nil
 	}
@@ -2050,6 +2218,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	if vectorsLeft.GetFloatVector() != nil && vectorsRight.GetFloatVector() != nil {
 		distances, err := distance.CalcFloatDistance(vectorsLeft.Dim, vectorsLeft.GetFloatVector().Data, vectorsRight.GetFloatVector().Data, metric)
 		if err != nil {
+			log.Debug("Failed to CalcFloatDistance",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2057,6 +2230,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				},
 			}, nil
 		}
+
+		log.Debug("CalcFloatDistance done",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName))
 
 		return &milvuspb.CalcDistanceResults{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
@@ -2071,6 +2249,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	if vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
 		hamming, err := distance.CalcHammingDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
 		if err != nil {
+			log.Debug("Failed to CalcHammingDistance",
+				zap.Error(err),
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2080,6 +2263,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}
 
 		if metric == distance.HAMMING {
+			log.Debug("CalcHammingDistance done",
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
+
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
 				Array: &milvuspb.CalcDistanceResults_IntDist{
@@ -2093,6 +2280,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		if metric == distance.TANIMOTO {
 			tanimoto, err := distance.CalcTanimotoCoefficient(vectorsLeft.Dim, hamming)
 			if err != nil {
+				log.Debug("Failed to CalcTanimotoCoefficient",
+					zap.Error(err),
+					zap.String("traceID", traceID),
+					zap.String("role", Params.RoleName))
+
 				return &milvuspb.CalcDistanceResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2100,6 +2292,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 					},
 				}, nil
 			}
+
+			log.Debug("CalcTanimotoCoefficient done",
+				zap.String("traceID", traceID),
+				zap.String("role", Params.RoleName))
 
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
@@ -2112,10 +2308,15 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}
 	}
 
-	err = errors.New("Unexpected error")
+	err = errors.New("unexpected error")
 	if (vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetFloatVector() != nil) || (vectorsLeft.GetFloatVector() != nil && vectorsRight.GetBinaryVector() != nil) {
-		err = errors.New("Cannot calculate distance between binary vectors and float vectors")
+		err = errors.New("cannot calculate distance between binary vectors and float vectors")
 	}
+
+	log.Debug("Failed to CalcDistance",
+		zap.Error(err),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName))
 
 	return &milvuspb.CalcDistanceResults{
 		Status: &commonpb.Status{
@@ -2160,11 +2361,12 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		},
 		SegmentIDs: segments,
 	})
-	log.Debug("GetPersistentSegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
 	if err != nil {
+		log.Debug("GetPersistentSegmentInfo fail", zap.Error(err))
 		resp.Status.Reason = fmt.Errorf("dataCoord:GetSegmentInfo, err:%w", err).Error()
 		return resp, nil
 	}
+	log.Debug("GetPersistentSegmentInfo ", zap.Int("len(infos)", len(infoResp.Infos)), zap.Any("status", infoResp.Status))
 	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		resp.Status.Reason = infoResp.Status.Reason
 		return resp, nil
@@ -2414,6 +2616,19 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	log.Debug("Proxy.GetMetrics",
 		zap.String("metric_type", metricType))
 
+	msgID := UniqueID(0)
+	msgID, err = node.idAllocator.AllocOne()
+	if err != nil {
+		log.Warn("Proxy.GetMetrics failed to allocate id",
+			zap.Error(err))
+	}
+	req.Base = &commonpb.MsgBase{
+		MsgType:   commonpb.MsgType_SystemInfo,
+		MsgID:     msgID,
+		Timestamp: 0,
+		SourceID:  Params.ProxyID,
+	}
+
 	if metricType == metricsinfo.SystemInfoMetrics {
 		ret, err := node.metricsCacheManager.GetSystemInfoMetrics()
 		if err == nil && ret != nil {
@@ -2527,6 +2742,22 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 
 	resp, err := node.dataCoord.GetCompactionStateWithPlans(ctx, req)
 	log.Info("received GetCompactionStateWithPlans response", zap.Int64("compactionID", req.GetCompactionID()), zap.Any("resp", resp), zap.Error(err))
+	return resp, err
+}
+
+// GetFlushState gets the flush state of multiple segments
+func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	log.Info("received get flush state request", zap.Any("request", req))
+	var err error
+	resp := &milvuspb.GetFlushStateResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		log.Info("unable to get flush state because of closed server")
+		return resp, nil
+	}
+
+	resp, err = node.dataCoord.GetFlushState(ctx, req)
+	log.Info("received get flush state response", zap.Any("response", resp))
 	return resp, err
 }
 

@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -29,13 +28,13 @@ func TestTSafeReplica_valid(t *testing.T) {
 	timestamp := Timestamp(1000)
 	err = replica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
 	assert.NoError(t, err)
-	time.Sleep(20 * time.Millisecond)
+	<-watcher.watcherChan()
 	resT, err := replica.getTSafe(defaultVChannel)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, resT)
 
-	err = replica.removeTSafe(defaultVChannel)
-	assert.NoError(t, err)
+	isRemoved := replica.removeTSafe(defaultVChannel)
+	assert.True(t, isRemoved)
 }
 
 func TestTSafeReplica_invalid(t *testing.T) {
@@ -49,13 +48,13 @@ func TestTSafeReplica_invalid(t *testing.T) {
 	timestamp := Timestamp(1000)
 	err = replica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
 	assert.NoError(t, err)
-	time.Sleep(20 * time.Millisecond)
+	<-watcher.watcherChan()
 	resT, err := replica.getTSafe(defaultVChannel)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, resT)
 
-	err = replica.removeTSafe(defaultVChannel)
-	assert.NoError(t, err)
+	isRemoved := replica.removeTSafe(defaultVChannel)
+	assert.True(t, isRemoved)
 
 	replica.addTSafe(defaultVChannel)
 	replica.addTSafe(defaultVChannel)

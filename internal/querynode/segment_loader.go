@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -30,10 +32,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
+
+const timeoutForEachRead = 10 * time.Second
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
@@ -46,6 +51,8 @@ type segmentLoader struct {
 	etcdKV  *etcdkv.EtcdKV
 
 	indexLoader *indexLoader
+
+	factory msgstream.Factory
 }
 
 func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segmentType segmentType) error {
@@ -221,12 +228,6 @@ func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinl
 
 func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog, segmentType segmentType) error {
 	iCodec := storage.InsertCodec{}
-	defer func() {
-		err := iCodec.Close()
-		if err != nil {
-			log.Warn(err.Error())
-		}
-	}()
 	blobs := make([]*storage.Blob, 0)
 	for _, fb := range fieldBinlogs {
 		log.Debug("load segment fields data",
@@ -309,7 +310,10 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 			RowData:      records,
 		},
 	}
-	pks := getPrimaryKeys(tmpInsertMsg, loader.streamingReplica)
+	pks, err := getPrimaryKeys(tmpInsertMsg, loader.streamingReplica)
+	if err != nil {
+		return err
+	}
 	segment.updateBloomFilter(pks)
 
 	// 3. do insert
@@ -443,6 +447,93 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 	return nil
 }
 
+func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition) error {
+	log.Debug("from dml check point load delete", zap.Any("position", position), zap.Any("msg id", position.MsgID))
+	stream, err := loader.factory.NewMsgStream(ctx)
+	if err != nil {
+		return err
+	}
+	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
+	position.ChannelName = pChannelName
+	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeID, collectionID))
+	stream.SeekReaders([]*internalpb.MsgPosition{position})
+
+	delData := &deleteData{
+		deleteIDs:        make(map[UniqueID][]int64),
+		deleteTimestamps: make(map[UniqueID][]Timestamp),
+		deleteOffset:     make(map[UniqueID]int64),
+	}
+	log.Debug("start read msg from stream reader")
+	for stream.HasNext(pChannelName) {
+		ctx, cancel := context.WithTimeout(ctx, timeoutForEachRead)
+		tsMsg, err := stream.Next(ctx, pChannelName)
+		if err != nil {
+			cancel()
+			return err
+		}
+		if tsMsg == nil {
+			cancel()
+			continue
+		}
+
+		if tsMsg.Type() == commonpb.MsgType_Delete {
+			dmsg := tsMsg.(*msgstream.DeleteMsg)
+			if dmsg.CollectionID != collectionID {
+				cancel()
+				continue
+			}
+			log.Debug("delete pk", zap.Any("pk", dmsg.PrimaryKeys))
+			processDeleteMessages(loader.historicalReplica, dmsg, delData)
+		}
+		cancel()
+	}
+	log.Debug("All data has been read, there is no more data", zap.String("channel", pChannelName))
+	for segmentID, pks := range delData.deleteIDs {
+		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
+		if err != nil {
+			log.Debug(err.Error())
+			continue
+		}
+		offset := segment.segmentPreDelete(len(pks))
+		delData.deleteOffset[segmentID] = offset
+	}
+
+	wg := sync.WaitGroup{}
+	for segmentID := range delData.deleteOffset {
+		wg.Add(1)
+		go deletePk(loader.historicalReplica, delData, segmentID, &wg)
+	}
+	wg.Wait()
+	stream.Close()
+	log.Debug("from dml check point load done")
+	return nil
+}
+
+func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
+	defer wg.Done()
+	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
+	targetSegment, err := replica.getSegmentByID(segmentID)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	if targetSegment.segmentType != segmentTypeSealed && targetSegment.segmentType != segmentTypeIndexing {
+		return
+	}
+
+	ids := deleteData.deleteIDs[segmentID]
+	timestamps := deleteData.deleteTimestamps[segmentID]
+	offset := deleteData.deleteOffset[segmentID]
+
+	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
+	if err != nil {
+		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
+		return
+	}
+	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("segmentType", targetSegment.segmentType))
+}
+
 // JoinIDPath joins ids to path format.
 func JoinIDPath(ids ...UniqueID) string {
 	idStr := make([]string, len(ids))
@@ -565,7 +656,8 @@ func newSegmentLoader(ctx context.Context,
 	indexCoord types.IndexCoord,
 	historicalReplica ReplicaInterface,
 	streamingReplica ReplicaInterface,
-	etcdKV *etcdkv.EtcdKV) *segmentLoader {
+	etcdKV *etcdkv.EtcdKV,
+	factory msgstream.Factory) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -589,5 +681,7 @@ func newSegmentLoader(ctx context.Context,
 		etcdKV:  etcdKV,
 
 		indexLoader: iLoader,
+
+		factory: factory,
 	}
 }

@@ -199,7 +199,7 @@ type DataCoord interface {
 	//  and related message stream positions
 	//
 	// ctx is the context to control request deadline and cancellation
-	// req contains the collection/partition id to query
+	// req contains the segment binlogs and checkpoint informations.
 	//
 	// response status contains the status/error code and failing reason if any
 	// error is returned only when some communication issue occurs
@@ -227,9 +227,24 @@ type DataCoord interface {
 	ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
 	// GetCompactionState gets the state of a compaction
 	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
+	// GetCompactionStateWithPlans get the state of requested plan id
 	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
 
+	// WatchChannels notifies DataCoord to watch vchannels of a collection
 	WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
+	// GetFlushState gets the flush state of multiple segments
+	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
+
+	// DropVirtualChannel notifies DataCoord a virtual channel is dropped and
+	// updates related segments binlogs(including insert binlogs, stats logs and delta logs)
+	//  and related message stream positions
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the dropped virtual channel name and related segment information
+	//
+	// response status contains the status/error code and failing reason if any
+	// error is returned only when some communication issue occurs
+	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
 }
 
 // IndexNode is the interface `indexnode` package implements
@@ -958,6 +973,8 @@ type ProxyComponent interface {
 	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
 	ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
 	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
+	// GetFlushState gets the flush state of multiple segments
+	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
 }
 
 // QueryNode is the interface `querynode` package implements

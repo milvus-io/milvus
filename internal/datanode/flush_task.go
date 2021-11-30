@@ -54,7 +54,7 @@ type flushTaskRunner struct {
 
 	startSignal  <-chan struct{}
 	finishSignal chan struct{}
-	injectSignal <-chan taskInjection
+	injectSignal <-chan *taskInjection
 
 	segmentID  UniqueID
 	insertLogs map[UniqueID]string
@@ -71,7 +71,43 @@ type flushTaskRunner struct {
 type taskInjection struct {
 	injected      chan struct{} // channel to notify injected
 	injectOver    chan bool     // indicates injection over
+	wg            sync.WaitGroup
 	postInjection func(pack *segmentFlushPack)
+}
+
+func newTaskInjection(segmentCnt int, pf func(pack *segmentFlushPack)) *taskInjection {
+	ti := &taskInjection{
+		injected:      make(chan struct{}),
+		injectOver:    make(chan bool, segmentCnt),
+		postInjection: pf,
+	}
+	ti.wg.Add(segmentCnt)
+	return ti
+}
+
+// Injected returns a chan, which will be closed after pre set segments counts a injected
+func (ti *taskInjection) Injected() <-chan struct{} {
+	return ti.injected
+}
+
+func (ti *taskInjection) waitForInjected() {
+	ti.wg.Wait()
+	close(ti.injected)
+}
+
+func (ti *taskInjection) injectOne() {
+	ti.wg.Done()
+}
+
+func (ti *taskInjection) injectDone(success bool) {
+	if !success {
+		close(ti.injectOver)
+		return
+	}
+
+	for i := 0; i < cap(ti.injectOver); i++ {
+		ti.injectOver <- true
+	}
 }
 
 // init initializes flushTaskRunner with provided actions and signal
@@ -136,7 +172,7 @@ func (t *flushTaskRunner) waitFinish(notifyFunc notifyMetaFunc, postFunc taskPos
 	select {
 	case injection := <-t.injectSignal:
 		// notify injected
-		injection.injected <- struct{}{}
+		injection.injectOne()
 		ok := <-injection.injectOver
 		if ok {
 			// apply postInjection func
@@ -172,7 +208,7 @@ func (t *flushTaskRunner) getFlushPack() *segmentFlushPack {
 }
 
 // newFlushTaskRunner create a usable task runner
-func newFlushTaskRunner(segmentID UniqueID, injectCh <-chan taskInjection) *flushTaskRunner {
+func newFlushTaskRunner(segmentID UniqueID, injectCh <-chan *taskInjection) *flushTaskRunner {
 	t := &flushTaskRunner{
 		WaitGroup:    sync.WaitGroup{},
 		segmentID:    segmentID,

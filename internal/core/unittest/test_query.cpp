@@ -405,11 +405,11 @@ TEST(Query, ExecEmpty) {
     auto sr = segment->Search(plan.get(), *ph_group, time);
     std::cout << SearchResultToJson(sr);
 
-    for (auto i : sr.internal_seg_offsets_) {
+    for (auto i : sr.ids_) {
         ASSERT_EQ(i, -1);
     }
 
-    for (auto v : sr.result_distances_) {
+    for (auto v : sr.distances_) {
         ASSERT_EQ(v, std::numeric_limits<float>::max());
     }
 }
@@ -675,7 +675,7 @@ TEST(Query, FillSegment) {
             int64_t val;
             memcpy(&val, vec.data(), sizeof(int64_t));
 
-            auto internal_offset = result.internal_seg_offsets_[std_index];
+            auto internal_offset = result.ids_[std_index];
             auto std_val = std_vec[internal_offset];
             auto std_i32 = std_i32_vec[internal_offset];
             std::vector<float> std_vfloat(dim);

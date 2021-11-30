@@ -29,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -2479,4 +2481,38 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 		assert.EqualValues(t, unhealthyStatus(), resp.Status)
 		assert.Nil(t, err)
 	})
+}
+
+func Test_GetFlushState(t *testing.T) {
+	t.Run("normal test", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		resp, err := proxy.GetFlushState(context.TODO(), nil)
+		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{}, resp)
+		assert.Nil(t, err)
+	})
+
+	t.Run("test get flush state with unhealthy proxy", func(t *testing.T) {
+		datacoord := &DataCoordMock{}
+		proxy := &Proxy{dataCoord: datacoord}
+		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
+		resp, err := proxy.GetFlushState(context.TODO(), nil)
+		assert.EqualValues(t, unhealthyStatus(), resp.Status)
+		assert.Nil(t, err)
+	})
+}
+
+func TestProxy_GetComponentStates(t *testing.T) {
+	n := &Proxy{}
+	n.stateCode.Store(internalpb.StateCode_Healthy)
+	resp, err := n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	n.session = &sessionutil.Session{}
+	n.session.UpdateRegistered(true)
+	resp, err = n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }

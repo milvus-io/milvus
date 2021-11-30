@@ -10,9 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Types.h"
+
 #include <limits>
 #include <vector>
+#include "common/Types.h"
+
 namespace milvus::query {
 
 class SubSearchResult {
@@ -21,8 +23,8 @@ class SubSearchResult {
         : metric_type_(metric_type),
           num_queries_(num_queries),
           topk_(topk),
-          labels_(num_queries * topk, -1),
-          values_(num_queries * topk, init_value(metric_type)),
+          ids_(num_queries * topk, -1),
+          distances_(num_queries * topk, init_value(metric_type)),
           round_decimal_(round_decimal) {
     }
 
@@ -47,35 +49,42 @@ class SubSearchResult {
     get_num_queries() const {
         return num_queries_;
     }
+
     int64_t
     get_topk() const {
         return topk_;
     }
 
     const int64_t*
-    get_labels() const {
-        return labels_.data();
+    get_ids() const {
+        return ids_.data();
     }
+
     int64_t*
-    get_labels() {
-        return labels_.data();
+    get_ids() {
+        return ids_.data();
     }
+
     const float*
-    get_values() const {
-        return values_.data();
+    get_distances() const {
+        return distances_.data();
     }
+
     float*
-    get_values() {
-        return values_.data();
+    get_distances() {
+        return distances_.data();
     }
+
     auto&
-    mutable_labels() {
-        return labels_;
+    mutable_ids() {
+        return ids_;
     }
+
     auto&
-    mutable_values() {
-        return values_;
+    mutable_distances() {
+        return distances_;
     }
+
     void
     round_values();
 
@@ -95,8 +104,8 @@ class SubSearchResult {
     int64_t topk_;
     int64_t round_decimal_;
     MetricType metric_type_;
-    std::vector<int64_t> labels_;
-    std::vector<float> values_;
+    std::vector<int64_t> ids_;
+    std::vector<float> distances_;
 };
 
 }  // namespace milvus::query

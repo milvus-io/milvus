@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package querynode
 
@@ -42,10 +47,10 @@ type Collection struct {
 	id            UniqueID
 	partitionIDs  []UniqueID
 	schema        *schemapb.CollectionSchema
-	channelMu     sync.RWMutex
-	vChannels     []Channel
-	pChannels     []Channel
 
+	channelMu      sync.RWMutex
+	vChannels      []Channel
+	pChannels      []Channel
 	vDeltaChannels []Channel
 	pDeltaChannels []Channel
 
@@ -114,7 +119,26 @@ OUTER:
 func (c *Collection) getVChannels() []Channel {
 	c.channelMu.RLock()
 	defer c.channelMu.RUnlock()
-	return c.vChannels
+	tmpChannels := make([]Channel, len(c.vChannels))
+	copy(tmpChannels, c.vChannels)
+	return tmpChannels
+}
+
+// removeVChannel remove the virtual channel from collection
+func (c *Collection) removeVChannel(channel Channel) {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
+	tmpChannels := make([]Channel, 0)
+	for _, vChannel := range c.vChannels {
+		if channel != vChannel {
+			tmpChannels = append(tmpChannels, vChannel)
+		}
+	}
+	c.vChannels = tmpChannels
+	log.Debug("remove vChannel from collection",
+		zap.Any("collectionID", c.ID()),
+		zap.Any("channel", channel),
+	)
 }
 
 // addPChannels add physical channels to physical channels of collection
@@ -144,11 +168,15 @@ OUTER:
 func (c *Collection) getPChannels() []Channel {
 	c.channelMu.RLock()
 	defer c.channelMu.RUnlock()
-	return c.pChannels
+	tmpChannels := make([]Channel, len(c.pChannels))
+	copy(tmpChannels, c.pChannels)
+	return tmpChannels
 }
 
 // addPChannels add physical channels to physical channels of collection
 func (c *Collection) addPDeltaChannels(channels []Channel) {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
 OUTER:
 	for _, dstChan := range channels {
 		for _, srcChan := range c.pDeltaChannels {
@@ -170,15 +198,25 @@ OUTER:
 
 // getPChannels get physical channels of collection
 func (c *Collection) getPDeltaChannels() []Channel {
-	return c.pDeltaChannels
+	c.channelMu.RLock()
+	defer c.channelMu.RUnlock()
+	tmpChannels := make([]Channel, len(c.pDeltaChannels))
+	copy(tmpChannels, c.pDeltaChannels)
+	return tmpChannels
 }
 
 func (c *Collection) getVDeltaChannels() []Channel {
-	return c.vDeltaChannels
+	c.channelMu.RLock()
+	defer c.channelMu.RUnlock()
+	tmpChannels := make([]Channel, len(c.vDeltaChannels))
+	copy(tmpChannels, c.vDeltaChannels)
+	return tmpChannels
 }
 
 // addVChannels add virtual channels to collection
 func (c *Collection) addVDeltaChannels(channels []Channel) {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
 OUTER:
 	for _, dstChan := range channels {
 		for _, srcChan := range c.vDeltaChannels {
@@ -196,6 +234,22 @@ OUTER:
 		)
 		c.vDeltaChannels = append(c.vDeltaChannels, dstChan)
 	}
+}
+
+func (c *Collection) removeVDeltaChannel(channel Channel) {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
+	tmpChannels := make([]Channel, 0)
+	for _, vChannel := range c.vDeltaChannels {
+		if channel != vChannel {
+			tmpChannels = append(tmpChannels, vChannel)
+		}
+	}
+	c.vDeltaChannels = tmpChannels
+	log.Debug("remove vDeltaChannel from collection",
+		zap.Any("collectionID", c.ID()),
+		zap.Any("channel", channel),
+	)
 }
 
 // setReleaseTime records when collection is released

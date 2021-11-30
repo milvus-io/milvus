@@ -147,21 +147,22 @@ func (queue *baseTaskQueue) PopActiveTask(tID UniqueID) task {
 
 func (queue *baseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	queue.utLock.RLock()
-	defer queue.utLock.RUnlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
 		if e.Value.(task).ID() == reqID {
+			queue.utLock.RUnlock()
 			return e.Value.(task)
 		}
 	}
+	queue.utLock.RUnlock()
 
 	queue.atLock.RLock()
-	defer queue.atLock.RUnlock()
-	for tID := range queue.activeTasks {
+	for tID, t := range queue.activeTasks {
 		if tID == reqID {
-			return queue.activeTasks[tID]
+			queue.atLock.RUnlock()
+			return t
 		}
 	}
-
+	queue.atLock.RUnlock()
 	return nil
 }
 
@@ -238,7 +239,10 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	if err != nil {
 		return err
 	}
-	_ = queue.addPChanStats(t)
+	err = queue.addPChanStats(t)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -318,7 +322,7 @@ func (queue *dmTaskQueue) popPChanStats(t task) error {
 			}
 		}
 	} else {
-		return fmt.Errorf("Proxy dmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
+		return fmt.Errorf("proxy dmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
 	}
 	return nil
 }

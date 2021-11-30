@@ -12,17 +12,17 @@ elif [[ "$unamestr" == 'Darwin' ]]; then
 fi
 echo "platform: $platform"
 
-# define chaos testing object
-release=${1:-"milvus-chaos"}
-ns=${2:-"chaos-testing"}
+ns="chaos-testing"
 
 # switch namespace
 kubectl config set-context --current --namespace=${ns}
-pod="standalone"
-chaos_type="pod_kill"
-chaos_task="data-consist-test" # chaos-test or data-consist-test 
-release="milvus-chaos"
-ns="chaos-testing"
+
+# set parameters
+pod=${1:-"querynode"}
+chaos_type=${2:-"pod_kill"} #pod_kill or pod_failure
+chaos_task=${3:-"chaos-test"} # chaos-test or data-consist-test 
+
+release="test"-${pod}-${chaos_type/_/-} # replace pod_kill to pod-kill
 
 # install milvus cluster for chaos testing
 pushd ./scripts
@@ -47,6 +47,10 @@ then
     helm upgrade ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=2 --reuse-values
 fi
 
+# wait all pod ready
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
+kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s
+
 popd
 
 # replace chaos object as defined
@@ -61,21 +65,33 @@ fi
 
 # run chaos testing
 echo "start running testcase ${pod}"
-host=$(kubectl get svc/milvus-chaos -o jsonpath="{.spec.clusterIP}")
+if [[ $release =~ "milvus" ]]
+then
+    host=$(kubectl get svc/${release} -o jsonpath="{.spec.clusterIP}")
+else
+    host=$(kubectl get svc/${release}-milvus -o jsonpath="{.spec.clusterIP}")
+fi
+
 python scripts/hello_milvus.py --host "$host"
 # chaos test
+export ENABLE_TRACEBACK=False
+
 if [ "$chaos_task" == "chaos-test" ];
 then
-    pytest -s -v test_chaos.py --host "$host" || echo "chaos test fail"
+    pytest -s -v test_chaos.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
 fi
 # data consist test
 if [ "$chaos_task" == "data-consist-test" ];
 then
-    pytest -s -v test_chaos_data_consist.py --host "$host" || echo "chaos test fail"
+    pytest -s -v test_chaos_data_consist.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
 fi
-sleep 30s
+sleep 30
 echo "start running e2e test"
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} -n chaos-testing --timeout=360s
+kubectl wait --for=condition=Ready pod -l release=${release} -n chaos-testing --timeout=360s
+
 python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
 
 # save logs
-bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}
+data=`date +%Y-%m-%d-%H-%M-%S`
+bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}-${chaos_type}-${chaos_task}-${data}

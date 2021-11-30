@@ -20,15 +20,18 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type tSafeWatcher struct {
 	notifyChan chan bool
+	closeCh    chan struct{}
 }
 
 func newTSafeWatcher() *tSafeWatcher {
 	return &tSafeWatcher{
 		notifyChan: make(chan bool, 1),
+		closeCh:    make(chan struct{}, 1),
 	}
 }
 
@@ -40,6 +43,10 @@ func (watcher *tSafeWatcher) notify() {
 
 func (watcher *tSafeWatcher) watcherChan() <-chan bool {
 	return watcher.notifyChan
+}
+
+func (watcher *tSafeWatcher) close() {
+	watcher.closeCh <- struct{}{}
 }
 
 type tSafer interface {
@@ -79,7 +86,7 @@ func newTSafe(ctx context.Context, channel Channel) tSafer {
 		watcherList: make([]*tSafeWatcher, 0),
 		tSafeChan:   make(chan tSafeMsg, channelSize),
 		tSafeRecord: make(map[UniqueID]Timestamp),
-		tSafe:       math.MaxUint64,
+		tSafe:       typeutil.ZeroTimestamp,
 	}
 	return t
 }

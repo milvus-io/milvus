@@ -84,5 +84,15 @@ func (handler *componentsHealthzHandler) ServeHTTP(w http.ResponseWriter, r *htt
 		return
 	}
 
+	if states.State == nil {
+		unhealthyHandler(w, r, "failed to get state")
+		return
+	}
+
+	if states.State.StateCode != internalpb.StateCode_Healthy {
+		unhealthyHandler(w, r, fmt.Sprintf("state: %s", states.State.StateCode.String()))
+		return
+	}
+
 	healthyHandler(w, r)
 }

@@ -123,39 +123,54 @@ func (c *client) consume(consumer *consumer) {
 		select {
 		case <-c.closeCh:
 			return
+		case _, ok := <-consumer.initCh:
+			if !ok {
+				return
+			}
+			c.deliver(consumer, 100)
 		case _, ok := <-consumer.MsgMutex():
 			if !ok {
 				// consumer MsgMutex closed, goroutine exit
 				log.Debug("Consumer MsgMutex closed")
 				return
 			}
+			c.deliver(consumer, 100)
+		}
+	}
+}
 
-			for {
-				n := cap(consumer.messageCh) - len(consumer.messageCh)
-				if n < 100 { // batch min size
-					n = 100
-				}
-				msgs, err := consumer.client.server.Consume(consumer.topic, consumer.consumerName, n)
-				if err != nil {
-					log.Debug("Consumer's goroutine cannot consume from (" + consumer.topic +
-						"," + consumer.consumerName + "): " + err.Error())
-					break
-				}
+func (c *client) deliver(consumer *consumer, batchMin int) {
+	for {
+		n := cap(consumer.messageCh) - len(consumer.messageCh)
+		if n < batchMin { // batch min size
+			n = batchMin
+		}
+		msgs, err := consumer.client.server.Consume(consumer.topic, consumer.consumerName, n)
+		if err != nil {
+			log.Warn("Consumer's goroutine cannot consume from (" + consumer.topic + "," + consumer.consumerName + "): " + err.Error())
+			break
+		}
 
-				// no more msgs
-				if len(msgs) == 0 {
-					break
-				}
-				for _, msg := range msgs {
-					consumer.messageCh <- Message{
-						MsgID:   msg.MsgID,
-						Payload: msg.Payload,
-						Topic:   consumer.Topic(),
-					}
-				}
+		// no more msgs
+		if len(msgs) == 0 {
+			break
+		}
+		for _, msg := range msgs {
+			select {
+			case consumer.messageCh <- Message{
+				MsgID:   msg.MsgID,
+				Payload: msg.Payload,
+				Topic:   consumer.Topic()}:
+			case <-c.closeCh:
+				return
 			}
 		}
 	}
+}
+
+func (c *client) CreateReader(readerOptions ReaderOptions) (Reader, error) {
+	reader, err := newReader(c, &readerOptions)
+	return reader, err
 }
 
 // Close close the channel to notify rocksmq to stop operation and close rocksmq server

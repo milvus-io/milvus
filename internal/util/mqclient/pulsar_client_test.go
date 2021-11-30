@@ -124,7 +124,7 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
-	err = consumer.Seek(msgID)
+	err = consumer.Seek(msgID, true)
 	assert.Nil(t, err)
 
 	// skip the last received message
@@ -376,7 +376,7 @@ func TestPulsarClient_Consume2(t *testing.T) {
 	log.Info("main done")
 }
 
-func TestPulsarClient_Seek(t *testing.T) {
+func TestPulsarClient_SeekPosition(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
@@ -393,14 +393,15 @@ func TestPulsarClient_Seek(t *testing.T) {
 	assert.NotNil(t, producer)
 
 	log.Info("Produce start")
-	var id MessageID
+	ids := []MessageID{}
 	arr := []int{1, 2, 3}
 	for _, v := range arr {
 		msg := &ProducerMessage{
 			Payload:    IntToBytes(v),
 			Properties: map[string]string{},
 		}
-		id, err = producer.Send(ctx, msg)
+		id, err := producer.Send(ctx, msg)
+		ids = append(ids, id)
 		assert.Nil(t, err)
 	}
 
@@ -415,16 +416,99 @@ func TestPulsarClient_Seek(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
-	seekID := id.(*pulsarID).messageID
+	seekID := ids[2].(*pulsarID).messageID
 	consumer.Seek(seekID)
 
 	msgChan := consumer.Chan()
 
 	select {
 	case msg := <-msgChan:
+		assert.Equal(t, seekID.BatchIdx(), msg.ID().BatchIdx())
+		assert.Equal(t, seekID.LedgerID(), msg.ID().LedgerID())
+		assert.Equal(t, seekID.EntryID(), msg.ID().EntryID())
+		assert.Equal(t, seekID.PartitionIdx(), msg.ID().PartitionIdx())
 		assert.Equal(t, 3, BytesToInt(msg.Payload()))
 	case <-time.After(2 * time.Second):
-		log.Info("after 2 seconds")
+		assert.FailNow(t, "should not wait")
+	}
+
+	seekID = ids[1].(*pulsarID).messageID
+	consumer.Seek(seekID)
+
+	msgChan = consumer.Chan()
+
+	select {
+	case msg := <-msgChan:
+		assert.Equal(t, seekID.BatchIdx(), msg.ID().BatchIdx())
+		assert.Equal(t, seekID.LedgerID(), msg.ID().LedgerID())
+		assert.Equal(t, seekID.EntryID(), msg.ID().EntryID())
+		assert.Equal(t, seekID.PartitionIdx(), msg.ID().PartitionIdx())
+		assert.Equal(t, 2, BytesToInt(msg.Payload()))
+	case <-time.After(2 * time.Second):
+		assert.FailNow(t, "should not wait")
+	}
+}
+
+func TestPulsarClient_SeekLatest(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	defer pc.Close()
+	assert.NoError(t, err)
+	assert.NotNil(t, pc)
+	rand.Seed(time.Now().UnixNano())
+
+	ctx := context.Background()
+	topic := fmt.Sprintf("test-topic-%d", rand.Int())
+	subName := fmt.Sprintf("test-subname-%d", rand.Int())
+
+	producer, err := pc.CreateProducer(ProducerOptions{Topic: topic})
+	assert.Nil(t, err)
+	assert.NotNil(t, producer)
+
+	log.Info("Produce start")
+
+	arr := []int{1, 2, 3}
+	for _, v := range arr {
+		msg := &ProducerMessage{
+			Payload:    IntToBytes(v),
+			Properties: map[string]string{},
+		}
+		_, err = producer.Send(ctx, msg)
+		assert.Nil(t, err)
+	}
+
+	log.Info("Produced")
+
+	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		Type:                        pulsar.KeyShared,
+		SubscriptionInitialPosition: pulsar.SubscriptionPositionLatest,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+	defer consumer.Close()
+
+	msgChan := consumer.Chan()
+
+	loop := true
+	for loop {
+		select {
+		case msg := <-msgChan:
+			consumer.Ack(msg)
+			v := BytesToInt(msg.Payload())
+			log.Info("RECV", zap.Any("v", v))
+			assert.Equal(t, v, 4)
+			loop = false
+		case <-time.After(2 * time.Second):
+			log.Info("after 2 seconds")
+			msg := &ProducerMessage{
+				Payload:    IntToBytes(4),
+				Properties: map[string]string{},
+			}
+			_, err = producer.Send(ctx, msg)
+			assert.Nil(t, err)
+		}
 	}
 }
 

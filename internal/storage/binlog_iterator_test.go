@@ -26,19 +26,49 @@ func generateTestData(t *testing.T, num int) []*Blob {
 		{FieldID: rootcoord.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
 		{FieldID: rootcoord.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64},
 		{FieldID: 101, Name: "int32", DataType: schemapb.DataType_Int32},
+		{FieldID: 102, Name: "floatVector", DataType: schemapb.DataType_FloatVector},
+		{FieldID: 103, Name: "binaryVector", DataType: schemapb.DataType_BinaryVector},
 	}}
 	insertCodec := NewInsertCodec(&etcdpb.CollectionMeta{ID: 1, Schema: schema})
-	defer insertCodec.Close()
 
-	data := &InsertData{Data: map[FieldID]FieldData{rootcoord.TimeStampField: &Int64FieldData{Data: []int64{}}, rootcoord.RowIDField: &Int64FieldData{Data: []int64{}}, 101: &Int32FieldData{Data: []int32{}}}}
+	var (
+		field0   []int64
+		field1   []int64
+		field101 []int32
+		field102 []float32
+		field103 []byte
+	)
+
 	for i := 1; i <= num; i++ {
-		field0 := data.Data[rootcoord.TimeStampField].(*Int64FieldData)
-		field0.Data = append(field0.Data, int64(i))
-		field1 := data.Data[rootcoord.RowIDField].(*Int64FieldData)
-		field1.Data = append(field1.Data, int64(i))
-		field2 := data.Data[101].(*Int32FieldData)
-		field2.Data = append(field2.Data, int32(i))
+		field0 = append(field0, int64(i))
+		field1 = append(field1, int64(i))
+		field101 = append(field101, int32(i))
+
+		f102 := make([]float32, 8)
+		for j := range f102 {
+			f102[j] = float32(i)
+		}
+
+		field102 = append(field102, f102...)
+		field103 = append(field103, byte(i))
 	}
+
+	data := &InsertData{Data: map[FieldID]FieldData{
+		rootcoord.RowIDField:     &Int64FieldData{Data: field0},
+		rootcoord.TimeStampField: &Int64FieldData{Data: field1},
+		101:                      &Int32FieldData{Data: field101},
+		102: &FloatVectorFieldData{
+			NumRows: []int64{int64(num)},
+			Data:    field102,
+			Dim:     8,
+		},
+		103: &BinaryVectorFieldData{
+			NumRows: []int64{int64(num)},
+			Data:    field103,
+			Dim:     8,
+		},
+	}}
+
 	blobs, _, err := insertCodec.Serialize(1, 1, data)
 	assert.Nil(t, err)
 	return blobs
@@ -75,12 +105,24 @@ func TestInsertlogIterator(t *testing.T) {
 			v, err := itr.Next()
 			assert.Nil(t, err)
 			value := v.(*Value)
+
+			f102 := make([]float32, 8)
+			for j := range f102 {
+				f102[j] = float32(i)
+			}
+
 			expected := &Value{
 				int64(i),
 				int64(i),
 				int64(i),
 				false,
-				map[FieldID]interface{}{rootcoord.TimeStampField: int64(i), rootcoord.RowIDField: int64(i), 101: int32(i)},
+				map[FieldID]interface{}{
+					rootcoord.TimeStampField: int64(i),
+					rootcoord.RowIDField:     int64(i),
+					101:                      int32(i),
+					102:                      f102,
+					103:                      []byte{byte(i)},
+				},
 			}
 			assert.EqualValues(t, expected, value)
 		}
@@ -121,12 +163,23 @@ func TestMergeIterator(t *testing.T) {
 			v, err := itr.Next()
 			assert.Nil(t, err)
 			value := v.(*Value)
+			f102 := make([]float32, 8)
+			for j := range f102 {
+				f102[j] = float32(i)
+			}
+
 			expected := &Value{
 				int64(i),
 				int64(i),
 				int64(i),
 				false,
-				map[FieldID]interface{}{rootcoord.TimeStampField: int64(i), rootcoord.RowIDField: int64(i), 101: int32(i)},
+				map[FieldID]interface{}{
+					rootcoord.TimeStampField: int64(i),
+					rootcoord.RowIDField:     int64(i),
+					101:                      int32(i),
+					102:                      f102,
+					103:                      []byte{byte(i)},
+				},
 			}
 			assert.EqualValues(t, expected, value)
 		}
@@ -145,12 +198,23 @@ func TestMergeIterator(t *testing.T) {
 		itr := NewMergeIterator(iterators)
 
 		for i := 1; i <= 3; i++ {
+			f102 := make([]float32, 8)
+			for j := range f102 {
+				f102[j] = float32(i)
+			}
+
 			expected := &Value{
 				int64(i),
 				int64(i),
 				int64(i),
 				false,
-				map[FieldID]interface{}{rootcoord.TimeStampField: int64(i), rootcoord.RowIDField: int64(i), 101: int32(i)},
+				map[FieldID]interface{}{
+					rootcoord.TimeStampField: int64(i),
+					rootcoord.RowIDField:     int64(i),
+					101:                      int32(i),
+					102:                      f102,
+					103:                      []byte{byte(i)},
+				},
 			}
 			for j := 0; j < 2; j++ {
 				assert.True(t, itr.HasNext())

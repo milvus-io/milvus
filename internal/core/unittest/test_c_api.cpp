@@ -956,8 +956,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -1075,8 +1075,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -1212,8 +1212,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -1241,9 +1241,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
-                  search_result_on_raw_index->result_distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1364,8 +1364,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -1393,9 +1393,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
-                  search_result_on_raw_index->result_distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1500,8 +1500,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -1529,9 +1529,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
-                  search_result_on_raw_index->result_distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1645,8 +1645,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -1674,9 +1674,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
-                  search_result_on_raw_index->result_distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1783,8 +1783,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -1812,9 +1812,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
-                  search_result_on_raw_index->result_distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1934,8 +1934,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -1963,9 +1963,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
-                  search_result_on_raw_index->result_distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2071,8 +2071,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -2105,9 +2105,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
-                  search_result_on_raw_index->result_distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset], search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2221,8 +2220,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     }
 
     auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
-    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
-    search_result_on_raw_index->result_distances_ = vec_dis;
+    search_result_on_raw_index->ids_ = vec_ids;
+    search_result_on_raw_index->distances_ = vec_dis;
 
     auto binary_set = indexing->Serialize(conf);
     void* c_load_index_info = nullptr;
@@ -2255,9 +2254,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
-                  search_result_on_raw_index->result_distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset], search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2458,7 +2456,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2551,7 +2549,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    auto res2 = Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -2718,7 +2716,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);

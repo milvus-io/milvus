@@ -11,6 +11,8 @@
 
 package rocksmq
 
+import "context"
+
 // ProducerMessage that will be write to rocksdb
 type ProducerMessage struct {
 	Payload []byte
@@ -47,4 +49,10 @@ type RocksMQ interface {
 	ExistConsumerGroup(topicName string, groupName string) (bool, *Consumer)
 
 	Notify(topicName, groupName string)
+
+	CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool, subscriptionRolePrefix string) (string, error)
+	ReaderSeek(topicName string, readerName string, msgID UniqueID)
+	Next(ctx context.Context, topicName string, readerName string, messageIDInclusive bool) (*ConsumerMessage, error)
+	HasNext(topicName string, readerName string, messageIDInclusive bool) bool
+	CloseReader(topicName string, readerName string)
 }

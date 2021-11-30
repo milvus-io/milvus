@@ -44,7 +44,7 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 	entity = strings.TrimSpace(entity)
 
 	if entity == "" {
-		return fmt.Errorf("Collection %s should not be empty", entityType)
+		return fmt.Errorf("collection %s should not be empty", entityType)
 	}
 
 	invalidMsg := fmt.Sprintf("Invalid collection %s: %s. ", entityType, entity)
@@ -118,7 +118,7 @@ func validateFieldName(fieldName string) error {
 	fieldName = strings.TrimSpace(fieldName)
 
 	if fieldName == "" {
-		return errors.New("Field name should not be empty")
+		return errors.New("field name should not be empty")
 	}
 
 	invalidMsg := "Invalid field name: " + fieldName + ". "
@@ -267,7 +267,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 		// check system field
 		if field.FieldID < 100 {
 			// System Fields, not injected yet
-			return fmt.Errorf("FieldID(%d) that is less than 100 is reserved for system fields: %s", field.FieldID, field.Name)
+			return fmt.Errorf("fieldID(%d) that is less than 100 is reserved for system fields: %s", field.FieldID, field.Name)
 		}
 
 		// primary key detector

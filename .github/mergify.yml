@@ -1,4 +1,26 @@
 pull_request_rules:
+  - name: Add needs-dco label when DCO check failed
+    conditions:
+      - base=master
+      - -status-success=DCO
+    actions:
+      label:
+        remove:
+          - dco-passed
+        add:
+          - needs-dco
+
+  - name: Add dco-passed label when DCO check passed
+    conditions:
+      - base=master
+      - status-success=DCO
+    actions:
+      label:
+        remove:
+          - needs-dco
+        add:
+          - dco-passed
+
   - name: Test passed for code changed
     conditions:
       - base=master
@@ -16,6 +38,16 @@ pull_request_rules:
     conditions:
       - base=master
       - -files~=^(?!tests\/python_client).+
+      - "status-success=continuous-integration/jenkins/pr-merge"
+    actions:
+      label:
+        add:
+          - ci-passed
+  
+  - name: Test passed for tests scripts changed
+    conditions:
+      - base=master
+      - -files~=^(?!tests\/scripts).+
       - "status-success=continuous-integration/jenkins/pr-merge"
     actions:
       label:

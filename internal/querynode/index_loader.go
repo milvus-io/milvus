@@ -108,9 +108,8 @@ func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexPa
 	var indexParams indexParam
 	var indexName string
 	indexCodec := storage.NewIndexFileBinlogCodec()
-	defer indexCodec.Close()
 	for _, p := range indexPath {
-		log.Debug("", zap.String("load path", fmt.Sprintln(indexPath)))
+		log.Debug("", zap.String("load path", fmt.Sprintln(p)))
 		indexPiece, err := loader.kv.Load(p)
 		if err != nil {
 			return nil, nil, "", err

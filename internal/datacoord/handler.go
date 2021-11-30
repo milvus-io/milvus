@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Handler handles some channel method for ChannelManager
 type Handler interface {
 	GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string) bool
@@ -27,7 +28,10 @@ func newServerHandler(s *Server) *ServerHandler {
 
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
 func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo {
-	segments := h.s.meta.GetSegmentsByChannel(channel)
+	// cannot use GetSegmentsByChannel since dropped segments are needed here
+	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
+		return s.InsertChannel == channel
+	})
 	log.Debug("GetSegmentsByChannel",
 		zap.Any("collectionID", collectionID),
 		zap.Any("channel", channel),
@@ -35,10 +39,16 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 	)
 	var flushed []*datapb.SegmentInfo
 	var unflushed []*datapb.SegmentInfo
+	var dropped []*datapb.SegmentInfo
 	var seekPosition *internalpb.MsgPosition
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
+			continue
+		}
+
+		if s.GetState() == commonpb.SegmentState_Dropped {
+			dropped = append(dropped, trimSegmentInfo(s.SegmentInfo))
 			continue
 		}
 
@@ -73,6 +83,7 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 		SeekPosition:      seekPosition,
 		FlushedSegments:   flushed,
 		UnflushedSegments: unflushed,
+		DroppedSegments:   dropped,
 	}
 }
 
@@ -121,11 +132,13 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 	segments := h.s.meta.GetSegmentsByChannel(channel)
 	for _, segment := range segments {
-		if segment.GetStartPosition() != nil && // fitler empty segment
+		if segment.GetStartPosition() != nil && // filter empty segment
 			// FIXME: we filter compaction generated segments
 			// because datanode may not know the segment due to the network lag or
 			// datacoord crash when handling CompleteCompaction.
-			len(segment.CompactionFrom) == 0 &&
+			// FIXME: cancel this limitation for #12265
+			// need to change a unified DropAndFlush to solve the root problem
+			//len(segment.CompactionFrom) == 0 &&
 			segment.GetState() != commonpb.SegmentState_Dropped {
 			return false
 		}

@@ -10,21 +10,22 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Schema.h"
-#include <random>
-#include <memory>
-#include <cstring>
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentSealed.h"
-#include "Constants.h"
-#include <boost/algorithm/string/predicate.hpp>
-#include "segcore/SegmentSealed.h"
 
-#include <knowhere/index/vector_index/VecIndex.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <knowhere/index/vector_index/IndexIVF.h>
-#include <query/SearchOnIndex.h>
+#include <boost/algorithm/string/predicate.hpp>
+#include <cstring>
+#include <memory>
+#include <random>
+
+#include "Constants.h"
+#include "common/Schema.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "query/SearchOnIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealedImpl.h"
+
 using boost::algorithm::starts_with;
 
 namespace milvus::segcore {
@@ -289,8 +290,7 @@ SearchResultToJson(const SearchResult& sr) {
         std::vector<std::string> result;
         for (int k = 0; k < topk; ++k) {
             int index = q * topk + k;
-            result.emplace_back(std::to_string(sr.internal_seg_offsets_[index]) + "->" +
-                                std::to_string(sr.result_distances_[index]));
+            result.emplace_back(std::to_string(sr.ids_[index]) + "->" + std::to_string(sr.distances_[index]));
         }
         results.emplace_back(std::move(result));
     }

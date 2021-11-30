@@ -520,12 +520,14 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:            1,
 									InsertChannel: "ch1",
+									State:         commonpb.SegmentState_Flushed,
 								},
 							},
 							2: {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:            2,
 									InsertChannel: "ch2",
+									State:         commonpb.SegmentState_Flushed,
 								},
 							},
 						},
@@ -555,6 +557,7 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:            2,
 									InsertChannel: "ch2",
+									State:         commonpb.SegmentState_Growing,
 								},
 							},
 						},

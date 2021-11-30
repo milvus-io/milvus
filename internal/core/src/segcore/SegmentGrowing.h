@@ -35,9 +35,6 @@ struct ColumnBasedRawData {
     int64_t count;
 };
 
-int
-TestABI();
-
 class SegmentGrowing : public SegmentInternalInterface {
  public:
     virtual void
@@ -72,14 +69,5 @@ class SegmentGrowing : public SegmentInternalInterface {
 };
 
 using SegmentGrowingPtr = std::unique_ptr<SegmentGrowing>;
-
-SegmentGrowingPtr
-CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config);
-
-inline SegmentGrowingPtr
-CreateGrowingSegment(SchemaPtr schema) {
-    auto seg_conf = SegcoreConfig::default_config();
-    return CreateGrowingSegment(schema, seg_conf);
-}
 
 }  // namespace milvus::segcore

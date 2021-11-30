@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -137,10 +136,10 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	chanNames := make([]string, t.Req.ShardsNum)
 	deltaChanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.dmlChannels.GetDmlMsgStreamName(), collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.chanTimeTick.getDmlChannelName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 
-		deltaChanNames[i] = t.core.deltaChannels.GetDmlMsgStreamName()
+		deltaChanNames[i] = t.core.chanTimeTick.getDeltaChannelName()
 		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.DmlChannelName, Params.DeltaChannelName)
 		if err1 != nil || deltaChanName != deltaChanNames[i] {
 			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
@@ -201,15 +200,15 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
 
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		// add dml channel before send dd msg
-		t.core.dmlChannels.AddProducerChannels(chanNames...)
+		t.core.chanTimeTick.addDmlChannels(chanNames...)
 
 		// also add delta channels
-		t.core.deltaChannels.AddProducerChannels(deltaChanNames...)
+		t.core.chanTimeTick.addDeltaChannels(deltaChanNames...)
 
 		ids, err := t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 		if err != nil {
@@ -223,13 +222,13 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		}
 		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
 		if err != nil {
-			t.core.dmlChannels.RemoveProducerChannels(chanNames...)
-			t.core.deltaChannels.RemoveProducerChannels(deltaChanNames...)
+			t.core.chanTimeTick.removeDmlChannels(chanNames...)
+			t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
 
-		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 
 		return nil
@@ -296,6 +295,12 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
+	// drop all indices
+	if err = t.core.RemoveIndex(ctx, t.Req.CollectionName, ""); err != nil {
+		return err
+	}
+
+	// get all aliases before meta table updated
 	aliases := t.core.MetaTable.ListAliases(collMeta.ID)
 
 	// use lambda function here to guarantee all resources to be released
@@ -304,9 +309,9 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
 
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOpStr)
 		if err != nil {
@@ -318,24 +323,23 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 
 		// send tt into deleted channels to tell data_node to clear flowgragh
-		t.core.chanTimeTick.SendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
+		t.core.chanTimeTick.sendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
 
 		// remove dml channel after send dd msg
-		t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
+		t.core.chanTimeTick.removeDmlChannels(collMeta.PhysicalChannelNames...)
 
 		// remove delta channels
 		deltaChanNames := make([]string, len(collMeta.PhysicalChannelNames))
 		for i, chanName := range collMeta.PhysicalChannelNames {
-			deltaChanNames[i], err = ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName)
-			if err != nil {
+			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName); err != nil {
 				return err
 			}
 		}
-		t.core.deltaChannels.RemoveProducerChannels(deltaChanNames...)
+		t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 		return nil
 	}
 
@@ -346,36 +350,12 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	//notify query service to release collection
 	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
-		log.Error("Failed to CallReleaseCollectionService", zap.String("error", err.Error()))
+		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
 		return err
 	}
 
-	req := proxypb.InvalidateCollMetaCacheRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0, //TODO, msg type
-			MsgID:     0, //TODO, msg id
-			Timestamp: ts,
-			SourceID:  t.core.session.ServerID,
-		},
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-	}
-	// error doesn't matter here
-	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
-
-	for _, alias := range aliases {
-		req = proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO, msg type
-				MsgID:     0, //TODO, msg id
-				Timestamp: ts,
-				SourceID:  t.core.session.ServerID,
-			},
-			DbName:         t.Req.DbName,
-			CollectionName: alias,
-		}
-		t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
-	}
+	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
+	t.core.ExpireMetaCache(ctx, aliases, ts)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -542,9 +522,9 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
 
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ts, ddOpStr)
 		if err != nil {
@@ -556,7 +536,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 		return nil
 	}
@@ -566,18 +546,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	req := proxypb.InvalidateCollMetaCacheRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0, //TODO, msg type
-			MsgID:     0, //TODO, msg id
-			Timestamp: ts,
-			SourceID:  t.core.session.ServerID,
-		},
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-	}
-	// error doesn't matter here
-	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -638,9 +607,9 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
 
-		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
 		_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ts, ddOpStr)
 		if err != nil {
@@ -652,7 +621,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 		return nil
 	}
@@ -662,22 +631,11 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	req := proxypb.InvalidateCollMetaCacheRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0, //TODO, msg type
-			MsgID:     0, //TODO, msg id
-			Timestamp: ts,
-			SourceID:  t.core.session.ServerID,
-		},
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-	}
-	// error doesn't matter here
-	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
 
 	//notify query service to release partition
 	if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partID}); err != nil {
-		log.Error("Failed to CallReleaseCollectionService", zap.String("error", err.Error()))
+		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
 		return err
 	}
 
@@ -969,22 +927,10 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropIndex {
 		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	_, info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
-	if err != nil {
-		log.Warn("GetIndexByName failed,", zap.String("collection name", t.Req.CollectionName), zap.String("field name", t.Req.FieldName), zap.String("index name", t.Req.IndexName), zap.Error(err))
+	if err := t.core.RemoveIndex(ctx, t.Req.CollectionName, t.Req.IndexName); err != nil {
 		return err
 	}
-	if len(info) == 0 {
-		return nil
-	}
-	if len(info) != 1 {
-		return fmt.Errorf("len(index) = %d", len(info))
-	}
-	err = t.core.CallDropIndexService(ctx, info[0].IndexID)
-	if err != nil {
-		return err
-	}
-	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	_, _, err := t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
 	return err
 }
 
@@ -1043,17 +989,7 @@ func (t *DropAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table drop alias failed, error = %w", err)
 	}
 
-	req := proxypb.InvalidateCollMetaCacheRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0, //TODO, msg type
-			MsgID:     0, //TODO, msg id
-			Timestamp: ts,
-			SourceID:  t.core.session.ServerID,
-		},
-		CollectionName: t.Req.Alias,
-	}
-	// error doesn't matter here
-	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+	t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, ts)
 
 	return nil
 }
@@ -1084,17 +1020,7 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table alter alias failed, error = %w", err)
 	}
 
-	req := proxypb.InvalidateCollMetaCacheRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0, //TODO, msg type
-			MsgID:     0, //TODO, msg id
-			Timestamp: ts,
-			SourceID:  t.core.session.ServerID,
-		},
-		CollectionName: t.Req.Alias,
-	}
-	// error doesn't matter here
-	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+	t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, ts)
 
 	return nil
 }

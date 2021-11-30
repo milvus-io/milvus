@@ -16,8 +16,8 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "log/Log.h"
 #include "segcore/Collection.h"
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentSealed.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealedImpl.h"
 #include "segcore/segment_c.h"
 #include "segcore/SimilarityCorelation.h"
 
@@ -70,7 +70,7 @@ Search(CSegmentInterface c_segment,
         *search_result = segment->Search(plan, *phg_ptr, timestamp);
         // if (plan->plan_node_->search_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
         if (!milvus::segcore::PositivelyRelated(plan->plan_node_->search_info_.metric_type_)) {
-            for (auto& dis : search_result->result_distances_) {
+            for (auto& dis : search_result->distances_) {
                 dis *= -1;
             }
         }

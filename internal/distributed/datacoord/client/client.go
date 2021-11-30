@@ -35,6 +35,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -137,6 +138,12 @@ func (c *Client) Init() error {
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
+	var kacp = keepalive.ClientParameters{
+		Time:                60 * time.Second, // send pings every 60 seconds if there is no activity
+		Timeout:             6 * time.Second,  // wait 6 second for ping ack before considering the connection dead
+		PermitWithoutStream: true,             // send pings even without active streams
+	}
+
 	var err error
 	connectDataCoordFn := func() error {
 		c.addr, err = getDataCoordAddress(c.sess)
@@ -149,6 +156,7 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
 		defer cancel()
 		conn, err := grpc.DialContext(ctx, c.addr,
+			grpc.WithKeepaliveParams(kacp),
 			grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
@@ -194,7 +202,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	if err == context.Canceled || err == context.DeadlineExceeded {
-		return nil, err
+		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
 	}
 
 	log.Debug("DataCoord Client grpc error", zap.Error(err))
@@ -202,6 +210,10 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	c.resetConnection()
 
 	ret, err = caller()
+	if err != nil {
+		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
+	}
+
 	return ret, err
 }
 
@@ -629,6 +641,7 @@ func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	return ret.(*milvuspb.GetCompactionPlansResponse), err
 }
 
+// WatchChannels notifies DataCoord to watch vchannels of a collection
 func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
@@ -644,4 +657,40 @@ func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		return nil, err
 	}
 	return ret.(*datapb.WatchChannelsResponse), err
+}
+
+// GetFlushState gets the flush state of multiple segments
+func (c *Client) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.GetFlushState(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.GetFlushStateResponse), err
+}
+
+// DropVirtualChannel drops virtual channel in datacoord.
+func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.DropVirtualChannel(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*datapb.DropVirtualChannelResponse), err
 }

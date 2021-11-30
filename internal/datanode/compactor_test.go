@@ -76,8 +76,8 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			{true, schemapb.DataType_Int64, []interface{}{int64(1), int64(2)}, "valid int64"},
 			{true, schemapb.DataType_Float, []interface{}{float32(1), float32(2)}, "valid float32"},
 			{true, schemapb.DataType_Double, []interface{}{float64(1), float64(2)}, "valid float64"},
-			{true, schemapb.DataType_FloatVector, []interface{}{float32(1), float32(2)}, "valid floatvector"},
-			{true, schemapb.DataType_BinaryVector, []interface{}{byte(255), byte(1)}, "valid binaryvector"},
+			{true, schemapb.DataType_FloatVector, []interface{}{[]float32{1.0, 2.0}}, "valid floatvector"},
+			{true, schemapb.DataType_BinaryVector, []interface{}{[]byte{255}}, "valid binaryvector"},
 			{false, schemapb.DataType_Bool, []interface{}{1, 2}, "invalid bool"},
 			{false, schemapb.DataType_Int8, []interface{}{nil, nil}, "invalid int8"},
 			{false, schemapb.DataType_Int16, []interface{}{nil, nil}, "invalid int16"},
@@ -95,7 +95,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				if test.isvalid {
 					fd, err := interface2FieldData(test.tp, test.content, 2)
 					assert.NoError(t, err)
-					assert.Equal(t, 2, fd.Length())
+					assert.Equal(t, 2, fd.RowNum())
 				} else {
 					fd, err := interface2FieldData(test.tp, test.content, 2)
 					assert.Error(t, err)
@@ -552,10 +552,11 @@ func (mfm *mockFlushManager) flushDelData(data *DelDataBuf, segmentID UniqueID, 
 	return nil
 }
 
-func (mfm *mockFlushManager) injectFlush(injection taskInjection, segments ...UniqueID) {
+func (mfm *mockFlushManager) injectFlush(injection *taskInjection, segments ...UniqueID) {
 	go func() {
 		time.Sleep(time.Second * time.Duration(mfm.sleepSeconds))
-		injection.injected <- struct{}{}
+		//injection.injected <- struct{}{}
+		close(injection.injected)
 		<-injection.injectOver
 	}()
 }

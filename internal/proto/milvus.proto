@@ -41,6 +41,7 @@ service MilvusService {
   rpc Query(QueryRequest) returns (QueryResults) {}
   rpc CalcDistance(CalcDistanceRequest) returns (CalcDistanceResults) {}
 
+  rpc GetFlushState(GetFlushStateRequest) returns (GetFlushStateResponse) {}
   rpc GetPersistentSegmentInfo(GetPersistentSegmentInfoRequest) returns (GetPersistentSegmentInfoResponse) {}
   rpc GetQuerySegmentInfo(GetQuerySegmentInfoRequest) returns (GetQuerySegmentInfoResponse) {}
 
@@ -762,6 +763,15 @@ message GetCompactionPlansResponse {
 message CompactionMergeInfo {
   repeated int64 sources = 1;
   int64 target = 2;
+}
+
+message GetFlushStateRequest {
+  repeated int64 segmentIDs = 1;
+}
+
+message GetFlushStateResponse {
+  common.Status status = 1;
+  bool flushed = 2;
 }
 
 service ProxyService {

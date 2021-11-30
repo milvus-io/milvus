@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
 )
 
 // queryNodeFlowGraph is a TimeTickedFlowGraph in query node
@@ -192,6 +193,19 @@ func (q *queryNodeFlowGraph) consumerFlowGraph(channel Channel, subName ConsumeS
 		return errors.New("null dml message stream in flow graph")
 	}
 	q.dmlStream.AsConsumer([]string{channel}, subName)
+	log.Debug("query node flow graph consumes from pChannel",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", channel),
+		zap.Any("subName", subName),
+	)
+	return nil
+}
+
+func (q *queryNodeFlowGraph) consumerFlowGraphLatest(channel Channel, subName ConsumeSubName) error {
+	if q.dmlStream == nil {
+		return errors.New("null dml message stream in flow graph")
+	}
+	q.dmlStream.AsConsumerWithPosition([]string{channel}, subName, mqclient.SubscriptionPositionLatest)
 	log.Debug("query node flow graph consumes from pChannel",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", channel),

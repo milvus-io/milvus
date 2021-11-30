@@ -29,7 +29,7 @@ func TestBaseTaskQueue_addUnissuedTask(t *testing.T) {
 	}
 
 	t.Run("test full", func(t *testing.T) {
-		taskQueue := newLoadAndReleaseTaskQueue(s)
+		taskQueue := newQueryNodeTaskQueue(s)
 		task := &mockTask{}
 		for i := 0; i < maxTaskNum; i++ {
 			err := taskQueue.addUnissuedTask(task)
@@ -40,7 +40,7 @@ func TestBaseTaskQueue_addUnissuedTask(t *testing.T) {
 	})
 
 	t.Run("add task to front", func(t *testing.T) {
-		taskQueue := newLoadAndReleaseTaskQueue(s)
+		taskQueue := newQueryNodeTaskQueue(s)
 		mt := &mockTask{
 			timestamp: 1000,
 		}

@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1637148505037,
+  "iteration": 1638184124946,
   "links": [],
   "panels": [
     {
@@ -266,6 +266,89 @@
       "timeFrom": null,
       "timeShift": null,
       "title": "IndexCoord Health",
+      "type": "stat"
+    },
+    {
+      "datasource": "prometheus",
+      "description": "Current health state of QueryCoord",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "from": "-65535",
+              "id": 1,
+              "text": "UP",
+              "to": "-1",
+              "type": 2,
+              "value": "0"
+            },
+            {
+              "from": "0",
+              "id": 2,
+              "text": "DOWN",
+              "to": "1",
+              "type": 1,
+              "value": "0"
+            }
+          ],
+          "noValue": "N/A",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "dark-red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "id": 123222,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(up{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\",app_kubernetes_io_component=\"querycoord\"})*(-1)",
+          "format": "time_series",
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "QueryCoord Health",
       "type": "stat"
     },
     {
@@ -4664,7 +4747,7 @@
       "yaxes": [
         {
           "format": "short",
-          "label": null,
+          "label": "",
           "logBase": 1,
           "max": null,
           "min": "0",
@@ -4872,7 +4955,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": null,
+          "min": "0",
           "show": true
         },
         {
@@ -5066,7 +5149,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": null,
+          "min": "0",
           "show": true
         },
         {
@@ -5226,10 +5309,11 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "go_threads{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\"}",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{component}}: {{pod}}",
+          "legendFormat": "{{pod}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -5323,6 +5407,7 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "go_memstats_next_gc_bytes{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}",
           "interval": "",
           "intervalFactor": 2,
@@ -5355,7 +5440,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": null,
+          "min": "0",
           "show": true
         },
         {
@@ -5521,7 +5606,7 @@
           "expr": "go_memstats_gc_cpu_fraction{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{pod}}",
+          "legendFormat": "{{component}}: {{pod}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -5619,7 +5704,7 @@
           "expr": "rate(go_memstats_frees_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m])",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{pod}}",
+          "legendFormat": "{{component}}: {{pod}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -6047,7 +6132,7 @@
         "allValue": null,
         "current": {
           "isNone": true,
-          "selected": true,
+          "selected": false,
           "text": "None",
           "value": ""
         },
@@ -6175,5 +6260,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 166
+  "version": 174
 }

@@ -251,6 +251,28 @@ func TestInsertCodec(t *testing.T) {
 			},
 		},
 	}
+
+	insertDataEmpty := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField:        &Int64FieldData{[]int64{}, []int64{}},
+			TimestampField:    &Int64FieldData{[]int64{}, []int64{}},
+			BoolField:         &BoolFieldData{[]int64{}, []bool{}},
+			Int8Field:         &Int8FieldData{[]int64{}, []int8{}},
+			Int16Field:        &Int16FieldData{[]int64{}, []int16{}},
+			Int32Field:        &Int32FieldData{[]int64{}, []int32{}},
+			Int64Field:        &Int64FieldData{[]int64{}, []int64{}},
+			FloatField:        &FloatFieldData{[]int64{}, []float32{}},
+			DoubleField:       &DoubleFieldData{[]int64{}, []float64{}},
+			StringField:       &StringFieldData{[]int64{}, []string{}},
+			BinaryVectorField: &BinaryVectorFieldData{[]int64{}, []byte{}, 8},
+			FloatVectorField:  &FloatVectorFieldData{[]int64{}, []float32{}, 4},
+		},
+	}
+	b, s, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
+	assert.Error(t, err)
+	assert.Empty(t, b)
+	assert.Empty(t, s)
+
 	Blobs1, statsBlob1, err := insertCodec.Serialize(PartitionID, SegmentID, insertData1)
 	assert.Nil(t, err)
 	for _, blob := range Blobs1 {
@@ -293,7 +315,6 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []string{"1", "2", "3", "4"}, resultData.Data[StringField].(*StringFieldData).Data)
 	assert.Equal(t, []byte{0, 255, 0, 255}, resultData.Data[BinaryVectorField].(*BinaryVectorFieldData).Data)
 	assert.Equal(t, []float32{0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7}, resultData.Data[FloatVectorField].(*FloatVectorFieldData).Data)
-	assert.Nil(t, insertCodec.Close())
 	log.Debug("Data", zap.Any("Data", resultData.Data))
 	log.Debug("Infos", zap.Any("Infos", resultData.Infos))
 
@@ -353,7 +374,6 @@ func TestDDCodec(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, resultTs, ts)
 	assert.Equal(t, resultRequests, ddRequests)
-	assert.Nil(t, dataDefinitionCodec.Close())
 
 	blobs = []*Blob{}
 	_, _, err = dataDefinitionCodec.Deserialize(blobs)
@@ -415,9 +435,6 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 	}
 	assert.Equal(t, indexName, idxName)
 	assert.Equal(t, indexID, idxID)
-
-	err = codec.Close()
-	assert.Nil(t, err)
 
 	// empty
 	_, _, _, _, _, _, _, _, _, _, err = codec.DeserializeImpl(nil)

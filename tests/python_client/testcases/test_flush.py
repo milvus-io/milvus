@@ -57,7 +57,7 @@ class TestFlushBase:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "describe collection failed: can't find collection: %s" % collection_new
+            assert message == "DescribeCollection failed: can't find collection: %s" % collection_new
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_flush_empty_collection(self, connect, collection):

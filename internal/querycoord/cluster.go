@@ -416,18 +416,18 @@ func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, 
 	if targetNode != nil {
 		err := targetNode.releaseCollection(ctx, in)
 		if err != nil {
-			log.Debug("ReleaseCollection: queryNode release collection error", zap.String("error", err.Error()))
+			log.Debug("releaseCollection: queryNode release collection error", zap.String("error", err.Error()))
 			return err
 		}
 		err = c.clusterMeta.releaseCollection(in.CollectionID)
 		if err != nil {
-			log.Debug("ReleaseCollection: meta release collection error", zap.String("error", err.Error()))
+			log.Debug("releaseCollection: meta release collection error", zap.String("error", err.Error()))
 			return err
 		}
 		return nil
 	}
 
-	return fmt.Errorf("ReleaseCollection: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releaseCollection: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error {
@@ -441,21 +441,21 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 	if targetNode != nil {
 		err := targetNode.releasePartitions(ctx, in)
 		if err != nil {
-			log.Debug("ReleasePartitions: queryNode release partitions error", zap.String("error", err.Error()))
+			log.Debug("releasePartitions: queryNode release partitions error", zap.String("error", err.Error()))
 			return err
 		}
 
 		for _, partitionID := range in.PartitionIDs {
 			err = c.clusterMeta.releasePartition(in.CollectionID, partitionID)
 			if err != nil {
-				log.Debug("ReleasePartitions: meta release partitions error", zap.String("error", err.Error()))
+				log.Debug("releasePartitions: meta release partitions error", zap.String("error", err.Error()))
 				return err
 			}
 		}
 		return nil
 	}
 
-	return fmt.Errorf("ReleasePartitions: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releasePartitions: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error) {
@@ -520,7 +520,7 @@ func (c *queryNodeCluster) getSegmentInfoByNode(ctx context.Context, nodeID int6
 		return res.Infos, nil
 	}
 
-	return nil, fmt.Errorf("ReleasePartitions: can't find query node by nodeID, nodeID = %d", nodeID)
+	return nil, fmt.Errorf("getSegmentInfoByNode: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 type queryNodeGetMetricsResponse struct {

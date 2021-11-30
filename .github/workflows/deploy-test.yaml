@@ -108,10 +108,10 @@ jobs:
           helm repo update
 
           # if the task is reinstall, install milvus with latest image in repo milvusdb/milvus-dev
-          if [ ${{ matrix.task }} == "reinstall" ]; then helm install --wait --timeout 300s deploy-testing milvus/milvus -f cluster-values.yaml; fi
+          if [ ${{ matrix.task }} == "reinstall" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml; fi
 
           # if the task is upgrade, install milvus with latest rc image in repo milvusdb/milvus
-          if [ ${{ matrix.task }} == "upgrade" ]; then helm install --wait --timeout 300s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest -f cluster-values.yaml; fi
+          if [ ${{ matrix.task }} == "upgrade" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest -f cluster-values.yaml; fi
           kubectl get pods
           sleep 20s
           kubectl get pods
@@ -130,12 +130,12 @@ jobs:
           helm uninstall deploy-testing
       
       - name: Seconde Milvus Deployment
-        timeout-minutes: 15
+        timeout-minutes: 20
         shell: bash
         working-directory: tests/python_client/deploy     
         run: |
           # 
-          helm install --wait --timeout 300s deploy-testing milvus/milvus -f cluster-values.yaml
+          helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml
           kubectl get pods
           sleep 20s
           kubectl get pods

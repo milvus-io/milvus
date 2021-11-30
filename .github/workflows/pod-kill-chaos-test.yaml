@@ -85,13 +85,13 @@ jobs:
           sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/pod_kill\/'/g" constants.py
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_kill.yaml\'/g" constants.py
           cat constants.py
-          timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 || echo "chaos test failed"
+          timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO || echo "chaos test failed"
 
       - name: Milvus E2E Test
         timeout-minutes: 10
         if: ${{ always() }}
         shell: bash
-        working-directory: tests/python_client/chaos
+        working-directory: tests/python_client
         run: |
           kubectl get pod -n chaos-testing
           # wait all pod to be ready
@@ -104,7 +104,8 @@ jobs:
           sleep 20s
           nc -vz 127.0.0.1 19530
 
-          python scripts/hello_milvus.py
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO
+          python chaos/scripts/hello_milvus.py --host 127.0.0.1
       
       - name: Deploy Milvus Again If Previous E2E Test Failed
         timeout-minutes: 15
@@ -133,21 +134,25 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
-          timeout 4m pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 || echo "data consist test failed"
+          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 --log-cli-level=INFO || echo "data consist chaos test failed"
 
       - name: Milvus E2E Test
-        timeout-minutes: 5
+        timeout-minutes: 10
         if: ${{ always() }}
         shell: bash
-        working-directory: tests/python_client/chaos
+        working-directory: tests/python_client
         run: |
           kubectl get pod -n chaos-testing
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s
+          kubectl get pod -n chaos-testing       
           ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9  
           kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
           sleep 20s
           nc -vz 127.0.0.1 19530
 
-          python scripts/hello_milvus.py
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO
+          python chaos/scripts/hello_milvus.py --host 127.0.0.1
 
       - name: Export logs
         if: ${{ always() }}

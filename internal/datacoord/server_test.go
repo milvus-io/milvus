@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
@@ -43,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -343,6 +346,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 					},
 				},
 			},
+			State: commonpb.SegmentState_Growing,
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(info))
 		assert.Nil(t, err)
@@ -369,6 +373,8 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 					},
 				},
 			},
+
+			State: commonpb.SegmentState_Growing,
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(info))
 		assert.Nil(t, err)
@@ -447,7 +453,8 @@ func TestGetSegmentInfo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
-			ID: 0,
+			ID:    0,
+			State: commonpb.SegmentState_Flushed,
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
 		assert.Nil(t, err)
@@ -464,7 +471,8 @@ func TestGetSegmentInfo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
-			ID: 0,
+			ID:    0,
+			State: commonpb.SegmentState_Flushed,
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
 		assert.Nil(t, err)
@@ -491,6 +499,12 @@ func TestGetSegmentInfo(t *testing.T) {
 
 func TestGetComponentStates(t *testing.T) {
 	svr := &Server{}
+	resp, err := svr.GetComponentStates(context.Background())
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	svr.session = &sessionutil.Session{}
+	svr.session.UpdateRegistered(true)
 	type testCase struct {
 		state ServerState
 		code  internalpb.StateCode
@@ -807,6 +821,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 				ID:            segment.id,
 				CollectionID:  segment.collectionID,
 				InsertChannel: "ch1",
+				State:         commonpb.SegmentState_Growing,
 			}
 			err := svr.meta.AddSegment(NewSegmentInfo(s))
 			assert.Nil(t, err)
@@ -888,6 +903,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 				ID:            1,
 				CollectionID:  1,
 				InsertChannel: "ch1",
+				State:         commonpb.SegmentState_Growing,
 			},
 		})
 		assert.Nil(t, err)
@@ -903,6 +919,143 @@ func TestSaveBinlogPaths(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		<-spyCh
+	})
+}
+
+func TestDropVirtualChannel(t *testing.T) {
+	t.Run("normal DropVirtualChannel", func(t *testing.T) {
+		spyCh := make(chan struct{}, 1)
+		svr := newTestServer(t, nil, SetSegmentManager(&spySegmentManager{spyCh: spyCh}))
+
+		defer closeTestServer(t, svr)
+
+		svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0})
+		type testSegment struct {
+			id           UniqueID
+			collectionID UniqueID
+		}
+		segments := make([]testSegment, 0, maxOperationsPerTxn) // test batch overflow
+		for i := 0; i < maxOperationsPerTxn; i++ {
+			segments = append(segments, testSegment{
+				id:           int64(i),
+				collectionID: 0,
+			})
+		}
+		for idx, segment := range segments {
+			s := &datapb.SegmentInfo{
+				ID:            segment.id,
+				CollectionID:  segment.collectionID,
+				InsertChannel: "ch1",
+
+				State: commonpb.SegmentState_Growing,
+			}
+			if idx%2 == 0 {
+				s.Binlogs = []*datapb.FieldBinlog{
+					{FieldID: 1},
+				}
+				s.Statslogs = []*datapb.FieldBinlog{
+					{FieldID: 1},
+				}
+			}
+			err := svr.meta.AddSegment(NewSegmentInfo(s))
+			assert.Nil(t, err)
+		}
+
+		err := svr.channelManager.AddNode(0)
+		require.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		require.Nil(t, err)
+
+		ctx := context.Background()
+		req := &datapb.DropVirtualChannelRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			ChannelName: "ch1",
+			Segments:    make([]*datapb.DropVirtualChannelSegment, 0, maxOperationsPerTxn),
+		}
+		for _, segment := range segments {
+			seg2Drop := &datapb.DropVirtualChannelSegment{
+				SegmentID:    segment.id,
+				CollectionID: segment.collectionID,
+				Field2BinlogPaths: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []string{
+							"/by-dev/test/0/1/2/1/Allo1",
+							"/by-dev/test/0/1/2/1/Allo2",
+						},
+					},
+				},
+				Field2StatslogPaths: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []string{
+							"/by-dev/test/0/1/2/1/stats1",
+							"/by-dev/test/0/1/2/1/stats2",
+						},
+					},
+				},
+				Deltalogs: []*datapb.DeltaLogInfo{
+					{
+						RecordEntries: 1,
+						DeltaLogPath:  "/by-dev/test/0/1/2/1/delta1",
+					},
+				},
+				CheckPoint: &internalpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				StartPosition: &internalpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				NumOfRows: 10,
+			}
+			req.Segments = append(req.Segments, seg2Drop)
+		}
+		resp, err := svr.DropVirtualChannel(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		<-spyCh
+
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		require.Nil(t, err)
+
+		//resend
+		resp, err = svr.DropVirtualChannel(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+	})
+
+	t.Run("with channel not matched", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		err := svr.channelManager.AddNode(0)
+		require.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		require.Nil(t, err)
+
+		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
+			ChannelName: "ch2",
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
 	})
 }
 
@@ -1233,6 +1386,138 @@ func TestGetVChannelPos(t *testing.T) {
 	})
 }
 
+func TestShouldDropChannel(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+	schema := newTestSchema()
+	svr.meta.AddCollection(&datapb.CollectionInfo{
+		ID:     0,
+		Schema: schema,
+		StartPositions: []*commonpb.KeyDataPair{
+			{
+				Key:  "ch1",
+				Data: []byte{8, 9, 10},
+			},
+		},
+	})
+	svr.meta.AddCollection(&datapb.CollectionInfo{
+		ID:     1,
+		Schema: schema,
+		StartPositions: []*commonpb.KeyDataPair{
+			{
+				Key:  "ch0",
+				Data: []byte{8, 9, 10},
+			},
+		},
+	})
+
+	s1 := &datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Dropped,
+		StartPosition: &internalpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{8, 9, 10},
+			MsgGroup:    "",
+			Timestamp:   0,
+		},
+		DmlPosition: &internalpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{1, 2, 3},
+			MsgGroup:    "",
+			Timestamp:   0,
+		},
+	}
+	s2 := &datapb.SegmentInfo{
+		ID:             2,
+		CollectionID:   0,
+		PartitionID:    0,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Flushed,
+		CompactionFrom: []int64{4, 5},
+		StartPosition: &internalpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{8, 9, 10},
+			MsgGroup:    "",
+		},
+		DmlPosition: &internalpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{1, 2, 3},
+			MsgGroup:    "",
+			Timestamp:   1,
+		},
+	}
+	s3 := &datapb.SegmentInfo{
+		ID:            3,
+		CollectionID:  0,
+		PartitionID:   1,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Growing,
+		StartPosition: &internalpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{8, 9, 10},
+			MsgGroup:    "",
+		},
+		DmlPosition: &internalpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{11, 12, 13},
+			MsgGroup:    "",
+			Timestamp:   2,
+		},
+	}
+	s4 := &datapb.SegmentInfo{
+		ID:            4,
+		CollectionID:  0,
+		PartitionID:   1,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Growing,
+	}
+
+	t.Run("channel without segments", func(t *testing.T) {
+		r := svr.handler.CheckShouldDropChannel("ch1")
+		assert.True(t, r)
+
+	})
+
+	t.Run("channel with all dropped segments", func(t *testing.T) {
+		err := svr.meta.AddSegment(NewSegmentInfo(s1))
+		require.NoError(t, err)
+
+		r := svr.handler.CheckShouldDropChannel("ch1")
+		assert.True(t, r)
+	})
+
+	t.Run("channel with all dropped segments and flushed compacted segments", func(t *testing.T) {
+		err := svr.meta.AddSegment(NewSegmentInfo(s2))
+		require.Nil(t, err)
+
+		r := svr.handler.CheckShouldDropChannel("ch1")
+		assert.False(t, r)
+	})
+
+	t.Run("channel with other state segments", func(t *testing.T) {
+		err := svr.meta.DropSegment(2)
+		require.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(s3))
+		require.Nil(t, err)
+
+		r := svr.handler.CheckShouldDropChannel("ch1")
+		assert.False(t, r)
+	})
+
+	t.Run("channel with dropped segment and with segment without start position", func(t *testing.T) {
+		err := svr.meta.DropSegment(3)
+		require.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(s4))
+		require.Nil(t, err)
+
+		r := svr.handler.CheckShouldDropChannel("ch1")
+		assert.True(t, r)
+	})
+}
+
 func TestGetRecoveryInfo(t *testing.T) {
 
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
@@ -1397,6 +1682,36 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
 		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
 		assert.ElementsMatch(t, []string{"/binlog/file1", "/binlog/file2"}, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs())
+	})
+
+	t.Run("with dropped segments", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+			return newMockRootCoordService(), nil
+		}
+
+		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
+		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
+		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
+		assert.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
+		assert.Nil(t, err)
+
+		req := &datapb.GetRecoveryInfoRequest{
+			CollectionID: 0,
+			PartitionID:  0,
+		}
+		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
+		assert.EqualValues(t, 1, len(resp.GetChannels()))
+		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
+		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
+		assert.Len(t, resp.GetChannels()[0].GetDroppedSegments(), 1)
+		assert.Equal(t, UniqueID(8), resp.GetChannels()[0].GetDroppedSegments()[0].GetID())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -1809,6 +2124,101 @@ func TestPostFlush(t *testing.T) {
 
 		err = svr.postFlush(context.Background(), 1)
 		assert.Nil(t, err)
+	})
+}
+
+func TestGetFlushState(t *testing.T) {
+	t.Run("get flush state with all flushed segments", func(t *testing.T) {
+		svr := &Server{
+			isServing: ServerStateHealthy,
+			meta: &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    1,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    2,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		resp, err := svr.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
+		assert.Nil(t, err)
+		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
+			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Flushed: true,
+		}, resp)
+	})
+
+	t.Run("get flush state with unflushed segments", func(t *testing.T) {
+		svr := &Server{
+			isServing: ServerStateHealthy,
+			meta: &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    1,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    2,
+								State: commonpb.SegmentState_Sealed,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		resp, err := svr.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
+		assert.Nil(t, err)
+		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
+			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Flushed: false,
+		}, resp)
+	})
+
+	t.Run("get flush state with compacted segments", func(t *testing.T) {
+		svr := &Server{
+			isServing: ServerStateHealthy,
+			meta: &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    1,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    2,
+								State: commonpb.SegmentState_Dropped,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		resp, err := svr.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{SegmentIDs: []int64{1, 2}})
+		assert.Nil(t, err)
+		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{
+			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Flushed: true,
+		}, resp)
 	})
 }
 

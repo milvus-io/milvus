@@ -331,6 +331,7 @@ func (p *ParamTable) initMetaRootPath() {
 
 func (p *ParamTable) initGracefulTime() {
 	p.GracefulTime = p.ParseInt64("queryNode.gracefulTime")
+	log.Debug("query node init gracefulTime", zap.Any("gracefulTime", p.GracefulTime))
 }
 
 func (p *ParamTable) initSegcoreChunkRows() {

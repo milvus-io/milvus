@@ -136,7 +136,7 @@ func TestRmqClient_Subscribe(t *testing.T) {
 			msgID := rmqmsg.ID()
 			rID := msgID.(*rmqID)
 			assert.NotZero(t, rID)
-			err = consumer.Seek(msgID)
+			err = consumer.Seek(msgID, true)
 			assert.Nil(t, err)
 		}
 	}

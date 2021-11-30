@@ -9,19 +9,39 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package rootcoord
+package trace
 
 import (
-	"errors"
 	"fmt"
-
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"testing"
 )
 
-func msgRootCoordIsUnhealthy(coordID typeutil.UniqueID) string {
-	return fmt.Sprintf("RootCoord %d is not ready", coordID)
+func TestStackTraceMsg(t *testing.T) {
+	fmt.Println(StackTraceMsg(1))
+	fmt.Println(StackTraceMsg(5))
+	fmt.Println(StackTraceMsg(10))
+
+	func() {
+		fmt.Println(StackTraceMsg(10))
+	}()
+
+	func() {
+		func() {
+			fmt.Println(StackTraceMsg(10))
+		}()
+	}()
 }
 
-func errRootCoordIsUnhealthy(coordID typeutil.UniqueID) error {
-	return errors.New(msgRootCoordIsUnhealthy(coordID))
+func TestStackTrace(t *testing.T) {
+	fmt.Println(StackTrace())
+
+	func() {
+		fmt.Println(StackTrace())
+	}()
+
+	func() {
+		func() {
+			fmt.Println(StackTrace())
+		}()
+	}()
 }
