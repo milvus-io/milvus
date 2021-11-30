@@ -172,9 +172,12 @@ func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
 func (kv *MemoryKV) Close() {
 }
 
+// MultiRemoveWithPrefix not implemented
 func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error {
 	panic("not implement")
 }
+
+// MultiSaveAndRemoveWithPrefix saves key-value pairs in @saves, & remove key with prefix in @removals in MemoryKV atomicly.
 func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -198,6 +201,7 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remova
 	return nil
 }
 
+// RemoveWithPrefix remove key of given prefix in MemoryKV atomicly.
 func (kv *MemoryKV) RemoveWithPrefix(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
