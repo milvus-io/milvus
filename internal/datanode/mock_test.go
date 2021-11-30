@@ -49,6 +49,8 @@ import (
 const ctxTimeInMillisecond = 5000
 const debug = false
 
+var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
+
 func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
@@ -160,6 +162,9 @@ type DataCoordFactory struct {
 
 	CompleteCompactionError      bool
 	CompleteCompactionNotSuccess bool
+
+	DropVirtualChannelError      bool
+	DropVirtualChannelNotSuccess bool
 }
 
 func (ds *DataCoordFactory) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
@@ -182,6 +187,24 @@ func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.Sav
 	}
 
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
+func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+	if ds.DropVirtualChannelError {
+		return nil, errors.New("error")
+	}
+	if ds.DropVirtualChannelNotSuccess {
+		return &datapb.DropVirtualChannelResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}, nil
+	}
+	return &datapb.DropVirtualChannelResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
 }
 
 func (mf *MetaFactory) GetCollectionMeta(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
