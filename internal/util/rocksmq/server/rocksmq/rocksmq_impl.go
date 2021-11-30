@@ -381,7 +381,7 @@ func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 	start := time.Now()
 	key := constructCurrentID(topicName, groupName)
 	if rmq.checkKeyExist(key) {
-		log.Debug("RocksMQ: " + key + " existed.")
+		log.Debug("RMQ CreateConsumerGroup key already exists", zap.String("key", key))
 		return nil
 	}
 	err := rmq.kv.Save(key, DefaultMessageID)
