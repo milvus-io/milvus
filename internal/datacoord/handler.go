@@ -13,6 +13,7 @@ import (
 
 // Handler handles some channel method for ChannelManager
 type Handler interface {
+	// GetVChanPositions gets the information recovery needed of a channel
 	GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string) bool
 }
