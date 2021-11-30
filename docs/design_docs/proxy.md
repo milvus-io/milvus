@@ -10,19 +10,19 @@ Proxy divides requests from clients into three classes: `DdRequest`, `DmRequest`
 
 DdRequest is the shorthand of `Data Definition Request`. It means an operation on the meta information of
 collections, including two parts. One part is of the writing operations on collections, such as defining a schema,
-creating or dropping a partition, creating or dropping the index and etc. Another part is of the reading operations on
+creating or dropping a partition, creating or dropping the index, etc. Another part is of the reading operations on
 collections, such as listing all collections or partitions, checking if a collection or a partition exists.
 
 DmRequest means `Data Manipulation Request`. These requests perform a writing operation on collections, including
 inserting records into a collection, deleting some specific records of a collection.
 
 DqRequest means `Data Query Request`. These requests perform a reading operation on collections, such as searching on a
-collection, querying for specific records of a collection and etc.
+collection, querying for specific records of a collection, etc.
 
 For every request, Proxy will first check if it's valid to be executed by Milvus and if the request is invalid then
 Proxy will return the error to clients and won't continue to forward this request to other components. The check
 operation of Proxy includes two parts, one part is static check and another is dynamic check. Static check includes
-parameters check, constraints check and etc. Dynamic check will check some related dependencies of the request, take
+parameters check, constraints check, etc. Dynamic check will check some related dependencies of the request, take
 search requests for example, Proxy should check if the related collection exists in Milvus.
 
 Also, Proxy will do some preprocessing for every request. Proxy will do little things for some requests in the
