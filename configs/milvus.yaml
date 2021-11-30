@@ -39,7 +39,7 @@ minio:
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
   address: localhost
-  port: 6650
+  port: 6650 # Port of pulsar
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
 
 rocksmq:
