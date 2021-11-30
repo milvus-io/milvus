@@ -123,5 +123,9 @@ class ApiUtilityWrapper:
 
     def mkts_from_datetime(self, d_time=None, milliseconds=0., delta=None):
         d_time = datetime.now() if d_time is None else d_time
-        res, is_succ = api_request([self.ut.mkts_from_datetime, d_time, milliseconds, delta])
+        res, _ = api_request([self.ut.mkts_from_datetime, d_time, milliseconds, delta])
+        return res
+
+    def mkts_from_hybridts(self, hybridts, milliseconds=0., delta=None):
+        res, _ = api_request([self.ut.mkts_from_hybridts, hybridts, milliseconds, delta])
         return res

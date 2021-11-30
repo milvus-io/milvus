@@ -870,8 +870,7 @@ class TestDeleteOperation(TestcaseBase):
         """
         pass
 
-    @pytest.mark.xfail(reason="Issue 12336")
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_time_travel(self):
         """
         target: test search with time travel after delete
@@ -880,15 +879,13 @@ class TestDeleteOperation(TestcaseBase):
                 3.load and search with time travel
         expected: search successfully
         """
-        from datetime import datetime
-        from pymilvus import utility
 
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(tmp_nb)
         insert_res, _ = collection_w.insert(df)
         collection_w.load()
 
-        before_delete = utility.mkts_from_datetime(datetime.now(), milliseconds=1.0)
+        tt = self.utility_wrap.mkts_from_hybridts(insert_res.timestamp, milliseconds=0.)
 
         res_before, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
                                             ct.default_float_vec_field_name,
@@ -897,16 +894,13 @@ class TestDeleteOperation(TestcaseBase):
         expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:tmp_nb // 2]}'
         delete_res, _ = collection_w.delete(expr)
 
-        collection_w.load()
         res_travel, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit,
-                                            travel_timestamp=before_delete
-                                            )
+                                            travel_timestamp=tt)
         assert res_before[0].ids == res_travel[0].ids
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="Issue 12336")
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_insert_multi(self):
         """
         target: test delete after multi insert
