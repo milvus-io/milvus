@@ -39,6 +39,7 @@ func (fddNode *filterDeleteNode) Name() string {
 	return "fdNode"
 }
 
+// Operate handles input messages, to filter invalid delete messages
 func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in filterDDNode", zap.Int("input length", len(in)))
