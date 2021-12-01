@@ -1053,6 +1053,7 @@ func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName strin
 	return reader.Next(ctx, messageIDInclusive)
 }
 
+// HasNext judge whether reader has next message
 func (rmq *rocksmq) HasNext(topicName string, readerName string, messageIDInclusive bool) bool {
 	if rmq.isClosed() {
 		return false
