@@ -17,6 +17,10 @@ jobs:
     
     steps:
 
+      - name: Set env param
+        run: |
+          echo "RELEASE=test-${{ matrix.pod }}-pod-kill" >> $GITHUB_ENV
+
       - name: Creating kind cluster
         uses: helm/kind-action@v1.2.0
       
@@ -64,12 +68,12 @@ jobs:
           bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
-          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 720s milvus-chaos milvus/milvus -f cluster-values.yaml  -n=chaos-testing; fi
-          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 720s milvus-chaos milvus/milvus --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
+          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus -f cluster-values.yaml  -n=chaos-testing; fi
+          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
           kubectl get pods -n chaos-testing
           sleep 20s
           kubectl get pods -n chaos-testing
-          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
           sleep 20s
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
@@ -85,7 +89,7 @@ jobs:
           sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/pod_kill\/'/g" constants.py
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_kill.yaml\'/g" constants.py
           cat constants.py
-          timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO || echo "chaos test failed"
+          timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
 
       - name: Milvus E2E Test
         timeout-minutes: 10
@@ -95,16 +99,16 @@ jobs:
         run: |
           kubectl get pod -n chaos-testing
           # wait all pod to be ready
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
-          kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
           kubectl get pod -n chaos-testing
           ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
-          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
 
           sleep 20s
           nc -vz 127.0.0.1 19530
 
-          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
       
       - name: Deploy Milvus Again If Previous E2E Test Failed
@@ -115,13 +119,13 @@ jobs:
         run: |
           kubectl config set-context --current --namespace=chaos-testing
           bash scripts/uninstall_milvus.sh
-          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 720s milvus-chaos milvus/milvus -f cluster-values.yaml  -n=chaos-testing; fi
-          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 720s milvus-chaos milvus/milvus --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
+          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus -f cluster-values.yaml  -n=chaos-testing; fi
+          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
           kubectl get pods -n chaos-testing
           sleep 20s
           kubectl get pods -n chaos-testing
           ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
-          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
           sleep 20s
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
@@ -134,7 +138,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
-          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 --log-cli-level=INFO || echo "data consist chaos test failed"
+          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "data consist chaos test failed"
 
       - name: Milvus E2E Test
         timeout-minutes: 10
@@ -143,15 +147,15 @@ jobs:
         working-directory: tests/python_client
         run: |
           kubectl get pod -n chaos-testing
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
-          kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
           kubectl get pod -n chaos-testing       
           ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9  
-          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
           sleep 20s
           nc -vz 127.0.0.1 19530
 
-          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
 
       - name: Export logs
