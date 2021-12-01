@@ -35,8 +35,7 @@ As shown in the figure below, when inserting data into the message queue, Milvus
 records, but also insert timetick continuously. Taking "syncTs1" in the figure as an example, when downstream consumers
 (such as QueryNodes) see syncTs1, it means that all the data which is earlier than syncTs1 has been consumed. In
 other words, the inserted record with a timestamp smaller than syncTs1 will no longer appear in the message queue.
-Of course, if there is, there must be a bug in the system. If you find it, we are pleased to solve it as soon as
-possible.
+
 
 ![ts-watermask](./figs/guarantee-ts-ts-mask.png)
 
