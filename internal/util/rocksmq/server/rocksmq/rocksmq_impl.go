@@ -1042,6 +1042,7 @@ func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID Unique
 	reader.Seek(msgID)
 }
 
+// Next get the next message of reader
 func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName string, messageIDInclusive bool) (*ConsumerMessage, error) {
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)
