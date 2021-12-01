@@ -80,7 +80,7 @@ proxy:
     insert:
       bufSize: 1024 # msgPack chan buffer size
     search:
-      bufSize: 512
+      bufSize: 512 # msgPack chan buffer size
     searchResult:
       recvBufSize: 1024 # msgPack chan buffer size
       pulsarBufSize: 1024 # pulsar chan buffer size
