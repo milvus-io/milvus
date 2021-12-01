@@ -28,7 +28,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	for _, opt := range opts {
 		opt(c)
 	}
-	el := make(ErrorList, 0)
+	var el ErrorList
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
