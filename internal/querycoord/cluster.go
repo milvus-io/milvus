@@ -680,7 +680,7 @@ func (c *queryNodeCluster) getOnlineNodes() (map[int64]Node, error) {
 		}
 	}
 	if len(nodes) == 0 {
-		return nil, errors.New("GetOnlineNodes: no queryNode is alive")
+		return nil, errors.New("getOnlineNodes: no queryNode is alive")
 	}
 
 	return nodes, nil
