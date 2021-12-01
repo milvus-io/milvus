@@ -48,7 +48,7 @@ func TestImpl_GetComponentStates(t *testing.T) {
 	node.stateCode = atomic.Value{}
 	node.stateCode.Store("invalid")
 	rsp, err = node.GetComponentStates(ctx)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 }
 
@@ -97,7 +97,7 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	status, err = node.AddQueryChannel(ctx, req)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
@@ -137,7 +137,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	status, err = node.WatchDmChannels(ctx, req)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
@@ -165,7 +165,7 @@ func TestImpl_LoadSegments(t *testing.T) {
 
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	status, err = node.LoadSegments(ctx, req)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
@@ -190,7 +190,7 @@ func TestImpl_ReleaseCollection(t *testing.T) {
 
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	status, err = node.ReleaseCollection(ctx, req)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
@@ -216,7 +216,7 @@ func TestImpl_ReleasePartitions(t *testing.T) {
 
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	status, err = node.ReleasePartitions(ctx, req)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
@@ -243,7 +243,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 
 		node.UpdateStateCode(internalpb.StateCode_Abnormal)
 		rsp, err = node.GetSegmentInfo(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
@@ -360,7 +360,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 
 		node.UpdateStateCode(internalpb.StateCode_Abnormal)
 		rsp, err = node.GetSegmentInfo(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
@@ -379,7 +379,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 
 		node.streaming.replica.(*collectionReplica).partitions = make(map[UniqueID]*Partition)
 		rsp, err := node.GetSegmentInfo(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
@@ -398,7 +398,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 
 		node.streaming.replica.(*collectionReplica).segments = make(map[UniqueID]*Segment)
 		rsp, err := node.GetSegmentInfo(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
@@ -417,7 +417,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 
 		node.historical.replica.(*collectionReplica).partitions = make(map[UniqueID]*Partition)
 		rsp, err := node.GetSegmentInfo(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
@@ -436,7 +436,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 
 		node.historical.replica.(*collectionReplica).segments = make(map[UniqueID]*Segment)
 		rsp, err := node.GetSegmentInfo(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 }
@@ -530,7 +530,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 
 		node.UpdateStateCode(internalpb.StateCode_Abnormal)
 		_, err = node.ReleaseSegments(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test segment not exists", func(t *testing.T) {
