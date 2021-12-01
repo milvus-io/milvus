@@ -289,6 +289,17 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 			Status: unhealthyStatus(),
 		}, nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-HasCollection")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
+	log.Debug("HasCollection received",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
 	hct := &hasCollectionTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
@@ -296,38 +307,14 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		rootCoord:            node.rootCoord,
 	}
 
-	log.Debug("HasCollection enqueue",
-		zap.String("role", Params.RoleName),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
-	err := node.sched.ddQueue.Enqueue(hct)
-	if err != nil {
-		return &milvuspb.BoolResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
-	}
-
-	log.Debug("HasCollection",
-		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
-	defer func() {
-		log.Debug("HasCollection Done",
+	if err := node.sched.ddQueue.Enqueue(hct); err != nil {
+		log.Warn("HasCollection failed to enqueue",
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
-	}()
 
-	err = hct.WaitToFinish()
-	if err != nil {
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -335,6 +322,43 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 			},
 		}, nil
 	}
+
+	log.Debug("HasCollection enqueued",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", hct.ID()),
+		zap.Uint64("BeginTS", hct.BeginTs()),
+		zap.Uint64("EndTS", hct.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	if err := hct.WaitToFinish(); err != nil {
+		log.Warn("HasCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", hct.ID()),
+			zap.Uint64("BeginTS", hct.BeginTs()),
+			zap.Uint64("EndTS", hct.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+
+		return &milvuspb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug("HasCollection done",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", hct.ID()),
+		zap.Uint64("BeginTS", hct.BeginTs()),
+		zap.Uint64("EndTS", hct.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
 
 	return hct.result, nil
 }
