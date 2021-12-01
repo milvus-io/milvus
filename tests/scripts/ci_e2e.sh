@@ -47,7 +47,10 @@ source "${ROOT}/tests/scripts/ci-util.sh"
 
 
 cd ${ROOT}/tests/python_client
+
+# print python3 version, python version 3.6.8 is more stable for test
 python3 -V
+
 if [ ! -d "${CI_LOG_PATH}" ]; then
 mkdir -p ${CI_LOG_PATH}
 fi
