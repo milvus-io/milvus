@@ -185,7 +185,7 @@ TEST(Query, ExecWithPredicateLoader) {
     auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = SearchResultToJson(sr);
+    Json json = SearchResultToJson(*sr);
     auto ref = json::parse(R"(
 [
   [
@@ -248,7 +248,7 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = SearchResultToJson(sr);
+    Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
 }
 
@@ -300,7 +300,7 @@ TEST(Query, ExecWithPredicate) {
     auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = SearchResultToJson(sr);
+    Json json = SearchResultToJson(*sr);
     auto ref = json::parse(R"(
 [
 	[
@@ -357,15 +357,14 @@ TEST(Query, ExecTerm) {
     auto num_queries = 3;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    SearchResult sr;
     Timestamp time = 1000000;
 
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = SearchResultToJson(sr);
-    ASSERT_EQ(sr.num_queries_, num_queries);
-    ASSERT_EQ(sr.topk_, topk);
+    auto json = SearchResultToJson(*sr);
+    ASSERT_EQ(sr->num_queries_, num_queries);
+    ASSERT_EQ(sr->topk_, topk);
     // for(auto x: )
 }
 
@@ -403,13 +402,13 @@ TEST(Query, ExecEmpty) {
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), *ph_group, time);
-    std::cout << SearchResultToJson(sr);
+    std::cout << SearchResultToJson(*sr);
 
-    for (auto i : sr.ids_) {
+    for (auto i : sr->ids_) {
         ASSERT_EQ(i, -1);
     }
 
-    for (auto v : sr.distances_) {
+    for (auto v : sr->distances_) {
         ASSERT_EQ(v, std::numeric_limits<float>::max());
     }
 }
@@ -449,13 +448,12 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    SearchResult sr;
     Timestamp time = 1000000;
 
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = SearchResultToJson(sr);
+    auto json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
 }
 
@@ -494,13 +492,12 @@ TEST(Query, ExecWithoutPredicate) {
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    SearchResult sr;
     Timestamp time = 1000000;
 
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = SearchResultToJson(sr);
+    auto json = SearchResultToJson(*sr);
     auto ref = json::parse(R"(
 [
 	[
@@ -551,9 +548,8 @@ TEST(Indexing, InnerProduct) {
     auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp ts = N * 2;
-    SearchResult sr;
-    sr = segment->Search(plan.get(), *ph_group, ts);
-    std::cout << SearchResultToJson(sr).dump(2);
+    auto sr = segment->Search(plan.get(), *ph_group, ts);
+    std::cout << SearchResultToJson(*sr).dump(2);
 }
 
 TEST(Query, FillSegment) {
@@ -661,12 +657,12 @@ TEST(Query, FillSegment) {
         plan->target_entries_.clear();
         plan->target_entries_.push_back(schema->get_offset(FieldName("fakevec")));
         plan->target_entries_.push_back(schema->get_offset(FieldName("the_value")));
-        SearchResult result = segment->Search(plan.get(), *ph, ts);
+        auto result = segment->Search(plan.get(), *ph, ts);
         // std::cout << SearchResultToJson(result).dump(2);
-        result.result_offsets_.resize(topk * num_queries);
-        segment->FillTargetEntry(plan.get(), result);
+        result->result_offsets_.resize(topk * num_queries);
+        segment->FillTargetEntry(plan.get(), *result);
 
-        auto ans = result.row_data_;
+        auto ans = result->row_data_;
         ASSERT_EQ(ans.size(), topk * num_queries);
         int64_t std_index = 0;
 
@@ -675,7 +671,7 @@ TEST(Query, FillSegment) {
             int64_t val;
             memcpy(&val, vec.data(), sizeof(int64_t));
 
-            auto internal_offset = result.ids_[std_index];
+            auto internal_offset = result->ids_[std_index];
             auto std_val = std_vec[internal_offset];
             auto std_i32 = std_i32_vec[internal_offset];
             std::vector<float> std_vfloat(dim);
@@ -739,13 +735,12 @@ TEST(Query, ExecWithPredicateBinary) {
     auto num_queries = 5;
     auto ph_group_raw = CreateBinaryPlaceholderGroupFromBlob(num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    SearchResult sr;
     Timestamp time = 1000000;
 
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = SearchResultToJson(sr);
+    Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
     // ASSERT_EQ(json.dump(2), ref.dump(2));
 }

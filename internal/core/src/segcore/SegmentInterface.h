@@ -41,7 +41,7 @@ class SegmentInterface {
     virtual void
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
 
-    virtual SearchResult
+    virtual std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan, const query::PlaceholderGroup& placeholder_group, Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
@@ -84,7 +84,7 @@ class SegmentInternalInterface : public SegmentInterface {
         return *ptr;
     }
 
-    SearchResult
+    std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup& placeholder_group,
            Timestamp timestamp) const override;
