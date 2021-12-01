@@ -34,6 +34,7 @@ type filterDeleteNode struct {
 	replica      ReplicaInterface
 }
 
+// Name returns the name of filterDeleteNode
 func (fddNode *filterDeleteNode) Name() string {
 	return "fdNode"
 }
