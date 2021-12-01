@@ -31,7 +31,7 @@ type Cluster struct {
 	channelManager *ChannelManager
 }
 
-// NewCluster create new cluster
+// NewCluster creates a new cluster
 func NewCluster(sessionManager *SessionManager, channelManager *ChannelManager) *Cluster {
 	c := &Cluster{
 		sessionManager: sessionManager,
@@ -41,7 +41,7 @@ func NewCluster(sessionManager *SessionManager, channelManager *ChannelManager) 
 	return c
 }
 
-// Startup init the cluster
+// Startup inits the cluster
 func (c *Cluster) Startup(nodes []*NodeInfo) error {
 	for _, node := range nodes {
 		c.sessionManager.AddSession(node)
