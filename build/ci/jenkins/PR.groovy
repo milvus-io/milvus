@@ -20,7 +20,7 @@ pipeline {
                 defaultContainer 'main'
                 yamlFile 'build/ci/jenkins/pod/rte.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
-                idleMinutes 120
+                // idleMinutes 120
             }
     }
     environment {
@@ -42,6 +42,9 @@ pipeline {
         stage ('Build'){
             steps {
                 container('main') {
+                    dir ('build'){
+                            sh './set_docker_mirror.sh'
+                    }
                     dir ('tests/scripts') {
                         script {
                             sh 'printenv'
