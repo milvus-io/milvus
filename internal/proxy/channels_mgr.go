@@ -205,11 +205,12 @@ func (mgr *singleTypeChannelsMgr) getVChansByVID(vid int) ([]vChan, error) {
 	return vchans, nil
 }
 
+// getPChansByVChans converts virtual channel names to physical channel names
 func (mgr *singleTypeChannelsMgr) getPChansByVChans(vchans []vChan) ([]pChan, error) {
 	mgr.vchans2pchansMtx.RLock()
 	defer mgr.vchans2pchansMtx.RUnlock()
 
-	pchans := make([]pChan, 0)
+	pchans := make([]pChan, 0, len(vchans))
 	for _, vchan := range vchans {
 		pchan, ok := mgr.vchans2pchans[vchan]
 		if !ok {
