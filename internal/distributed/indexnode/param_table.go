@@ -70,6 +70,7 @@ func (pt *ParamTable) initParams() {
 	pt.initServerMaxRecvSize()
 }
 
+// initPort initializes the port of IndexNode service.
 func (pt *ParamTable) initPort() {
 	port := pt.ParseInt("indexNode.port")
 	pt.Port = port
