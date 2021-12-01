@@ -149,6 +149,7 @@ type FloatVectorFieldData struct {
 	Dim     int
 }
 
+// RowNum implements FieldData.RowNum
 func (data *BoolFieldData) RowNum() int         { return len(data.Data) }
 func (data *Int8FieldData) RowNum() int         { return len(data.Data) }
 func (data *Int16FieldData) RowNum() int        { return len(data.Data) }
@@ -160,6 +161,7 @@ func (data *StringFieldData) RowNum() int       { return len(data.Data) }
 func (data *BinaryVectorFieldData) RowNum() int { return len(data.Data) * 8 / data.Dim }
 func (data *FloatVectorFieldData) RowNum() int  { return len(data.Data) / data.Dim }
 
+// GetRow implements FieldData.GetRow
 func (data *BoolFieldData) GetRow(i int) interface{}   { return data.Data[i] }
 func (data *Int8FieldData) GetRow(i int) interface{}   { return data.Data[i] }
 func (data *Int16FieldData) GetRow(i int) interface{}  { return data.Data[i] }
@@ -180,6 +182,7 @@ func (data *FloatVectorFieldData) GetRow(i int) interface{} {
 // must be a fixed-size value or a slice of fixed-size values, or a pointer to such data.
 // If v is neither of these, binary.Size returns -1.
 
+// GetMemorySize implements FieldData.GetMemorySize
 func (data *BoolFieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
