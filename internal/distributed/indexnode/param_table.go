@@ -62,6 +62,7 @@ func (pt *ParamTable) LoadFromEnv() {
 	Params.IP = funcutil.GetLocalIP()
 }
 
+// initParams initializes params of the configuration items.
 func (pt *ParamTable) initParams() {
 	pt.LoadFromEnv()
 	pt.LoadFromArgs()
