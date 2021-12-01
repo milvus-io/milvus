@@ -364,56 +364,115 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_dropMode(t *testing.T) {
-	kv := memkv.NewMemoryKV()
+	t.Run("test drop mode", func(t *testing.T) {
+		kv := memkv.NewMemoryKV()
 
-	var mut sync.Mutex
-	var result []*segmentFlushPack
-	signal := make(chan struct{})
+		var mut sync.Mutex
+		var result []*segmentFlushPack
+		signal := make(chan struct{})
 
-	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
-	}, func(packs []*segmentFlushPack) {
+		m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+		}, func(packs []*segmentFlushPack) {
+			mut.Lock()
+			result = packs
+			mut.Unlock()
+			close(signal)
+		})
+
+		halfMsgID := []byte{1, 1, 1}
+		m.flushBufferData(nil, -1, true, false, &internalpb.MsgPosition{
+			MsgID: halfMsgID,
+		})
+
+		m.startDropping()
+		// half normal, half drop mode, should not appear in final packs
+		m.flushDelData(nil, -1, &internalpb.MsgPosition{
+			MsgID: halfMsgID,
+		})
+
+		target := make(map[int64]struct{})
+		for i := 1; i < 11; i++ {
+			target[int64(i)] = struct{}{}
+			m.flushBufferData(nil, int64(i), true, false, &internalpb.MsgPosition{
+				MsgID: []byte{1},
+			})
+			m.flushDelData(nil, int64(i), &internalpb.MsgPosition{
+				MsgID: []byte{1},
+			})
+		}
+
+		m.notifyAllFlushed()
+
+		<-signal
 		mut.Lock()
-		result = packs
-		mut.Unlock()
-		close(signal)
-	})
+		defer mut.Unlock()
 
-	halfMsgID := []byte{1, 1, 1}
-	m.flushBufferData(nil, -1, true, false, &internalpb.MsgPosition{
-		MsgID: halfMsgID,
+		output := make(map[int64]struct{})
+		for _, pack := range result {
+			assert.NotEqual(t, -1, pack.segmentID)
+			output[pack.segmentID] = struct{}{}
+			_, has := target[pack.segmentID]
+			assert.True(t, has)
+		}
+		assert.Equal(t, len(target), len(output))
 	})
+	t.Run("test drop mode with injection", func(t *testing.T) {
+		kv := memkv.NewMemoryKV()
 
-	m.startDropping()
-	// half normal, half drop mode, should not appear in final packs
-	m.flushDelData(nil, -1, &internalpb.MsgPosition{
-		MsgID: halfMsgID,
-	})
+		var mut sync.Mutex
+		var result []*segmentFlushPack
+		signal := make(chan struct{})
 
-	target := make(map[int64]struct{})
-	for i := 1; i < 11; i++ {
-		target[int64(i)] = struct{}{}
-		m.flushBufferData(nil, int64(i), true, false, &internalpb.MsgPosition{
-			MsgID: []byte{1},
+		m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+		}, func(packs []*segmentFlushPack) {
+			mut.Lock()
+			result = packs
+			mut.Unlock()
+			close(signal)
 		})
-		m.flushDelData(nil, int64(i), &internalpb.MsgPosition{
-			MsgID: []byte{1},
+
+		halfMsgID := []byte{1, 1, 1}
+		m.flushBufferData(nil, -1, true, false, &internalpb.MsgPosition{
+			MsgID: halfMsgID,
 		})
-	}
 
-	m.notifyAllFlushed()
+		injFunc := func(pack *segmentFlushPack) {
+			pack.segmentID = 100
+		}
+		for i := 1; i < 11; i++ {
+			it := newTaskInjection(1, injFunc)
+			m.injectFlush(it, int64(i))
+			<-it.Injected()
+			it.injectDone(true)
+		}
 
-	<-signal
-	mut.Lock()
-	defer mut.Unlock()
+		m.startDropping()
+		// half normal, half drop mode, should not appear in final packs
+		m.flushDelData(nil, -1, &internalpb.MsgPosition{
+			MsgID: halfMsgID,
+		})
 
-	output := make(map[int64]struct{})
-	for _, pack := range result {
-		assert.NotEqual(t, -1, pack.segmentID)
-		output[pack.segmentID] = struct{}{}
-		_, has := target[pack.segmentID]
-		assert.True(t, has)
-	}
-	assert.Equal(t, len(target), len(output))
+		for i := 1; i < 11; i++ {
+			m.flushBufferData(nil, int64(i), true, false, &internalpb.MsgPosition{
+				MsgID: []byte{1},
+			})
+			m.flushDelData(nil, int64(i), &internalpb.MsgPosition{
+				MsgID: []byte{1},
+			})
+		}
+
+		m.notifyAllFlushed()
+
+		<-signal
+		mut.Lock()
+		defer mut.Unlock()
+
+		for _, pack := range result {
+			assert.NotEqual(t, -1, pack.segmentID)
+			assert.Equal(t, int64(100), pack.segmentID)
+		}
+	})
+
 }
 
 func TestRendezvousFlushManager_close(t *testing.T) {

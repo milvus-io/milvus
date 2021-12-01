@@ -274,7 +274,9 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 	case clientv3.EventTypeDelete:
 		// guaranteed there is no "/" in channel name
 		parts := strings.Split(string(evt.Kv.Key), "/")
-		node.ReleaseDataSyncService(parts[len(parts)-1])
+		vchanName := parts[len(parts)-1]
+		log.Warn("handle channel delete event", zap.Int64("node id", Params.NodeID), zap.String("vchannel", vchanName))
+		node.ReleaseDataSyncService(vchanName)
 	}
 }
 
@@ -333,7 +335,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 
 	flushCh := make(chan flushMsg, 100)
 
-	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache, node.blobKv)
+	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache, node.blobKv, node.compactionExecutor)
 	if err != nil {
 		return err
 	}
@@ -357,7 +359,6 @@ func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 		select {
 		case vChan := <-vChannelCh:
 			log.Info("GC flowgraph", zap.String("vChan", vChan))
-			node.stopCompactionOfVChannel(vChan)
 			node.ReleaseDataSyncService(vChan)
 		case <-node.ctx.Done():
 			log.Info("DataNode ctx done")
@@ -741,12 +742,6 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	}, nil
 }
 
-func (node *DataNode) stopCompactionOfVChannel(vChan string) {
-	log.Debug("Stop compaction of vChannel", zap.String("vChannelName", vChan))
-
-	node.compactionExecutor.stopExecutingtaskByVChannelName(vChan)
-}
-
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -756,6 +751,12 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	if !ok {
 		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channel name", req.GetChannel()))
 		status.Reason = errIllegalCompactionPlan.Error()
+		return status, nil
+	}
+
+	if !node.compactionExecutor.channelValidateForCompaction(req.GetChannel()) {
+		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channel name", req.GetChannel()))
+		status.Reason = "channel marked invalid"
 		return status, nil
 	}
 

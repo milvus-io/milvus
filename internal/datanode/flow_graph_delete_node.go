@@ -233,6 +233,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	if fgMsg.dropCollection {
+		dn.flushManager.notifyAllFlushed()
 		log.Debug("DeleteNode notifies BackgroundGC to release vchannel", zap.String("vChannelName", dn.channelName))
 		dn.clearSignal <- dn.channelName
 	}

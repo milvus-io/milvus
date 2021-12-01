@@ -131,7 +131,9 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 			err := c.remove(nodeChannel.NodeID, ch)
 			if err != nil {
 				log.Warn("unable to remove channel", zap.String("channel", ch.Name), zap.Error(err))
+				continue
 			}
+			c.h.FinishDropChannel(ch.Name)
 		}
 	}
 }
