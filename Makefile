@@ -100,7 +100,6 @@ build-cpp:
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_dablooms_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
 build-cpp-with-unittest:
