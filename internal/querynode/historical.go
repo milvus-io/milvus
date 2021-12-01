@@ -271,6 +271,7 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 		zap.Any("searchPartitionIDs", searchPartIDs),
 	)
 
+	var segmentLock sync.RWMutex
 	for _, partID := range searchPartIDs {
 		segIDs, err := h.replica.getSegmentIDs(partID)
 		if err != nil {
@@ -278,7 +279,6 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 		}
 
 		var err2 error
-		var segmentLock sync.RWMutex
 		var wg sync.WaitGroup
 		for _, segID := range segIDs {
 			segID2 := segID

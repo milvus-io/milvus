@@ -163,6 +163,7 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 	)
 	s.replica.printReplica()
 
+	var segmentLock sync.RWMutex
 	for _, partID := range searchPartIDs {
 		segIDs, err := s.replica.getSegmentIDsByVChannel(partID, vChannel)
 		log.Debug("get segmentIDs by vChannel",
@@ -215,7 +216,9 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 					err2 = err
 					return
 				}
+				segmentLock.Lock()
 				searchResults = append(searchResults, searchResult)
+				segmentLock.Unlock()
 			}()
 
 		}
