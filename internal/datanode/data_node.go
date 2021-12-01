@@ -724,7 +724,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
-		return systemInfoMetrics, err
+		return systemInfoMetrics, nil
 	}
 
 	log.Debug("DataNode.GetMetrics failed, request metric type is not implemented yet",

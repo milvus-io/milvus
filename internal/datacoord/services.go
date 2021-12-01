@@ -693,7 +693,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 		s.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
-		return metrics, err
+		return metrics, nil
 	}
 
 	log.Debug("DataCoord.GetMetrics failed, request metric type is not implemented yet",

@@ -501,7 +501,12 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	for _, indexID := range req.IndexBuildIDs {
 		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(indexID)
 		if err != nil {
-			return nil, err
+			return &indexpb.GetIndexFilePathsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
 		}
 		indexPaths = append(indexPaths, indexPathInfo)
 	}
@@ -577,7 +582,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 
 		i.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
-		return metrics, err
+		return metrics, nil
 	}
 
 	log.Debug("IndexCoord.GetMetrics failed, request metric type is not implemented yet",
