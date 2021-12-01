@@ -15,7 +15,7 @@ default_tag = ut.default_tag
 class TestCreateBase:
     """
     ******************************************************************
-      The following cases are used to test `create_partition` function 
+      The following cases are used to test `create_partition` function
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
@@ -90,7 +90,7 @@ class TestCreateBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "CreatePartition failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_name_name_none(self, connect, collection):
         """
         target: test create partition, tag name set None, check status returned
@@ -115,7 +115,7 @@ class TestCreateBase:
         connect.create_partition(collection, tag_name)
         assert ut.compare_list_elements(connect.list_partitions(collection), [default_tag, tag_name, '_default'])
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_insert_default(self, connect, id_collection):
         """
         target: test create partition, and insert vectors, check status returned
@@ -140,7 +140,7 @@ class TestCreateBase:
         result = connect.insert(id_collection, default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == len(ids)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_insert_with_tag_not_existed(self, connect, collection):
         """
         target: try to insert data into a non existing partition
@@ -177,7 +177,7 @@ class TestCreateBase:
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == default_nb * 2
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
         """
         target: test create two partitions, and insert vectors with the same tag to
@@ -204,7 +204,7 @@ class TestShowBase:
 
     """
     ******************************************************************
-      The following cases are used to test `list_partitions` function 
+      The following cases are used to test `list_partitions` function
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
@@ -280,7 +280,7 @@ class TestHasBase:
             res = connect.has_partition(collection, tag_name)
             assert res
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_name_not_existed(self, connect, collection):
         """
         target: test has_partition, check status and result
@@ -291,7 +291,7 @@ class TestHasBase:
         logging.getLogger().info(res)
         assert not res
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_collection_not_existed(self, connect, collection):
         """
         target: test has_partition, check status and result
@@ -324,7 +324,7 @@ class TestDropBase:
 
     """
     ******************************************************************
-      The following cases are used to test `drop_partition` function 
+      The following cases are used to test `drop_partition` function
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
@@ -341,7 +341,7 @@ class TestDropBase:
         res2 = connect.list_partitions(collection)
         assert default_tag not in res2
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_name_not_existed(self, connect, collection):
         """
         target: test drop partition, but tag not existed
@@ -358,7 +358,7 @@ class TestDropBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "DropPartition failed: partition %s does not exist" % new_tag
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_name_not_existed_A(self, connect, collection):
         """
         target: test drop partition, but collection not existed
