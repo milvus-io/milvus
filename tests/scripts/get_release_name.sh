@@ -17,6 +17,7 @@
 # Exit immediately for non zero status
 set -e
 set -u
+# Print commands
 set -x
 function milvus_ci_release_name(){
     # rules for helm release name 
