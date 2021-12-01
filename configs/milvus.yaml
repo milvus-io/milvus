@@ -43,7 +43,7 @@ pulsar:
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
 
 rocksmq:
-  path: /var/lib/milvus/rdb_data
+  path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
   rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes
   retentionTimeInMinutes: 10080 # 7 days, 7 * 24 * 60 minutes
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB
