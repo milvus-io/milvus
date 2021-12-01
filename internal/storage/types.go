@@ -14,9 +14,16 @@ package storage
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.
 type ChunkManager interface {
+	// GetPath returns path of @key
 	GetPath(key string) (string, error)
+	// Write writes @content to @key
 	Write(key string, content []byte) error
+	// Exist returns true if @key exists
 	Exist(key string) bool
+	// Read reads @key and returns content
 	Read(key string) ([]byte, error)
+	// ReadAt reads @key by offset @off, content stored in @p, return @n as the number of bytes read
+	// if all bytes are read, @err is io.EOF
+	// return other error if read failed
 	ReadAt(key string, p []byte, off int64) (n int, err error)
 }
