@@ -34,7 +34,6 @@ MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
 PARALLEL_NUM="${PARALLEL_NUM:-6}"
 MILVUS_CLIENT="${MILVUS_CLIENT:-pymilvus}"
-CI_LOG_PATH=/tmp/ci_logs/test
 MILVUS_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-milvus.milvus-ci" | tr -d '\n')
 MILVUS_SERVICE_PORT="19530"
 
@@ -50,6 +49,8 @@ cd ${ROOT}/tests/python_client
 
 # print python3 version, python version 3.6.8 is more stable for test
 python3 -V
+ 
+export CI_LOG_PATH=/tmp/ci_logs/test
 
 if [ ! -d "${CI_LOG_PATH}" ]; then
 mkdir -p ${CI_LOG_PATH}
