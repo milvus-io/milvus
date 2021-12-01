@@ -371,7 +371,7 @@ class TestCollectionParams(TestcaseBase):
         """
         target: test collection with float type
         method: create field with float type
-        expected:
+        expected: raise exception
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
