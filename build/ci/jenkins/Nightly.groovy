@@ -47,6 +47,9 @@ pipeline {
         stage ('Build'){
             steps {
                 container('main') {
+                    dir ('build'){
+                            sh './set_docker_mirror.sh'
+                    }
                     dir ('tests/scripts') {
                         script {
                             sh 'printenv'

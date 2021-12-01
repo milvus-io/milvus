@@ -32,6 +32,7 @@ pipeline {
             steps {
                 container('main') {
                     script {
+                        sh './build/set_docker_mirror.sh'
                         sh "build/builder.sh /bin/bash -c \"make install\""
 
                         def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
