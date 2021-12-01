@@ -260,6 +260,7 @@ func (s *Server) Stop() error {
 
 	s.cancel()
 	if s.grpcServer != nil {
+		log.Debug("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 
