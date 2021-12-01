@@ -234,8 +234,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 			log.Warn("Failed to get seginfo from meta", zap.Int64("id", segmentID))
 			continue
 		}
-		if segment.State == commonpb.SegmentState_Sealed || segment.CollectionID != collectionID ||
-			segment.PartitionID != partitionID || segment.InsertChannel != channelName {
+		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) {
 			continue
 		}
 		segments = append(segments, segment)
@@ -275,6 +274,15 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 
 	allocations := append(newSegmentAllocations, existedSegmentAllocations...)
 	return allocations, nil
+}
+
+func satisfy(segment *SegmentInfo, collectionID, partitionID UniqueID, channel string) bool {
+	return segment.GetCollectionID() == collectionID && segment.GetPartitionID() == partitionID &&
+		segment.GetInsertChannel() == channel
+}
+
+func isGrowing(segment *SegmentInfo) bool {
+	return segment.GetState() == commonpb.SegmentState_Growing
 }
 
 func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
