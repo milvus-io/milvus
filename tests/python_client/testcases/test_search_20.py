@@ -265,7 +265,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "Field %s doesn't exist in schema"
                                                     % invalid_search_field})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_metric_type(self, get_invalid_metric_type):
         """
         target: test search with invalid parameter values
@@ -316,7 +316,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     check_items={"err_code": 0,
                                                  "err_msg": message})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_limit_type(self, get_invalid_limit):
         """
         target: test search with invalid limit type
@@ -335,7 +335,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "`limit` value %s is illegal" % invalid_limit})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [0, 16385])
     def test_search_param_invalid_limit_value(self, limit):
         """
@@ -357,7 +357,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": err_msg})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_expr_type(self, get_invalid_expr_type):
         """
         target: test search with invalid parameter type
@@ -378,7 +378,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "The type of expr must be string ,"
                                                     "but {} is given".format(type(invalid_search_expr))})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_expr_value(self, get_invalid_expr_value):
         """
         target: test search with invalid parameter values
