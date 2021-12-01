@@ -15,7 +15,5 @@ import "strings"
 
 func PositivelyRelated(metricType string) bool {
 	mUpper := strings.ToUpper(metricType)
-	return mUpper == strings.ToUpper(IP) ||
-		mUpper == strings.ToUpper(JACCARD) ||
-		mUpper == strings.ToUpper(TANIMOTO)
+	return mUpper == strings.ToUpper(IP)
 }

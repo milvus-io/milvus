@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -1831,8 +1832,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 	ret.Results.TopK = realTopK
 
-	if metricType != "IP" {
-		// if !distance.PositivelyRelated(metricType) {
+	if !distance.PositivelyRelated(metricType) {
 		for k := range ret.Results.Scores {
 			ret.Results.Scores[k] *= -1
 		}

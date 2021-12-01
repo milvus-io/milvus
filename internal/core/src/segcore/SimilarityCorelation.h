@@ -13,12 +13,9 @@
 
 #include "index/thirdparty/faiss/MetricType.h"
 
-namespace milvus {
-namespace segcore {
+namespace milvus::segcore {
 static inline bool
 PositivelyRelated(faiss::MetricType metric_type) {
-    return metric_type == faiss::MetricType::METRIC_INNER_PRODUCT || metric_type == faiss::MetricType::METRIC_Jaccard ||
-           metric_type == faiss::MetricType::METRIC_Tanimoto;
+    return metric_type == faiss::MetricType::METRIC_INNER_PRODUCT;
 }
-}  // namespace segcore
-}  // namespace milvus
+}  // namespace milvus::segcore
