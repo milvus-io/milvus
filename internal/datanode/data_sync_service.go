@@ -146,7 +146,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	// initialize flush manager for DataSync Service
-	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica, flushNotifyFunc(dsService))
+	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica,
+		flushNotifyFunc(dsService), dropVirtualChannelFunc(dsService))
 
 	// recover segment checkpoints
 	for _, us := range vchanInfo.GetUnflushedSegments() {

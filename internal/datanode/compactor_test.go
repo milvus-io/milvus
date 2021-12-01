@@ -561,4 +561,8 @@ func (mfm *mockFlushManager) injectFlush(injection *taskInjection, segments ...U
 	}()
 }
 
+func (mfm *mockFlushManager) notifyAllFlushed() {}
+
+func (mfm *mockFlushManager) startDropping() {}
+
 func (mfm *mockFlushManager) close() {}

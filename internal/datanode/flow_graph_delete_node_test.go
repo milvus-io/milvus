@@ -205,7 +205,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 	)
 	replica := genMockReplica(segIDs, pks, chanName)
 	kv := memkv.NewMemoryKV()
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), kv, replica, func(*segmentFlushPack) {})
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), kv, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 	t.Run("Test get segment by primary keys", func(te *testing.T) {
 		c := &nodeConfig{
 			replica:      replica,

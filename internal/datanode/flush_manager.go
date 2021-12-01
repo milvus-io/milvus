@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +43,10 @@ type flushManager interface {
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
 	// injectFlush injects compaction or other blocking task before flush sync
 	injectFlush(injection *taskInjection, segments ...UniqueID)
+	// startDropping changes flush manager into dropping mode
+	startDropping()
+	// notifyAllFlushed tells flush manager there is not future incoming flush task for drop mode
+	notifyAllFlushed()
 	// close handles resource clean up
 	close()
 }
@@ -61,6 +66,9 @@ type segmentFlushPack struct {
 // notifyMetaFunc notify meta to persistent flush result
 type notifyMetaFunc func(*segmentFlushPack)
 
+// flushAndDropFunc notifies meta to flush current state and drop virtual channel
+type flushAndDropFunc func([]*segmentFlushPack)
+
 // taskPostFunc clean up function after single flush task done
 type taskPostFunc func(pack *segmentFlushPack, postInjection postInjectionFunc)
 
@@ -70,6 +78,7 @@ type postInjectionFunc func(pack *segmentFlushPack)
 // make sure implementation
 var _ flushManager = (*rendezvousFlushManager)(nil)
 
+// orderFlushQueue keeps the order of task notifyFunc execution in order
 type orderFlushQueue struct {
 	sync.Once
 	segmentID UniqueID
@@ -111,8 +120,9 @@ func (q *orderFlushQueue) init() {
 func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flushTaskRunner {
 	actual, loaded := q.working.LoadOrStore(string(pos.MsgID), newFlushTaskRunner(q.segmentID, q.injectCh))
 	t := actual.(*flushTaskRunner)
+	// not loaded means the task runner is new, do initializtion
 	if !loaded {
-
+		// take over injection if task queue is handling it
 		q.injectMut.Lock()
 		q.runningTasks++
 		if q.injectHandler != nil {
@@ -120,7 +130,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flush
 			q.injectHandler = nil
 		}
 		q.injectMut.Unlock()
-
+		// add task to tail
 		q.tailMut.Lock()
 		t.init(q.notifyFunc, q.postTask, q.tailCh)
 		q.tailCh = t.finishSignal
@@ -129,13 +139,18 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flush
 	return t
 }
 
+// postTask handles clean up work after a task is done
 func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInjectionFunc) {
+	// delete task from working map
 	q.working.Delete(string(pack.pos.MsgID))
+	// after descreasing working count, check whether flush queue is empty
 	q.injectMut.Lock()
 	q.runningTasks--
+	// if flush queue is empty, let flush queue take over injection
 	if q.runningTasks == 0 {
 		q.injectHandler = newInjectHandler(q)
 	}
+	// set postInjection function if injection is handled in task
 	if postInjection != nil {
 		q.postInjection = postInjection
 	}
@@ -163,12 +178,14 @@ func (q *orderFlushQueue) inject(inject *taskInjection) {
 	q.injectCh <- inject
 }
 
+// injectionHandler handles injection for empty flush queue
 type injectHandler struct {
 	once sync.Once
 	wg   sync.WaitGroup
 	done chan struct{}
 }
 
+// newInjectHandler create injection handler for flush queue
 func newInjectHandler(q *orderFlushQueue) *injectHandler {
 	h := &injectHandler{
 		done: make(chan struct{}),
@@ -208,6 +225,14 @@ func (h *injectHandler) close() {
 	})
 }
 
+type dropHandler struct {
+	sync.Mutex
+	dropFlushWg  sync.WaitGroup
+	flushAndDrop flushAndDropFunc
+	allFlushed   chan struct{}
+	packs        []*segmentFlushPack
+}
+
 // rendezvousFlushManager makes sure insert & del buf all flushed
 type rendezvousFlushManager struct {
 	allocatorInterface
@@ -217,9 +242,12 @@ type rendezvousFlushManager struct {
 	// segment id => flush queue
 	dispatcher sync.Map
 	notifyFunc notifyMetaFunc
+
+	dropping    atomic.Bool
+	dropHandler dropHandler
 }
 
-// getFlushQueue
+// getFlushQueue gets or creates a orderFlushQueue for segment id if not found
 func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQueue {
 	newQueue := newOrderFlushQueue(segmentID, m.notifyFunc)
 	actual, _ := m.dispatcher.LoadOrStore(segmentID, newQueue)
@@ -229,14 +257,64 @@ func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQu
 	return queue
 }
 
+func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
+	// in dropping mode
+	if m.dropping.Load() {
+		r := &flushTaskRunner{
+			WaitGroup: sync.WaitGroup{},
+			segmentID: segmentID,
+		}
+		r.WaitGroup.Add(1) // insert and delete are not bound in drop mode
+		r.runFlushInsert(task, binlogs, statslogs, flushed, dropped, pos)
+		r.WaitGroup.Wait()
+
+		m.dropHandler.Lock()
+		defer m.dropHandler.Unlock()
+		m.dropHandler.packs = append(m.dropHandler.packs, r.getFlushPack())
+
+		return
+	}
+	// normal mode
+	m.getFlushQueue(segmentID).enqueueInsertFlush(task, binlogs, statslogs, flushed, dropped, pos)
+}
+
+func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flushDeleteTask, deltaLogs *DelDataBuf, pos *internalpb.MsgPosition) {
+	// in dropping mode
+	if m.dropping.Load() {
+		// preventing separate delete, check position exists in queue first
+		q := m.getFlushQueue(segmentID)
+		_, ok := q.working.Load(string(pos.MsgID))
+		// if ok, means position insert data already in queue, just handle task in normal mode
+		// if not ok, means the insert buf should be handle in drop mode
+		if !ok {
+			r := &flushTaskRunner{
+				WaitGroup: sync.WaitGroup{},
+				segmentID: segmentID,
+			}
+			r.WaitGroup.Add(1) // insert and delete are not bound in drop mode
+			r.runFlushDel(task, deltaLogs)
+			r.WaitGroup.Wait()
+
+			m.dropHandler.Lock()
+			defer m.dropHandler.Unlock()
+			m.dropHandler.packs = append(m.dropHandler.packs, r.getFlushPack())
+			return
+		}
+	}
+	// normal mode
+	m.getFlushQueue(segmentID).enqueueDelFlush(task, deltaLogs, pos)
+}
+
 // notify flush manager insert buffer data
 func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool,
 	dropped bool, pos *internalpb.MsgPosition) error {
 
 	// empty flush
 	if data == nil || data.buffer == nil {
-		m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{},
-			map[UniqueID]string{}, map[UniqueID]string{}, flushed, dropped, pos)
+		//m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{},
+		//	map[UniqueID]string{}, map[UniqueID]string{}, flushed, dropped, pos)
+		m.handleInsertTask(segmentID, &flushBufferInsertTask{}, map[UniqueID]string{}, map[UniqueID]string{},
+			flushed, dropped, pos)
 		return nil
 	}
 
@@ -301,7 +379,12 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	}
 
 	m.updateSegmentCheckPoint(segmentID)
-	m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{
+	/*
+		m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{
+			BaseKV: m.BaseKV,
+			data:   kvs,
+		}, field2Insert, field2Stats, flushed, dropped, pos)*/
+	m.handleInsertTask(segmentID, &flushBufferInsertTask{
 		BaseKV: m.BaseKV,
 		data:   kvs,
 	}, field2Insert, field2Stats, flushed, dropped, pos)
@@ -314,7 +397,10 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 
 	// del signal with empty data
 	if data == nil || data.delData == nil {
-		m.getFlushQueue(segmentID).enqueueDelFlush(&flushBufferDeleteTask{}, nil, pos)
+		/*
+			m.getFlushQueue(segmentID).enqueueDelFlush(&flushBufferDeleteTask{}, nil, pos)
+		*/
+		m.handleDeleteTask(segmentID, &flushBufferDeleteTask{}, nil, pos)
 		return nil
 	}
 
@@ -342,8 +428,12 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 	data.fileSize = int64(len(blob.Value))
 	data.filePath = blobPath
 	log.Debug("delete blob path", zap.String("path", blobPath))
-
-	m.getFlushQueue(segmentID).enqueueDelFlush(&flushBufferDeleteTask{
+	/*
+		m.getFlushQueue(segmentID).enqueueDelFlush(&flushBufferDeleteTask{
+			BaseKV: m.BaseKV,
+			data:   kvs,
+		}, data, pos)*/
+	m.handleDeleteTask(segmentID, &flushBufferDeleteTask{
 		BaseKV: m.BaseKV,
 		data:   kvs,
 	}, data, pos)
@@ -379,6 +469,39 @@ func (m *rendezvousFlushManager) getSegmentMeta(segmentID UniqueID, pos *interna
 		Schema: sch,
 	}
 	return collID, partID, meta, nil
+}
+
+// waitForAllTaskQueue waits for all flush queues in dispatcher become empty
+func (m *rendezvousFlushManager) waitForAllFlushQueue() {
+	var wg sync.WaitGroup
+	m.dispatcher.Range(func(k, v interface{}) bool {
+		queue := v.(*orderFlushQueue)
+		wg.Add(1)
+		go func() {
+			<-queue.tailCh
+			wg.Done()
+		}()
+		return true
+	})
+	wg.Wait()
+}
+
+// startDropping changes flush manager into dropping mode
+func (m *rendezvousFlushManager) startDropping() {
+	m.dropping.Store(true)
+	m.dropHandler.allFlushed = make(chan struct{})
+	go func() {
+		<-m.dropHandler.allFlushed       // all needed flush tasks are in flush manager now
+		m.waitForAllFlushQueue()         // waits for all the normal flush queue done
+		m.dropHandler.dropFlushWg.Wait() // waits for all drop mode task done
+		m.dropHandler.Lock()
+		defer m.dropHandler.Unlock()
+		m.dropHandler.flushAndDrop(m.dropHandler.packs) // invoke drop & flush
+	}()
+}
+
+func (m *rendezvousFlushManager) notifyAllFlushed() {
+	close(m.dropHandler.allFlushed)
 }
 
 // close cleans up all the left members
@@ -422,12 +545,122 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 }
 
 // NewRendezvousFlushManager create rendezvousFlushManager with provided allocator and kv
-func NewRendezvousFlushManager(allocator allocatorInterface, kv kv.BaseKV, replica Replica, f notifyMetaFunc) *rendezvousFlushManager {
-	return &rendezvousFlushManager{
+func NewRendezvousFlushManager(allocator allocatorInterface, kv kv.BaseKV, replica Replica, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
+	fm := &rendezvousFlushManager{
 		allocatorInterface: allocator,
 		BaseKV:             kv,
 		notifyFunc:         f,
 		Replica:            replica,
+		dropHandler: dropHandler{
+			flushAndDrop: drop,
+		},
+	}
+	// start with normal mode
+	fm.dropping.Store(false)
+	return fm
+}
+
+func getFieldBinlogs(fieldID UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
+	for _, binlog := range binlogs {
+		if fieldID == binlog.GetFieldID() {
+			return binlog
+		}
+	}
+	return nil
+}
+
+func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) flushAndDropFunc {
+	return func(packs []*segmentFlushPack) {
+		req := &datapb.DropVirtualChannelRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO msg type
+				MsgID:     0, //TODO msg id
+				Timestamp: 0, //TODO time stamp
+				SourceID:  Params.NodeID,
+			},
+			ChannelName: dsService.vchannelName,
+		}
+
+		segmentPack := make(map[UniqueID]*datapb.DropVirtualChannelSegment)
+		for _, pack := range packs {
+			segment, has := segmentPack[pack.segmentID]
+			if !has {
+				segment = &datapb.DropVirtualChannelSegment{
+					SegmentID:    pack.segmentID,
+					CollectionID: dsService.collectionID,
+				}
+
+				segmentPack[pack.segmentID] = segment
+			}
+			for k, v := range pack.insertLogs {
+				fieldBinlogs := getFieldBinlogs(k, segment.Field2BinlogPaths)
+				if fieldBinlogs == nil {
+					segment.Field2BinlogPaths = append(segment.Field2BinlogPaths, &datapb.FieldBinlog{
+						FieldID: k,
+						Binlogs: []string{v},
+					})
+				} else {
+					fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, v)
+				}
+			}
+			for k, v := range pack.statsLogs {
+				fieldStatsLogs := getFieldBinlogs(k, segment.Field2StatslogPaths)
+				if fieldStatsLogs == nil {
+					segment.Field2StatslogPaths = append(segment.Field2StatslogPaths, &datapb.FieldBinlog{
+						FieldID: k,
+						Binlogs: []string{v},
+					})
+				} else {
+					fieldStatsLogs.Binlogs = append(fieldStatsLogs.Binlogs, v)
+				}
+			}
+			for _, delData := range pack.deltaLogs {
+				segment.Deltalogs = append(segment.Deltalogs, &datapb.DeltaLogInfo{RecordEntries: uint64(delData.size), TimestampFrom: delData.tsFrom, TimestampTo: delData.tsTo, DeltaLogPath: delData.filePath, DeltaLogSize: delData.fileSize})
+			}
+			updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
+			segment.NumOfRows = updates.GetNumRows()
+			if pack.pos != nil {
+				if segment.CheckPoint == nil || pack.pos.Timestamp > segment.CheckPoint.Timestamp {
+					segment.CheckPoint = pack.pos
+				}
+			}
+		}
+
+		// start positions for all new segments
+		for _, pos := range dsService.replica.listNewSegmentsStartPositions() {
+			segment, has := segmentPack[pos.GetSegmentID()]
+			if !has {
+				segment = &datapb.DropVirtualChannelSegment{
+					SegmentID:    pos.GetSegmentID(),
+					CollectionID: dsService.collectionID,
+				}
+
+				segmentPack[pos.GetSegmentID()] = segment
+			}
+			segment.StartPosition = pos.GetStartPosition()
+		}
+
+		err := retry.Do(context.Background(), func() error {
+			rsp, err := dsService.dataCoord.DropVirtualChannel(context.Background(), req)
+			// should be network issue, return error and retry
+			if err != nil {
+				return fmt.Errorf(err.Error())
+			}
+
+			// TODO should retry only when datacoord status is unhealthy
+			if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				return fmt.Errorf("data service DropVirtualChannel failed, reason = %s", rsp.GetStatus().GetReason())
+			}
+			return nil
+		}, opts...)
+		if err != nil {
+			log.Warn("failed to DropVirtualChannel", zap.String("channel", dsService.vchannelName), zap.Error(err))
+			panic(err)
+		}
+		for segID := range segmentPack {
+			dsService.replica.segmentFlushed(segID)
+			dsService.flushingSegCache.Remove(segID)
+		}
 	}
 }
 

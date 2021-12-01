@@ -83,7 +83,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 
 	memkv := memkv.NewMemoryKV()
 
-	fm := NewRendezvousFlushManager(&allocator{}, memkv, replica, func(*segmentFlushPack) {})
+	fm := NewRendezvousFlushManager(&allocator{}, memkv, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 
@@ -180,7 +180,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	memkv := memkv.NewMemoryKV()
 
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), memkv, replica, func(*segmentFlushPack) {})
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), memkv, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
@@ -395,7 +395,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 			colRep.segmentFlushed(pack.segmentID)
 		}
 		wg.Done()
-	})
+	}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
@@ -656,7 +656,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 
 	memkv := memkv.NewMemoryKV()
 
-	fm := NewRendezvousFlushManager(&allocator{}, memkv, replica, func(*segmentFlushPack) {})
+	fm := NewRendezvousFlushManager(&allocator{}, memkv, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
