@@ -80,7 +80,7 @@ class TestCollectionParams(TestcaseBase):
                                                           exp_primary: ct.default_int64_field_name})
         assert c_name in self.utility_wrap.list_collections()[0]
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_empty_name(self):
         """
@@ -94,7 +94,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=default_schema, check_task=CheckTasks.err_res,
                                              check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     @pytest.mark.parametrize("name", [[], 1, [1, "2", 3], (1,), {1: 1}, None])
     def test_collection_illegal_name(self, name):
@@ -108,7 +108,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(name, schema=default_schema, check_task=CheckTasks.err_res,
                                              check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
     def test_collection_invalid_name(self, name):
         """
@@ -138,7 +138,7 @@ class TestCollectionParams(TestcaseBase):
         assert collection_w.num_entities == self.collection_wrap.num_entities
         assert collection_w.name in self.utility_wrap.list_collections()[0]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_dup_name_with_desc(self):
         """
         target: test collection with dup name
@@ -174,7 +174,7 @@ class TestCollectionParams(TestcaseBase):
                                              "schema passed in."}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_dup_name_new_primary(self):
         """
         target: test collection with dup name and new primary_field schema
@@ -254,7 +254,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: default_schema})
         assert collection_w.name == self.collection_wrap.name
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_none_schema(self):
         """
         target: test collection with none schema
@@ -266,7 +266,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Should be passed into the schema"}
         self.collection_wrap.init_collection(c_name, schema=None, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_invalid_type_schema(self, get_none_removed_invalid_strings):
         """
         target: test collection with invalid schema
@@ -279,7 +279,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=get_none_removed_invalid_strings,
                                              check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_invalid_type_fields(self, get_invalid_type_fields):
         """
         target: test collection with invalid fields type, non-list
@@ -292,7 +292,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_schema_wrap.init_collection_schema(fields=fields,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_with_unknown_type(self):
         """
         target: test collection with unknown type
@@ -304,7 +304,7 @@ class TestCollectionParams(TestcaseBase):
         self.field_schema_wrap.init_field_schema(name="unknown", dtype=DataType.UNKNOWN,
                                                  check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     @pytest.mark.parametrize("name", [[], 1, (1,), {1: 1}, "12-s"])
     def test_collection_invalid_type_field(self, name):
@@ -321,7 +321,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "expected one of: bytes, unicode"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
     def test_collection_invalid_field_name(self, name):
         """
@@ -337,7 +337,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "Invalid field name"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_none_field_name(self):
         """
@@ -352,7 +352,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "You should specify the name of field"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dtype", [6, [[]], {}, (), "", "a"])
     def test_collection_invalid_field_type(self, dtype):
         """
@@ -381,7 +381,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Field type must be of DataType!"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_empty_fields(self):
         """
         target: test collection with empty fields
@@ -477,7 +477,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_schema_wrap.init_collection_schema([int_fields, vec_fields],
                                                            check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_is_primary_false(self):
         """
         target: test collection with all is_primary false
@@ -490,7 +490,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
         self.collection_schema_wrap.init_collection_schema(fields, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("is_primary", ct.get_invalid_strs)
     def test_collection_invalid_is_primary(self, is_primary):
         """
@@ -504,7 +504,7 @@ class TestCollectionParams(TestcaseBase):
         self.field_schema_wrap.init_field_schema(name=name, dtype=DataType.INT64, is_primary=is_primary,
                                                  check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
     def test_collection_invalid_primary_field(self, primary_field):
         """
@@ -518,7 +518,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_schema_wrap.init_collection_schema(fields=fields, primary_field=primary_field,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [[], 1, [1, "2", 3], (1,), {1: 1}, None])
     def test_collection_non_string_primary_field(self, primary_field):
         """
@@ -532,7 +532,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_schema_wrap.init_collection_schema(fields, primary_field=primary_field,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_not_existed_primary_field(self):
         """
         target: test collection with not exist primary field
@@ -573,7 +573,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(cf.gen_unique_str(prefix), schema=schema)
         assert self.collection_wrap.primary_field.name == ct.default_int64_field_name
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_unsupported_primary_field(self, get_unsupported_primary_field):
         """
@@ -603,7 +603,7 @@ class TestCollectionParams(TestcaseBase):
             fields=[int_field_one, int_field_two, cf.gen_float_vec_field()],
             check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_primary_inconsistent(self):
         """
         target: test collection with different primary field setting
@@ -667,7 +667,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_auto_id_non_primary_field(self):
         """
         target: test collection set auto_id in non-primary field
@@ -679,7 +679,7 @@ class TestCollectionParams(TestcaseBase):
         self.field_schema_wrap.init_field_schema(name=ct.default_int64_field_name, dtype=DataType.INT64, auto_id=True,
                                                  check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_auto_id_false_non_primary(self):
         """
         target: test collection set auto_id in non-primary field
@@ -693,7 +693,7 @@ class TestCollectionParams(TestcaseBase):
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields)
         assert not schema.auto_id
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_auto_id_inconsistent(self):
         """
         target: test collection auto_id with both collection schema and field schema
@@ -708,7 +708,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_schema_wrap.init_collection_schema([int_field, vec_field], auto_id=False,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("auto_id", [True, False])
     def test_collection_auto_id_consistent(self, auto_id):
         """
@@ -722,7 +722,7 @@ class TestCollectionParams(TestcaseBase):
         schema, _ = self.collection_schema_wrap.init_collection_schema([int_field, vec_field], auto_id=auto_id)
         assert schema.auto_id == auto_id
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_auto_id_none_in_field(self):
         """
         target: test collection with auto_id is None
@@ -735,7 +735,7 @@ class TestCollectionParams(TestcaseBase):
                                                  is_primary=True,
                                                  auto_id=None, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("auto_id", ct.get_invalid_strs)
     def test_collection_invalid_auto_id(self, auto_id):
         """
@@ -750,7 +750,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_schema_wrap.init_collection_schema([int_field, vec_field], auto_id=auto_id,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_multi_fields_auto_id(self):
         """
         target: test collection auto_id with multi fields
@@ -763,7 +763,7 @@ class TestCollectionParams(TestcaseBase):
         self.field_schema_wrap.init_field_schema(name="int", dtype=DataType.INT64, auto_id=True,
                                                  check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dtype", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR])
     def test_collection_vector_without_dim(self, dtype):
         """
@@ -778,7 +778,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "dimension is not defined in field type params"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_vector_invalid_dim(self, get_invalid_dim):
         """
@@ -793,7 +793,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: f'invalid dim: {get_invalid_dim}'}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [-1, 0, 32769])
     def test_collection_vector_out_bounds_dim(self, dim):
         """
@@ -838,7 +838,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_none_desc(self):
         """
@@ -852,7 +852,7 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "None has type NoneType, but expected one of: bytes, unicode"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_long_desc(self):
         """
         target: test collection with long desc
@@ -910,7 +910,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_shards_num: shards_num})
         assert c_name in self.utility_wrap.list_collections()[0]
 
-    @pytest.mark.tag(CaseLabel.L0)
+    @pytest.mark.tag(CaseLabel.L2)
     def test_collection_shards_num_with_error_type(self):
         """
         target:test collection with error type shards_num
@@ -937,7 +937,7 @@ class TestCollectionOperation(TestcaseBase):
     #     if self.self.collection_wrap is not None and self.self.collection_wrap.collection is not None:
     #         self.self.collection_wrap.drop()
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_without_connection(self):
         """
         target: test collection without connection
@@ -954,7 +954,7 @@ class TestCollectionOperation(TestcaseBase):
                                              check_task=CheckTasks.err_res, check_items=error)
         assert self.collection_wrap.collection is None
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_multi_create_drop(self):
         """
         target: test cycle creation and deletion of multiple collections
@@ -1006,7 +1006,7 @@ class TestCollectionOperation(TestcaseBase):
                                   check_items={exp_name: c_name, exp_schema: default_schema})
         assert self.utility_wrap.has_collection(c_name)[0]
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_all_datatype_fields(self):
         """
         target: test create collection with all dataType fields
@@ -1071,7 +1071,7 @@ class TestCollectionDataframe(TestcaseBase):
                                                       check_items={exp_name: c_name, exp_schema: default_binary_schema})
         assert self.collection_wrap.num_entities == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_none_dataframe(self):
         """
         target: test create collection by empty dataframe
@@ -1083,7 +1083,7 @@ class TestCollectionDataframe(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Dataframe can not be None."}
         self.collection_wrap.construct_from_dataframe(c_name, None, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_dataframe_only_column(self):
         """
         target: test collection with dataframe only columns
@@ -1097,7 +1097,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_inconsistent_dataframe(self):
         """
         target: test collection with data inconsistent
@@ -1113,7 +1113,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field='A', check_task=CheckTasks.err_res,
                                                       check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_non_dataframe(self, get_non_df):
         """
         target: test create collection by invalid dataframe
@@ -1126,7 +1126,7 @@ class TestCollectionDataframe(TestcaseBase):
         df = get_non_df
         self.collection_wrap.construct_from_dataframe(c_name, df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_data_type_dataframe(self):
         """
         target: test collection with invalid dataframe
@@ -1140,7 +1140,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_invalid_field_name(self):
         """
         target: test collection with invalid field name
@@ -1154,7 +1154,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_none_primary_field(self):
         """
         target: test collection with none primary field
@@ -1168,7 +1168,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=None,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_not_existed_primary_field(self):
         """
         target: test collection with not existed primary field
@@ -1182,7 +1182,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=c_name,
                                                       check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_with_none_auto_id(self):
         """
         target: test construct with non-int64 as primary field
@@ -1258,7 +1258,7 @@ class TestCollectionDataframe(TestcaseBase):
         assert not self.collection_wrap.schema.auto_id
         assert self.collection_wrap.num_entities == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_construct_none_value_auto_id_false(self):
         """
         target: test construct with none value, auto_id
@@ -1366,7 +1366,7 @@ class TestCollectionCount:
         with pytest.raises(Exception) as e:
             dis_connect.count_entities(collection)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_count_no_vectors(self, connect, collection):
         """
         target: test collection rows_count is correct or not, if collection is empty
@@ -1406,7 +1406,7 @@ class TestCollectionCountIP:
         request.param.update({"metric_type": "IP"})
         return request.param
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_count_after_index_created(self, connect, collection, get_simple_index, insert_count):
         """
         target: test count_entities, after index have been created
@@ -1470,7 +1470,7 @@ class TestCollectionCountBinary:
         return request.param
 
     # TODO: need to update and enable
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_count_after_index_created_A(self, connect, binary_collection, get_hamming_index, insert_count):
         """
         target: test count_entities, after index have been created
@@ -1632,7 +1632,7 @@ class TestGetCollectionStats:
     def insert_count(self, request):
         yield request.param
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_get_collection_stats_name_not_existed(self, connect, collection):
         """
         target: get collection stats where collection name does not exist
@@ -2009,7 +2009,7 @@ class TestCreateCollection:
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_after_insert(self, connect, collection):
         """
         target: test insert vector, then create collection again
@@ -2028,7 +2028,7 @@ class TestCreateCollection:
             assert message == "CreateCollection failed: meta table add collection failed," \
                               "error = collection %s exist" % collection
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_after_insert_flush(self, connect, collection):
         """
         target: test insert vector, then create collection again
@@ -2046,7 +2046,7 @@ class TestCreateCollection:
             assert message == "CreateCollection failed: meta table add collection failed," \
                               "error = collection %s exist" % collection
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_create_collection_multithread(self, connect):
         """
         target: test create collection with multi-thread
@@ -2240,7 +2240,7 @@ class TestDescribeCollection:
         with pytest.raises(Exception) as e:
             dis_connect.describe_collection(collection)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_not_existed(self, connect):
         """
         target: test if collection not created
@@ -2260,7 +2260,7 @@ class TestDescribeCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_describe_collection_multithread(self, connect):
         """
         target: test create collection with multi-thread
@@ -2382,7 +2382,7 @@ class TestDropCollection:
         with pytest.raises(Exception) as e:
             dis_connect.drop_collection(collection)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_drop_collection_not_existed(self, connect):
         """
         target: test if collection not created
@@ -2399,7 +2399,7 @@ class TestDropCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_create_drop_collection_multithread(self, connect):
         """
         target: test create and drop collection with multi-thread
@@ -2480,7 +2480,7 @@ class TestHasCollection:
         with pytest.raises(Exception) as e:
             assert dis_connect.has_collection(collection)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_not_existed(self, connect):
         """
         target: test if collection not created
@@ -2672,7 +2672,7 @@ class TestLoadCollection:
         connect.load_collection(collection)
         connect.release_collection(collection)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_after_index_binary(self, connect, binary_collection, get_binary_index):
         """
         target: test load binary_collection, after index created
@@ -2696,7 +2696,7 @@ class TestLoadCollection:
             connect.load_collection(binary_collection)
             connect.release_collection(binary_collection)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_empty_collection(self, connect, collection):
         """
         target: test load an empty collection with no data inserted
@@ -2758,7 +2758,7 @@ class TestLoadCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_collection_not_load(self, connect, collection):
         """
         target: test release collection without load
@@ -3166,7 +3166,7 @@ class TestLoadPartition:
         with pytest.raises(Exception) as e:
             dis_connect.release_partitions(collection, [default_tag])
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_not_existed(self, connect, collection):
         """
         target: test load partition for invalid scenario
