@@ -1,4 +1,3 @@
-import pdb
 import logging
 
 logger = logging.getLogger("milvus_benchmark.parser")
