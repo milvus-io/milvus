@@ -65,7 +65,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context) (*internalpb.Componen
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    errMsg,
 		}
-		return stats, errors.New(errMsg)
+		return stats, nil
 	}
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
@@ -2771,7 +2771,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 
 		node.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
-		return metrics, err
+		return metrics, nil
 	}
 
 	log.Debug("Proxy.GetMetrics failed, request metric type is not implemented yet",

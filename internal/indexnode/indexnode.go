@@ -389,7 +389,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
-		return metrics, err
+		return metrics, nil
 	}
 
 	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
