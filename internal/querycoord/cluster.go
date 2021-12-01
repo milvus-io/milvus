@@ -649,7 +649,7 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 			return err
 		}
 		delete(c.nodes, nodeID)
-		log.Debug("RemoveNodeInfo: delete nodeInfo in cluster MetaReplica and etcd", zap.Int64("nodeID", nodeID))
+		log.Debug("removeNodeInfo: delete nodeInfo in cluster MetaReplica and etcd", zap.Int64("nodeID", nodeID))
 	}
 
 	return nil
