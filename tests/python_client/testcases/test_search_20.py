@@ -1021,7 +1021,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": limit - deleted_entity_num,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_partition_after_release_one(self, nq, dim, auto_id, _async):
         """
         target: test search function before and after release
@@ -1110,7 +1110,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": 0,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_collection_after_release_load(self, nb, nq, dim, auto_id, _async):
         """
         target: search the pre-released collection after load
@@ -1220,7 +1220,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_new_data(self, nq, dim, auto_id, _async):
         """
         target: test search new inserted data without load
@@ -1290,7 +1290,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": nq,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
