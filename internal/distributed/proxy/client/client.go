@@ -267,6 +267,7 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 	return ret.(*commonpb.Status), err
 }
 
+// ReleaseDQLMessageStream release dql message stream by request
 func (c *Client) ReleaseDQLMessageStream(ctx context.Context, req *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		client, err := c.getGrpcClient()
