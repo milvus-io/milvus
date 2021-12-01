@@ -68,13 +68,12 @@ type ParamTable struct {
 	// Channel subscribition name -
 	MsgChannelSubName string
 
-	// --- ETCD ---
+	// etcd
 	EtcdEndpoints       []string
 	MetaRootPath        string
 	ChannelWatchSubPath string
 
 	// MinIO
-
 	MinioAddress         string
 	MinioAccessKeyID     string
 	MinioSecretAccessKey string
