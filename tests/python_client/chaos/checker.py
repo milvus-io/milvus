@@ -23,6 +23,7 @@ class Op(Enum):
 
 
 timeout = 20
+enable_traceback = False
 
 
 class Checker:
@@ -37,9 +38,11 @@ class Checker:
         self.c_wrap = ApiCollectionWrapper()
         self.c_wrap.init_collection(name=cf.gen_unique_str('Checker_'),
                                     schema=cf.gen_default_collection_schema(),
-                                    timeout=timeout)
+                                    timeout=timeout,
+                                    enable_traceback=enable_traceback)
         self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.ENTITIES_FOR_SEARCH),
-                           timeout=timeout)
+                           timeout=timeout,
+                           enable_traceback=enable_traceback)
         self.initial_entities = self.c_wrap.num_entities    # do as a flush
 
     def total(self):
@@ -57,17 +60,19 @@ class SearchChecker(Checker):
     """check search operations in a dependent thread"""
     def __init__(self):
         super().__init__()
-        self.c_wrap.load()   # do load before search
+        self.c_wrap.load(enable_traceback=enable_traceback)  # do load before search
 
     def keep_running(self):
         while True:
             search_vec = cf.gen_vectors(5, ct.default_dim)
             _, result = self.c_wrap.search(
-                                data=search_vec,
-                                anns_field=ct.default_float_vec_field_name,
-                                param={"nprobe": 32},
-                                limit=1, timeout=timeout, check_task=CheckTasks.check_nothing
-                            )
+                data=search_vec,
+                anns_field=ct.default_float_vec_field_name,
+                param={"nprobe": 32},
+                limit=1, timeout=timeout,
+                enable_traceback=enable_traceback,
+                check_task=CheckTasks.check_nothing
+            )
             if result:
                 self._succ += 1
             else:
@@ -86,7 +91,9 @@ class InsertFlushChecker(Checker):
         while True:
             _, insert_result = \
                 self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.DELTA_PER_INS),
-                                   timeout=timeout, check_task=CheckTasks.check_nothing)
+                                   timeout=timeout,
+                                   enable_traceback=enable_traceback,
+                                   check_task=CheckTasks.check_nothing)
             if not self._flush:
                 if insert_result:
                     self._succ += 1
@@ -114,13 +121,14 @@ class CreateChecker(Checker):
     def keep_running(self):
         while True:
             _, result = self.c_wrap.init_collection(
-                                    name=cf.gen_unique_str("CreateChecker_"),
-                                    schema=cf.gen_default_collection_schema(),
-                                    timeout=timeout, check_task=CheckTasks.check_nothing
-                                )
+                name=cf.gen_unique_str("CreateChecker_"),
+                schema=cf.gen_default_collection_schema(),
+                timeout=timeout,
+                enable_traceback=enable_traceback,
+                check_task=CheckTasks.check_nothing)
             if result:
                 self._succ += 1
-                self.c_wrap.drop(timeout=timeout)
+                self.c_wrap.drop(timeout=timeout, enable_traceback=enable_traceback)
             else:
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
@@ -130,8 +138,8 @@ class IndexChecker(Checker):
     """check Insert operations in a dependent thread"""
     def __init__(self):
         super().__init__()
-        self.c_wrap.insert(data=cf.gen_default_list_data(nb=5*constants.ENTITIES_FOR_SEARCH),
-                           timeout=timeout)
+        self.c_wrap.insert(data=cf.gen_default_list_data(nb=5 * constants.ENTITIES_FOR_SEARCH),
+                           timeout=timeout, enable_traceback=enable_traceback)
         log.debug(f"Index ready entities: {self.c_wrap.num_entities }")  # do as a flush before indexing
 
     def keep_running(self):
@@ -139,10 +147,12 @@ class IndexChecker(Checker):
             _, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
                                                  constants.DEFAULT_INDEX_PARAM,
                                                  name=cf.gen_unique_str('index_'),
-                                                 timeout=timeout, check_task=CheckTasks.check_nothing)
+                                                 timeout=timeout,
+                                                 enable_traceback=enable_traceback,
+                                                 check_task=CheckTasks.check_nothing)
             if result:
                 self._succ += 1
-                self.c_wrap.drop_index(timeout=timeout)
+                self.c_wrap.drop_index(timeout=timeout, enable_traceback=enable_traceback)
             else:
                 self._fail += 1
 
@@ -151,7 +161,7 @@ class QueryChecker(Checker):
     """check query operations in a dependent thread"""
     def __init__(self):
         super().__init__()
-        self.c_wrap.load()      # load before query
+        self.c_wrap.load(enable_traceback=enable_traceback)  # load before query
 
     def keep_running(self):
         while True:
@@ -159,7 +169,9 @@ class QueryChecker(Checker):
             for _ in range(5):
                 int_values.append(randint(0, constants.ENTITIES_FOR_SEARCH))
             term_expr = f'{ct.default_int64_field_name} in {int_values}'
-            _, result = self.c_wrap.query(term_expr, timeout=timeout, check_task=CheckTasks.check_nothing)
+            _, result = self.c_wrap.query(term_expr, timeout=timeout,
+                                          enable_traceback=enable_traceback,
+                                          check_task=CheckTasks.check_nothing)
             if result:
                 self._succ += 1
             else:
