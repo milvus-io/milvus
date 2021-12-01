@@ -24,11 +24,11 @@ func TestPositivelyRelated(t *testing.T) {
 		},
 		{
 			JACCARD,
-			true,
+			false,
 		},
 		{
 			TANIMOTO,
-			true,
+			false,
 		},
 		{
 			L2,
