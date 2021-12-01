@@ -874,7 +874,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 	iter := rmq.kv.(*rocksdbkv.RocksdbKV).DB.NewIterator(readOpts)
 	defer iter.Close()
 
-	pageIDs := make([]UniqueID, 0)
+	var pageIDs []UniqueID
 	pageMsgKey := pageMsgPrefix + "/" + strconv.FormatInt(firstID, 10)
 	for iter.Seek([]byte(pageMsgKey)); iter.Valid(); iter.Next() {
 		key := iter.Key()
