@@ -532,8 +532,8 @@ func (s *Segment) matchIndexParam(fieldID int64, indexParams indexParam) bool {
 }
 
 func (s *Segment) setIndexInfo(fieldID int64, info *indexInfo) error {
-	s.paramMutex.RLock()
-	defer s.paramMutex.RUnlock()
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
 	if s.indexInfos == nil {
 		return errors.New("indexInfos hasn't been init")
 	}
