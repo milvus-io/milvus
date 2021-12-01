@@ -77,7 +77,7 @@ Use \"$0  --help\" for more information about a given command.
   esac
 done
 
-
+# try to found logs file from mount disk /volume1/ci-logs
 find ${LOG_DIR:-/ci-logs/} -type f  -name "*${RELEASE_NAME:-milvus-testing}*" \
 | xargs tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz -P --remove-files || true
 
