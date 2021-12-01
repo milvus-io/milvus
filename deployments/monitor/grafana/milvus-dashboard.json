@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1638184124946,
+  "iteration": 1638350262803,
   "links": [],
   "panels": [
     {
@@ -5606,7 +5606,7 @@
           "expr": "go_memstats_gc_cpu_fraction{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{pod}}",
+          "legendFormat": "{{component}}: {{pod}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -5704,7 +5704,7 @@
           "expr": "rate(go_memstats_frees_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m])",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{component}}: {{pod}}",
+          "legendFormat": "{{pod}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -6101,8 +6101,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "default",
-          "value": "default"
+          "text": "argo",
+          "value": "argo"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -6260,5 +6260,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 174
+  "version": 178
 }
