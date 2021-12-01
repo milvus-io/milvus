@@ -19,6 +19,7 @@ default_nb = ct.default_nb
 num_loaded_entities = "num_loaded_entities"
 num_total_entities = "num_total_entities"
 
+
 def get_segment_distribution(res):
     """
     Get segment distribution
@@ -35,7 +36,7 @@ def get_segment_distribution(res):
             segment_distribution[r.nodeID]["sealed"].append(r.segmentID)
         if r.state == 2:
             segment_distribution[r.nodeID]["growing"].append(r.segmentID)
-    
+
     return segment_distribution
 
 
@@ -1347,7 +1348,7 @@ class TestUtilityAdvanced(TestcaseBase):
         c_names = []
         num = 5
 
-        for i in range(thread_num*num):
+        for i in range(thread_num * num):
             c_name = cf.gen_unique_str(prefix)
             self.init_collection_wrap(c_name)
             c_names.append(c_name)
@@ -1359,13 +1360,13 @@ class TestUtilityAdvanced(TestcaseBase):
                 assert not self.utility_wrap.has_collection(name)[0]
 
         for i in range(thread_num):
-            x = threading.Thread(target=create_and_drop_collection, args=(c_names[i*num:(i+1)*num],))
+            x = threading.Thread(target=create_and_drop_collection, args=(c_names[i * num:(i + 1) * num],))
             threads.append(x)
             x.start()
         for t in threads:
             t.join()
         log.debug(self.utility_wrap.list_collections()[0])
-    
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_query_segment_info_empty_collection(self):
         """
@@ -1378,7 +1379,7 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.load()
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         assert len(res) == 0
-    
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_growing_query_segment_info(self):
         """
@@ -1454,17 +1455,17 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.load()
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
-        segment_distribution = get_segment_distribution(res) 
-        all_querynodes = [node["identifier"]for node in ms.query_nodes]
+        segment_distribution = get_segment_distribution(res)
+        all_querynodes = [node["identifier"] for node in ms.query_nodes]
         assert len(all_querynodes) > 1
         all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"]) \
-                                    if x in segment_distribution else 0, reverse=True)
+                                key=lambda x: len(segment_distribution[x]["sealed"])
+                                if x in segment_distribution else 0, reverse=True)
         src_node_id = all_querynodes[0]
         des_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         # load balance
-        self.utility_wrap.load_balance(src_node_id,des_node_ids,sealed_segment_ids)
+        self.utility_wrap.load_balance(src_node_id, des_node_ids, sealed_segment_ids)
         # get segments distribution after load balance
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = get_segment_distribution(res)
