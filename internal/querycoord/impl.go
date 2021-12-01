@@ -101,7 +101,7 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 		log.Debug("show collection end with query coordinator not healthy")
 		return &querypb.ShowCollectionsResponse{
 			Status: status,
-		}, err
+		}, nil
 	}
 	collectionInfos := qc.meta.showCollections()
 	ID2collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
@@ -129,7 +129,7 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 			status.Reason = err.Error()
 			return &querypb.ShowCollectionsResponse{
 				Status: status,
-			}, err
+			}, nil
 		}
 		inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
 	}
@@ -155,7 +155,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		err := errors.New("query coordinator is not healthy")
 		status.Reason = err.Error()
 		log.Debug("load collection end with query coordinator not healthy")
-		return status, err
+		return status, nil
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
@@ -172,14 +172,14 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		return status, err
+		return status, nil
 	}
 
 	err = loadCollectionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		return status, err
+		return status, nil
 	}
 
 	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Any("status", status))
@@ -199,7 +199,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		err := errors.New("query coordinator is not healthy")
 		status.Reason = err.Error()
 		log.Debug("release collection end with query coordinator not healthy")
-		return status, err
+		return status, nil
 	}
 
 	hasCollection := qc.meta.hasCollection(collectionID)
@@ -220,14 +220,14 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		return status, err
+		return status, nil
 	}
 
 	err = releaseCollectionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		return status, err
+		return status, nil
 	}
 
 	log.Debug("ReleaseCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
@@ -250,7 +250,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		log.Debug("show partition end with query coordinator not healthy")
 		return &querypb.ShowPartitionsResponse{
 			Status: status,
-		}, err
+		}, nil
 	}
 
 	partitionStates, err := qc.meta.showPartitions(collectionID)
@@ -259,7 +259,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		status.Reason = err.Error()
 		return &querypb.ShowPartitionsResponse{
 			Status: status,
-		}, err
+		}, nil
 	}
 	ID2PartitionState := make(map[UniqueID]*querypb.PartitionStates)
 	inMemoryPartitionIDs := make([]UniqueID, 0)
@@ -286,7 +286,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 			status.Reason = err.Error()
 			return &querypb.ShowPartitionsResponse{
 				Status: status,
-			}, err
+			}, nil
 		}
 		inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
 	}
@@ -313,7 +313,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		err := errors.New("query coordinator is not healthy")
 		status.Reason = err.Error()
 		log.Debug("load partition end with query coordinator not healthy")
-		return status, err
+		return status, nil
 	}
 
 	if len(partitionIDs) == 0 {
@@ -321,7 +321,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		err := errors.New("partitionIDs are empty")
 		status.Reason = err.Error()
 		log.Debug("LoadPartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID))
-		return status, err
+		return status, nil
 	}
 
 	hasCollection := qc.meta.hasCollection(collectionID)
@@ -365,7 +365,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		return status, err
+		return status, nil
 	}
 
 	err = loadPartitionTask.waitToFinish()
@@ -373,7 +373,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
 		log.Debug("LoadPartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID))
-		return status, err
+		return status, nil
 	}
 
 	log.Debug("LoadPartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID))
@@ -394,7 +394,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		err := errors.New("query coordinator is not healthy")
 		status.Reason = err.Error()
 		log.Debug("release partition end with query coordinator not healthy")
-		return status, err
+		return status, nil
 	}
 
 	hasCollection := qc.meta.hasCollection(collectionID)
@@ -408,7 +408,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		err := errors.New("partitionIDs are empty")
 		status.Reason = err.Error()
 		log.Debug("releasePartitionsRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID))
-		return status, err
+		return status, nil
 	}
 
 	toReleasedPartitions := make([]UniqueID, 0)
@@ -434,14 +434,14 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		return status, err
+		return status, nil
 	}
 
 	err = releasePartitionTask.waitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		return status, err
+		return status, nil
 	}
 	log.Debug("ReleasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 	//qc.MetaReplica.printMeta()
@@ -461,7 +461,7 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 		log.Debug("createQueryChannel end with query coordinator not healthy")
 		return &querypb.CreateQueryChannelResponse{
 			Status: status,
-		}, err
+		}, nil
 	}
 
 	collectionID := req.CollectionID
@@ -472,7 +472,7 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 		log.Debug("createQueryChannel end with error")
 		return &querypb.CreateQueryChannelResponse{
 			Status: status,
-		}, err
+		}, nil
 	}
 
 	return &querypb.CreateQueryChannelResponse{
@@ -494,7 +494,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 		log.Debug("getPartitionStates end with query coordinator not healthy")
 		return &querypb.GetPartitionStatesResponse{
 			Status: status,
-		}, err
+		}, nil
 	}
 
 	partitionIDs := req.PartitionIDs
@@ -506,7 +506,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 			status.Reason = err.Error()
 			return &querypb.GetPartitionStatesResponse{
 				Status: status,
-			}, err
+			}, nil
 		}
 		partitionState := &querypb.PartitionStates{
 			PartitionID: partitionID,
@@ -533,7 +533,7 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 		log.Debug("getSegmentInfo end with query coordinator not healthy")
 		return &querypb.GetSegmentInfoResponse{
 			Status: status,
-		}, err
+		}, nil
 	}
 
 	totalMemSize := int64(0)
@@ -547,7 +547,7 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 		status.Reason = err.Error()
 		return &querypb.GetSegmentInfoResponse{
 			Status: status,
-		}, err
+		}, nil
 	}
 	for _, info := range segmentInfos {
 		totalNumRows += info.NumRows
@@ -599,7 +599,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		return status, err
+		return status, nil
 	}
 	log.Debug("LoadBalanceRequest completed",
 		zap.String("role", Params.RoleName),
@@ -648,7 +648,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 				Reason:    err.Error(),
 			},
 			Response: "",
-		}, err
+		}, nil
 	}
 
 	log.Debug("QueryCoord.GetMetrics",
@@ -673,7 +673,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 		qc.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
-		return metrics, err
+		return metrics, nil
 	}
 	err = errors.New(metricsinfo.MsgUnimplementedMetric)
 	log.Debug("QueryCoord.GetMetrics failed",
@@ -688,5 +688,5 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 			Reason:    err.Error(),
 		},
 		Response: "",
-	}, err
+	}, nil
 }
