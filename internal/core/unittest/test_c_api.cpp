@@ -1242,8 +1242,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
-                  search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset], search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1394,8 +1393,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
-                  search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset], search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1530,8 +1528,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
-                  search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset], search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1675,8 +1672,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
-                  search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset], search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1813,8 +1809,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
-                  search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset], search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1964,8 +1959,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.ids_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex.distances_[offset],
-                  search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex.distances_[offset], search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
