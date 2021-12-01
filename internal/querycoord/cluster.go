@@ -661,7 +661,7 @@ func (c *queryNodeCluster) stopNode(nodeID int64) {
 
 	if node, ok := c.nodes[nodeID]; ok {
 		node.stop()
-		log.Debug("StopNode: queryNode offline", zap.Int64("nodeID", nodeID))
+		log.Debug("stopNode: queryNode offline", zap.Int64("nodeID", nodeID))
 	}
 }
 
