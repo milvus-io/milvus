@@ -195,7 +195,7 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 	return key, blob.GetValue(), nil
 }
 
-// return kvs, insert-paths, stats-paths
+// genInsertBlobs returns kvs, insert-paths, stats-paths
 func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta *etcdpb.CollectionMeta) (map[string]string, []*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
 	inCodec := storage.NewInsertCodec(meta)
 	inlogs, statslogs, err := inCodec.Serialize(partID, segID, data)
