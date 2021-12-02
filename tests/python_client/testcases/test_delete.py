@@ -135,7 +135,7 @@ class TestDeleteParams(TestcaseBase):
         """
         target: test delete with all values
         method: delete with expr: "id in [all]"
-        expected: num entities unchanged and deleted data will be not be queried
+        expected: num entities unchanged and deleted data will not be queried
         """
         # init collection with default_nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
