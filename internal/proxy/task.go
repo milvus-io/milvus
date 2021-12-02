@@ -4614,7 +4614,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		log.Error("Failed to get primary keys from expr", zap.Error(err))
 		return err
 	}
-	log.Debug("get primary keys from expr", zap.Any("primary keys", primaryKeys))
+	log.Debug("get primary keys from expr", zap.Int("len of primary keys", len(primaryKeys)))
 	dt.DeleteRequest.PrimaryKeys = primaryKeys
 
 	// set result
