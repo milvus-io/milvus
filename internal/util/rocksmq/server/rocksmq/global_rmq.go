@@ -12,6 +12,7 @@
 package rocksmq
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"sync"
@@ -43,26 +44,33 @@ func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 
 // InitRocksMQ init global rocksmq single instance
 func InitRocksMQ() error {
-	var err error
+	var finalErr error
 	once.Do(func() {
 		params.Init()
 		rocksdbName, _ := params.Load("_RocksmqPath")
 		log.Debug("RocksmqPath=" + rocksdbName)
-		_, err = os.Stat(rocksdbName)
-		if os.IsNotExist(err) {
-			err = os.MkdirAll(rocksdbName, os.ModePerm)
-			if err != nil {
-				errMsg := "Create dir " + rocksdbName + " failed"
-				panic(errMsg)
+		var fi os.FileInfo
+		fi, finalErr = os.Stat(rocksdbName)
+		if os.IsNotExist(finalErr) {
+			finalErr = os.MkdirAll(rocksdbName, os.ModePerm)
+			if finalErr != nil {
+				return
+			}
+		} else {
+			if !fi.IsDir() {
+				errMsg := "can't create a directory because there exists a file with the same name"
+				finalErr = errors.New(errMsg)
+				return
 			}
 		}
 
 		kvname := rocksdbName + "_kv"
-		rocksdbKV, err := rocksdbkv.NewRocksdbKV(kvname)
-		if err != nil {
-			panic(err)
+		var rkv *rocksdbkv.RocksdbKV
+		rkv, finalErr = rocksdbkv.NewRocksdbKV(kvname)
+		if finalErr != nil {
+			return
 		}
-		idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
+		idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rkv)
 		_ = idAllocator.Initialize()
 
 		rawRmqPageSize, err := params.Load("rocksmq.rocksmqPageSize")
@@ -94,12 +102,9 @@ func InitRocksMQ() error {
 		}
 		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", RocksmqRetentionTimeInMinutes),
 			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB), zap.Any("RocksmqPageSize", RocksmqPageSize))
-		Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
-		if err != nil {
-			panic(err)
-		}
+		Rmq, finalErr = NewRocksMQ(rocksdbName, idAllocator)
 	})
-	return err
+	return finalErr
 }
 
 // CloseRocksMQ is used to close global rocksmq

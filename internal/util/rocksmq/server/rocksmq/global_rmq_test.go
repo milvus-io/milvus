@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -68,4 +69,14 @@ func Test_InitRocksMQ(t *testing.T) {
 		MsgMutex:  make(chan struct{}),
 	}
 	Rmq.RegisterConsumer(consumer)
+}
+
+func Test_InitRocksMQError(t *testing.T) {
+	once = sync.Once{}
+	dummyPath := "/tmp/milvus/dummy"
+	os.Create(dummyPath)
+	os.Setenv("ROCKSMQ_PATH", dummyPath)
+	defer os.RemoveAll(dummyPath)
+	err := InitRocksMQ()
+	assert.Error(t, err)
 }

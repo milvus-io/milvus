@@ -28,6 +28,7 @@ import (
 	"syscall"
 
 	"github.com/milvus-io/milvus/internal/util/healthz"
+	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"go.uber.org/zap"
@@ -54,6 +55,15 @@ func newMsgFactory(localMsg bool) msgstream.Factory {
 		return msgstream.NewRmsFactory()
 	}
 	return msgstream.NewPmsFactory()
+}
+
+func initRocksmq() error {
+	err := rocksmq.InitRocksMQ()
+	return err
+}
+
+func stopRocksmq() {
+	rocksmq.CloseRocksMQ()
 }
 
 // MilvusRoles determines to run which components.
@@ -349,6 +359,12 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 		cfg := mr.setLogConfigFilename("standalone.log")
 		logutil.SetupLogger(cfg)
 		defer log.Sync()
+
+		err := initRocksmq()
+		if err != nil {
+			panic(err)
+		}
+		defer stopRocksmq()
 	} else {
 		err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
 		if err != nil {
