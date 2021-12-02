@@ -12,6 +12,7 @@ from chaos.checker import (CreateChecker, InsertFlushChecker,
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
+from utils.util_k8s import wait_pods_ready
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from chaos import constants
@@ -102,7 +103,7 @@ class TestChaos(TestChaosBase):
         return conn
 
     @pytest.fixture(scope="function", autouse=True)
-    def init_health_checkers(self, connection):
+    def init_health_checkers(self):
         checkers = {
             Op.create: CreateChecker(),
             Op.insert: InsertFlushChecker(),
@@ -199,9 +200,9 @@ class TestChaos(TestChaosBase):
         sleep(2)
         # wait all pods ready
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={meta_name}")
-        chaos_res.wait_pods_ready(constants.CHAOS_NAMESPACE, f"app.kubernetes.io/instance={meta_name}")
+        wait_pods_ready(constants.CHAOS_NAMESPACE, f"app.kubernetes.io/instance={meta_name}")
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label release={meta_name}")
-        chaos_res.wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={meta_name}")
+        wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={meta_name}")
         log.info("all pods are ready")
         # reconnect if needed
         sleep(constants.WAIT_PER_OP * 2)
