@@ -758,6 +758,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	return pid, sid, result, nil
 }
 
+// DataDefinitionCodec serializes and deserializes the data definition
 // Blob key example:
 // ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
 // ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
@@ -765,6 +766,7 @@ type DataDefinitionCodec struct {
 	collectionID int64
 }
 
+// NewDataDefinitionCodec is constructor for DataDefinitionCodec
 func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
 	return &DataDefinitionCodec{collectionID: collectionID}
 }
