@@ -62,6 +62,7 @@ jobs:
         shell: bash
         run: |
           docker-compose up -d pulsar etcd minio
+          exit 1
       - name: Build and UnitTest
         env:
           CHECK_BUILDER: "1"
