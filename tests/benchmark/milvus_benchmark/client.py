@@ -299,12 +299,16 @@ class MilvusClient(object):
         return self._milvus.drop_index(self._collection_name, field_name)
 
     @time_wrapper
-    def query(self, vector_query, filter_query=None, collection_name=None, timeout=300):
+    def query(self, vector_query, filter_query=None, collection_name=None, guarantee_timestamp=None, timeout=300):
         """ This method corresponds to the search method of milvus """
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
 
         params = util.search_param_analysis(vector_query, filter_query)
         params.update({"timeout": timeout})
+
+        if guarantee_timestamp is not None:
+            params.update({"guarantee_timestamp": guarantee_timestamp})
+
         logger.debug("Params of search : %s" % str(params))
         result = self._milvus.search(tmp_collection_name, **params)
 
