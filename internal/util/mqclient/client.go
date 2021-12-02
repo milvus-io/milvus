@@ -19,7 +19,7 @@ type Client interface {
 	// Create a producer instance
 	CreateProducer(options ProducerOptions) (Producer, error)
 
-	// Create a consumer instance and subscribe a topic
+	// Subscribe creates a consumer instance and subscribe a topic
 	Subscribe(options ConsumerOptions) (Consumer, error)
 
 	// Get the earliest MessageID
