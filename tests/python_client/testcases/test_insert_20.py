@@ -513,7 +513,7 @@ class TestInsertOperation(TestcaseBase):
         """
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
-        df = cf.gen_default_dataframe_data(ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         df.drop(ct.default_int64_field_name, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
         assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
@@ -535,7 +535,7 @@ class TestInsertOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-        df = cf.gen_default_dataframe_data(ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         df.drop(ct.default_int64_field_name, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
         assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
@@ -572,7 +572,7 @@ class TestInsertOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-        data = cf.gen_default_list_data(nb=ct.default_nb)
+        data = cf.gen_default_list_data()
         mutation_res, _ = collection_w.insert(data=data[1:])
         assert mutation_res.insert_count == ct.default_nb
         assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
@@ -686,7 +686,7 @@ class TestInsertOperation(TestcaseBase):
         """
         step = 120
         nb = 12000
-        collection_w = self.init_collection_general(prefix, False, dim=dim)[0]
+        collection_w = self.init_collection_general(prefix, dim=dim)[0]
         for _ in range(nb // step):
             df = cf.gen_default_dataframe_data(step, dim)
             mutation_res, _ = collection_w.insert(data=df)
