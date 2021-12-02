@@ -147,5 +147,5 @@ def load_and_search():
             print(ids)
         print("search latency = %.4fs" % (end_time - start_time))
         print("###########")
-        c.release()
+        # c.release()
     print("search data ends")
