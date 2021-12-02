@@ -16,7 +16,7 @@ type Client interface {
 	// CreateReader creates a producer instance
 	CreateReader(options ReaderOptions) (Reader, error)
 
-	// Create a producer instance
+	// CreateProducer creates a producer instance
 	CreateProducer(options ProducerOptions) (Producer, error)
 
 	// Create a consumer instance and subscribe a topic
