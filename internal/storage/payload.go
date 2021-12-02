@@ -538,7 +538,7 @@ func (r *PayloadReader) GetOneStringFromPayload(idx int) (string, error) {
 	return C.GoStringN(cStr, cSize), nil
 }
 
-// ,dimension, error
+// GetBinaryVectorFromPayload returns vector, dimension, error
 func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
 	if r.colType != schemapb.DataType_BinaryVector {
 		return nil, 0, errors.New("incorrect data type")
@@ -558,7 +558,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
 	return slice, int(cDim), nil
 }
 
-// ,dimension, error
+// GetFloatVectorFromPayload returns vector, dimension, error
 func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
 	if r.colType != schemapb.DataType_FloatVector {
 		return nil, 0, errors.New("incorrect data type")
