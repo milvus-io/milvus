@@ -122,7 +122,7 @@ func createPidFile(filename string, runtimeDir string) (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
 	}
-	fmt.Println("lock pid file:", fileFullName)
+	fmt.Println("lock pid file: !", fileFullName)
 
 	fd.Truncate(0)
 	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
