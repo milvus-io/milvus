@@ -810,7 +810,7 @@ class TestConnect:
         """
         target: test uri connect with multiprocess
         method: set correct uri, test with multiprocessing connecting
-        expected: all connection is connected
+        expected: all connections are connected
         """
 
         def connect():
