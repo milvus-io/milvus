@@ -2,6 +2,7 @@ from enum import Enum
 from random import randint
 import datetime
 from time import sleep
+from delayed_assert import expect
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from common import common_type as ct
@@ -177,3 +178,18 @@ class QueryChecker(Checker):
             else:
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
+
+
+def assert_statistic(checkers, expectations={}):
+    for k in checkers.keys():
+        # expect succ if no expectations
+        succ_rate = checkers[k].succ_rate()
+        total = checkers[k].total()
+        if expectations.get(k, '') == constants.FAIL:
+            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
+            expect(succ_rate < 0.49 or total < 2,
+                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
+        else:
+            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
+            expect(succ_rate > 0.90 or total > 2,
+                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
