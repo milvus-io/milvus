@@ -113,6 +113,7 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 	return msg
 }
 
+// newFilteredDeleteNode returns a new filterDeleteNode
 func newFilteredDeleteNode(replica ReplicaInterface,
 	collectionID UniqueID,
 	partitionID UniqueID) *filterDeleteNode {
