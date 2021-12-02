@@ -340,7 +340,7 @@ class TestCompactionOperation(TestcaseBase):
                 4.search
         expected: Verify segment info and index info
         """
-        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb)
+        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb, is_dup=False)
 
         # create index
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)

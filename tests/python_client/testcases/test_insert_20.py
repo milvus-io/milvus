@@ -67,7 +67,7 @@ class TestInsertParams(TestcaseBase):
         assert mutation_res.primary_keys == data[0]
         assert collection_w.num_entities == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_non_data_type(self, get_non_data_type):
         """
         target: test insert with non-dataframe, non-list data
@@ -79,7 +79,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Data type is not support"}
         collection_w.insert(data=get_non_data_type, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("data", [[], pd.DataFrame()])
     def test_insert_empty_data(self, data):
         """
@@ -92,7 +92,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "The data fields number is not match with schema"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_dataframe_only_columns(self):
         """
         target: test insert with dataframe just columns
@@ -106,7 +106,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_empty_field_name_dataframe(self):
         """
         target: test insert empty field name df
@@ -120,7 +120,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "The types of schema and data do not match"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_invalid_field_name_dataframe(self, get_invalid_field_name):
         """
         target: test insert with invalid dataframe data
@@ -142,7 +142,7 @@ class TestInsertParams(TestcaseBase):
         """
         pass
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_none(self):
         """
         target: test insert None
@@ -157,7 +157,7 @@ class TestInsertParams(TestcaseBase):
         assert collection_w.is_empty
         assert collection_w.num_entities == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_numpy_data(self):
         """
         target: test insert numpy.ndarray data
@@ -215,7 +215,7 @@ class TestInsertParams(TestcaseBase):
         assert mutation_res.primary_keys == data[0]
         assert collection_w.num_entities == 1
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_insert_dim_not_match(self):
         """
@@ -231,7 +231,7 @@ class TestInsertParams(TestcaseBase):
                  ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_insert_binary_dim_not_match(self):
         """
@@ -247,7 +247,7 @@ class TestInsertParams(TestcaseBase):
                  ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_field_name_not_match(self):
         """
         target: test insert field name not match
@@ -261,7 +261,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_field_value_not_match(self):
         """
         target: test insert data value not match
@@ -277,7 +277,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_value_less(self):
         """
         target: test insert value less than other
@@ -294,7 +294,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'Arrays must all be same length.'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_vector_value_less(self):
         """
         target: test insert vector value less than other
@@ -311,7 +311,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'Arrays must all be same length.'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_fields_more(self):
         """
         target: test insert with fields more
@@ -326,7 +326,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema.'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_fields_less(self):
         """
         target: test insert with fields less
@@ -340,7 +340,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema.'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_list_order_inconsistent_schema(self):
         """
         target: test insert data fields order inconsistent with schema
@@ -378,7 +378,7 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_inconsistent_data(self):
         """
         target: test insert with inconsistent data
@@ -404,7 +404,7 @@ class TestInsertOperation(TestcaseBase):
     def dim(self, request):
         yield request.param
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_without_connection(self):
         """
         target: test insert without connection
@@ -420,6 +420,7 @@ class TestInsertOperation(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")],
                                             [cf.gen_binary_vec_field()],
                                             [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")]])
@@ -486,7 +487,7 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data=df)
         assert collection_w.num_entities == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_binary_after_index(self):
         """
         target: test insert binary after index
@@ -525,7 +526,7 @@ class TestInsertOperation(TestcaseBase):
         assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
         assert collection_w.indexes[0] == index
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_auto_id_true(self):
         """
         target: test insert ids fields values when auto_id=True
@@ -562,7 +563,7 @@ class TestInsertOperation(TestcaseBase):
         assert cf._check_primary_keys(primary_keys, nb * 2)
         assert collection_w.num_entities == nb * 2
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_auto_id_true_list_data(self):
         """
         target: test insert ids fields values when auto_id=True
@@ -593,7 +594,7 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.is_empty
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_auto_id_true_with_list_values(self):
         """
         target: test insert with auto_id=True
@@ -640,7 +641,7 @@ class TestInsertOperation(TestcaseBase):
         assert mutation_res.primary_keys == data[0]
         assert collection_w.num_entities == nb
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_multi_threading(self):
         """
         target: test concurrent insert
@@ -677,7 +678,7 @@ class TestInsertOperation(TestcaseBase):
         """
         pass
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_multi_times(self, dim):
         """
         target: test insert multi times
@@ -695,7 +696,7 @@ class TestInsertOperation(TestcaseBase):
 
         assert collection_w.num_entities == nb
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_all_datatype_collection(self):
         """
         target: test insert into collection that contains all datatype fields
