@@ -392,6 +392,11 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-LoadCollection")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	lct := &loadCollectionTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
@@ -399,41 +404,60 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		queryCoord:            node.queryCoord,
 	}
 
-	log.Debug("LoadCollection enqueue",
+	log.Debug("LoadCollection received",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
-	err := node.sched.ddQueue.Enqueue(lct)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
 
-	log.Debug("LoadCollection",
-		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
-	defer func() {
-		log.Debug("LoadCollection Done",
+	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
+		log.Warn("LoadCollection failed to enqueue",
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
-	}()
 
-	err = lct.WaitToFinish()
-	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug("LoadCollection enqueued",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", lct.ID()),
+		zap.Uint64("BeginTS", lct.BeginTs()),
+		zap.Uint64("EndTS", lct.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	if err := lct.WaitToFinish(); err != nil {
+		log.Warn("LoadCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", lct.ID()),
+			zap.Uint64("BeginTS", lct.BeginTs()),
+			zap.Uint64("EndTS", lct.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug("LoadCollection done",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", lct.ID()),
+		zap.Uint64("BeginTS", lct.BeginTs()),
+		zap.Uint64("EndTS", lct.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
 
 	return lct.result, nil
 }
