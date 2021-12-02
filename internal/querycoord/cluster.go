@@ -712,7 +712,7 @@ func (c *queryNodeCluster) getOfflineNodes() (map[int64]Node, error) {
 		}
 	}
 	if len(nodes) == 0 {
-		return nil, errors.New("GetOfflineNodes: no queryNode is offline")
+		return nil, errors.New("getOfflineNodes: no queryNode is offline")
 	}
 
 	return nodes, nil
