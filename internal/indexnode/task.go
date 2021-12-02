@@ -203,6 +203,7 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, versions[0], string(metaValue))
 		if err != nil {
 			log.Warn("IndexNode checkIndexMeta CompareVersionAndSwap", zap.Error(err))
+			return err
 		}
 		return nil
 	}
@@ -210,8 +211,9 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 	err := retry.Do(ctx, fn, retry.Attempts(3))
 	if err != nil {
 		log.Error("IndexNode failed to checkIndexMeta", zap.Error(err))
+		return err
 	}
-	return err
+	return nil
 }
 
 // PreExecute does some checks before building the index, for example, whether the index has been deleted.
