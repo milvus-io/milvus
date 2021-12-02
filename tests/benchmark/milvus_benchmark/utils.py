@@ -148,6 +148,13 @@ def get_server_tag(deploy_params):
     return server_tag
 
 
+def get_server_resource(deploy_params):
+    server_resource = {}
+    if deploy_params and "server_resource" in deploy_params:
+        server_resource = deploy_params["server_resource"]
+    return server_resource
+
+
 def dict_update(source, target):
     for key, value in source.items():
         if isinstance(value, dict) and key in target:
