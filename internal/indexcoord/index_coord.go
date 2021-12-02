@@ -361,6 +361,17 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		zap.Strings("DataPath = ", req.DataPaths),
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams))
+	if !i.isHealthy() {
+		errMsg := "IndexCoord is not healthy"
+		err := errors.New(errMsg)
+		log.Warn(errMsg)
+		return &indexpb.BuildIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errMsg,
+			},
+		}, err
+	}
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
 	defer sp.Finish()
 	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)

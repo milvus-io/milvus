@@ -247,3 +247,12 @@ func TestIndexCoord_GetComponentStates(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }
+
+func TestIndexCoord_NotHealthy(t *testing.T) {
+	ic := &IndexCoord{}
+	ic.stateCode.Store(internalpb.StateCode_Abnormal)
+	req := &indexpb.BuildIndexRequest{}
+	resp, err := ic.BuildIndex(context.Background(), req)
+	assert.Error(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+}
