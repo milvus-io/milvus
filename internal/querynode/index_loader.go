@@ -36,6 +36,7 @@ type indexParam = map[string]string
 
 // indexLoader is in charge of loading index in query node
 type indexLoader struct {
+	ctx     context.Context
 	replica ReplicaInterface
 
 	fieldIndexes   map[string][]*internalpb.IndexStats
@@ -62,7 +63,7 @@ func (loader *indexLoader) loadIndex(segment *Segment, fieldID FieldID) error {
 		return nil
 	}
 	//TODO retry should be set by config
-	err = retry.Do(context.TODO(), fn, retry.Attempts(10),
+	err = retry.Do(loader.ctx, fn, retry.Attempts(10),
 		retry.Sleep(time.Second*1), retry.MaxSleepTime(time.Second*10))
 
 	if err != nil {
@@ -173,7 +174,6 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 			fmt.Sprintln(collectionID))
 	}
 
-	ctx := context.TODO()
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_DescribeSegment,
@@ -181,7 +181,7 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 		CollectionID: collectionID,
 		SegmentID:    segment.segmentID,
 	}
-	response, err := loader.rootCoord.DescribeSegment(ctx, req)
+	response, err := loader.rootCoord.DescribeSegment(loader.ctx, req)
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
 		IndexBuildIDs: []UniqueID{response.BuildID},
 	}
-	pathResponse, err := loader.indexCoord.GetIndexFilePaths(ctx, indexFilePathRequest)
+	pathResponse, err := loader.indexCoord.GetIndexFilePaths(loader.ctx, indexFilePathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return err
 	}
@@ -239,6 +239,7 @@ func newIndexLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord t
 	}
 
 	return &indexLoader{
+		ctx:     ctx,
 		replica: replica,
 
 		fieldIndexes:   make(map[string][]*internalpb.IndexStats),
