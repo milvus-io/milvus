@@ -238,7 +238,7 @@ func (c *queryNodeCluster) getComponentInfos(ctx context.Context) ([]*internalpb
 	subComponentInfos := make([]*internalpb.ComponentInfo, 0)
 	nodes, err := c.getOnlineNodes()
 	if err != nil {
-		log.Debug("GetComponentInfos: failed get on service nodes", zap.String("error info", err.Error()))
+		log.Debug("getComponentInfos: failed get on service nodes", zap.String("error info", err.Error()))
 		return nil, err
 	}
 	for _, node := range nodes {
