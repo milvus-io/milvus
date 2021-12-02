@@ -39,7 +39,7 @@ DC
     - if so, no need to recover the vchannel
 
 Pros:
-    1. Easiest approach in both DN and DC
+    1. The easiest approach in both DN and DC
     2. DN can reuse the current flush manager procedure
 Cons:
     1. The No. rpc call is equal to the No. segments in a collection, expensive
