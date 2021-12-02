@@ -20,12 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/milvus-io/milvus/internal/indexnode"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -75,9 +76,8 @@ func TestIndexNodeServer(t *testing.T) {
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
-		req := &milvuspb.GetMetricsRequest{
-			Request: "",
-		}
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.Nil(t, err)
 		resp, err := server.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)

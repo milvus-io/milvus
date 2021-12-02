@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -97,6 +99,16 @@ func TestIndexCoord(t *testing.T) {
 		req := &indexpb.BuildIndexRequest{
 			IndexID:   indexID,
 			DataPaths: []string{"DataPath-1", "DataPath-2"},
+			NumRows:   0,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+			FieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+			},
 		}
 		resp, err := ic.BuildIndex(ctx, req)
 		assert.Nil(t, err)
