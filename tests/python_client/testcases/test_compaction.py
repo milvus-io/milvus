@@ -404,7 +404,8 @@ class TestCompactionOperation(TestcaseBase):
                                                 search_params, ct.default_limit,
                                                 check_task=CheckTasks.err_res,
                                                 check_items={ct.err_code: 1,
-                                                             ct.err_msg: "Metric type of field index isn't the same with search info"})
+                                                             ct.err_msg: "Metric type of field index isn't "
+                                                                         "the same with search info"})
 
         # verify search result
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
