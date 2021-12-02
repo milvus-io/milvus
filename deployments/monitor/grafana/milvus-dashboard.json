@@ -16,92 +16,9 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1638350262803,
+  "iteration": 1638443261686,
   "links": [],
   "panels": [
-    {
-      "datasource": "prometheus",
-      "description": "Current health state of RootCoord",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "from": "-65535",
-              "id": 1,
-              "text": "UP",
-              "to": "-1",
-              "type": 2,
-              "value": "0"
-            },
-            {
-              "from": "0",
-              "id": 2,
-              "text": "DOWN",
-              "to": "1",
-              "type": 1,
-              "value": "0"
-            }
-          ],
-          "noValue": "N/A",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "dark-red",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 0
-      },
-      "id": 123220,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(up{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\",app_kubernetes_io_component=\"rootcoord\"})*(-1)",
-          "format": "time_series",
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "RootCoord Health",
-      "type": "stat"
-    },
     {
       "datasource": "prometheus",
       "description": "Current health state of DataCoord",
@@ -6101,8 +6018,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "argo",
-          "value": "argo"
+          "text": "default",
+          "value": "default"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -6260,5 +6177,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 178
+  "version": 179
 }
