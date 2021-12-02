@@ -1473,6 +1473,35 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #12559")
+    # TODO: add one more for binary vectors
+    # @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="test_vector1")],
+    #                                         [cf.gen_binary_vec_field(name="test_vector1")],
+    #                                         [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("test_vector1")]])
+    def test_search_multiple_vectors_with_one_indexed(self):
+        """
+        target: test indexing on one vector fields when there are multi float vec fields
+        method: 1. create collection with multiple float vector fields
+                2. insert data and build index on one of float vector fields
+                3. load collection and search
+        expected: load and search successfully
+        """
+        vec_fields = [cf.gen_float_vec_field(name="test_vector1")]
+        schema = cf.gen_schema_multi_vector_fields(vec_fields)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+        _index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        res, ch = collection_w.create_index(field_name="test_vector1", index_params=_index)
+        assert ch is True
+        collection_w.load()
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(2)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+        res_1, _ = collection_w.search(data=vectors, anns_field="test_vector1",
+                                       param=search_params, limit=1)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_index_one_partition(self, nb, auto_id, _async):
         """
         target: test search from partition
