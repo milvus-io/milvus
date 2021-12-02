@@ -32,7 +32,7 @@ minio:
   port: 9000   # Port of MinIO/S3
   accessKeyID: minioadmin # accessKeyID of MinIO/S3
   secretAccessKey: minioadmin # MinIO/S3 encryption string
-  useSSL: false
+  useSSL: false # Access to MinIO/S3 with SSL
   bucketName: "a-bucket" # Bucket name in MinIO/S3
   rootPath: files
 
