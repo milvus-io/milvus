@@ -293,6 +293,7 @@ func (s *Server) Stop() error {
 	log.Debug("Rootcoord begin to stop grpc server")
 	s.cancel()
 	if s.grpcServer != nil {
+		log.Debug("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 	s.wg.Wait()
