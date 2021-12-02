@@ -37,7 +37,7 @@ import (
 // make sure ddNode implements flowgraph.Node
 var _ flowgraph.Node = (*ddNode)(nil)
 
-// ddNode filter messages from message streams.
+// ddNode filters messages from message streams.
 //
 // ddNode recives all the messages from message stream dml channels, including insert messages,
 //  delete messages and ddl messages like CreateCollectionMsg.
