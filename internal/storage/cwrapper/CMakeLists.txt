@@ -16,7 +16,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include( ExternalProject )
-set( ARROW_VERSION "2.0.0" )
+set( ARROW_VERSION "6.0.1" )
 set( ARROW_SOURCE_URL
     "https://github.com/apache/arrow/archive/apache-arrow-${ARROW_VERSION}.tar.gz")
 
@@ -49,6 +49,7 @@ macro( build_arrow )
         "-DARROW_CUDA=OFF"
         "-DARROW_JEMALLOC=OFF"
         "-DARROW_PYTHON=OFF"
+        "-DARROW_WITH_RE2=OFF"
         "-DARROW_BUILD_UTILITIES=OFF"
         "-DARROW_PARQUET=ON"
         "-DPARQUET_BUILD_SHARED=OFF"
@@ -68,7 +69,7 @@ macro( build_arrow )
             INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}
             SOURCE_SUBDIR       "cpp"
             URL                 ${ARROW_SOURCE_URL}
-            URL_MD5             "37fbe42e7f155dd76cf6f63257373b24"
+            URL_MD5             "e00927820d0350879c2abbc77e72c863"
             CMAKE_ARGS          ${ARROW_CMAKE_ARGS}
             ${EP_LOG_OPTIONS}
             )
