@@ -1,4 +1,4 @@
-from time import sleep
+from time import time, sleep
 
 import pytest
 from pymilvus.grpc_gen.common_pb2 import SegmentState
@@ -721,7 +721,7 @@ class TestCompactionOperation(TestcaseBase):
         assert tmp_nb in search_res[0].ids
         assert len(search_res[0]) == ct.default_limit
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_threshold_auto_merge(self):
         """
         target: test num (segment_size < 1/2Max) reaches auto-merge threshold 10
@@ -735,13 +735,20 @@ class TestCompactionOperation(TestcaseBase):
         # create collection shard_num=1, insert 10 segments, each with one entity
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, num_of_segment=threshold)
 
-        # todo compaction cost
-        sleep(2)
+        # Estimated auto-merging takes 30s
+        cost = 30
         collection_w.load()
-        segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        start = time()
+        while True:
+            sleep(5)
+            segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
 
-        # verify segments reaches threshold, auto-merge ten segments into one
-        assert len(segments_info) == 1
+            # verify segments reaches threshold, auto-merge ten segments into one
+            if len(segments_info) == 1:
+                break
+            end = time()
+            if end - start > cost:
+                raise BaseException(1, "Ccompact auto-merge more than 30s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_less_threshold_no_merge(self):
