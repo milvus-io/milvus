@@ -94,15 +94,16 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult&
     }
 }
 
-SearchResult
+std::unique_ptr<SearchResult>
 SegmentInternalInterface::Search(const query::Plan* plan,
                                  const query::PlaceholderGroup& placeholder_group,
                                  Timestamp timestamp) const {
     std::shared_lock lck(mutex_);
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this, timestamp, placeholder_group);
-    auto results = visitor.get_moved_result(*plan->plan_node_);
-    results.segment_ = (void*)this;
+    auto results = std::make_unique<SearchResult>();
+    *results = visitor.get_moved_result(*plan->plan_node_);
+    results->segment_ = (void*)this;
     return results;
 }
 
