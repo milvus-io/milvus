@@ -895,8 +895,7 @@ func TestSegment_indexInfoTest(t *testing.T) {
 
 		fieldID := simpleVecField.id
 
-		err = seg.setIndexInfo(fieldID, &indexInfo{})
-		assert.NoError(t, err)
+		seg.setIndexInfo(fieldID, &indexInfo{})
 
 		indexName := "query-node-test-index"
 		err = seg.setIndexName(fieldID, indexName)
@@ -983,21 +982,14 @@ func TestSegment_indexInfoTest(t *testing.T) {
 		id = seg.getBuildID(fieldID)
 		assert.Equal(t, int64(-1), id)
 
-		err = seg.setIndexInfo(fieldID, &indexInfo{
+		seg.setIndexInfo(fieldID, &indexInfo{
 			readyLoad: true,
 		})
-		assert.NoError(t, err)
 
 		ready := seg.checkIndexReady(fieldID)
 		assert.True(t, ready)
 		ready = seg.checkIndexReady(FieldID(1000))
 		assert.False(t, ready)
-
-		seg.indexInfos = nil
-		err = seg.setIndexInfo(fieldID, &indexInfo{
-			readyLoad: true,
-		})
-		assert.Error(t, err)
 	})
 }
 
@@ -1077,8 +1069,7 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 	t.Run("test fillVectorFieldsData float-vector invalid vectorChunkManager", func(t *testing.T) {
 		fieldID := FieldID(100)
 		fieldName := "float-vector-field-0"
-		err = segment.setIndexInfo(fieldID, &indexInfo{})
-		assert.NoError(t, err)
+		segment.setIndexInfo(fieldID, &indexInfo{})
 		info := &VectorFieldInfo{
 			fieldBinlog: &datapb.FieldBinlog{
 				FieldID: fieldID,

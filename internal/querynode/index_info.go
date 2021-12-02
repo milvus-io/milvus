@@ -15,6 +15,7 @@ type indexInfo struct {
 	indexName   string
 	indexID     UniqueID
 	buildID     UniqueID
+	fieldID     UniqueID
 	indexPaths  []string
 	indexParams map[string]string
 	readyLoad   bool
@@ -39,6 +40,10 @@ func (info *indexInfo) setBuildID(id UniqueID) {
 	info.buildID = id
 }
 
+func (info *indexInfo) setFieldID(id UniqueID) {
+	info.fieldID = id
+}
+
 func (info *indexInfo) setIndexPaths(paths []string) {
 	info.indexPaths = paths
 }
@@ -61,6 +66,10 @@ func (info *indexInfo) getIndexID() UniqueID {
 
 func (info *indexInfo) getBuildID() UniqueID {
 	return info.buildID
+}
+
+func (info *indexInfo) getFieldID() UniqueID {
+	return info.fieldID
 }
 
 func (info *indexInfo) getIndexPaths() []string {

@@ -142,6 +142,7 @@ func (m *mockRootCoord) DescribeSegment(ctx context.Context, req *milvuspb.Descr
 		IndexID:     indexID,
 		BuildID:     buildID,
 		EnableIndex: true,
+		FieldID:     fieldID,
 	}, nil
 }
 

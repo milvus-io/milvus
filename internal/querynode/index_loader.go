@@ -168,12 +168,13 @@ func (loader *indexLoader) estimateIndexBinlogSize(segment *Segment, fieldID Fie
 	return indexSize, nil
 }
 
-func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment, fieldID UniqueID) error {
+func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segment *Segment) (*indexInfo, error) {
 	if loader.indexCoord == nil || loader.rootCoord == nil {
-		return errors.New("null index coordinator client or root coordinator client, collectionID = " +
+		return nil, errors.New("null indexcoord client or rootcoord client, collectionID = " +
 			fmt.Sprintln(collectionID))
 	}
 
+	// request for segment info
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_DescribeSegment,
@@ -181,46 +182,55 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 		CollectionID: collectionID,
 		SegmentID:    segment.segmentID,
 	}
-	response, err := loader.rootCoord.DescribeSegment(loader.ctx, req)
+	resp, err := loader.rootCoord.DescribeSegment(loader.ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(response.Status.Reason)
-	}
-
-	if !response.EnableIndex {
-		return errors.New("there are no indexes on this segment")
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, errors.New(resp.Status.Reason)
 	}
 
-	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
-		IndexBuildIDs: []UniqueID{response.BuildID},
-	}
-	pathResponse, err := loader.indexCoord.GetIndexFilePaths(loader.ctx, indexFilePathRequest)
-	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return err
+	if !resp.EnableIndex {
+		log.Warn("index not enabled", zap.Int64("collection id", collectionID),
+			zap.Int64("segment id", segment.segmentID))
+		return nil, errors.New("there are no indexes on this segment")
 	}
 
-	if len(pathResponse.FilePaths) <= 0 {
-		return errors.New("illegal index file paths")
+	// request for index info
+	indexFilePathReq := &indexpb.GetIndexFilePathsRequest{
+		IndexBuildIDs: []UniqueID{resp.BuildID},
 	}
-	if len(pathResponse.FilePaths[0].IndexFilePaths) == 0 {
-		return errors.New("empty index paths")
+	pathResp, err := loader.indexCoord.GetIndexFilePaths(loader.ctx, indexFilePathReq)
+	if err != nil {
+		return nil, err
+	}
+	if pathResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, errors.New(pathResp.Status.Reason)
 	}
 
-	info := &indexInfo{
-		indexID:    response.IndexID,
-		buildID:    response.BuildID,
-		indexPaths: pathResponse.FilePaths[0].IndexFilePaths,
+	if len(pathResp.FilePaths) <= 0 {
+		log.Warn("illegal index file path", zap.Int64("collection id", collectionID),
+			zap.Int64("segment id", segment.segmentID), zap.Int64("build id", resp.BuildID))
+		return nil, errors.New("illegal index file paths")
+	}
+	if len(pathResp.FilePaths[0].IndexFilePaths) == 0 {
+		log.Warn("empty index path", zap.Int64("collection id", collectionID),
+			zap.Int64("segment id", segment.segmentID), zap.Int64("build id", resp.BuildID))
+		return nil, errors.New("empty index paths")
+	}
+
+	return &indexInfo{
+		indexID:    resp.IndexID,
+		buildID:    resp.BuildID,
+		fieldID:    resp.FieldID,
+		indexPaths: pathResp.FilePaths[0].IndexFilePaths,
 		readyLoad:  true,
-	}
-	segment.setEnableIndex(response.EnableIndex)
-	err = segment.setIndexInfo(fieldID, info)
-	if err != nil {
-		return err
-	}
+	}, nil
+}
 
-	return nil
+func (loader *indexLoader) setIndexInfo(segment *Segment, info *indexInfo) {
+	segment.setEnableIndex(true)
+	segment.setIndexInfo(info.fieldID, info)
 }
 
 func newIndexLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface) *indexLoader {

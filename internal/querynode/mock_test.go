@@ -84,6 +84,7 @@ const (
 const (
 	buildID   = UniqueID(0)
 	indexID   = UniqueID(0)
+	fieldID   = UniqueID(100)
 	indexName = "query-node-index-0"
 )
 

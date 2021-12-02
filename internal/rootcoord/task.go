@@ -755,6 +755,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	t.Rsp.IndexID = segIdxInfo.IndexID
 	t.Rsp.BuildID = segIdxInfo.BuildID
 	t.Rsp.EnableIndex = segIdxInfo.EnableIndex
+	t.Rsp.FieldID = segIdxInfo.FieldID
 	return nil
 }
 

@@ -563,13 +563,11 @@ func (loader *segmentLoader) getFieldAndIndexInfo(segment *Segment,
 	}
 
 	indexedFieldIDs := make([]FieldID, 0)
-	for _, vecFieldID := range vectorFieldIDs {
-		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
-		if err != nil {
-			log.Warn(err.Error())
-			continue
-		}
-		indexedFieldIDs = append(indexedFieldIDs, vecFieldID)
+	if idxInfo, err := loader.indexLoader.getIndexInfo(collectionID, segment); err != nil {
+		log.Warn(err.Error())
+	} else {
+		loader.indexLoader.setIndexInfo(segment, idxInfo)
+		indexedFieldIDs = append(indexedFieldIDs, idxInfo.fieldID)
 	}
 
 	// we don't need to load raw data for indexed vector field
