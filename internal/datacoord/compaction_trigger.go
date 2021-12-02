@@ -244,7 +244,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		log.Debug("global merge compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("plans", getPlanIDs(mergeCompactionPlans)))
 	}
 
-	log.Info("handle glonbal compaction cost", zap.Int64("millliseconds", time.Since(t1).Milliseconds()))
+	log.Info("handle global compaction cost", zap.Int64("millliseconds", time.Since(t1).Milliseconds()))
 }
 
 func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
