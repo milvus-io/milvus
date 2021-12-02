@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -86,7 +85,7 @@ func readMagicNumber(buffer io.Reader) (int32, error) {
 		return -1, err
 	}
 	if magicNumber != MagicNumber {
-		return -1, fmt.Errorf("parse magic number failed, expected: %s, actual: %s", strconv.Itoa(int(MagicNumber)), strconv.Itoa(int(magicNumber)))
+		return -1, fmt.Errorf("parse magic number failed, expected: %d, actual: %d", MagicNumber, magicNumber)
 	}
 
 	return magicNumber, nil
