@@ -443,6 +443,11 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	rct := &releaseCollectionTask{
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
@@ -451,41 +456,60 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		chMgr:                    node.chMgr,
 	}
 
-	log.Debug("ReleaseCollection enqueue",
+	log.Debug("ReleaseCollection received",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
-	err := node.sched.ddQueue.Enqueue(rct)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
 
-	log.Debug("ReleaseCollection",
-		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
-	defer func() {
-		log.Debug("ReleaseCollection Done",
+	if err := node.sched.ddQueue.Enqueue(rct); err != nil {
+		log.Debug("ReleaseCollection failed to enqueue",
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
-	}()
 
-	err = rct.WaitToFinish()
-	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug("ReleaseCollection enqueued",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", rct.ID()),
+		zap.Uint64("BeginTS", rct.BeginTs()),
+		zap.Uint64("EndTS", rct.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	if err := rct.WaitToFinish(); err != nil {
+		log.Debug("ReleaseCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", rct.ID()),
+			zap.Uint64("BeginTS", rct.BeginTs()),
+			zap.Uint64("EndTS", rct.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug("ReleaseCollection done",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", rct.ID()),
+		zap.Uint64("BeginTS", rct.BeginTs()),
+		zap.Uint64("EndTS", rct.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
 
 	return rct.result, nil
 }
