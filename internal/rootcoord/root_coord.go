@@ -118,7 +118,7 @@ type Core struct {
 	CallGetFlushedSegmentsService func(ctx context.Context, collID, partID typeutil.UniqueID) ([]typeutil.UniqueID, error)
 
 	//call index builder's client to build index, return build id
-	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
+	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (typeutil.UniqueID, error)
 	CallDropIndexService  func(ctx context.Context, indexID typeutil.UniqueID) error
 
 	NewProxyClient func(sess *sessionutil.Session) (types.Proxy, error)
@@ -727,7 +727,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 		}
 	}()
 
-	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (retID typeutil.UniqueID, retErr error) {
+	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (retID typeutil.UniqueID, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retErr = fmt.Errorf("build index panic, msg = %v", err)
@@ -740,6 +740,8 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 			IndexParams: idxInfo.IndexParams,
 			IndexID:     idxInfo.IndexID,
 			IndexName:   idxInfo.IndexName,
+			NumRows:     numRows,
+			FieldSchema: field,
 		})
 		if err != nil {
 			return retID, err
@@ -864,7 +866,7 @@ func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *s
 		if err != nil {
 			return 0, err
 		}
-		bldID, err = c.CallBuildIndexService(ctx, binlogs, field, idxInfo)
+		bldID, err = c.CallBuildIndexService(ctx, binlogs, field, idxInfo, rows)
 		if err != nil {
 			return 0, err
 		}

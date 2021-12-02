@@ -102,12 +102,13 @@ func (bt *BaseTask) Notify(err error) {
 // IndexBuildTask is used to record the information of the index tasks.
 type IndexBuildTask struct {
 	BaseTask
-	index     Index
-	kv        kv.BaseKV
-	etcdKV    *etcdkv.EtcdKV
-	savePaths []string
-	req       *indexpb.CreateIndexRequest
-	nodeID    UniqueID
+	index          Index
+	kv             kv.BaseKV
+	etcdKV         *etcdkv.EtcdKV
+	savePaths      []string
+	req            *indexpb.CreateIndexRequest
+	nodeID         UniqueID
+	serializedSize uint64
 }
 
 // Ctx is the context of index tasks.
@@ -182,6 +183,7 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		}
 		indexMeta.IndexFilePaths = it.savePaths
 		indexMeta.State = commonpb.IndexState_Finished
+		indexMeta.SerializeSize = it.serializedSize
 		// Under normal circumstances, it.err and it.internalErr will not be non-nil at the same time, but for the sake of insurance, the else judgment is added.
 		if it.err != nil {
 			log.Error("IndexNode CreateIndex failed and can not be retried", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", it.err))
@@ -407,6 +409,11 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 			return err
 		}
 		tr.Record("serialize index codec done")
+		it.serializedSize = 0
+		for i := range serializedIndexBlobs {
+			it.serializedSize += uint64(len(serializedIndexBlobs[i].Value))
+		}
+		log.Debug("serialize index codec done", zap.Uint64("serialized index size", it.serializedSize))
 
 		getSavePathByKey := func(key string) string {
 

@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -37,8 +39,12 @@ func TestMetaTable(t *testing.T) {
 		IndexName:    "test_index",
 		IndexID:      0,
 		DataPaths:    []string{"DataPath-1-1", "DataPath-1-2"},
-		TypeParams:   []*commonpb.KeyValuePair{{Key: "TypeParam-1-1", Value: "TypeParam-1-1"}, {Key: "TypeParam-1-2", Value: "TypeParam-1-2"}},
+		TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
 		IndexParams:  []*commonpb.KeyValuePair{{Key: "IndexParam-1-1", Value: "IndexParam-1-1"}, {Key: "IndexParam-1-2", Value: "IndexParam-1-2"}},
+		NumRows:      100,
+		FieldSchema: &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+		},
 	}
 	indexMeta1 := &indexpb.IndexMeta{
 		IndexBuildID:   1,
@@ -170,8 +176,12 @@ func TestMetaTable(t *testing.T) {
 			IndexName:    "test_index",
 			IndexID:      2,
 			DataPaths:    []string{"DataPath-1-1", "DataPath-1-2"},
-			TypeParams:   []*commonpb.KeyValuePair{{Key: "TypeParam-1-1", Value: "TypeParam-1-1"}, {Key: "TypeParam-1-2", Value: "TypeParam-1-2"}},
+			TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
 			IndexParams:  []*commonpb.KeyValuePair{{Key: "IndexParam-1-1", Value: "IndexParam-1-1"}, {Key: "IndexParam-1-2", Value: "IndexParam-1-2"}},
+			NumRows:      100,
+			FieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+			},
 		}
 
 		err = metaTable.AddIndex(6, req2)
@@ -182,8 +192,12 @@ func TestMetaTable(t *testing.T) {
 			IndexName:    "test_index",
 			IndexID:      3,
 			DataPaths:    []string{"DataPath-1-1", "DataPath-1-2"},
-			TypeParams:   []*commonpb.KeyValuePair{{Key: "TypeParam-1-1", Value: "TypeParam-1-1"}, {Key: "TypeParam-1-2", Value: "TypeParam-1-2"}},
+			TypeParams:   []*commonpb.KeyValuePair{{Key: "TypeParam-1-1", Value: "TypeParam-1-1"}, {Key: "dim", Value: "256"}},
 			IndexParams:  []*commonpb.KeyValuePair{{Key: "IndexParam-1-1", Value: "IndexParam-1-1"}, {Key: "IndexParam-1-2", Value: "IndexParam-1-2"}},
+			NumRows:      10,
+			FieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+			},
 		}
 
 		has, err := metaTable.HasSameReq(req3)
@@ -246,8 +260,12 @@ func TestMetaTable(t *testing.T) {
 			IndexName:    "test_index",
 			IndexID:      4,
 			DataPaths:    []string{"DataPath-1-1", "DataPath-1-2"},
-			TypeParams:   []*commonpb.KeyValuePair{{Key: "TypeParam-1-1", Value: "TypeParam-1-1"}, {Key: "TypeParam-1-2", Value: "TypeParam-1-2"}},
+			TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}, {Key: "TypeParam-1-2", Value: "TypeParam-1-2"}},
 			IndexParams:  []*commonpb.KeyValuePair{{Key: "IndexParam-1-1", Value: "IndexParam-1-1"}, {Key: "IndexParam-1-2", Value: "IndexParam-1-2"}},
+			NumRows:      10,
+			FieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+			},
 		}
 		err = metaTable.AddIndex(7, req4)
 		assert.Nil(t, err)
@@ -269,8 +287,12 @@ func TestMetaTable(t *testing.T) {
 			IndexName:    "test_index",
 			IndexID:      5,
 			DataPaths:    []string{"DataPath-1-1", "DataPath-1-2"},
-			TypeParams:   []*commonpb.KeyValuePair{{Key: "TypeParam-1-1", Value: "TypeParam-1-1"}, {Key: "TypeParam-1-2", Value: "TypeParam-1-2"}},
+			TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}, {Key: "TypeParam-1-2", Value: "TypeParam-1-2"}},
 			IndexParams:  []*commonpb.KeyValuePair{{Key: "IndexParam-1-1", Value: "IndexParam-1-1"}, {Key: "IndexParam-1-2", Value: "IndexParam-1-2"}},
+			NumRows:      10,
+			FieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+			},
 		}
 
 		err = metaTable.AddIndex(req5.IndexBuildID, req5)

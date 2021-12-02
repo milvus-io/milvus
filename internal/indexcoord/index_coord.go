@@ -354,13 +354,6 @@ func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 // the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
 // execution.
 func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	log.Debug("IndexCoord building index ...",
-		zap.Int64("IndexBuildID", req.IndexBuildID),
-		zap.String("IndexName = ", req.IndexName),
-		zap.Int64("IndexID = ", req.IndexID),
-		zap.Strings("DataPath = ", req.DataPaths),
-		zap.Any("TypeParams", req.TypeParams),
-		zap.Any("IndexParams", req.IndexParams))
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
 		err := errors.New(errMsg)
@@ -372,6 +365,15 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 			},
 		}, err
 	}
+	log.Debug("IndexCoord building index ...",
+		zap.Int64("IndexBuildID", req.IndexBuildID),
+		zap.String("IndexName = ", req.IndexName),
+		zap.Int64("IndexID = ", req.IndexID),
+		zap.Strings("DataPath = ", req.DataPaths),
+		zap.Any("TypeParams", req.TypeParams),
+		zap.Any("IndexParams", req.IndexParams),
+		zap.Int64("numRow", req.NumRows),
+		zap.Any("field type", req.FieldSchema.DataType))
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
 	defer sp.Finish()
 	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
@@ -827,7 +829,8 @@ func (i *IndexCoord) assignTaskLoop() {
 					continue
 				}
 				log.Debug("The version of the task has been updated", zap.Int64("indexBuildID", indexBuildID))
-				nodeID, builderClient := i.nodeManager.PeekClient()
+
+				nodeID, builderClient := i.nodeManager.PeekClient(meta)
 				if builderClient == nil {
 					log.Warn("IndexCoord assignmentTasksLoop can not find available IndexNode")
 					break
