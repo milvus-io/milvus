@@ -602,3 +602,5 @@ func (h *mockHandler) GetVChanPositions(channel string, collectionID UniqueID, p
 func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
 	return false
 }
+
+func (h *mockHandler) FinishDropChannel(channel string) {}

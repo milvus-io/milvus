@@ -148,6 +148,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				df,
 				newCache(),
 				memkv.NewMemoryKV(),
+				newCompactionExecutor(),
 			)
 
 			if !test.isValidCase {
@@ -224,7 +225,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	signalCh := make(chan string, 100)
-	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache(), memkv.NewMemoryKV())
+	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache(), memkv.NewMemoryKV(), newCompactionExecutor())
 
 	assert.Nil(t, err)
 	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)

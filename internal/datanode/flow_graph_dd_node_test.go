@@ -82,6 +82,7 @@ func TestFlowGraph_DDNode_newDDNode(te *testing.T) {
 					ChannelName:       "by-dev-rootcoord-dml-test",
 				},
 				mmf,
+				newCompactionExecutor(),
 			)
 			require.NotNil(t, ddNode)
 
@@ -146,8 +147,10 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
 				ddn := ddNode{
-					collectionID:   test.ddnCollID,
-					deltaMsgStream: deltaStream,
+					collectionID:       test.ddnCollID,
+					deltaMsgStream:     deltaStream,
+					vchannelName:       "ddn_drop_msg",
+					compactionExecutor: newCompactionExecutor(),
 				}
 
 				var dropCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{

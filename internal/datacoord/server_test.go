@@ -891,35 +891,35 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
 		assert.Equal(t, serverNotServingErrMsg, resp.GetReason())
 	})
+	/*
+		t.Run("test save dropped segment and remove channel", func(t *testing.T) {
+			spyCh := make(chan struct{}, 1)
+			svr := newTestServer(t, nil, SetSegmentManager(&spySegmentManager{spyCh: spyCh}))
+			defer closeTestServer(t, svr)
 
-	t.Run("test save dropped segment and remove channel", func(t *testing.T) {
-		spyCh := make(chan struct{}, 1)
-		svr := newTestServer(t, nil, SetSegmentManager(&spySegmentManager{spyCh: spyCh}))
-		defer closeTestServer(t, svr)
+			svr.meta.AddCollection(&datapb.CollectionInfo{ID: 1})
+			err := svr.meta.AddSegment(&SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            1,
+					CollectionID:  1,
+					InsertChannel: "ch1",
+					State:         commonpb.SegmentState_Growing,
+				},
+			})
+			assert.Nil(t, err)
 
-		svr.meta.AddCollection(&datapb.CollectionInfo{ID: 1})
-		err := svr.meta.AddSegment(&SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				InsertChannel: "ch1",
-				State:         commonpb.SegmentState_Growing,
-			},
-		})
-		assert.Nil(t, err)
+			err = svr.channelManager.AddNode(0)
+			assert.Nil(t, err)
+			err = svr.channelManager.Watch(&channel{"ch1", 1})
+			assert.Nil(t, err)
 
-		err = svr.channelManager.AddNode(0)
-		assert.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 1})
-		assert.Nil(t, err)
-
-		_, err = svr.SaveBinlogPaths(context.TODO(), &datapb.SaveBinlogPathsRequest{
-			SegmentID: 1,
-			Dropped:   true,
-		})
-		assert.Nil(t, err)
-		<-spyCh
-	})
+			_, err = svr.SaveBinlogPaths(context.TODO(), &datapb.SaveBinlogPathsRequest{
+				SegmentID: 1,
+				Dropped:   true,
+			})
+			assert.Nil(t, err)
+			<-spyCh
+		})*/
 }
 
 func TestDropVirtualChannel(t *testing.T) {
@@ -1410,111 +1410,127 @@ func TestShouldDropChannel(t *testing.T) {
 			},
 		},
 	})
+	/*
+		s1 := &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			StartPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{8, 9, 10},
+				MsgGroup:    "",
+				Timestamp:   0,
+			},
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   0,
+			},
+		}
+		s2 := &datapb.SegmentInfo{
+			ID:             2,
+			CollectionID:   0,
+			PartitionID:    0,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{4, 5},
+			StartPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{8, 9, 10},
+				MsgGroup:    "",
+			},
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+		}
+		s3 := &datapb.SegmentInfo{
+			ID:            3,
+			CollectionID:  0,
+			PartitionID:   1,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Growing,
+			StartPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{8, 9, 10},
+				MsgGroup:    "",
+			},
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{11, 12, 13},
+				MsgGroup:    "",
+				Timestamp:   2,
+			},
+		}
+		s4 := &datapb.SegmentInfo{
+			ID:            4,
+			CollectionID:  0,
+			PartitionID:   1,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Growing,
+		}*/
+	/*
+		t.Run("channel without segments", func(t *testing.T) {
+			r := svr.handler.CheckShouldDropChannel("ch1")
+			assert.True(t, r)
 
-	s1 := &datapb.SegmentInfo{
-		ID:            1,
-		CollectionID:  0,
-		PartitionID:   0,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Dropped,
-		StartPosition: &internalpb.MsgPosition{
-			ChannelName: "ch1",
-			MsgID:       []byte{8, 9, 10},
-			MsgGroup:    "",
-			Timestamp:   0,
-		},
-		DmlPosition: &internalpb.MsgPosition{
-			ChannelName: "ch1",
-			MsgID:       []byte{1, 2, 3},
-			MsgGroup:    "",
-			Timestamp:   0,
-		},
-	}
-	s2 := &datapb.SegmentInfo{
-		ID:             2,
-		CollectionID:   0,
-		PartitionID:    0,
-		InsertChannel:  "ch1",
-		State:          commonpb.SegmentState_Flushed,
-		CompactionFrom: []int64{4, 5},
-		StartPosition: &internalpb.MsgPosition{
-			ChannelName: "ch1",
-			MsgID:       []byte{8, 9, 10},
-			MsgGroup:    "",
-		},
-		DmlPosition: &internalpb.MsgPosition{
-			ChannelName: "ch1",
-			MsgID:       []byte{1, 2, 3},
-			MsgGroup:    "",
-			Timestamp:   1,
-		},
-	}
-	s3 := &datapb.SegmentInfo{
-		ID:            3,
-		CollectionID:  0,
-		PartitionID:   1,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
-			ChannelName: "ch1",
-			MsgID:       []byte{8, 9, 10},
-			MsgGroup:    "",
-		},
-		DmlPosition: &internalpb.MsgPosition{
-			ChannelName: "ch1",
-			MsgID:       []byte{11, 12, 13},
-			MsgGroup:    "",
-			Timestamp:   2,
-		},
-	}
-	s4 := &datapb.SegmentInfo{
-		ID:            4,
-		CollectionID:  0,
-		PartitionID:   1,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Growing,
-	}
+		})
 
-	t.Run("channel without segments", func(t *testing.T) {
-		r := svr.handler.CheckShouldDropChannel("ch1")
-		assert.True(t, r)
+		t.Run("channel with all dropped segments", func(t *testing.T) {
+			err := svr.meta.AddSegment(NewSegmentInfo(s1))
+			require.NoError(t, err)
 
+			r := svr.handler.CheckShouldDropChannel("ch1")
+			assert.True(t, r)
+		})
+
+		t.Run("channel with all dropped segments and flushed compacted segments", func(t *testing.T) {
+			err := svr.meta.AddSegment(NewSegmentInfo(s2))
+			require.Nil(t, err)
+
+			r := svr.handler.CheckShouldDropChannel("ch1")
+			assert.False(t, r)
+		})
+
+		t.Run("channel with other state segments", func(t *testing.T) {
+			err := svr.meta.DropSegment(2)
+			require.Nil(t, err)
+			err = svr.meta.AddSegment(NewSegmentInfo(s3))
+			require.Nil(t, err)
+
+			r := svr.handler.CheckShouldDropChannel("ch1")
+			assert.False(t, r)
+		})
+
+		t.Run("channel with dropped segment and with segment without start position", func(t *testing.T) {
+			err := svr.meta.DropSegment(3)
+			require.Nil(t, err)
+			err = svr.meta.AddSegment(NewSegmentInfo(s4))
+			require.Nil(t, err)
+
+			r := svr.handler.CheckShouldDropChannel("ch1")
+			assert.True(t, r)
+		})
+	*/
+	t.Run("channel name not in kv", func(t *testing.T) {
+		assert.False(t, svr.handler.CheckShouldDropChannel("ch99"))
 	})
 
-	t.Run("channel with all dropped segments", func(t *testing.T) {
-		err := svr.meta.AddSegment(NewSegmentInfo(s1))
+	t.Run("channel in remove flag", func(t *testing.T) {
+		key := buildChannelRemovePath("ch1")
+		err := svr.meta.client.Save(key, removeFlagTomestone)
 		require.NoError(t, err)
 
-		r := svr.handler.CheckShouldDropChannel("ch1")
-		assert.True(t, r)
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
 	})
 
-	t.Run("channel with all dropped segments and flushed compacted segments", func(t *testing.T) {
-		err := svr.meta.AddSegment(NewSegmentInfo(s2))
-		require.Nil(t, err)
-
-		r := svr.handler.CheckShouldDropChannel("ch1")
-		assert.False(t, r)
-	})
-
-	t.Run("channel with other state segments", func(t *testing.T) {
-		err := svr.meta.DropSegment(2)
-		require.Nil(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(s3))
-		require.Nil(t, err)
-
-		r := svr.handler.CheckShouldDropChannel("ch1")
-		assert.False(t, r)
-	})
-
-	t.Run("channel with dropped segment and with segment without start position", func(t *testing.T) {
-		err := svr.meta.DropSegment(3)
-		require.Nil(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(s4))
-		require.Nil(t, err)
-
-		r := svr.handler.CheckShouldDropChannel("ch1")
-		assert.True(t, r)
+	t.Run("channel name not matched", func(t *testing.T) {
+		assert.False(t, svr.handler.CheckShouldDropChannel("ch2"))
 	})
 }
 
@@ -1683,7 +1699,6 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
 		assert.ElementsMatch(t, []string{"/binlog/file1", "/binlog/file2"}, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs())
 	})
-
 	t.Run("with dropped segments", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)

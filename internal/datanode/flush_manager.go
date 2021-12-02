@@ -496,6 +496,16 @@ func (m *rendezvousFlushManager) startDropping() {
 		m.dropHandler.dropFlushWg.Wait() // waits for all drop mode task done
 		m.dropHandler.Lock()
 		defer m.dropHandler.Unlock()
+		// apply injection if any
+		for _, pack := range m.dropHandler.packs {
+			q := m.getFlushQueue(pack.segmentID)
+			// queue will never be nil, sincde getFlushQueue will initialize one if not found
+			q.injectMut.Lock()
+			if q.postInjection != nil {
+				q.postInjection(pack)
+			}
+			q.injectMut.Unlock()
+		}
 		m.dropHandler.flushAndDrop(m.dropHandler.packs) // invoke drop & flush
 	}()
 }

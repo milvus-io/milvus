@@ -52,6 +52,7 @@ type compactor interface {
 	stop()
 	getPlanID() UniqueID
 	getCollection() UniqueID
+	getChannelName() string
 }
 
 // make sure compactionTask implements compactor interface
@@ -70,6 +71,8 @@ type compactionTask struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	wg sync.WaitGroup
 }
 
 // check if compactionTask implements compactor
@@ -102,10 +105,15 @@ func newCompactionTask(
 
 func (t *compactionTask) stop() {
 	t.cancel()
+	t.wg.Wait()
 }
 
 func (t *compactionTask) getPlanID() UniqueID {
 	return t.plan.GetPlanID()
+}
+
+func (t *compactionTask) getChannelName() string {
+	return t.plan.GetChannel()
 }
 
 func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelTs Timestamp) (map[UniqueID]Timestamp, *DelDataBuf, error) {
@@ -257,6 +265,8 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 }
 
 func (t *compactionTask) compact() error {
+	t.wg.Add(1)
+	defer t.wg.Done()
 	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 

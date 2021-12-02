@@ -35,6 +35,7 @@ type compactionExecutor struct {
 	parallelCh chan struct{}
 	executing  sync.Map // planID to compactor
 	taskCh     chan compactor
+	dropped    sync.Map // vchannel dropped
 }
 
 // 0.5*min(8, NumCPU/2)
@@ -98,11 +99,19 @@ func (c *compactionExecutor) stopTask(planID UniqueID) {
 	}
 }
 
+func (c *compactionExecutor) channelValidateForCompaction(vChannelName string) bool {
+	// if vchannel marked dropped, compaction should not proceed
+	_, loaded := c.dropped.Load(vChannelName)
+	return !loaded
+}
+
 func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string) {
+	c.dropped.Store(vChannelName, struct{}{})
 	c.executing.Range(func(key interface{}, value interface{}) bool {
-		if value.(*compactionTask).plan.GetChannel() == vChannelName {
+		if value.(compactor).getChannelName() == vChannelName {
 			c.stopTask(key.(UniqueID))
 		}
+		log.Warn(value.(compactor).getChannelName())
 		return true
 	})
 }

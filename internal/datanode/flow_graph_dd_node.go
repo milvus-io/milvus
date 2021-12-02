@@ -61,8 +61,9 @@ type ddNode struct {
 	droppedSegments []*datapb.SegmentInfo
 	vchannelName    string
 
-	deltaMsgStream msgstream.MsgStream
-	dropMode       atomic.Value
+	deltaMsgStream     msgstream.MsgStream
+	dropMode           atomic.Value
+	compactionExecutor *compactionExecutor
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -110,7 +111,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		dropCollection: false,
 	}
 
-	forwardMsgs := make([]msgstream.TsMsg, 0)
+	var forwardMsgs []msgstream.TsMsg
 	for _, msg := range msMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
@@ -119,6 +120,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					zap.Any("collectionID", ddn.collectionID),
 					zap.String("vChannelName", ddn.vchannelName))
 				ddn.dropMode.Store(true)
+
+				log.Debug("Stop compaction of vChannel", zap.String("vChannelName", ddn.vchannelName))
+				ddn.compactionExecutor.stopExecutingtaskByVChannelName(ddn.vchannelName)
 				fgMsg.dropCollection = true
 			}
 		case commonpb.MsgType_Insert:
@@ -257,7 +261,8 @@ func (ddn *ddNode) Close() {
 	}
 }
 
-func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelInfo, msFactory msgstream.Factory) *ddNode {
+func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelInfo,
+	msFactory msgstream.Factory, compactor *compactionExecutor) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.FlowGraphMaxQueueLength)
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxParallelism)
@@ -288,12 +293,13 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 	deltaMsgStream.Start()
 
 	dd := &ddNode{
-		BaseNode:        baseNode,
-		collectionID:    collID,
-		flushedSegments: fs,
-		droppedSegments: vchanInfo.GetDroppedSegments(),
-		vchannelName:    vchanInfo.ChannelName,
-		deltaMsgStream:  deltaMsgStream,
+		BaseNode:           baseNode,
+		collectionID:       collID,
+		flushedSegments:    fs,
+		droppedSegments:    vchanInfo.GetDroppedSegments(),
+		vchannelName:       vchanInfo.ChannelName,
+		deltaMsgStream:     deltaMsgStream,
+		compactionExecutor: compactor,
 	}
 
 	dd.dropMode.Store(false)

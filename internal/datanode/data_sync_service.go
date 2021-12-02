@@ -47,6 +47,7 @@ type dataSyncService struct {
 	flushingSegCache *Cache       // a guarding cache stores currently flushing segment ids
 	flushManager     flushManager // flush manager handles flush process
 	blobKV           kv.BaseKV
+	compactor        *compactionExecutor // reference to compaction executor
 }
 
 func newDataSyncService(ctx context.Context,
@@ -59,7 +60,7 @@ func newDataSyncService(ctx context.Context,
 	dataCoord types.DataCoord,
 	flushingSegCache *Cache,
 	blobKV kv.BaseKV,
-
+	compactor *compactionExecutor,
 ) (*dataSyncService, error) {
 
 	if replica == nil {
@@ -82,6 +83,7 @@ func newDataSyncService(ctx context.Context,
 		clearSignal:      clearSignal,
 		flushingSegCache: flushingSegCache,
 		blobKV:           blobKV,
+		compactor:        compactor,
 	}
 
 	if err := service.initNodes(vchan); err != nil {
@@ -212,7 +214,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	var ddNode Node = newDDNode(dsService.ctx, dsService.collectionID, vchanInfo, dsService.msFactory)
+	var ddNode Node = newDDNode(dsService.ctx, dsService.collectionID, vchanInfo, dsService.msFactory, dsService.compactor)
 	var insertBufferNode Node
 	insertBufferNode, err = newInsertBufferNode(
 		dsService.ctx,

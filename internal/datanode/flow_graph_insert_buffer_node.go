@@ -179,6 +179,10 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		return []Msg{}
 	}
 
+	if fgMsg.dropCollection {
+		ibNode.flushManager.startDropping()
+	}
+
 	var spans []opentracing.Span
 	for _, msg := range fgMsg.insertMessages {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())

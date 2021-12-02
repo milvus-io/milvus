@@ -18,7 +18,10 @@ package datanode
 
 import (
 	"context"
+	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCompactionExecutor(t *testing.T) {
@@ -64,23 +67,82 @@ func TestCompactionExecutor(t *testing.T) {
 		}
 	})
 
+	t.Run("Test channel valid check", func(t *testing.T) {
+		tests := []struct {
+			expected bool
+			channel  string
+			desc     string
+		}{
+			{expected: true, channel: "ch1", desc: "no in dropped"},
+			{expected: false, channel: "ch2", desc: "in dropped"},
+		}
+		ex := newCompactionExecutor()
+		ex.stopExecutingtaskByVChannelName("ch2")
+		for _, test := range tests {
+			t.Run(test.desc, func(t *testing.T) {
+				assert.Equal(t, test.expected, ex.channelValidateForCompaction(test.channel))
+			})
+		}
+	})
+
+	t.Run("test stop vchannel tasks", func(t *testing.T) {
+		ex := newCompactionExecutor()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go ex.start(ctx)
+		mc := newMockCompactor(true)
+		mc.alwaysWorking = true
+
+		ex.execute(mc)
+
+		// wait for task enqueued
+		found := false
+		for !found {
+			ex.executing.Range(func(key, value interface{}) bool {
+				found = true
+				return true
+			})
+		}
+
+		ex.stopExecutingtaskByVChannelName("mock")
+
+		select {
+		case <-mc.ctx.Done():
+		default:
+			t.FailNow()
+		}
+	})
+
 }
 
 func newMockCompactor(isvalid bool) *mockCompactor {
-	return &mockCompactor{isvalid: isvalid}
+	ctx, cancel := context.WithCancel(context.TODO())
+	return &mockCompactor{
+		ctx:     ctx,
+		cancel:  cancel,
+		isvalid: isvalid,
+	}
 }
 
 type mockCompactor struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	isvalid bool
+	sync.WaitGroup
+	ctx           context.Context
+	cancel        context.CancelFunc
+	isvalid       bool
+	alwaysWorking bool
 }
 
 var _ compactor = (*mockCompactor)(nil)
 
 func (mc *mockCompactor) compact() error {
+	mc.Add(1)
+	defer mc.Done()
 	if !mc.isvalid {
 		return errStart
+	}
+	if mc.alwaysWorking {
+		<-mc.ctx.Done()
+		return mc.ctx.Err()
 	}
 	return nil
 }
@@ -92,9 +154,14 @@ func (mc *mockCompactor) getPlanID() UniqueID {
 func (mc *mockCompactor) stop() {
 	if mc.cancel != nil {
 		mc.cancel()
+		mc.Wait()
 	}
 }
 
 func (mc *mockCompactor) getCollection() UniqueID {
 	return 1
+}
+
+func (mc *mockCompactor) getChannelName() string {
+	return "mock"
 }

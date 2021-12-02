@@ -282,4 +282,39 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		// send again shall trigger empty buffer flush
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 	})
+	t.Run("Test deleteNode Operate valid with dropCollection", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		chanName := "datanode-test-FlowGraphDeletenode-operate"
+		testPath := "/test/datanode/root/meta"
+		assert.NoError(t, clearEtcd(testPath))
+		Params.MetaRootPath = testPath
+		Params.DeleteBinlogRootPath = testPath
+
+		c := &nodeConfig{
+			replica:      replica,
+			allocator:    NewAllocatorFactory(),
+			vChannelName: chanName,
+		}
+		sig := make(chan string, 1)
+		delNode, err := newDeleteNode(ctx, fm, sig, c)
+		assert.Nil(t, err)
+
+		msg := genFlowGraphDeleteMsg(pks, chanName)
+		msg.segmentsToFlush = segIDs
+
+		msg.endPositions[0].Timestamp = 100 // set to normal timestamp
+		msg.dropCollection = true
+		assert.NotPanics(t, func() {
+			fm.startDropping()
+			delNode.Operate([]flowgraph.Msg{&msg})
+		})
+		timer := time.NewTimer(time.Millisecond)
+		select {
+		case <-timer.C:
+			t.FailNow()
+		case <-sig:
+		}
+	})
 }

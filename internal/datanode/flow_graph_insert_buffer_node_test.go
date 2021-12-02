@@ -204,8 +204,12 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	inMsg := genFlowGraphInsertMsg(insertChannelName)
-	var fgMsg flowgraph.Msg = &inMsg
-	iBNode.Operate([]flowgraph.Msg{fgMsg})
+	assert.NotPanics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
+
+	// test drop collection operate
+	inMsg = genFlowGraphInsertMsg(insertChannelName)
+	inMsg.dropCollection = true
+	assert.NotPanics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
 }
 
 /*

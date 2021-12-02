@@ -38,6 +38,8 @@ const (
 	segmentPrefix        = metaPrefix + "/s"
 	channelRemovePrefix  = metaPrefix + "/channel-removal"
 	handoffSegmentPrefix = "querycoord-handoff"
+
+	removeFlagTomestone = "removed"
 )
 
 type meta struct {
@@ -460,7 +462,7 @@ func (m *meta) saveDropSegmentAndRemove(channel string, modSegments map[int64]*S
 		// add removal flag into meta, preventing non-atomic removal channel failure
 		removalFlag := buildChannelRemovePath(channel)
 
-		kv[removalFlag] = ""
+		kv[removalFlag] = removeFlagTomestone
 	}
 
 	err := m.saveKvTxn(kv)
@@ -480,6 +482,16 @@ func (m *meta) saveDropSegmentAndRemove(channel string, modSegments map[int64]*S
 func (m *meta) FinishRemoveChannel(channel string) error {
 	key := buildChannelRemovePath(channel)
 	return m.client.Remove(key)
+}
+
+// ChannelHasRemoveFlag
+func (m *meta) ChannelHasRemoveFlag(channel string) bool {
+	key := buildChannelRemovePath(channel)
+	v, err := m.client.Load(key)
+	if err != nil || v != removeFlagTomestone {
+		return false
+	}
+	return true
 }
 
 // ListSegmentFiles lists all segments' logs
