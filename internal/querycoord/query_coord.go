@@ -202,8 +202,10 @@ func (qc *QueryCoord) Start() error {
 	qc.loopWg.Add(1)
 	go qc.watchHandoffSegmentLoop()
 
-	qc.loopWg.Add(1)
-	go qc.loadBalanceSegmentLoop()
+	if Params.AutoBalance {
+		qc.loopWg.Add(1)
+		go qc.loadBalanceSegmentLoop()
+	}
 
 	go qc.session.LivenessCheck(qc.loopCtx, func() {
 		log.Error("Query Coord disconnected from etcd, process will exit", zap.Int64("Server Id", qc.session.ServerID))
