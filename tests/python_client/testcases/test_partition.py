@@ -486,7 +486,7 @@ class TestNewCase(object):
     def test_drop_default_partition_B(self, connect, collection):
         """
         target: test drop partition of default, check status returned
-        method: call function: drop_partition
+        method: call function drop_partition after manual create the default partition
         expected: status not ok
         """
         connect.create_partition(collection, default_tag)
