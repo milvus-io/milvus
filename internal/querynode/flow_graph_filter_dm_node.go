@@ -43,6 +43,7 @@ func (fdmNode *filterDmNode) Name() string {
 	return "fdmNode"
 }
 
+// Operate handles input messages, to filter invalid insert messages
 func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do filterDmNode operation")
 
