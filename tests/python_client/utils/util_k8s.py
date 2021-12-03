@@ -30,7 +30,7 @@ def wait_pods_ready(namespace, label_selector, timeout=360):
             all_pos_ready_flag = True
             for item in api_response.items:
                 for c in item.status.container_statuses:
-                    log.info(f"{c.name} statu is {c.ready}")
+                    log.info(f"{c.name} status is {c.ready}")
                     if c.ready is False:
                         all_pos_ready_flag = False
                         break
