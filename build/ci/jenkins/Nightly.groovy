@@ -21,7 +21,7 @@ pipeline {
     }
     agent {
         kubernetes {
-            label "milvus-e2e-test-nightly"             
+            label "milvus-e2e-test-nightly"
             inheritFrom 'default'
             defaultContainer 'main'
             yamlFile "build/ci/jenkins/pod/rte.yaml"
