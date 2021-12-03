@@ -26,6 +26,7 @@ ROOT="$( cd -P "$( dirname "$SOURCE" )/../.." && pwd )"
 set -e
 # Check unset variables
 set -u
+# Print commands
 set -x
 
 
