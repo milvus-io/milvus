@@ -103,6 +103,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
+// filterInvalidDeleteMessage would filter out invalid delete messages
 func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) *msgstream.DeleteMsg {
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
