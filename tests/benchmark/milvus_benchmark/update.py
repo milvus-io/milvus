@@ -323,6 +323,10 @@ def update_values(src_values_file, deploy_params_file):
         'mountPath': '/test'
     }]
 
+    server_resource = utils.get_server_resource(deploy_params)
+    print("[benchmark update] server_resource: %s" % str(server_resource))
+    values_dict = utils.update_dict_value(server_resource, values_dict)
+
     print(values_dict)
     # Update content of src_values_file
     with open(src_values_file, 'w') as f:
