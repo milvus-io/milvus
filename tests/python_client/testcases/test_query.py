@@ -746,7 +746,7 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
-        df = cf.gen_default_dataframe_data(ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         partition_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
         partition_w.load()
@@ -763,7 +763,7 @@ class TestQueryParams(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
-        df = cf.gen_default_dataframe_data(ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         partition_w.insert(df)
         assert partition_w.num_entities == ct.default_nb
         error = {ct.err_code: 1, ct.err_msg: f'collection {collection_w.name} was not loaded into memory'}
@@ -852,7 +852,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=collection_name)
 
         # insert data to collection
-        collection_w.insert(data=cf.gen_default_list_data(ct.default_nb))
+        collection_w.insert(data=cf.gen_default_list_data())
 
         # check number of entities and that method calls the flush interface
         assert collection_w.num_entities == ct.default_nb
@@ -1063,7 +1063,7 @@ class TestQueryOperation(TestcaseBase):
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
 
         # insert data to partition
-        df = cf.gen_default_dataframe_data(ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         partition_w.insert(df)
 
         # check number of entities and that method calls the flush interface
