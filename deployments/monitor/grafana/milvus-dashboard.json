@@ -5425,7 +5425,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Rate of mallocs",
+      "description": "Rate of memory mallocs",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
