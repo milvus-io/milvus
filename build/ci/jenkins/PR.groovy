@@ -187,7 +187,7 @@ pipeline {
                                 body: '$DEFAULT_CONTENT',
                                 recipientProviders: [developers(), culprits()],
                                 replyTo: '$DEFAULT_REPLYTO',
-                                to: "${authorEmail}"
+                                to: "${authorEmail},devops@zilliz.com"
                             }
                         }
                     }
