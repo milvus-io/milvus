@@ -1,7 +1,7 @@
 import time
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
-from util_log import test_log as log
+from utils.util_log import test_log as log
 
 
 def wait_pods_ready(namespace, label_selector, timeout=360):
