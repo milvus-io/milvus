@@ -52,7 +52,7 @@ type ParamTable struct {
 	SearchChannelPrefix       string
 	SearchResultChannelPrefix string
 
-	// --- ETCD ---
+	// --- etcd ---
 	EtcdEndpoints []string
 	MetaRootPath  string
 	KvRootPath    string
@@ -107,7 +107,7 @@ func (p *ParamTable) Init() {
 	p.initStatsChannelName()
 	p.initTimeTickChannelName()
 
-	// --- ETCD ---
+	// --- etcd ---
 	p.initEtcdEndpoints()
 	p.initMetaRootPath()
 	p.initKvRootPath()
