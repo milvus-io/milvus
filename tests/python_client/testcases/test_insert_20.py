@@ -421,6 +421,7 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")],
                                             [cf.gen_binary_vec_field()],
                                             [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")]])

@@ -531,6 +531,7 @@ class TestQueryParams(TestcaseBase):
                                check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")]])
     def test_query_output_multi_float_vec_field(self, vec_fields):
         """
@@ -557,6 +558,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     @pytest.mark.parametrize("vec_fields", [[cf.gen_binary_vec_field()],
                                             [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec1")]])
     def test_query_output_mix_float_binary_field(self, vec_fields):
@@ -642,6 +644,7 @@ class TestQueryParams(TestcaseBase):
                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     def test_query_output_fields_simple_wildcard(self):
         """
         target: test query output_fields with simple wildcard (* and %)
@@ -673,6 +676,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res3, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     def test_query_output_fields_part_scale_wildcard(self):
         """
         target: test query output_fields with part wildcard
@@ -697,6 +701,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res2})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     def test_query_output_fields_part_vector_wildcard(self):
         """
         target: test query output_fields with part wildcard
@@ -721,6 +726,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res2, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
     def test_query_invalid_wildcard(self, output_fields):
         """

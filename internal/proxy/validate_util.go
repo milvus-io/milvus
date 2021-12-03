@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+const enableMultipleVectorFields = false
+
 func isAlpha(c uint8) bool {
 	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
 		return false
@@ -339,6 +341,29 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 
 	if !autoID && primaryIdx == -1 {
 		return fmt.Errorf("primary key is required for non autoid mode")
+	}
+
+	return nil
+}
+
+func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
+	vecExist := false
+	var vecName string
+
+	for i := range schema.Fields {
+		name := schema.Fields[i].Name
+		dType := schema.Fields[i].DataType
+		isVec := (dType == schemapb.DataType_BinaryVector || dType == schemapb.DataType_FloatVector)
+		if isVec && vecExist && !enableMultipleVectorFields {
+			return fmt.Errorf(
+				"multiple vector fields is not supported, fields name: %s, %s",
+				vecName,
+				name,
+			)
+		} else if isVec {
+			vecExist = true
+			vecName = name
+		}
 	}
 
 	return nil
