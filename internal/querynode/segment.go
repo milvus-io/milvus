@@ -471,8 +471,8 @@ func (s *Segment) getIndexName(fieldID int64) string {
 }
 
 func (s *Segment) getIndexID(fieldID int64) UniqueID {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
+	s.paramMutex.RLock()
+	defer s.paramMutex.RUnlock()
 	if _, ok := s.indexInfos[fieldID]; !ok {
 		return -1
 	}
