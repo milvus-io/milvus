@@ -29,3 +29,30 @@ func TestMergedTimeTicker(t *testing.T) {
 	assert.Less(t, len(ticks), 20)
 	mut.Unlock()
 }
+
+func TestMergedTimeTicker_close10000(t *testing.T) {
+	var wg sync.WaitGroup
+	batchSize := 10000
+	wg.Add(batchSize)
+	for i := 0; i < batchSize; i++ {
+		mt := newMergedTimeTickerSender(func(ts Timestamp) error {
+			return nil
+		})
+		go func(mt *mergedTimeTickerSender) {
+			defer wg.Done()
+			time.Sleep(10 * time.Millisecond)
+			mt.close()
+		}(mt)
+	}
+	tm := time.NewTimer(time.Millisecond * 20)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-tm.C:
+		t.FailNow()
+	case <-done:
+	}
+}

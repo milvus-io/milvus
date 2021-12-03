@@ -61,6 +61,8 @@ func (mt *mergedTimeTickerSender) bufferTs(ts Timestamp) {
 	defer mt.lastMut.RUnlock()
 
 	if !mt.lastSent.IsZero() && time.Since(mt.lastSent) > time.Millisecond*100 {
+		mt.cond.L.Lock()
+		defer mt.cond.L.Unlock()
 		mt.cond.Signal()
 	}
 }
@@ -72,10 +74,21 @@ func (mt *mergedTimeTickerSender) tick() {
 	for {
 		select {
 		case <-t:
+			mt.cond.L.Lock()
 			mt.cond.Signal() // allow worker to check every 0.1s
+			mt.cond.L.Unlock()
 		case <-mt.closeCh:
 			return
 		}
+	}
+}
+
+func (mt *mergedTimeTickerSender) isClosed() bool {
+	select {
+	case <-mt.closeCh:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -83,13 +96,11 @@ func (mt *mergedTimeTickerSender) work() {
 	defer mt.wg.Done()
 	ts, lastTs := uint64(0), uint64(0)
 	for {
-		select {
-		case <-mt.closeCh:
-			return
-		default:
-		}
-
 		mt.cond.L.Lock()
+		if mt.isClosed() {
+			mt.cond.L.Unlock()
+			return
+		}
 		mt.cond.Wait()
 		ts = mt.ts.Load()
 		mt.cond.L.Unlock()
@@ -105,8 +116,10 @@ func (mt *mergedTimeTickerSender) work() {
 
 func (mt *mergedTimeTickerSender) close() {
 	mt.closeOnce.Do(func() {
+		mt.cond.L.Lock()
 		close(mt.closeCh)
 		mt.cond.Broadcast()
+		mt.cond.L.Unlock()
 		mt.wg.Wait()
 	})
 }
