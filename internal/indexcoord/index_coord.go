@@ -789,18 +789,7 @@ func (i *IndexCoord) assignTaskLoop() {
 			log.Debug("IndexCoord assignTaskLoop ctx Done")
 			return
 		case <-timeTicker.C:
-			sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
-			if err != nil {
-				log.Error("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
-			}
-			if len(sessions) <= 0 {
-				log.Warn("There is no IndexNode available as this time.")
-				break
-			}
-			var serverIDs []int64
-			for _, session := range sessions {
-				serverIDs = append(serverIDs, session.ServerID)
-			}
+			serverIDs := i.nodeManager.ListNode()
 			metas := i.metaTable.GetUnassignedTasks(serverIDs)
 			sort.Slice(metas, func(i, j int) bool {
 				return metas[i].indexMeta.Version <= metas[j].indexMeta.Version
@@ -811,7 +800,7 @@ func (i *IndexCoord) assignTaskLoop() {
 			}
 			for index, meta := range metas {
 				indexBuildID := meta.indexMeta.IndexBuildID
-				if err = i.metaTable.UpdateVersion(indexBuildID); err != nil {
+				if err := i.metaTable.UpdateVersion(indexBuildID); err != nil {
 					log.Warn("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
 					continue
 				}
@@ -836,12 +825,11 @@ func (i *IndexCoord) assignTaskLoop() {
 					log.Warn("IndexCoord assignTask assign task to IndexNode failed")
 					continue
 				}
-				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
+				if err := i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
 					log.Error("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
 					break
 				}
-				log.Debug("This task has been assigned", zap.Int64("indexBuildID", indexBuildID),
-					zap.Int64("The IndexNode execute this task", nodeID))
+				log.Debug("This task has been assigned successfully", zap.Int64("indexBuildID", indexBuildID), zap.Int64("nodeID", nodeID))
 				i.nodeManager.pq.IncPriority(nodeID, 1)
 				if index > i.taskLimit {
 					break
