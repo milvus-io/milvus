@@ -1,6 +1,6 @@
 # Opentracing User Guide
 
-This guide mainly describes the use of jaeger and the commonly used display meanings.
+This guide mainly describes the use of jaeger, and the commonly used display meanings.
 
 Jaeger, inspired by [Dapper](https://research.google.com/pubs/pub36356.html) and [OpenZipkin](https://zipkin.io/), is a distributed tracing platform created by [Uber Technologies](https://uber.github.io/) and donated to [Cloud Native Computing Foundation](https://cncf.io/). It can be used for monitoring microservices-based distributed systems:
 
@@ -36,7 +36,7 @@ Filter with service name.
 
 ### Operation
 
-Operation in Service, eg. request name, function name.
+Operation in Service, e.g. request name, function name.
 
 ### Tags
 
