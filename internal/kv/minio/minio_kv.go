@@ -234,13 +234,13 @@ func (kv *MinIOKV) RemoveWithPrefix(prefix string) error {
 	return nil
 }
 
-// Remove delete an object with @key.
+// Remove deletes an object with @key.
 func (kv *MinIOKV) Remove(key string) error {
 	err := kv.minioClient.RemoveObject(kv.ctx, kv.bucketName, string(key), minio.RemoveObjectOptions{})
 	return err
 }
 
-// MultiRemove delete a objects with @keys.
+// MultiRemove deletes a objects with @keys.
 func (kv *MinIOKV) MultiRemove(keys []string) error {
 	var resultErr error
 	for _, key := range keys {
