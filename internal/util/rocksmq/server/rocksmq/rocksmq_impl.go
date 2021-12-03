@@ -1067,6 +1067,7 @@ func (rmq *rocksmq) HasNext(topicName string, readerName string, messageIDInclus
 	return reader.HasNext(messageIDInclusive)
 }
 
+// CloseReader close a reader
 func (rmq *rocksmq) CloseReader(topicName string, readerName string) {
 	if rmq.isClosed() {
 		return
