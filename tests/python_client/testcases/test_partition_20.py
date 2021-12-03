@@ -329,9 +329,9 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_dropped_collection(self):
         """
         target: verify create partition against a dropped collection
-        method: 1. create collection1
-                2. drop collection1
-                3. create partition in collection1
+        method: 1. create a collection
+                2. drop collection
+                3. create partition in collection
         expected: raise exception
         """
         # create collection
