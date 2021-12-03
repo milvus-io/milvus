@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"runtime"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -40,11 +39,12 @@ type compactionExecutor struct {
 
 // 0.5*min(8, NumCPU/2)
 func calculeateParallel() int {
-	cores := runtime.NumCPU()
-	if cores < 16 {
-		return 4
-	}
-	return cores / 2
+	return 2
+	//cores := runtime.NumCPU()
+	//if cores < 16 {
+	//return 4
+	//}
+	//return cores / 2
 }
 
 func newCompactionExecutor() *compactionExecutor {
