@@ -960,6 +960,16 @@ func TestDropVirtualChannel(t *testing.T) {
 			err := svr.meta.AddSegment(NewSegmentInfo(s))
 			assert.Nil(t, err)
 		}
+		// add non matched segments
+		os := &datapb.SegmentInfo{
+			ID:            maxOperationsPerTxn + 100,
+			CollectionID:  0,
+			InsertChannel: "ch2",
+
+			State: commonpb.SegmentState_Growing,
+		}
+
+		svr.meta.AddSegment(NewSegmentInfo(os))
 
 		err := svr.channelManager.AddNode(0)
 		require.Nil(t, err)
