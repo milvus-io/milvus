@@ -403,6 +403,7 @@ message DescribeSegmentResponse {
   int64 indexID = 2;
   int64 buildID = 3;
   bool enable_index = 4;
+  int64 fieldID = 5;
 }
 
 message ShowSegmentsRequest {

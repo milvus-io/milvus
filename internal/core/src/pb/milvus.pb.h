@@ -5029,6 +5029,7 @@ class DescribeSegmentResponse :
     kStatusFieldNumber = 1,
     kIndexIDFieldNumber = 2,
     kBuildIDFieldNumber = 3,
+    kFieldIDFieldNumber = 5,
     kEnableIndexFieldNumber = 4,
   };
   // .milvus.proto.common.Status status = 1;
@@ -5049,6 +5050,11 @@ class DescribeSegmentResponse :
   ::PROTOBUF_NAMESPACE_ID::int64 buildid() const;
   void set_buildid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // int64 fieldID = 5;
+  void clear_fieldid();
+  ::PROTOBUF_NAMESPACE_ID::int64 fieldid() const;
+  void set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // bool enable_index = 4;
   void clear_enable_index();
   bool enable_index() const;
@@ -5062,6 +5068,7 @@ class DescribeSegmentResponse :
   ::milvus::proto::common::Status* status_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
   ::PROTOBUF_NAMESPACE_ID::int64 buildid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
   bool enable_index_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -17798,6 +17805,20 @@ inline void DescribeSegmentResponse::set_enable_index(bool value) {
   
   enable_index_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeSegmentResponse.enable_index)
+}
+
+// int64 fieldID = 5;
+inline void DescribeSegmentResponse::clear_fieldid() {
+  fieldid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 DescribeSegmentResponse::fieldid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeSegmentResponse.fieldID)
+  return fieldid_;
+}
+inline void DescribeSegmentResponse::set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  fieldid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeSegmentResponse.fieldID)
 }
 
 // -------------------------------------------------------------------

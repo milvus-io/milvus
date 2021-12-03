@@ -341,8 +341,7 @@ func TestSegmentLoader_estimateSegmentSize(t *testing.T) {
 	indexPath, err := generateIndex(defaultSegmentID)
 	assert.NoError(t, err)
 
-	err = seg.setIndexInfo(simpleVecField.id, &indexInfo{})
-	assert.NoError(t, err)
+	seg.setIndexInfo(simpleVecField.id, &indexInfo{})
 
 	err = seg.setIndexPaths(simpleVecField.id, indexPath)
 	assert.NoError(t, err)
