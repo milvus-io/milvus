@@ -178,7 +178,7 @@ class ApiCollectionWrapper:
         return res, check_result
 
     def create_index(self, field_name, index_params, check_task=None, check_items=None, **kwargs):
-        timeout = kwargs.get("timeout", TIMEOUT)
+        timeout = kwargs.get("timeout", TIMEOUT * 2)
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name

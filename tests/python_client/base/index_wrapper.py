@@ -13,6 +13,8 @@ class ApiIndexWrapper:
     index = None
 
     def init_index(self, collection, field_name, index_params, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT * 2)
+        kwargs.update({"timeout": timeout})
         """ In order to distinguish the same name of index """
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([Index, collection, field_name, index_params], **kwargs)
