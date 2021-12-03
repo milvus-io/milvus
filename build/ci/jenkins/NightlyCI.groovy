@@ -77,7 +77,7 @@ pipeline {
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
-                                            --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
+                                            --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379} --set dataCoordinator.enableGarbageCollection=true  --set dataCoordinator.gc.interval=60 --set dataCoordinator.gc.missingTolerance=60 --set dataCoordinator.gc.dropTolerance=60" \
                                             --skip-export-logs \
                                             --skip-cleanup \
                                             --test-extra-arg "-n 4 --tags L0 L1 L2 --repeat-scope=session" \
