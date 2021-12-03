@@ -73,7 +73,7 @@ def locust_executor(host, port, collection_name, connection_type="single", run_p
     MyUser.values = {
         "ids": [random.randint(1000000, 10000000) for _ in range(nb)],
         "get_ids": [random.randint(1, 10000000) for _ in range(nb)],
-        "X": utils.generate_vectors(nq, MyUser.op_info["dimension"])
+        "X": utils.generate_vectors(_nq, MyUser.op_info["dimension"])
     }
 
     # MyUser.tasks = {Tasks.query: 1, Tasks.flush: 1}
