@@ -693,6 +693,11 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	cpt := &createPartitionTask{
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
@@ -701,44 +706,71 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		result:                 nil,
 	}
 
-	log.Debug("CreatePartition enqueue",
+	log.Debug(
+		rpcReceived("CreatePartition"),
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
-	err := node.sched.ddQueue.Enqueue(cpt)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
 
-	log.Debug("CreatePartition",
-		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName))
-	defer func() {
-		log.Debug("CreatePartition Done",
+	if err := node.sched.ddQueue.Enqueue(cpt); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue("CreatePartition"),
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.String("partition", request.PartitionName))
-	}()
 
-	err = cpt.WaitToFinish()
-	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug(
+		rpcEnqueued("CreatePartition"),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", cpt.ID()),
+		zap.Uint64("BeginTS", cpt.BeginTs()),
+		zap.Uint64("EndTS", cpt.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName))
+
+	if err := cpt.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish("CreatePartition"),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", cpt.ID()),
+			zap.Uint64("BeginTS", cpt.BeginTs()),
+			zap.Uint64("EndTS", cpt.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("partition", request.PartitionName))
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone("CreatePartition"),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", cpt.ID()),
+		zap.Uint64("BeginTS", cpt.BeginTs()),
+		zap.Uint64("EndTS", cpt.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName))
+
 	return cpt.result, nil
 }
 
