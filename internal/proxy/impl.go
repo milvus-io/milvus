@@ -554,6 +554,11 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 			Status: unhealthyStatus(),
 		}, nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetCollectionStatistics")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	g := &getCollectionStatisticsTask{
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
@@ -561,38 +566,20 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		dataCoord:                      node.dataCoord,
 	}
 
-	log.Debug("GetCollectionStatistics enqueue",
+	log.Debug("GetCollectionStatistics received",
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
-	err := node.sched.ddQueue.Enqueue(g)
-	if err != nil {
-		return &milvuspb.GetCollectionStatisticsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
-	}
 
-	log.Debug("GetCollectionStatistics",
-		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
-	defer func() {
-		log.Debug("GetCollectionStatistics Done",
+	if err := node.sched.ddQueue.Enqueue(g); err != nil {
+		log.Warn("GetCollectionStatistics failed to enqueue",
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
-	}()
 
-	err = g.WaitToFinish()
-	if err != nil {
 		return &milvuspb.GetCollectionStatisticsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -600,6 +587,43 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 			},
 		}, nil
 	}
+
+	log.Debug("GetCollectionStatistics enqueued",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", g.ID()),
+		zap.Uint64("BeginTS", g.BeginTs()),
+		zap.Uint64("EndTS", g.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	if err := g.WaitToFinish(); err != nil {
+		log.Warn("GetCollectionStatistics failed to WaitToFinish",
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", g.ID()),
+			zap.Uint64("BeginTS", g.BeginTs()),
+			zap.Uint64("EndTS", g.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+
+		return &milvuspb.GetCollectionStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug("GetCollectionStatistics done",
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", g.ID()),
+		zap.Uint64("BeginTS", g.BeginTs()),
+		zap.Uint64("EndTS", g.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
 
 	return g.result, nil
 }
