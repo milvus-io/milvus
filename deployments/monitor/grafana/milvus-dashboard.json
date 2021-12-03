@@ -16,175 +16,9 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1638443261686,
+  "iteration": 1638461467785,
   "links": [],
   "panels": [
-    {
-      "datasource": "prometheus",
-      "description": "Current health state of DataCoord",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "from": "-65535",
-              "id": 1,
-              "text": "UP",
-              "to": "-1",
-              "type": 2,
-              "value": "0"
-            },
-            {
-              "from": "0",
-              "id": 2,
-              "text": "DOWN",
-              "to": "1",
-              "type": 1,
-              "value": "0"
-            }
-          ],
-          "noValue": "N/A",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "dark-red",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 0
-      },
-      "id": 123219,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(up{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\",app_kubernetes_io_component=\"datacoord\"})*(-1)",
-          "format": "time_series",
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "DataCoord Health",
-      "type": "stat"
-    },
-    {
-      "datasource": "prometheus",
-      "description": "Current health state of QueryCoord",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "from": "-65535",
-              "id": 1,
-              "text": "UP",
-              "to": "-1",
-              "type": 2,
-              "value": "0"
-            },
-            {
-              "from": "0",
-              "id": 2,
-              "text": "DOWN",
-              "to": "1",
-              "type": 1,
-              "value": "0"
-            }
-          ],
-          "noValue": "N/A",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "dark-red",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 12,
-        "y": 0
-      },
-      "id": 123222,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(up{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\",app_kubernetes_io_component=\"querycoord\"})*(-1)",
-          "format": "time_series",
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "QueryCoord Health",
-      "type": "stat"
-    },
     {
       "collapsed": false,
       "datasource": null,
@@ -192,7 +26,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 0
       },
       "id": 123155,
       "panels": [],
@@ -221,7 +55,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 6
+        "y": 1
       },
       "id": 123161,
       "options": {
@@ -279,7 +113,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 6
+        "y": 1
       },
       "id": 123165,
       "options": {
@@ -337,7 +171,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 6
+        "y": 1
       },
       "id": 123159,
       "options": {
@@ -395,7 +229,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 6
+        "y": 1
       },
       "id": 123160,
       "options": {
@@ -453,7 +287,7 @@
         "h": 5,
         "w": 4,
         "x": 16,
-        "y": 6
+        "y": 1
       },
       "id": 123163,
       "options": {
@@ -511,7 +345,7 @@
         "h": 5,
         "w": 4,
         "x": 20,
-        "y": 6
+        "y": 1
       },
       "id": 123164,
       "options": {
@@ -564,7 +398,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 11
+        "y": 6
       },
       "hiddenSeries": false,
       "id": 123149,
@@ -667,7 +501,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 11
+        "y": 6
       },
       "hiddenSeries": false,
       "id": 123139,
@@ -770,7 +604,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 11
+        "y": 6
       },
       "hiddenSeries": false,
       "id": 123152,
@@ -878,7 +712,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 17
+        "y": 12
       },
       "id": 123162,
       "options": {
@@ -937,7 +771,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 17
+        "y": 12
       },
       "id": 123166,
       "options": {
@@ -995,7 +829,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 17
+        "y": 12
       },
       "id": 123167,
       "options": {
@@ -1053,7 +887,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 17
+        "y": 12
       },
       "id": 123168,
       "options": {
@@ -1111,7 +945,7 @@
         "h": 5,
         "w": 4,
         "x": 16,
-        "y": 17
+        "y": 12
       },
       "id": 123176,
       "options": {
@@ -1169,7 +1003,7 @@
         "h": 5,
         "w": 4,
         "x": 20,
-        "y": 17
+        "y": 12
       },
       "id": 123175,
       "options": {
@@ -1222,7 +1056,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 22
+        "y": 17
       },
       "hiddenSeries": false,
       "id": 123145,
@@ -1325,7 +1159,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 22
+        "y": 17
       },
       "hiddenSeries": false,
       "id": 123147,
@@ -1428,7 +1262,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 22
+        "y": 17
       },
       "hiddenSeries": false,
       "id": 123177,
@@ -1536,7 +1370,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 28
+        "y": 23
       },
       "id": 123181,
       "options": {
@@ -1594,7 +1428,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 28
+        "y": 23
       },
       "id": 123170,
       "options": {
@@ -1652,7 +1486,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 28
+        "y": 23
       },
       "id": 123178,
       "options": {
@@ -1710,7 +1544,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 28
+        "y": 23
       },
       "id": 123173,
       "options": {
@@ -1768,7 +1602,7 @@
         "h": 5,
         "w": 4,
         "x": 16,
-        "y": 28
+        "y": 23
       },
       "id": 123169,
       "options": {
@@ -1826,7 +1660,7 @@
         "h": 5,
         "w": 4,
         "x": 20,
-        "y": 28
+        "y": 23
       },
       "id": 123179,
       "options": {
@@ -1879,7 +1713,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 33
+        "y": 28
       },
       "hiddenSeries": false,
       "id": 123153,
@@ -1982,7 +1816,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 33
+        "y": 28
       },
       "hiddenSeries": false,
       "id": 123143,
@@ -2085,7 +1919,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 33
+        "y": 28
       },
       "hiddenSeries": false,
       "id": 123180,
@@ -2193,7 +2027,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 39
+        "y": 34
       },
       "id": 123174,
       "options": {
@@ -2251,7 +2085,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 39
+        "y": 34
       },
       "id": 123182,
       "options": {
@@ -2309,7 +2143,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 39
+        "y": 34
       },
       "id": 123184,
       "options": {
@@ -2367,7 +2201,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 39
+        "y": 34
       },
       "id": 123185,
       "options": {
@@ -2425,7 +2259,7 @@
         "h": 5,
         "w": 4,
         "x": 16,
-        "y": 39
+        "y": 34
       },
       "id": 123187,
       "options": {
@@ -2483,7 +2317,7 @@
         "h": 5,
         "w": 4,
         "x": 20,
-        "y": 39
+        "y": 34
       },
       "id": 123188,
       "options": {
@@ -2536,7 +2370,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 44
+        "y": 39
       },
       "hiddenSeries": false,
       "id": 123183,
@@ -2639,7 +2473,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 44
+        "y": 39
       },
       "hiddenSeries": false,
       "id": 123186,
@@ -2742,7 +2576,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 44
+        "y": 39
       },
       "hiddenSeries": false,
       "id": 123189,
@@ -2850,7 +2684,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 50
+        "y": 45
       },
       "id": 123195,
       "options": {
@@ -2908,7 +2742,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 50
+        "y": 45
       },
       "id": 123191,
       "options": {
@@ -2966,7 +2800,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 50
+        "y": 45
       },
       "id": 123192,
       "options": {
@@ -3024,7 +2858,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 50
+        "y": 45
       },
       "id": 123193,
       "options": {
@@ -3077,7 +2911,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 50
+        "y": 45
       },
       "hiddenSeries": false,
       "id": 123141,
@@ -3174,7 +3008,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 55
+        "y": 50
       },
       "hiddenSeries": false,
       "id": 123151,
@@ -3277,7 +3111,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 55
+        "y": 50
       },
       "hiddenSeries": false,
       "id": 123194,
@@ -3370,7 +3204,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 61
+        "y": 56
       },
       "id": 123172,
       "panels": [],
@@ -3399,7 +3233,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 62
+        "y": 57
       },
       "id": 123190,
       "options": {
@@ -3457,7 +3291,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 62
+        "y": 57
       },
       "id": 123196,
       "options": {
@@ -3515,7 +3349,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 62
+        "y": 57
       },
       "id": 123198,
       "options": {
@@ -3573,7 +3407,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 62
+        "y": 57
       },
       "id": 123199,
       "options": {
@@ -3626,7 +3460,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 62
+        "y": 57
       },
       "hiddenSeries": false,
       "id": 123207,
@@ -3723,7 +3557,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 67
+        "y": 62
       },
       "hiddenSeries": false,
       "id": 123197,
@@ -3826,7 +3660,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 67
+        "y": 62
       },
       "hiddenSeries": false,
       "id": 123200,
@@ -3929,7 +3763,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 68
+        "y": 63
       },
       "hiddenSeries": false,
       "id": 123210,
@@ -4025,7 +3859,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 73
+        "y": 68
       },
       "hiddenSeries": false,
       "id": 123208,
@@ -4121,7 +3955,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 73
+        "y": 68
       },
       "hiddenSeries": false,
       "id": 123209,
@@ -4217,7 +4051,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 74
+        "y": 69
       },
       "hiddenSeries": false,
       "id": 123214,
@@ -4303,7 +4137,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 80
+        "y": 75
       },
       "id": 123157,
       "panels": [],
@@ -4327,7 +4161,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 81
+        "y": 76
       },
       "hiddenSeries": false,
       "id": 123202,
@@ -4423,7 +4257,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 81
+        "y": 76
       },
       "hiddenSeries": false,
       "id": 123204,
@@ -4521,7 +4355,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 81
+        "y": 76
       },
       "hiddenSeries": false,
       "id": 123206,
@@ -4618,7 +4452,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 87
+        "y": 82
       },
       "hiddenSeries": false,
       "id": 123135,
@@ -4715,7 +4549,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 87
+        "y": 82
       },
       "hiddenSeries": false,
       "id": 123133,
@@ -4823,7 +4657,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 87
+        "y": 82
       },
       "hiddenSeries": false,
       "id": 123125,
@@ -4920,7 +4754,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 93
+        "y": 88
       },
       "hiddenSeries": false,
       "id": 123137,
@@ -5017,7 +4851,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 93
+        "y": 88
       },
       "hiddenSeries": false,
       "id": 123131,
@@ -5113,7 +4947,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 93
+        "y": 88
       },
       "hiddenSeries": false,
       "id": 123127,
@@ -5211,7 +5045,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 99
+        "y": 94
       },
       "hiddenSeries": false,
       "id": 123129,
@@ -5308,7 +5142,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 99
+        "y": 94
       },
       "hiddenSeries": false,
       "id": 123211,
@@ -5406,7 +5240,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 99
+        "y": 94
       },
       "hiddenSeries": false,
       "id": 123212,
@@ -5504,7 +5338,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 105
+        "y": 100
       },
       "hiddenSeries": false,
       "id": 123213,
@@ -5602,7 +5436,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 105
+        "y": 100
       },
       "hiddenSeries": false,
       "id": 123215,
@@ -5700,7 +5534,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 105
+        "y": 100
       },
       "hiddenSeries": false,
       "id": 123216,
@@ -5798,7 +5632,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 111
+        "y": 106
       },
       "hiddenSeries": false,
       "id": 123217,
@@ -5965,7 +5799,6 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
           "text": "None",
           "value": ""
@@ -5997,10 +5830,13 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": [
+            "None"
+          ],
+          "value": [
+            ""
+          ]
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -6029,10 +5865,13 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": [
+            "None"
+          ],
+          "value": [
+            ""
+          ]
         },
         "datasource": "${datasource}",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , app_kubernetes_io_component)",
@@ -6094,5 +5933,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 179
+  "version": 182
 }
