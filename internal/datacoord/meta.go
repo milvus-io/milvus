@@ -351,6 +351,19 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 			modSegments[seg2Drop.GetID()] = segment
 		}
 	}
+	// set all channels of channel to dropped
+	for _, seg := range m.segments.segments {
+		if seg.InsertChannel != channel {
+			continue
+		}
+		_, ok := modSegments[seg.ID]
+		// seg inf mod segments are all in dropped state
+		if !ok {
+			clonedSeg := seg.Clone()
+			clonedSeg.State = commonpb.SegmentState_Dropped
+			modSegments[seg.ID] = clonedSeg
+		}
+	}
 
 	return m.batchSaveDropSegments(channel, modSegments)
 }
