@@ -234,14 +234,17 @@ func (gp *BaseTable) tryloadFromEnv() {
 	}
 }
 
+// Load loads an object with @key.
 func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.params.Load(strings.ToLower(key))
 }
 
+// LoadWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
 func (gp *BaseTable) LoadWithDefault(key, defaultValue string) string {
 	return gp.params.LoadWithDefault(strings.ToLower(key), defaultValue)
 }
 
+// LoadRange loads objects with range @startKey to @endKey with @limit number of objects.
 func (gp *BaseTable) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	return gp.params.LoadRange(strings.ToLower(key), strings.ToLower(endKey), limit)
 }
