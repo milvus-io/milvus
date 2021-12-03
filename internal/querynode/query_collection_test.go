@@ -40,7 +40,7 @@ import (
 )
 
 func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*queryCollection, error) {
-	tSafe := newTSafeReplica()
+	tSafe := newTSafeReplica(ctx)
 	historical, err := genSimpleHistorical(ctx, tSafe)
 	if err != nil {
 		return nil, err
@@ -134,7 +134,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 
 	schema := genTestCollectionSchema(0, false, 2)
 	historicalReplica := newCollectionReplica(etcdKV)
-	tsReplica := newTSafeReplica()
+	tsReplica := newTSafeReplica(ctx)
 	streamingReplica := newCollectionReplica(etcdKV)
 	historical := newHistorical(context.Background(), historicalReplica, etcdKV, tsReplica)
 

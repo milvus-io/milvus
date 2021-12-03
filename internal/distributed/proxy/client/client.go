@@ -19,78 +19,21 @@ package grpcproxyclient
 import (
 	"context"
 	"fmt"
-	"sync"
-	"time"
 
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/trace"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/keepalive"
 )
 
 // Client is the grpc client for Proxy
 type Client struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	grpcClient    proxypb.ProxyClient
-	conn          *grpc.ClientConn
-	grpcClientMtx sync.RWMutex
-
-	addr string
-
-	getGrpcClient func() (proxypb.ProxyClient, error)
-}
-
-func (c *Client) setGetGrpcClientFunc() {
-	c.getGrpcClient = c.getGrpcClientFunc
-}
-
-func (c *Client) getGrpcClientFunc() (proxypb.ProxyClient, error) {
-	c.grpcClientMtx.RLock()
-	if c.grpcClient != nil {
-		defer c.grpcClientMtx.RUnlock()
-		return c.grpcClient, nil
-	}
-	c.grpcClientMtx.RUnlock()
-
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-
-	if c.grpcClient != nil {
-		return c.grpcClient, nil
-	}
-
-	// FIXME(dragondriver): how to handle error here?
-	// if we return nil here, then we should check if client is nil outside,
-	err := c.connect(retry.Attempts(20))
-	if err != nil {
-		return nil, err
-	}
-
-	return c.grpcClient, nil
-}
-
-func (c *Client) resetConnection() {
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-
-	if c.conn != nil {
-		_ = c.conn.Close()
-	}
-	c.conn = nil
-	c.grpcClient = nil
+	grpcClient grpcclient.GrpcClient
+	addr       string
 }
 
 // NewClient creates a new client instance
@@ -98,99 +41,31 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
-	ctx, cancel := context.WithCancel(ctx)
-
+	Params.Init()
 	client := &Client{
-		ctx:    ctx,
-		cancel: cancel,
-		addr:   addr,
+		addr: addr,
+		grpcClient: &grpcclient.ClientBase{
+			ClientMaxRecvSize: Params.ClientMaxRecvSize,
+			ClientMaxSendSize: Params.ClientMaxSendSize,
+		},
 	}
-
-	client.setGetGrpcClientFunc()
+	client.grpcClient.SetRole(typeutil.ProxyRole)
+	client.grpcClient.SetGetAddrFunc(client.getAddr)
+	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	return client, nil
 }
 
 // Init initializes Proxy's grpc client.
 func (c *Client) Init() error {
-	Params.Init()
-	return c.connect(retry.Attempts(20))
-}
-
-func (c *Client) connect(retryOptions ...retry.Option) error {
-	var kacp = keepalive.ClientParameters{
-		Time:                60 * time.Second, // send pings every 60 seconds if there is no activity
-		Timeout:             6 * time.Second,  // wait 6 second for ping ack before considering the connection dead
-		PermitWithoutStream: true,             // send pings even without active streams
-	}
-	connectGrpcFunc := func() error {
-		opts := trace.GetInterceptorOpts()
-		log.Debug("ProxyClient try connect ", zap.String("address", c.addr))
-		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
-		defer cancel()
-		conn, err := grpc.DialContext(ctx, c.addr,
-			grpc.WithKeepaliveParams(kacp),
-			grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithDefaultCallOptions(
-				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
-				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
-			grpc.WithUnaryInterceptor(
-				grpc_middleware.ChainUnaryClient(
-					grpc_retry.UnaryClientInterceptor(
-						grpc_retry.WithMax(3),
-						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
-					),
-					grpc_opentracing.UnaryClientInterceptor(opts...),
-				)),
-			grpc.WithStreamInterceptor(
-				grpc_middleware.ChainStreamClient(
-					grpc_retry.StreamClientInterceptor(
-						grpc_retry.WithMax(3),
-						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
-					),
-					grpc_opentracing.StreamClientInterceptor(opts...),
-				)),
-		)
-		if err != nil {
-			return err
-		}
-		if c.conn != nil {
-			_ = c.conn.Close()
-		}
-		c.conn = conn
-		return nil
-	}
-
-	err := retry.Do(c.ctx, connectGrpcFunc, retryOptions...)
-	if err != nil {
-		log.Debug("ProxyClient try connect failed", zap.Error(err))
-		return err
-	}
-	log.Debug("ProxyClient connect success")
-
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-	c.grpcClient = proxypb.NewProxyClient(c.conn)
-
 	return nil
 }
 
-func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {
-	ret, err := caller()
-	if err == nil {
-		return ret, nil
-	}
-	if err == context.Canceled || err == context.DeadlineExceeded {
-		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
-	}
-	log.Debug("Proxy Client grpc error", zap.Error(err))
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+	return proxypb.NewProxyClient(cc)
+}
 
-	c.resetConnection()
-
-	ret, err = caller()
-	if err != nil {
-		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
-	}
-	return ret, err
+func (c *Client) getAddr() (string, error) {
+	return c.addr, nil
 }
 
 // Start dummy
@@ -200,13 +75,7 @@ func (c *Client) Start() error {
 
 // Stop stops the client, closes the connection
 func (c *Client) Stop() error {
-	c.cancel()
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-	if c.conn != nil {
-		return c.conn.Close()
-	}
-	return nil
+	return c.grpcClient.Close()
 }
 
 // Register dummy
@@ -216,15 +85,11 @@ func (c *Client) Register() error {
 
 // GetComponentStates get the component state.
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		return client.(proxypb.ProxyClient).GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -233,15 +98,11 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.(proxypb.ProxyClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -251,15 +112,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 // InvalidateCollectionMetaCache invalidate collection meta cache
 func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.InvalidateCollectionMetaCache(ctx, req)
+		return client.(proxypb.ProxyClient).InvalidateCollectionMetaCache(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -269,15 +126,11 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 
 // ReleaseDQLMessageStream release dql message stream by request
 func (c *Client) ReleaseDQLMessageStream(ctx context.Context, req *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.ReleaseDQLMessageStream(ctx, req)
+		return client.(proxypb.ProxyClient).ReleaseDQLMessageStream(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

@@ -40,6 +40,7 @@ type tSafeRef struct {
 type tSafeReplica struct {
 	mu     sync.Mutex            // guards tSafes
 	tSafes map[Channel]*tSafeRef // map[vChannel]tSafeRef
+	ctx    context.Context
 }
 
 func (t *tSafeReplica) getTSafe(vChannel Channel) (Timestamp, error) {
@@ -80,10 +81,9 @@ func (t *tSafeReplica) getTSaferPrivate(vChannel Channel) (tSafer, error) {
 func (t *tSafeReplica) addTSafe(vChannel Channel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	ctx := context.Background()
 	if _, ok := t.tSafes[vChannel]; !ok {
 		t.tSafes[vChannel] = &tSafeRef{
-			tSafer: newTSafe(ctx, vChannel),
+			tSafer: newTSafe(t.ctx, vChannel),
 			ref:    1,
 		}
 		t.tSafes[vChannel].tSafer.start()
@@ -149,9 +149,10 @@ func (t *tSafeReplica) registerTSafeWatcher(vChannel Channel, watcher *tSafeWatc
 	return safer.registerTSafeWatcher(watcher)
 }
 
-func newTSafeReplica() TSafeReplicaInterface {
+func newTSafeReplica(ctx context.Context) TSafeReplicaInterface {
 	var replica TSafeReplicaInterface = &tSafeReplica{
 		tSafes: make(map[string]*tSafeRef),
+		ctx:    ctx,
 	}
 	return replica
 }

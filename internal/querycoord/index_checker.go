@@ -291,7 +291,9 @@ func getIndexInfo(ctx context.Context, info *querypb.SegmentInfo, root types.Roo
 		CollectionID: info.CollectionID,
 		SegmentID:    info.SegmentID,
 	}
-	response, err := root.DescribeSegment(ctx, req)
+	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel2()
+	response, err := root.DescribeSegment(ctx2, req)
 	if err != nil {
 		return nil, err
 	}
@@ -309,9 +311,11 @@ func getIndexInfo(ctx context.Context, info *querypb.SegmentInfo, root types.Roo
 	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
 		IndexBuildIDs: []UniqueID{response.BuildID},
 	}
-	pathResponse, err := index.GetIndexFilePaths(ctx, indexFilePathRequest)
-	if err != nil {
-		return nil, err
+	ctx3, cancel3 := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel3()
+	pathResponse, err2 := index.GetIndexFilePaths(ctx3, indexFilePathRequest)
+	if err2 != nil {
+		return nil, err2
 	}
 
 	if pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {

@@ -19,87 +19,57 @@ package grpcdatacoordclient
 import (
 	"context"
 	"fmt"
-	"sync"
-	"time"
 
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/keepalive"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // Client is the datacoord grpc client
 type Client struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	grpcClient    datapb.DataCoordClient
-	conn          *grpc.ClientConn
-	grpcClientMtx sync.RWMutex
-
-	sess *sessionutil.Session
-	addr string
-
-	getGrpcClient func() (datapb.DataCoordClient, error)
+	grpcClient grpcclient.GrpcClient
+	sess       *sessionutil.Session
 }
 
-func (c *Client) setGetGrpcClientFunc() {
-	c.getGrpcClient = c.getGrpcClientFunc
-}
-
-func (c *Client) getGrpcClientFunc() (datapb.DataCoordClient, error) {
-	c.grpcClientMtx.RLock()
-	if c.grpcClient != nil {
-		defer c.grpcClientMtx.RUnlock()
-		return c.grpcClient, nil
-	}
-	c.grpcClientMtx.RUnlock()
-
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-
-	if c.grpcClient != nil {
-		return c.grpcClient, nil
-	}
-
-	// FIXME(dragondriver): how to handle error here?
-	// if we return nil here, then we should check if client is nil outside,
-	err := c.connect(retry.Attempts(20))
-	if err != nil {
+// NewClient creates a new client instance
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
+	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
+	if sess == nil {
+		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		log.Debug("DataCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-
-	return c.grpcClient, nil
-}
-
-func (c *Client) resetConnection() {
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-
-	if c.conn != nil {
-		_ = c.conn.Close()
+	Params.Init()
+	client := &Client{
+		grpcClient: &grpcclient.ClientBase{
+			ClientMaxRecvSize: Params.ClientMaxRecvSize,
+			ClientMaxSendSize: Params.ClientMaxSendSize,
+		},
+		sess: sess,
 	}
-	c.conn = nil
-	c.grpcClient = nil
+	client.grpcClient.SetRole(typeutil.DataCoordRole)
+	client.grpcClient.SetGetAddrFunc(client.getDataCoordAddr)
+	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
+
+	return client, nil
 }
 
-func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
-	key := typeutil.DataCoordRole
-	msess, _, err := sess.GetSessions(key)
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+	return datapb.NewDataCoordClient(cc)
+}
+
+func (c *Client) getDataCoordAddr() (string, error) {
+	key := c.grpcClient.GetRole()
+	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
 		log.Debug("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
@@ -112,109 +82,9 @@ func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-// NewClient creates a new client instance
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
-	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("DataCoordClient NewClient failed", zap.Error(err))
-		return nil, err
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	client := &Client{
-		ctx:    ctx,
-		cancel: cancel,
-		sess:   sess,
-	}
-
-	client.setGetGrpcClientFunc()
-	return client, nil
-}
-
 // Init initializes the client
 func (c *Client) Init() error {
-	Params.Init()
 	return nil
-}
-
-func (c *Client) connect(retryOptions ...retry.Option) error {
-	var kacp = keepalive.ClientParameters{
-		Time:                60 * time.Second, // send pings every 60 seconds if there is no activity
-		Timeout:             6 * time.Second,  // wait 6 second for ping ack before considering the connection dead
-		PermitWithoutStream: true,             // send pings even without active streams
-	}
-
-	var err error
-	connectDataCoordFn := func() error {
-		c.addr, err = getDataCoordAddress(c.sess)
-		if err != nil {
-			log.Debug("DataCoordClient getDataCoordAddr failed", zap.Error(err))
-			return err
-		}
-		opts := trace.GetInterceptorOpts()
-		log.Debug("DataCoordClient try reconnect ", zap.String("address", c.addr))
-		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
-		defer cancel()
-		conn, err := grpc.DialContext(ctx, c.addr,
-			grpc.WithKeepaliveParams(kacp),
-			grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithDefaultCallOptions(
-				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
-				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
-			grpc.WithUnaryInterceptor(
-				grpc_middleware.ChainUnaryClient(
-					grpc_retry.UnaryClientInterceptor(
-						grpc_retry.WithMax(3),
-						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
-					),
-					grpc_opentracing.UnaryClientInterceptor(opts...),
-				)),
-			grpc.WithStreamInterceptor(
-				grpc_middleware.ChainStreamClient(
-					grpc_retry.StreamClientInterceptor(grpc_retry.WithMax(3),
-						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
-					),
-					grpc_opentracing.StreamClientInterceptor(opts...),
-				)),
-		)
-		if err != nil {
-			return err
-		}
-		if c.conn != nil {
-			_ = c.conn.Close()
-		}
-		c.conn = conn
-		return nil
-	}
-
-	err = retry.Do(c.ctx, connectDataCoordFn, retryOptions...)
-	if err != nil {
-		log.Debug("DataCoord try reconnect failed", zap.Error(err))
-		return err
-	}
-	c.grpcClient = datapb.NewDataCoordClient(c.conn)
-	return nil
-}
-
-func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {
-	ret, err := caller()
-	if err == nil {
-		return ret, nil
-	}
-	if err == context.Canceled || err == context.DeadlineExceeded {
-		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
-	}
-
-	log.Debug("DataCoord Client grpc error", zap.Error(err))
-
-	c.resetConnection()
-
-	ret, err = caller()
-	if err != nil {
-		return nil, fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
-	}
-
-	return ret, err
 }
 
 // Start enables the client
@@ -223,30 +93,22 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) Stop() error {
-	c.cancel()
-	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
-	if c.conn != nil {
-		return c.conn.Close()
-	}
-	return nil
+	return c.grpcClient.Close()
 }
 
-// Register dumy
+// Register dummy
 func (c *Client) Register() error {
 	return nil
 }
 
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	log.Debug("ABC", zap.Any("ctx", ctx), zap.Any("func", c.grpcClient.ReCall))
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		log.Debug("ABC", zap.Any("client", client))
+		return client.(datapb.DataCoordClient).GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -256,15 +118,11 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 
 // GetTimeTickChannel return the name of time tick channel.
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		return client.(datapb.DataCoordClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -274,15 +132,11 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 
 // GetStatisticsChannel return the name of statistics channel.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.Call(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.(datapb.DataCoordClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -291,15 +145,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 }
 
 func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.Flush(ctx, req)
+		return client.(datapb.DataCoordClient).Flush(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -321,15 +171,11 @@ func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 // if the VChannel is newly used, `WatchDmlChannels` will be invoked to notify a `DataNode`(selected by policy) to watch it
 // if there is anything make the allocation impossible, the response will not contain the corresponding result
 func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.AssignSegmentID(ctx, req)
+		return client.(datapb.DataCoordClient).AssignSegmentID(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -347,15 +193,11 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 // 	otherwise the Segment State and Start position information will be returned
 // error is returned only when some communication issue occurs
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetSegmentStates(ctx, req)
+		return client.(datapb.DataCoordClient).GetSegmentStates(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -372,15 +214,11 @@ func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 // 	and corresponding binlog path list
 // error is returned only when some communication issue occurs
 func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetInsertBinlogPaths(ctx, req)
+		return client.(datapb.DataCoordClient).GetInsertBinlogPaths(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -397,15 +235,11 @@ func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 // 	only row count for now
 // error is returned only when some communication issue occurs
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetCollectionStatistics(ctx, req)
+		return client.(datapb.DataCoordClient).GetCollectionStatistics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -422,15 +256,11 @@ func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 // 	only row count for now
 // error is returned only when some communication issue occurs
 func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetPartitionStatistics(ctx, req)
+		return client.(datapb.DataCoordClient).GetPartitionStatistics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -441,15 +271,11 @@ func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 // GetSegmentInfoChannel DEPRECATED
 // legacy api to get SegmentInfo Channel name
 func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
+		return client.(datapb.DataCoordClient).GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -465,15 +291,11 @@ func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 // response struct `GetSegmentInfoResponse` contains the list of segment info
 // error is returned only when some communication issue occurs
 func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetSegmentInfo(ctx, req)
+		return client.(datapb.DataCoordClient).GetSegmentInfo(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -494,16 +316,18 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 // 	the root reason is each `SaveBinlogPaths` will overwrite the checkpoint position
 //  if the constraint is broken, the checkpoint position will not be monotonically increasing and the integrity will be compromised
 func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	// FIXME(dragondriver): why not to recall here?
-	client, err := c.getGrpcClient()
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+	// use Call here on purpose
+	ret, err := c.grpcClient.Call(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataCoordClient).SaveBinlogPaths(ctx, req)
+	})
+	log.Debug("abc,", zap.Any("ret", ret), zap.Error(err))
+	if err != nil || ret == nil {
+		return nil, err
 	}
-
-	return client.SaveBinlogPaths(ctx, req)
+	return ret.(*commonpb.Status), err
 }
 
 // GetRecoveryInfo request segment recovery info of collection/partition
@@ -514,15 +338,11 @@ func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 // response struct `GetRecoveryInfoResponse` contains the list of segments info and corresponding vchannel info
 // error is returned only when some communication issue occurs
 func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetRecoveryInfo(ctx, req)
+		return client.(datapb.DataCoordClient).GetRecoveryInfo(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -539,15 +359,11 @@ func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 // response struct `GetFlushedSegmentsResponse` contains flushed segment id list
 // error is returned only when some communication issue occurs
 func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetFlushedSegments(ctx, req)
+		return client.(datapb.DataCoordClient).GetFlushedSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -557,15 +373,11 @@ func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 
 // GetMetrics gets all metrics of datacoord
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetMetrics(ctx, req)
+		return client.(datapb.DataCoordClient).GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -574,15 +386,11 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 }
 
 func (c *Client) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.CompleteCompaction(ctx, req)
+		return client.(datapb.DataCoordClient).CompleteCompaction(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -591,15 +399,11 @@ func (c *Client) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 }
 
 func (c *Client) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.ManualCompaction(ctx, req)
+		return client.(datapb.DataCoordClient).ManualCompaction(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -608,15 +412,11 @@ func (c *Client) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 }
 
 func (c *Client) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetCompactionState(ctx, req)
+		return client.(datapb.DataCoordClient).GetCompactionState(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -625,15 +425,11 @@ func (c *Client) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 }
 
 func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetCompactionStateWithPlans(ctx, req)
+		return client.(datapb.DataCoordClient).GetCompactionStateWithPlans(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -643,15 +439,11 @@ func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 
 // WatchChannels notifies DataCoord to watch vchannels of a collection
 func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.WatchChannels(ctx, req)
+		return client.(datapb.DataCoordClient).WatchChannels(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -661,15 +453,11 @@ func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 
 // GetFlushState gets the flush state of multiple segments
 func (c *Client) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetFlushState(ctx, req)
+		return client.(datapb.DataCoordClient).GetFlushState(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -679,15 +467,11 @@ func (c *Client) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 
 // DropVirtualChannel drops virtual channel in datacoord.
 func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		client, err := c.getGrpcClient()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.DropVirtualChannel(ctx, req)
+		return client.(datapb.DataCoordClient).DropVirtualChannel(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

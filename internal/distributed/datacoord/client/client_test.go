@@ -21,105 +21,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/mock"
+
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 )
-
-type MockDataCoordClient struct {
-	err error
-}
-
-func (m *MockDataCoordClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{}, m.err
-}
-
-func (m *MockDataCoordClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) Flush(ctx context.Context, in *datapb.FlushRequest, opts ...grpc.CallOption) (*datapb.FlushResponse, error) {
-	return &datapb.FlushResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) AssignSegmentID(ctx context.Context, in *datapb.AssignSegmentIDRequest, opts ...grpc.CallOption) (*datapb.AssignSegmentIDResponse, error) {
-	return &datapb.AssignSegmentIDResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetSegmentInfo(ctx context.Context, in *datapb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
-	return &datapb.GetSegmentInfoResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetSegmentStates(ctx context.Context, in *datapb.GetSegmentStatesRequest, opts ...grpc.CallOption) (*datapb.GetSegmentStatesResponse, error) {
-	return &datapb.GetSegmentStatesResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetInsertBinlogPaths(ctx context.Context, in *datapb.GetInsertBinlogPathsRequest, opts ...grpc.CallOption) (*datapb.GetInsertBinlogPathsResponse, error) {
-	return &datapb.GetInsertBinlogPathsResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetCollectionStatistics(ctx context.Context, in *datapb.GetCollectionStatisticsRequest, opts ...grpc.CallOption) (*datapb.GetCollectionStatisticsResponse, error) {
-	return &datapb.GetCollectionStatisticsResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetPartitionStatistics(ctx context.Context, in *datapb.GetPartitionStatisticsRequest, opts ...grpc.CallOption) (*datapb.GetPartitionStatisticsResponse, error) {
-	return &datapb.GetPartitionStatisticsResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetSegmentInfoChannel(ctx context.Context, in *datapb.GetSegmentInfoChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) SaveBinlogPaths(ctx context.Context, in *datapb.SaveBinlogPathsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockDataCoordClient) GetRecoveryInfo(ctx context.Context, in *datapb.GetRecoveryInfoRequest, opts ...grpc.CallOption) (*datapb.GetRecoveryInfoResponse, error) {
-	return &datapb.GetRecoveryInfoResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetFlushedSegments(ctx context.Context, in *datapb.GetFlushedSegmentsRequest, opts ...grpc.CallOption) (*datapb.GetFlushedSegmentsResponse, error) {
-	return &datapb.GetFlushedSegmentsResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	return &milvuspb.GetMetricsResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.err
-}
-
-func (m *MockDataCoordClient) ManualCompaction(ctx context.Context, in *milvuspb.ManualCompactionRequest, opts ...grpc.CallOption) (*milvuspb.ManualCompactionResponse, error) {
-	return &milvuspb.ManualCompactionResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetCompactionState(ctx context.Context, in *milvuspb.GetCompactionStateRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionStateResponse, error) {
-	return &milvuspb.GetCompactionStateResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error) {
-	return &milvuspb.GetCompactionPlansResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest, opts ...grpc.CallOption) (*datapb.WatchChannelsResponse, error) {
-	return &datapb.WatchChannelsResponse{}, m.err
-}
-func (m *MockDataCoordClient) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
-	return &milvuspb.GetFlushStateResponse{}, m.err
-}
-
-func (m *MockDataCoordClient) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
-	return &datapb.DropVirtualChannelResponse{}, m.err
-}
 
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
@@ -213,30 +120,49 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r21, err)
 	}
 
-	client.getGrpcClient = func() (datapb.DataCoordClient, error) {
-		return &MockDataCoordClient{err: nil}, errors.New("dummy")
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: errors.New("dummy"),
 	}
+
+	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.DataCoordClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
+
 	checkFunc(false)
 
 	// special case since this method didn't use recall()
 	ret, err := client.SaveBinlogPaths(ctx, nil)
-	assert.NotNil(t, ret)
-	assert.Nil(t, err)
+	assert.Nil(t, ret)
+	assert.NotNil(t, err)
 
-	client.getGrpcClient = func() (datapb.DataCoordClient, error) {
-		return &MockDataCoordClient{err: errors.New("dummy")}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.DataCoordClient{Err: errors.New("dummy")}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
 	checkFunc(false)
 
 	// special case since this method didn't use recall()
 	ret, err = client.SaveBinlogPaths(ctx, nil)
-	assert.NotNil(t, ret)
+	assert.Nil(t, ret)
 	assert.NotNil(t, err)
 
-	client.getGrpcClient = func() (datapb.DataCoordClient, error) {
-		return &MockDataCoordClient{err: nil}, nil
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
 	}
+	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+		return &mock.DataCoordClient{Err: nil}
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 	checkFunc(true)
+
+	// special case since this method didn't use recall()
+	ret, err = client.SaveBinlogPaths(ctx, nil)
+	assert.NotNil(t, ret)
+	assert.Nil(t, err)
 
 	err = client.Stop()
 	assert.Nil(t, err)

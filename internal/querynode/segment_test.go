@@ -886,7 +886,7 @@ func TestSegment_indexInfoTest(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		tSafe := newTSafeReplica()
+		tSafe := newTSafeReplica(ctx)
 		h, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
@@ -939,7 +939,7 @@ func TestSegment_indexInfoTest(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		tSafe := newTSafeReplica()
+		tSafe := newTSafeReplica(ctx)
 		h, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 

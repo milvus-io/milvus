@@ -47,7 +47,7 @@ func TestPlan_createSearchPlanByExpr(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tSafe := newTSafeReplica()
+	tSafe := newTSafeReplica(ctx)
 	historical, err := genSimpleHistorical(ctx, tSafe)
 	assert.NoError(t, err)
 

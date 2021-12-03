@@ -30,7 +30,7 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 	defer cancel()
 
 	genServiceTimeNode := func() *serviceTimeNode {
-		tSafe := newTSafeReplica()
+		tSafe := newTSafeReplica(ctx)
 		tSafe.addTSafe(defaultVChannel)
 
 		fac, err := genFactory()
