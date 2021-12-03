@@ -124,6 +124,7 @@ type ConfAdapter interface {
 type BaseConfAdapter struct {
 }
 
+// CheckTrain check whether the params contains supported metrics types
 func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
