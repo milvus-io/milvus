@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/storage"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,8 +72,17 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		iData := genEmptyInsertData()
 		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, p)
+		assert.NoError(t, err)
+		assert.Empty(t, p.inPaths)
+		assert.Empty(t, p.statsPaths)
+		assert.Empty(t, p.deltaInfo)
+
+		iData = &InsertData{Data: make(map[int64]storage.FieldData)}
+		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
+		assert.NoError(t, err)
+		assert.Empty(t, p.inPaths)
+		assert.Empty(t, p.statsPaths)
+		assert.Empty(t, p.deltaInfo)
 
 		iData = genInsertData()
 		dData = &DeleteData{

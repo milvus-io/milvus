@@ -13,11 +13,15 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDmlChannels(t *testing.T) {
@@ -71,3 +75,82 @@ func TestDmlChannels(t *testing.T) {
 	dml.removeChannels(chanName0)
 	assert.Equal(t, 0, dml.getChannelNum())
 }
+
+func TestDmChannelsFailure(t *testing.T) {
+	t.Run("Test newDmlChannels", func(t *testing.T) {
+		mockFactory := &FailMessageStreamFactory{}
+		assert.Panics(t, func() { newDmlChannels(context.TODO(), mockFactory, "test-newdmlchannel-root", 1) })
+	})
+
+	t.Run("Test broadcast", func(t *testing.T) {
+		mockFactory := &FailMessageStreamFactory{errBroadcast: true}
+		dml := newDmlChannels(context.TODO(), mockFactory, "test-newdmlchannel-root", 1)
+		chanName0 := dml.getChannelName()
+		dml.addChannels(chanName0)
+		require.Equal(t, 1, dml.getChannelNum())
+
+		err := dml.broadcast([]string{chanName0}, nil)
+		assert.Error(t, err)
+
+		v, err := dml.broadcastMark([]string{chanName0}, nil)
+		assert.Empty(t, v)
+		assert.Error(t, err)
+	})
+}
+
+// FailMessageStreamFactory mock MessageStreamFactory failure
+type FailMessageStreamFactory struct {
+	msgstream.Factory
+	errBroadcast bool
+}
+
+func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	if f.errBroadcast {
+		return &FailMsgStream{errBroadcast: true}, nil
+	}
+	return nil, errors.New("mocked failure")
+}
+
+func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, errors.New("mocked failure")
+}
+
+type FailMsgStream struct {
+	msgstream.MsgStream
+	errBroadcast bool
+}
+
+func (ms *FailMsgStream) Start()                                       {}
+func (ms *FailMsgStream) Close()                                       {}
+func (ms *FailMsgStream) Chan() <-chan *msgstream.MsgPack              { return nil }
+func (ms *FailMsgStream) AsProducer(channels []string)                 {}
+func (ms *FailMsgStream) AsConsumer(channels []string, subName string) {}
+func (ms *FailMsgStream) AsReader(channels []string, subName string)   {}
+func (ms *FailMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
+}
+func (ms *FailMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc)                   {}
+func (ms *FailMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 { return nil }
+func (ms *FailMsgStream) GetProduceChannels() []string                                    { return nil }
+func (ms *FailMsgStream) Produce(*msgstream.MsgPack) error                                { return nil }
+func (ms *FailMsgStream) ProduceMark(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+	return nil, nil
+}
+func (ms *FailMsgStream) Broadcast(*msgstream.MsgPack) error {
+	if ms.errBroadcast {
+		return errors.New("broadcast error")
+	}
+	return nil
+}
+func (ms *FailMsgStream) BroadcastMark(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+	if ms.errBroadcast {
+		return nil, errors.New("broadcastMark error")
+	}
+	return nil, nil
+}
+func (ms *FailMsgStream) Consume() *msgstream.MsgPack { return nil }
+func (ms *FailMsgStream) Next(ctx context.Context, channelName string) (msgstream.TsMsg, error) {
+	return nil, nil
+}
+func (ms *FailMsgStream) HasNext(channelName string) bool                         { return true }
+func (ms *FailMsgStream) Seek(offset []*msgstream.MsgPosition) error              { return nil }
+func (ms *FailMsgStream) SeekReaders(msgPositions []*msgstream.MsgPosition) error { return nil }

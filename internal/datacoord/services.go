@@ -515,12 +515,17 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing {
 			continue
 		}
+		binlogs := segment.GetBinlogs()
+
+		if len(binlogs) == 0 {
+			continue
+		}
+
 		_, ok := flushedIDs[id]
 		if !ok {
 			flushedIDs[id] = struct{}{}
 		}
 
-		binlogs := segment.GetBinlogs()
 		field2Binlog := make(map[UniqueID][]string)
 		for _, field := range binlogs {
 			field2Binlog[field.GetFieldID()] = append(field2Binlog[field.GetFieldID()], field.GetBinlogs()...)
@@ -766,7 +771,14 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID, &timetravel{req.Timetravel})
+	tt, err := getTimetravelReverseTime(ctx, s.allocator)
+	if err != nil {
+		log.Warn("failed to get timetravel reverse time", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+
+	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID, tt)
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
 		resp.Status.Reason = err.Error()
