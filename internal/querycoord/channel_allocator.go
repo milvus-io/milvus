@@ -59,7 +59,7 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 		}
 
 		if len(availableNodes) > 0 {
-			nodeIDSlice := make([]int64, 0)
+			nodeIDSlice := make([]int64, 0, len(availableNodes))
 			for nodeID := range availableNodes {
 				nodeIDSlice = append(nodeIDSlice, nodeID)
 			}
