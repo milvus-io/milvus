@@ -443,7 +443,7 @@ class TestPartitionOperations(TestcaseBase):
         method: 1.create a partition with default schema
                 2. drop the partition
                 3. drop the same partition again
-        expected: raise exception when 2nd time
+        expected: raise exception for 2nd time
         """
         # create collection
         collection_w = self.init_collection_wrap()
