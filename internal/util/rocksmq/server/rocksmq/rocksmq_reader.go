@@ -35,6 +35,7 @@ type rocksmqReader struct {
 	readerMutex        chan struct{}
 }
 
+//Seek seek the rocksmq reader to the pointed position
 func (rr *rocksmqReader) Seek(msgID UniqueID) { //nolint:govet
 	rr.currentID = msgID
 	select {
