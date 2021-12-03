@@ -5479,7 +5479,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Malloc Rate",
+      "title": "Memory Malloc Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
