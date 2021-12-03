@@ -5,7 +5,21 @@ from utils.util_log import test_log as log
 
 
 def wait_pods_ready(namespace, label_selector, timeout=360):
-    """wait pods with label selector all ready"""
+    """
+    wait pods with label selector all ready
+
+    :param namespace: the namespace where the release
+    :type namespace: str
+
+    :param label_selector: labels to restrict which pods are waiting to be ready
+    :type label_selector: str
+
+    :param timeout: limits the duration of the call
+    :type timeout: int
+
+    :example:
+            >>> wait_pods_ready("default", "app.kubernetes.io/instance=scale-query")
+        """
     config.load_kube_config()
     api_instance = client.CoreV1Api()
     try:
@@ -27,7 +41,7 @@ def wait_pods_ready(namespace, label_selector, timeout=360):
         if all_pos_ready_flag:
             log.info(f"all pods in namespace {namespace} with label {label_selector} are ready")
         else:
-            log.info("timeout for waiting all pods in namespace {namespace} with label {label_selector} ready")
+            log.info(f"timeout for waiting all pods in namespace {namespace} with label {label_selector} ready")
     except ApiException as e:
         log.error("Exception when calling CoreV1Api->list_namespaced_pod: %s\n" % e)
         raise Exception(str(e))
