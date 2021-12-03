@@ -163,6 +163,7 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 	return msg
 }
 
+// filterInvalidInsertMessage would filter out invalid insert messages
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
