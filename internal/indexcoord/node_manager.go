@@ -97,15 +97,24 @@ func (nm *NodeManager) PeekClient() (UniqueID, types.IndexNode) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 
-	log.Debug("IndexCoord NodeManager PeekClient")
-
 	nodeID := nm.pq.Peek()
 	client, ok := nm.nodeClients[nodeID]
 	if !ok {
 		log.Error("IndexCoord NodeManager PeekClient", zap.Any("There is no IndexNode client corresponding to NodeID", nodeID))
 		return nodeID, nil
 	}
+	log.Debug("IndexCoord NodeManager PeekClient ", zap.Int64("node", nodeID))
 	return nodeID, client
+}
+
+func (nm *NodeManager) ListNode() []UniqueID {
+	nm.lock.Lock()
+	defer nm.lock.Unlock()
+	clients := []UniqueID{}
+	for id := range nm.nodeClients {
+		clients = append(clients, id)
+	}
+	return clients
 }
 
 type indexNodeGetMetricsResponse struct {
