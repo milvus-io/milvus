@@ -44,7 +44,7 @@ func TestMergedTimeTicker_close10000(t *testing.T) {
 			mt.close()
 		}(mt)
 	}
-	tm := time.NewTimer(time.Millisecond * 20)
+	tm := time.NewTimer(10 * time.Second)
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -52,7 +52,7 @@ func TestMergedTimeTicker_close10000(t *testing.T) {
 	}()
 	select {
 	case <-tm.C:
-		t.FailNow()
+		t.Fatal("wait all timer close, timeout")
 	case <-done:
 	}
 }
