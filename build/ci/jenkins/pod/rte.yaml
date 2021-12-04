@@ -32,7 +32,7 @@ spec:
       name: build-cache
       subPath: docker-volume   
   - name: pytest
-    image: milvusdb/pytest:20211108-d14cf36
+    image: milvusdb/pytest:20211123-f95ef22
     volumeMounts:
     - mountPath: /ci-logs
       name: ci-logs  

@@ -1,7 +1,7 @@
 #!/usr/bin/env groovy
 
 int total_timeout_minutes = 120
-int e2e_timeout_seconds = 50 * 60
+int e2e_timeout_seconds = 70 * 60
 def imageTag=''
 
 pipeline {
