@@ -68,15 +68,14 @@ func stopRocksmq() {
 
 // MilvusRoles determines to run which components.
 type MilvusRoles struct {
-	EnableRootCoord      bool `env:"ENABLE_ROOT_COORD"`
-	EnableProxy          bool `env:"ENABLE_PROXY"`
-	EnableQueryCoord     bool `env:"ENABLE_QUERY_COORD"`
-	EnableQueryNode      bool `env:"ENABLE_QUERY_NODE"`
-	EnableDataCoord      bool `env:"ENABLE_DATA_COORD"`
-	EnableDataNode       bool `env:"ENABLE_DATA_NODE"`
-	EnableIndexCoord     bool `env:"ENABLE_INDEX_COORD"`
-	EnableIndexNode      bool `env:"ENABLE_INDEX_NODE"`
-	EnableMsgStreamCoord bool `env:"ENABLE_MSGSTREAM_COORD"`
+	EnableRootCoord  bool `env:"ENABLE_ROOT_COORD"`
+	EnableProxy      bool `env:"ENABLE_PROXY"`
+	EnableQueryCoord bool `env:"ENABLE_QUERY_COORD"`
+	EnableQueryNode  bool `env:"ENABLE_QUERY_NODE"`
+	EnableDataCoord  bool `env:"ENABLE_DATA_COORD"`
+	EnableDataNode   bool `env:"ENABLE_DATA_NODE"`
+	EnableIndexCoord bool `env:"ENABLE_INDEX_COORD"`
+	EnableIndexNode  bool `env:"ENABLE_INDEX_NODE"`
 }
 
 // EnvValue not used now.
@@ -322,26 +321,6 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 	return in
 }
 
-func (mr *MilvusRoles) runMsgStreamCoord(ctx context.Context) *components.MsgStream {
-	var mss *components.MsgStream
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		var err error
-		mss, err = components.NewMsgStreamCoord(ctx)
-		if err != nil {
-			panic(err)
-		}
-		wg.Done()
-		_ = mss.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterMsgStreamCoord()
-	return mss
-}
-
 // Run runs Milvus components.
 func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
@@ -433,14 +412,6 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 		in = mr.runIndexNode(ctx, localMsg, alias)
 		if in != nil {
 			defer in.Stop()
-		}
-	}
-
-	var mss *components.MsgStream
-	if mr.EnableMsgStreamCoord {
-		mss = mr.runMsgStreamCoord(ctx)
-		if mss != nil {
-			defer mss.Stop()
 		}
 	}
 

@@ -30,5 +30,4 @@ func TestRegisterMetrics(t *testing.T) {
 	RegisterProxy()
 	RegisterQueryNode()
 	RegisterQueryCoord()
-	RegisterMsgStreamCoord()
 }

@@ -650,11 +650,6 @@ func RegisterIndexNode() {
 
 }
 
-//RegisterMsgStreamCoord registers MsgStreamCoord metrics
-func RegisterMsgStreamCoord() {
-
-}
-
 //ServeHTTP serves prometheus http service
 func ServeHTTP() {
 	http.Handle("/metrics", promhttp.Handler())
