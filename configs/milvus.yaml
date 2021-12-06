@@ -101,7 +101,7 @@ queryCoord:
   port: 19531
   autoHandoff: true
   autoBalance: true
-  overloadedMemoryThresholdPercentage: 90
+  overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
 
