@@ -125,11 +125,11 @@ func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.E
 
 func (qn *queryNode) start() error {
 	if err := qn.client.Init(); err != nil {
-		log.Error("Start: init queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
+		log.Error("start: init queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
 		return err
 	}
 	if err := qn.client.Start(); err != nil {
-		log.Error("Start: start queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
+		log.Error("start: start queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
 		return err
 	}
 
@@ -138,7 +138,7 @@ func (qn *queryNode) start() error {
 		qn.state = online
 	}
 	qn.stateLock.Unlock()
-	log.Debug("Start: queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
+	log.Debug("start: queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
 	return nil
 }
 
