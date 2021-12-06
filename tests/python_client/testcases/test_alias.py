@@ -81,6 +81,7 @@ class TestAliasOperation(TestcaseBase):
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_alias_alter_operation_default(self):
         """
         target: test collection altering alias
@@ -504,6 +505,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                                   check_task=CheckTasks.err_res,
                                   check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_collection_by_alias(self):
         """
         target: test dropping a collection by alias
