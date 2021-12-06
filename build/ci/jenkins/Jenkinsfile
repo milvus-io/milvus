@@ -67,7 +67,7 @@ pipeline {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
                                             ./e2e-k8s.sh \
-                                            --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                            --node-image registry.milvus.io/kindest/node:v1.20.2 \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
                                             --skip-export-logs \
