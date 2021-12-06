@@ -372,3 +372,39 @@ func TestValidateSchema(t *testing.T) {
 	pf3.IndexParams = ip3Good
 	assert.Nil(t, validateSchema(coll))
 }
+
+func TestValidateMultipleVectorFields(t *testing.T) {
+	// case1, no vector field
+	schema1 := &schemapb.CollectionSchema{}
+	assert.NoError(t, validateMultipleVectorFields(schema1))
+
+	// case2, only one vector field
+	schema2 := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "case2",
+				DataType: schemapb.DataType_FloatVector,
+			},
+		},
+	}
+	assert.NoError(t, validateMultipleVectorFields(schema2))
+
+	// case3, multiple vectors
+	schema3 := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "case3_f",
+				DataType: schemapb.DataType_FloatVector,
+			},
+			{
+				Name:     "case3_b",
+				DataType: schemapb.DataType_BinaryVector,
+			},
+		},
+	}
+	if enableMultipleVectorFields {
+		assert.NoError(t, validateMultipleVectorFields(schema3))
+	} else {
+		assert.Error(t, validateMultipleVectorFields(schema3))
+	}
+}

@@ -1173,6 +1173,10 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	if err := validateMultipleVectorFields(cct.schema); err != nil {
+		return err
+	}
+
 	return nil
 }
 

@@ -178,6 +178,23 @@ func constructCollectionSchemaWithAllType(
 		AutoID:      false,
 	}
 
+	if enableMultipleVectorFields {
+		return &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				b,
+				i32,
+				i64,
+				f,
+				d,
+				fVec,
+				bVec,
+			},
+		}
+	}
+
 	return &schemapb.CollectionSchema{
 		Name:        collectionName,
 		Description: "",
@@ -189,7 +206,7 @@ func constructCollectionSchemaWithAllType(
 			f,
 			d,
 			fVec,
-			bVec,
+			// bVec,
 		},
 	}
 }
@@ -1114,6 +1131,32 @@ func TestCreateCollectionTask(t *testing.T) {
 		task.CreateCollectionRequest.Schema = binaryTooLargeDimSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
+
+		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         "second_vector",
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: strconv.Itoa(128),
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		})
+		twoVecFieldsSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = twoVecFieldsSchema
+		err = task.PreExecute(ctx)
+		if enableMultipleVectorFields {
+			assert.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+		}
 	})
 }
 

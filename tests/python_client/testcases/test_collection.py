@@ -422,6 +422,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_schema_wrap.init_collection_schema([field], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     def test_collection_multi_float_vectors(self):
         """
         target: test collection with multi float vectors
@@ -436,6 +437,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     def test_collection_mix_vectors(self):
         """
         target: test collection with mix vectors
