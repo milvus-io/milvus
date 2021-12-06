@@ -215,6 +215,9 @@ func (i *IndexNode) Start() error {
 
 // Stop closes the server.
 func (i *IndexNode) Stop() error {
+	// https://github.com/milvus-io/milvus/issues/12282
+	i.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	i.loopCancel()
 	if i.sched != nil {
 		i.sched.Close()
@@ -223,9 +226,6 @@ func (i *IndexNode) Stop() error {
 		cb()
 	}
 	i.session.Revoke(time.Second)
-
-	// https://github.com/milvus-io/milvus/issues/12282
-	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	log.Debug("Index node stopped.")
 	return nil
