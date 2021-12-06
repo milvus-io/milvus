@@ -1,6 +1,4 @@
-<a href="https://milvus.io/hacktoberfest-2021">
-    <img src="https://assets.zilliz.com/milvus_hacktoberfest_15ba8e5083.jpeg" alt="Join Hacktoberfest with Milvus">
-</a>
+<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_en_6c5b3a1466.png" alt="milvus banner">
 
 
 <div class="column" align="middle">
@@ -15,7 +13,7 @@
 
 Milvus is an open-source vector database built to power embedding similarity search and AI applications. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
 
-Milvus 2.0 is a cloud-native vector database with storage and computation separated by design. All components in this refactored version of Milvus are stateless to enhance elasticity and flexibility. For more architecture details, see [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
+Milvus 2.0 is a cloud-native vector database with storage and computation separated by design. [Compared with prior releases](https://github.com/milvus-io/milvus/blob/master/milvus20vs1x.md), this refactored version of Milvus is highly scalable as all components are stateless to enhance elasticity and flexibility. For more architecture details, see [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
 
 Milvus was released under the [open-source Apache License 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) in October 2019. It is currently a graduate project under [LF AI & Data Foundation](https://lfaidata.foundation/).
 
@@ -94,10 +92,6 @@ $ make
 For the full story, see [developer's documentation](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md).
 
 > **IMPORTANT** The master branch is for the development of Milvus v2.0. On March 9th, 2021, we released Milvus v1.0, the first stable version of Milvus with long-term support. To use Milvus v1.0, switch to [branch 1.0](https://github.com/milvus-io/milvus/tree/1.0).
-
-## Milvus 2.0 vs. 1.x: Cloud-native, distributed architecture, highly scalable, and more
-
-See [Milvus 2.0 vs. 1.x](https://github.com/milvus-io/milvus/blob/master/milvus20vs1x.md) for more information.
 
 ## Real world demos
 
@@ -363,11 +357,9 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/zxf2017"><img src="https://avatars.githubusercontent.com/u/29620478?v=4" width="30px" /></a>
 <!-- Do not remove end of hero-bot --><br>
 
-## Documentation
+## Developer tools
 
-For guidance on installation, development, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs).
-
-### SDK
+### SDKs
 
 The implemented SDK and its API documentation are listed below:
 
@@ -376,11 +368,17 @@ The implemented SDK and its API documentation are listed below:
 - [Go SDK](https://github.com/milvus-io/milvus-sdk-go)(under development)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
-### Milvus insight
+### Milvus Insight
 
-Milvus insight provides an intuitive and efficient GUI for Milvus.
+Milvus Insight provides an intuitive and efficient GUI for Milvus.
 
 - [Quick start](https://github.com/zilliztech/milvus-insight#quick-start)
+
+### Milvus CLI
+
+The Milvus command-line interface based on [Milvus Python SDK](https://github.com/milvus-io/pymilvus).
+
+- [Overview](https://github.com/milvus-io/milvus_cli#overview)
 
 ## Community
 
@@ -404,7 +402,7 @@ Follow Milvus on social media:
 - [Twitter](https://twitter.com/milvusio)
 - [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
 
-## Join Us
+## Join us
 
 Zilliz, the company behind Milvus, is [actively hiring](https://app.mokahr.com/apply/zilliz/37974#/) algorithm, database, full-stack developers and solution engineers to build the next-generation open-source data fabric.
 
