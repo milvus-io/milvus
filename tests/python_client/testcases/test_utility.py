@@ -20,26 +20,6 @@ num_loaded_entities = "num_loaded_entities"
 num_total_entities = "num_total_entities"
 
 
-def get_segment_distribution(res):
-    """
-    Get segment distribution
-    """
-    from collections import defaultdict
-    segment_distribution = defaultdict(lambda: {"growing": [], "sealed": []})
-    for r in res:
-        if r.nodeID not in segment_distribution:
-            segment_distribution[r.nodeID] = {
-                "growing": [],
-                "sealed": []
-            }
-        if r.state == 3:
-            segment_distribution[r.nodeID]["sealed"].append(r.segmentID)
-        if r.state == 2:
-            segment_distribution[r.nodeID]["growing"].append(r.segmentID)
-
-    return segment_distribution
-
-
 class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
 
@@ -1487,7 +1467,7 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.load()
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
-        segment_distribution = get_segment_distribution(res)
+        segment_distribution = cf.get_segment_distribution(res)
         all_querynodes = [node["identifier"] for node in ms.query_nodes]
         assert len(all_querynodes) > 1
         all_querynodes = sorted(all_querynodes,
@@ -1500,7 +1480,7 @@ class TestUtilityAdvanced(TestcaseBase):
         self.utility_wrap.load_balance(src_node_id, des_node_ids, sealed_segment_ids)
         # get segments distribution after load balance
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
-        segment_distribution = get_segment_distribution(res)
+        segment_distribution = cf.get_segment_distribution(res)
         des_sealed_segment_ids = []
         for des_node_id in des_node_ids:
             des_sealed_segment_ids += segment_distribution[des_node_id]["sealed"]
