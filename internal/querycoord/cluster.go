@@ -166,7 +166,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 		onlineSessionMap[nodeID] = session
 	}
 	for nodeID, session := range onlineSessionMap {
-		log.Debug("ReloadFromKV: register a queryNode to cluster", zap.Any("nodeID", nodeID))
+		log.Debug("reloadFromKV: register a queryNode to cluster", zap.Any("nodeID", nodeID))
 		err := c.registerNode(c.ctx, session, nodeID, disConnect)
 		if err != nil {
 			log.Error("query node failed to register", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
@@ -185,19 +185,19 @@ func (c *queryNodeCluster) reloadFromKV() error {
 	for index := range oldStringNodeIDs {
 		nodeID, err := strconv.ParseInt(filepath.Base(oldStringNodeIDs[index]), 10, 64)
 		if err != nil {
-			log.Error("WatchNodeLoop: parse nodeID error", zap.Error(err))
+			log.Error("watchNodeLoop: parse nodeID error", zap.Error(err))
 			return err
 		}
 		if _, ok := onlineSessionMap[nodeID]; !ok {
 			session := &sessionutil.Session{}
 			err = json.Unmarshal([]byte(oldNodeSessions[index]), session)
 			if err != nil {
-				log.Error("WatchNodeLoop: unmarshal session error", zap.Error(err))
+				log.Error("watchNodeLoop: unmarshal session error", zap.Error(err))
 				return err
 			}
 			err = c.registerNode(context.Background(), session, nodeID, offline)
 			if err != nil {
-				log.Debug("ReloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+				log.Debug("reloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 				return err
 			}
 			toLoadMetaNodeIDs = append(toLoadMetaNodeIDs, nodeID)
@@ -219,10 +219,10 @@ func (c *queryNodeCluster) reloadFromKV() error {
 			}
 			err = c.nodes[nodeID].setCollectionInfo(collectionInfo)
 			if err != nil {
-				log.Debug("ReloadFromKV: failed to add queryNode meta to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+				log.Debug("reloadFromKV: failed to add queryNode meta to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 				return err
 			}
-			log.Debug("ReloadFromKV: reload collection info from etcd", zap.Any("info", collectionInfo))
+			log.Debug("reloadFromKV: reload collection info from etcd", zap.Any("info", collectionInfo))
 		}
 	}
 	return nil
