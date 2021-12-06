@@ -607,7 +607,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_not_existed(self):
         """
         target: test search not existed partition
@@ -627,7 +627,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "PartitonName: %s not found" % partition_name})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_binary(self):
         """
         target: test search within binary data (invalid parameter)
@@ -666,7 +666,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "Search failed"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_not_exist(self):
         """
         target: test search with output fields
