@@ -31,6 +31,7 @@ type timestampAllocator struct {
 	peerID UniqueID
 }
 
+// newTimestampAllocator creates a new timestampAllocator
 func newTimestampAllocator(ctx context.Context, tso timestampAllocatorInterface, peerID UniqueID) (*timestampAllocator, error) {
 	a := &timestampAllocator{
 		ctx:    ctx,
