@@ -179,6 +179,7 @@ func (s *Server) Stop() error {
 		s.indexnode.Stop()
 	}
 	if s.grpcServer != nil {
+		log.Debug("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 	s.loopWg.Wait()
