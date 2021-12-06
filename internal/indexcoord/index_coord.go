@@ -768,6 +768,8 @@ func (i *IndexCoord) watchMetaLoop() {
 	}
 }
 
+// assignTask sends the index task to the IndexNode, it has a timeout interval, if the IndexNode doesn't respond within
+// the interval, it is considered that the task sending failed.
 func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.CreateIndexRequest) bool {
 	ctx, cancel := context.WithTimeout(i.loopCtx, i.reqTimeoutInterval)
 	defer cancel()
