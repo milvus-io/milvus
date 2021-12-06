@@ -102,6 +102,7 @@ func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) err
 		if dms.refcnt > 0 {
 			if err := dms.ms.Broadcast(pack); err != nil {
 				log.Error("Broadcast failed", zap.String("chanName", chanName))
+				dms.mutex.RUnlock()
 				return err
 			}
 		}
@@ -125,6 +126,7 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 			ids, err := dms.ms.BroadcastMark(pack)
 			if err != nil {
 				log.Error("BroadcastMark failed", zap.String("chanName", chanName))
+				dms.mutex.RUnlock()
 				return result, err
 			}
 			for cn, idList := range ids {
