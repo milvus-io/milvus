@@ -273,7 +273,6 @@ func main() {
 		role.EnableDataNode = true
 		role.EnableIndexCoord = true
 		role.EnableIndexNode = true
-		role.EnableMsgStreamCoord = true
 		localMsg = true
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", serverType)
