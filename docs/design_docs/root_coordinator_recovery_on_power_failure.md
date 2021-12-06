@@ -33,7 +33,7 @@
 ### 2.3 `create index` requests from grpc
 
 1. In the processing of `create index`, `RC` calls `metaTable`'s `GetNotIndexedSegments` to get all segment ids that are not indexed
-2. After getting the segment ids, `RC` call `IC` to create index on these segment ids.
+2. After getting the segment ids, `RC` calls `IC` to create index on these segment ids.
 3. In the current implementation, the `create index` requests will return after the segment ids are put into a go channel.
 4. The `RC` starts a background task that keeps reading the segment ids from the go channel, and then calls the `IC` to create the index.
 5. There is a fault here, the segment ids have been put into the go channel in the processing function of the grpc request, and then the grpc returns, but the `RC`'s background task has not yet read them from the go channel, then `RC` crashes. At this time, the client thinks that the index is created, but the `RC` does not call `IC` to create the index.
