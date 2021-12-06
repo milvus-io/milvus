@@ -184,7 +184,7 @@ func (qn *queryNode) setCollectionInfo(info *querypb.CollectionInfo) error {
 	qn.collectionInfos[info.CollectionID] = info
 	err := saveNodeCollectionInfo(info.CollectionID, info, qn.id, qn.kvClient)
 	if err != nil {
-		log.Error("SetCollectionInfo: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", info.CollectionID))
+		log.Error("setCollectionInfo: save collectionInfo error", zap.Int64("nodeID", qn.id), zap.Int64("collectionID", info.CollectionID), zap.Any("error", err.Error()))
 		return err
 	}
 	return nil
