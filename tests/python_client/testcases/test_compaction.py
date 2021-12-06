@@ -648,7 +648,7 @@ class TestCompactionOperation(TestcaseBase):
         method: 1.create with shard_num=1
                 2.insert and flush
                 3.compact and search
-        expected: No exception
+        expected: No exception and no compact plans
         """
         # create collection
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
