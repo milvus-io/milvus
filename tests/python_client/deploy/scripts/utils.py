@@ -146,6 +146,15 @@ def load_and_search():
             ids = hits.ids
             print(ids)
         print("search latency = %.4fs" % (end_time - start_time))
-        print("###########")
+        t0 = time.time()
+        expr = "count in [2,4,6,8]"
+        output_fields = ["count", "random_value"]
+        res = c.query(expr, output_fields)
+        sorted_res = sorted(res, key=lambda k: k['count'])
+        for r in sorted_res:
+            print(r)
+        t1 = time.time()
+        print("query latency = %.4fs" % (t1 -t0))
         # c.release()
+        print("###########")
     print("search data ends")

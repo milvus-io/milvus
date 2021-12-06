@@ -33,13 +33,19 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
+      
+      - name: Install dependency
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
+          pip install -r requirements.txt
+          pip install --upgrade protobuf 
+      
       - name: Run deploy test
         timeout-minutes: 15
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
-          pip install -r requirements.txt
-          pip install --upgrade protobuf
           mkdir -p ${{ matrix.mode }}/logs
           echo "test -m ${{ matrix.mode }} -t ${{ matrix.task }}" > ./${{ matrix.mode }}/logs/test_info.log
           python scripts/get_tag.py >> ./${{ matrix.mode }}/logs/test_info.log
