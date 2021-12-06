@@ -275,6 +275,9 @@ func (i *IndexCoord) Start() error {
 
 // Stop stops the IndexCoord component.
 func (i *IndexCoord) Stop() error {
+	// https://github.com/milvus-io/milvus/issues/12282
+	i.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	i.loopCancel()
 	i.sched.Close()
 	i.loopWg.Wait()
@@ -282,9 +285,6 @@ func (i *IndexCoord) Stop() error {
 		cb()
 	}
 	i.session.Revoke(time.Second)
-
-	// https://github.com/milvus-io/milvus/issues/12282
-	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	return nil
 }
