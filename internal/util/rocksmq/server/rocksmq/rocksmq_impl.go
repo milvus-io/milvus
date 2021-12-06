@@ -62,7 +62,7 @@ const (
 	CurrentIDSuffix  = "current_id"
 	ReaderNamePrefix = "reader-"
 
-	RmqNotServingErrMsg = "Rocksmq is not serving"
+	RmqNotServingErrMsg = "rocksmq is not serving"
 )
 
 const (
@@ -992,7 +992,7 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	}
 	nowTs, err := getNowTs(rmq.idAllocator)
 	if err != nil {
-		return "", errors.New("Can't get current ts from rocksmq idAllocator")
+		return "", errors.New("can't get current ts from rocksmq idAllocator")
 	}
 	readerName := subscriptionRolePrefix + ReaderNamePrefix + strconv.FormatInt(nowTs, 10)
 
