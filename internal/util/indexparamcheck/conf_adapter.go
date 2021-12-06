@@ -138,6 +138,7 @@ func newBaseConfAdapter() *BaseConfAdapter {
 	return &BaseConfAdapter{}
 }
 
+// IVFConfAdapter checks if a IVF index can be built.
 type IVFConfAdapter struct {
 	BaseConfAdapter
 }
