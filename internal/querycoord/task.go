@@ -535,6 +535,7 @@ func (lct *loadCollectionTask) rollBack(ctx context.Context) []task {
 			baseTask:                 baseTask,
 			ReleaseCollectionRequest: req,
 			cluster:                  lct.cluster,
+			meta:                     lct.meta,
 		}
 		resultTasks = append(resultTasks, releaseCollectionTask)
 	}
@@ -618,6 +619,7 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 				baseTask:                 baseTask,
 				ReleaseCollectionRequest: req,
 				cluster:                  rct.cluster,
+				meta:                     rct.meta,
 			}
 
 			rct.addChildTask(releaseCollectionTask)
@@ -896,6 +898,7 @@ func (lpt *loadPartitionTask) rollBack(ctx context.Context) []task {
 				baseTask:                 baseTask,
 				ReleaseCollectionRequest: req,
 				cluster:                  lpt.cluster,
+				meta:                     lpt.meta,
 			}
 			resultTasks = append(resultTasks, releaseCollectionTask)
 		}
