@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
+// insertNode is one of the nodes in query flow graph
 type insertNode struct {
 	baseNode
 	streamingReplica ReplicaInterface
