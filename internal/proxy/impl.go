@@ -1395,25 +1395,17 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 
 // Insert insert records into collection.
 func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+	log.Info("Start processing insert request in Proxy", zap.String("traceID", traceID))
+	defer log.Info("Finish processing insert request in Proxy", zap.String("traceID", traceID))
+
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
 			Status: unhealthyStatus(),
 		}, nil
 	}
-
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
-	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
-
-	log.Debug("Insert received",
-		zap.String("traceID", traceID),
-		zap.String("role", Params.RoleName),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName),
-		zap.Int("len(FieldsData)", len(request.FieldsData)),
-		zap.Int("len(HashKeys)", len(request.HashKeys)),
-		zap.Uint32("NumRows", request.NumRows))
 
 	it := &insertTask{
 		ctx:       ctx,
@@ -1439,49 +1431,27 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		chTicker:       node.chTicker,
 	}
 
-	var err error
-
 	if len(it.PartitionName) <= 0 {
 		it.PartitionName = Params.DefaultPartitionName
 	}
 
-	result := &milvuspb.MutationResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-	}
-
-	err = node.sched.dmQueue.Enqueue(it)
-
-	if err != nil {
-		log.Debug("Insert failed to enqueue",
-			zap.Error(err),
-			zap.String("traceID", traceID),
-			zap.String("role", Params.RoleName),
-			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName),
-			zap.String("partition", request.PartitionName),
-			zap.Int("len(FieldsData)", len(request.FieldsData)),
-			zap.Int("len(HashKeys)", len(request.HashKeys)),
-			zap.Uint32("NumRows", request.NumRows))
-
-		result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		result.Status.Reason = err.Error()
+	constructFailedResponse := func(err error) *milvuspb.MutationResult {
 		numRows := it.req.NumRows
 		errIndex := make([]uint32, numRows)
 		for i := uint32(0); i < numRows; i++ {
 			errIndex[i] = i
 		}
-		result.ErrIndex = errIndex
-		return result, nil
+		return &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			ErrIndex: errIndex,
+		}
 	}
 
-	log.Debug("Insert enqueued",
-		zap.String("traceID", traceID),
+	log.Debug("Enqueue insert request in Proxy",
 		zap.String("role", Params.RoleName),
-		zap.Int64("MsgID", it.ID()),
-		zap.Uint64("BeginTS", it.BeginTs()),
-		zap.Uint64("EndTS", it.EndTs()),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
@@ -1489,55 +1459,44 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		zap.Int("len(HashKeys)", len(request.HashKeys)),
 		zap.Uint32("NumRows", request.NumRows))
 
-	err = it.WaitToFinish()
-	if err != nil {
-		log.Debug("Insert failed to WaitToFinish",
-			zap.Error(err),
-			zap.String("traceID", traceID),
-			zap.String("role", Params.RoleName),
-			zap.Int64("MsgID", it.ID()),
-			zap.Uint64("BeginTS", it.BeginTs()),
-			zap.Uint64("EndTS", it.EndTs()),
-			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName),
-			zap.String("partition", request.PartitionName),
-			zap.Int("len(FieldsData)", len(request.FieldsData)),
-			zap.Int("len(HashKeys)", len(request.HashKeys)),
-			zap.Uint32("NumRows", request.NumRows))
+	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+		log.Debug("Failed to enqueue insert task: " + err.Error())
+		return constructFailedResponse(err), nil
+	}
 
-		result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		result.Status.Reason = err.Error()
-		numRows := it.req.NumRows
-		errIndex := make([]uint32, numRows)
-		for i := uint32(0); i < numRows; i++ {
-			errIndex[i] = i
-		}
-		result.ErrIndex = errIndex
-		return result, nil
+	log.Debug("Detail of insert request in Proxy",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", it.Base.MsgID),
+		zap.Uint64("BeginTS", it.BeginTs()),
+		zap.Uint64("EndTS", it.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.Int("len(FieldsData)", len(request.FieldsData)),
+		zap.Int("len(HashKeys)", len(request.HashKeys)),
+		zap.Uint32("NumRows", request.NumRows),
+		zap.String("traceID", traceID))
+
+	if err := it.WaitToFinish(); err != nil {
+		log.Debug("Failed to execute insert task in task scheduler: "+err.Error(), zap.String("traceID", traceID))
+		return constructFailedResponse(err), nil
 	}
 
 	if it.result.Status.ErrorCode != commonpb.ErrorCode_Success {
-		numRows := it.req.NumRows
-		errIndex := make([]uint32, numRows)
-		for i := uint32(0); i < numRows; i++ {
-			errIndex[i] = i
+		setErrorIndex := func() {
+			numRows := it.req.NumRows
+			errIndex := make([]uint32, numRows)
+			for i := uint32(0); i < numRows; i++ {
+				errIndex[i] = i
+			}
+			it.result.ErrIndex = errIndex
 		}
-		it.result.ErrIndex = errIndex
-	}
-	it.result.InsertCnt = int64(it.req.NumRows)
 
-	log.Debug("Insert done",
-		zap.String("traceID", traceID),
-		zap.String("role", Params.RoleName),
-		zap.Int64("MsgID", it.ID()),
-		zap.Uint64("BeginTS", it.BeginTs()),
-		zap.Uint64("EndTS", it.EndTs()),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName),
-		zap.Int("len(FieldsData)", len(request.FieldsData)),
-		zap.Int("len(HashKeys)", len(request.HashKeys)),
-		zap.Uint32("NumRows", request.NumRows))
+		setErrorIndex()
+	}
+
+	// InsertCnt always equals to the number of entities in the request
+	it.result.InsertCnt = int64(it.req.NumRows)
 
 	return it.result, nil
 }
