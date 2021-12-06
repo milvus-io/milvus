@@ -59,6 +59,7 @@ type Cluster interface {
 	watchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error
 	//TODO:: removeDmChannel
 	getNumDmChannels(nodeID int64) (int, error)
+	getDmChannelWatchInfo(nodeID int64, collectionID UniqueID) []*querypb.DmChannelWatchInfo
 
 	hasWatchedQueryChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
 	hasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
@@ -217,6 +218,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 			if err != nil {
 				return err
 			}
+			collectionInfo.ChannelInfos = upgradeDmChannelInfos(collectionInfo.CollectionID, collectionInfo.ChannelInfos)
 			err = c.nodes[nodeID].setCollectionInfo(collectionInfo)
 			if err != nil {
 				log.Debug("reloadFromKV: failed to add queryNode meta to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
@@ -314,10 +316,21 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 		}
 
 		collectionID := in.CollectionID
-		err = c.clusterMeta.addDmChannel(collectionID, nodeID, channels)
-		if err != nil {
-			log.Debug("watchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
-			return err
+		for _, vChannelInfo := range in.Infos {
+			channelInfo := &querypb.DmChannelWatchInfo{
+				CollectionID: collectionID,
+				ChannelName:  vChannelInfo.ChannelName,
+				WatchType:    in.WatchType,
+			}
+			if in.WatchType == querypb.WatchType_WatchPartition {
+				channelInfo.PartitionIDs = []UniqueID{in.PartitionID}
+			}
+
+			err = c.clusterMeta.addDmChannel(collectionID, channelInfo)
+			if err != nil {
+				log.Debug("watchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
+				return err
+			}
 		}
 
 		return nil
@@ -564,6 +577,18 @@ func (c *queryNodeCluster) getNumDmChannels(nodeID int64) (int, error) {
 	return numChannel, nil
 }
 
+func (c *queryNodeCluster) getDmChannelWatchInfo(nodeID int64, collectionID UniqueID) []*querypb.DmChannelWatchInfo {
+	c.RLock()
+	defer c.RUnlock()
+
+	if node, ok := c.nodes[nodeID]; ok {
+		watchInfos := node.getDmChannelWatchInfo(collectionID)
+		return watchInfos
+	}
+
+	return nil
+}
+
 func (c *queryNodeCluster) getNumSegments(nodeID int64) (int, error) {
 	c.RLock()
 	defer c.RUnlock()
@@ -643,8 +668,12 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 		return err
 	}
 
-	if _, ok := c.nodes[nodeID]; ok {
-		err = c.nodes[nodeID].clearNodeInfo()
+	if node, ok := c.nodes[nodeID]; ok {
+		err = c.clusterMeta.removeDmChannelWatchInfosByNodeID(nodeID)
+		if err != nil {
+			return err
+		}
+		err = node.clearNodeInfo()
 		if err != nil {
 			return err
 		}

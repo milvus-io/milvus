@@ -221,8 +221,12 @@ func TestWatchNodeLoop(t *testing.T) {
 		err = removeNodeSession(nodeID)
 		assert.Nil(t, err)
 
+		queryNode2, err := startQueryNodeServer(baseCtx)
+		assert.Nil(t, err)
+
 		waitAllQueryNodeOffline(queryCoord.cluster, nodes)
 
+		queryNode2.stop()
 		queryCoord.Stop()
 		err = removeAllSession()
 		assert.Nil(t, err)

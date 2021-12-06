@@ -361,6 +361,13 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
+		// in case after update milvus, can't find recover watch type
+		// different queryNode may watch same dmChannel and create same growing segment
+		// deduplicate result when reduce, the correctness of search has no effect
+		// and growing segment will be removed after handoff
+		if loadReq.WatchType == querypb.WatchType_WatchTypeNone {
+			loadReq.WatchType = querypb.WatchType_WatchCollection
+		}
 		watchDmChannelTask := &watchDmChannelTask{
 			baseTask:               baseTask,
 			WatchDmChannelsRequest: &loadReq,

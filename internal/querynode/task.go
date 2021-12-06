@@ -225,8 +225,16 @@ func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
 func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	collectionID := w.req.CollectionID
 	partitionID := w.req.PartitionID
-	// if no partitionID is specified, load type is load collection
-	loadPartition := partitionID != 0
+	watchType := w.req.WatchType
+	var lt loadType
+	switch watchType {
+	case queryPb.WatchType_WatchCollection:
+		lt = loadTypeCollection
+	case queryPb.WatchType_WatchPartition:
+		lt = loadTypePartition
+	default:
+		return errors.New("unKnow watch type, collectionID = " + fmt.Sprintln(collectionID))
+	}
 
 	// get all vChannels
 	vChannels := make([]Channel, 0)
@@ -266,27 +274,22 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
-	var l loadType
-	if loadPartition {
-		l = loadTypePartition
-	} else {
-		l = loadTypeCollection
-	}
+
 	sCol, err := w.node.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
 	sCol.addVChannels(vChannels)
 	sCol.addPChannels(pChannels)
-	sCol.setLoadType(l)
+	sCol.setLoadType(lt)
 	hCol, err := w.node.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
 	hCol.addVChannels(vChannels)
 	hCol.addPChannels(pChannels)
-	hCol.setLoadType(l)
-	if loadPartition {
+	hCol.setLoadType(lt)
+	if lt == loadTypePartition {
 		sCol.deleteReleasedPartition(partitionID)
 		hCol.deleteReleasedPartition(partitionID)
 		if hasPartitionInStreaming := w.node.streaming.replica.hasPartition(partitionID); !hasPartitionInStreaming {
@@ -382,7 +385,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	}
 
 	// add flow graph
-	if loadPartition {
+	if lt == loadTypePartition {
 		w.node.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, vChannels)
 		log.Debug("Query node add partition flow graphs", zap.Any("channels", vChannels))
 	} else {
@@ -404,7 +407,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// channels as consumer
 	var nodeFGs map[Channel]*queryNodeFlowGraph
-	if loadPartition {
+	if lt == loadTypePartition {
 		nodeFGs, err = w.node.dataSyncService.getPartitionFlowGraphs(partitionID, vChannels)
 		if err != nil {
 			return err
@@ -491,7 +494,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	)
 
 	// start flow graphs
-	if loadPartition {
+	if lt == loadTypePartition {
 		err = w.node.dataSyncService.startPartitionFlowGraph(partitionID, vChannels)
 		if err != nil {
 			return err

@@ -134,6 +134,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		CollectionID: defaultCollectionID,
 		PartitionID:  defaultPartitionID,
 		Schema:       schema,
+		WatchType:    queryPb.WatchType_WatchPartition,
 	}
 
 	status, err := node.WatchDmChannels(ctx, req)

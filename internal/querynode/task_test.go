@@ -221,6 +221,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 			PartitionID:  defaultPartitionID,
 			Schema:       schema,
+			WatchType:    querypb.WatchType_WatchPartition,
 		}
 		return req
 	}

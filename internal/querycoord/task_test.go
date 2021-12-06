@@ -701,14 +701,17 @@ func Test_AssignInternalTask(t *testing.T) {
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_LoadSegments,
 			},
-			DstNodeID: node1.queryNodeID,
-			Schema:    schema,
-			Infos:     []*querypb.SegmentLoadInfo{segmentInfo},
+			DstNodeID:    node1.queryNodeID,
+			Schema:       schema,
+			Infos:        []*querypb.SegmentLoadInfo{segmentInfo},
+			CollectionID: defaultCollectionID,
 		}
 		loadSegmentRequests = append(loadSegmentRequests, req)
 	}
 
-	internalTasks, err := assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, nil, false, nil, nil)
+	queryCoord.meta.setDeltaChannel(defaultCollectionID, nil)
+
+	internalTasks, err := assignInternalTask(queryCoord.loopCtx, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, false, nil, nil)
 	assert.Nil(t, err)
 
 	assert.NotEqual(t, 1, len(internalTasks))
@@ -1109,4 +1112,55 @@ func TestMergeWatchDeltaChannelInfo(t *testing.T) {
 		},
 	}
 	assert.ElementsMatch(t, expected, results)
+}
+
+func TestNodeDownAfterLoadPartitions(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	req := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID, defaultPartitionID + 1},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+	baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
+	loadPartitionTask := &loadPartitionTask{
+		baseTask:              baseTask,
+		LoadPartitionsRequest: req,
+		rootCoord:             queryCoord.rootCoordClient,
+		dataCoord:             queryCoord.dataCoordClient,
+		indexCoord:            queryCoord.indexCoordClient,
+		cluster:               queryCoord.cluster,
+		meta:                  queryCoord.meta,
+	}
+
+	err = queryCoord.scheduler.Enqueue(loadPartitionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadPartitionTask, taskExpired)
+
+	nodes, err := queryCoord.cluster.onlineNodes()
+	assert.Nil(t, err)
+	node1.stop()
+	err = removeNodeSession(node1.queryNodeID)
+	assert.Nil(t, err)
+
+	node2, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+
+	waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+
+	node2.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
 }

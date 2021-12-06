@@ -34,6 +34,9 @@ func defaultChannelAllocatePolicy() ChannelAllocatePolicy {
 type ChannelAllocatePolicy func(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error
 
 func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error {
+	if len(reqs) == 0 {
+		return nil
+	}
 	for {
 		availableNodes, err := cluster.onlineNodes()
 		if err != nil {

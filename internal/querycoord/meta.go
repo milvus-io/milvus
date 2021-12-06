@@ -75,9 +75,10 @@ type Meta interface {
 
 	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
 
-	getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error)
-	addDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
-	removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
+	getDmChannelWatchInfosByNodeID(nodeID int64) []*querypb.DmChannelWatchInfo
+	addDmChannel(nodeID int64, info *querypb.DmChannelWatchInfo) error
+	removeDmChannel(nodeID int64, info *querypb.DmChannelWatchInfo) error
+	removeDmChannelWatchInfosByNodeID(nodeID int64) error
 
 	getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*datapb.VchannelInfo, error)
 	setDeltaChannel(collectionID UniqueID, info []*datapb.VchannelInfo) error
@@ -166,6 +167,7 @@ func (m *MetaReplica) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
+		collectionInfo.ChannelInfos = upgradeDmChannelInfos(collectionID, collectionInfo.ChannelInfos)
 		m.collectionInfos[collectionID] = collectionInfo
 	}
 
@@ -795,6 +797,10 @@ func (m *MetaReplica) getCollectionInfoByID(collectionID UniqueID) (*querypb.Col
 	m.collectionMu.RLock()
 	defer m.collectionMu.RUnlock()
 
+	return m.getCollectionInfoByIDPrivate(collectionID)
+}
+
+func (m *MetaReplica) getCollectionInfoByIDPrivate(collectionID UniqueID) (*querypb.CollectionInfo, error) {
 	if info, ok := m.collectionInfos[collectionID]; ok {
 		return proto.Clone(info).(*querypb.CollectionInfo), nil
 	}
@@ -833,7 +839,9 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 }
 
 func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID UniqueID) error {
-	info, err := m.getCollectionInfoByID(collectionID)
+	m.collectionMu.Lock()
+	defer m.collectionMu.Unlock()
+	info, err := m.getCollectionInfoByIDPrivate(collectionID)
 	if err == nil {
 		newPartitionIDs := make([]UniqueID, 0)
 		newPartitionStates := make([]*querypb.PartitionStates, 0)
@@ -862,107 +870,107 @@ func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID Unique
 		// So if releasing partition, inMemoryPercentage should be set to 0.
 		info.InMemoryPercentage = 0
 
+		// delete watchPartitionInfo by partitionID
+		removeDmChannelByPartitionID(info, partitionID)
+
 		err = saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("releasePartition: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
 			return err
 		}
 
-		m.collectionMu.Lock()
 		m.collectionInfos[collectionID] = info
-		m.collectionMu.Unlock()
-
 		return nil
 	}
 
 	return err
 }
 
-func (m *MetaReplica) getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error) {
+func (m *MetaReplica) getDmChannelWatchInfosByNodeID(nodeID int64) []*querypb.DmChannelWatchInfo {
 	m.collectionMu.RLock()
 	defer m.collectionMu.RUnlock()
 
-	if info, ok := m.collectionInfos[collectionID]; ok {
-		channels := make([]string, 0)
-		for _, channelInfo := range info.ChannelInfos {
+	var result []*querypb.DmChannelWatchInfo
+	for _, collectionInfo := range m.collectionInfos {
+		dmChannelInfos := collectionInfo.ChannelInfos
+		for _, channelInfo := range dmChannelInfos {
 			if channelInfo.NodeIDLoaded == nodeID {
-				channels = append(channels, channelInfo.ChannelIDs...)
+				result = append(result, channelInfo.WatchInfos...)
 			}
 		}
-		return channels, nil
 	}
 
-	return nil, errors.New("getDmChannelsByNodeID: can't find collection in collectionInfos")
+	return result
 }
 
-func (m *MetaReplica) addDmChannel(collectionID UniqueID, nodeID int64, channels []string) error {
-	//before add channel, should ensure toAddedChannels not in MetaReplica
-	info, err := m.getCollectionInfoByID(collectionID)
-	if err == nil {
-		findNodeID := false
-		for _, channelInfo := range info.ChannelInfos {
-			if channelInfo.NodeIDLoaded == nodeID {
-				findNodeID = true
-				channelInfo.ChannelIDs = append(channelInfo.ChannelIDs, channels...)
-			}
-		}
-		if !findNodeID {
-			newChannelInfo := &querypb.DmChannelInfo{
-				NodeIDLoaded: nodeID,
-				ChannelIDs:   channels,
-			}
-			info.ChannelInfos = append(info.ChannelInfos, newChannelInfo)
-		}
+func (m *MetaReplica) removeDmChannelWatchInfosByNodeID(nodeID int64) error {
+	m.collectionMu.Lock()
+	defer m.collectionMu.Unlock()
 
+	for collectionID, info := range m.collectionInfos {
+		collectionInfo := proto.Clone(info).(*querypb.CollectionInfo)
+		var newDmChannelInfos []*querypb.DmChannelInfo
+		needUpdate := false
+		dmChannelInfos := collectionInfo.ChannelInfos
+		for _, channelInfo := range dmChannelInfos {
+			if channelInfo.NodeIDLoaded != nodeID {
+				needUpdate = true
+				newDmChannelInfos = append(newDmChannelInfos, channelInfo)
+			}
+		}
+		collectionInfo.ChannelInfos = newDmChannelInfos
+
+		if needUpdate {
+			err := saveGlobalCollectionInfo(collectionID, collectionInfo, m.client)
+			if err != nil {
+				log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+				return err
+			}
+			m.collectionInfos[collectionID] = collectionInfo
+		}
+	}
+
+	return nil
+}
+
+func (m *MetaReplica) addDmChannel(nodeID int64, watchInfo *querypb.DmChannelWatchInfo) error {
+	m.collectionMu.Lock()
+	defer m.collectionMu.Unlock()
+	//before add channel, should ensure toAddedChannels not in MetaReplica
+	collectionID := watchInfo.CollectionID
+	info, err := m.getCollectionInfoByIDPrivate(collectionID)
+	if err == nil {
+		addDmChannel(nodeID, info, watchInfo)
 		err = saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
 		}
-		m.collectionMu.Lock()
 		m.collectionInfos[collectionID] = info
-		m.collectionMu.Unlock()
 		return nil
 	}
 
 	return errors.New("addDmChannels: can't find collection in collectionInfos")
 }
 
-func (m *MetaReplica) removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error {
-	info, err := m.getCollectionInfoByID(collectionID)
+func (m *MetaReplica) removeDmChannel(nodeID int64, watchInfo *querypb.DmChannelWatchInfo) error {
+	m.collectionMu.Lock()
+	defer m.collectionMu.Unlock()
+	collectionID := watchInfo.CollectionID
+	info, err := m.getCollectionInfoByIDPrivate(collectionID)
 	if err == nil {
-		for _, channelInfo := range info.ChannelInfos {
-			if channelInfo.NodeIDLoaded == nodeID {
-				newChannelIDs := make([]string, 0)
-				for _, channelID := range channelInfo.ChannelIDs {
-					findChannel := false
-					for _, channel := range channels {
-						if channelID == channel {
-							findChannel = true
-						}
-					}
-					if !findChannel {
-						newChannelIDs = append(newChannelIDs, channelID)
-					}
-				}
-				channelInfo.ChannelIDs = newChannelIDs
-			}
-		}
-
-		err := saveGlobalCollectionInfo(collectionID, info, m.client)
+		removeDmChannel(nodeID, info, watchInfo)
+		err = saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
 		}
 
-		m.collectionMu.Lock()
 		m.collectionInfos[collectionID] = info
-		m.collectionMu.Unlock()
-
 		return nil
 	}
 
-	return errors.New("addDmChannels: can't find collection in collectionInfos")
+	return errors.New("removeDmChannel: can't find collection in collectionInfos")
 }
 
 func createQueryChannel(collectionID UniqueID) *querypb.QueryChannelInfo {
@@ -994,17 +1002,12 @@ func (m *MetaReplica) getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*
 		return infos, nil
 	}
 
-	return nil, fmt.Errorf("delta channel not exist in meta")
+	return nil, fmt.Errorf("delta channel not exist in meta, collectionID = %d", collectionID)
 }
 
 func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.VchannelInfo) error {
 	m.deltaChannelMu.Lock()
 	defer m.deltaChannelMu.Unlock()
-	_, ok := m.deltaChannelInfos[collectionID]
-	if ok {
-		log.Debug("delta channel already exist", zap.Any("collectionID", collectionID))
-		return nil
-	}
 
 	err := saveDeltaChannelInfo(collectionID, infos, m.client)
 	if err != nil {
@@ -1071,7 +1074,9 @@ func (m *MetaReplica) getQueryStreamByID(collectionID UniqueID) (msgstream.MsgSt
 }
 
 func (m *MetaReplica) setLoadType(collectionID UniqueID, loadType querypb.LoadType) error {
-	info, err := m.getCollectionInfoByID(collectionID)
+	m.collectionMu.Lock()
+	defer m.collectionMu.Unlock()
+	info, err := m.getCollectionInfoByIDPrivate(collectionID)
 	if err == nil {
 		info.LoadType = loadType
 		err := saveGlobalCollectionInfo(collectionID, info, m.client)
@@ -1079,10 +1084,7 @@ func (m *MetaReplica) setLoadType(collectionID UniqueID, loadType querypb.LoadTy
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
 		}
-		m.collectionMu.Lock()
 		m.collectionInfos[collectionID] = info
-		m.collectionMu.Unlock()
-
 		return nil
 	}
 
@@ -1101,7 +1103,9 @@ func (m *MetaReplica) getLoadType(collectionID UniqueID) (querypb.LoadType, erro
 }
 
 func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID UniqueID, percentage int64, loadType querypb.LoadType) error {
-	info, err := m.getCollectionInfoByID(collectionID)
+	m.collectionMu.Lock()
+	defer m.collectionMu.Unlock()
+	info, err := m.getCollectionInfoByIDPrivate(collectionID)
 	if err != nil {
 		return errors.New("setLoadPercentage: can't find collection in collectionInfos")
 	}
@@ -1144,10 +1148,7 @@ func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID Uniqu
 		}
 	}
 
-	m.collectionMu.Lock()
 	m.collectionInfos[collectionID] = info
-	m.collectionMu.Unlock()
-
 	return nil
 }
 
@@ -1228,4 +1229,77 @@ func saveDeltaChannelInfo(collectionID UniqueID, infos []*datapb.VchannelInfo, k
 		kvs[key] = string(infoBytes)
 	}
 	return kv.MultiSave(kvs)
+}
+
+func upgradeDmChannelInfos(collectionID UniqueID, channelInfos []*querypb.DmChannelInfo) []*querypb.DmChannelInfo {
+	nodeID2WatchInfos := make(map[int64]map[string]*querypb.DmChannelWatchInfo)
+
+	for _, channelInfo := range channelInfos {
+		nodeID := channelInfo.NodeIDLoaded
+
+		// in case after update milvus, can't find watch type from dmChannelInfo
+		// different queryNode may watch same dmChannel and create same growing segment
+		// deduplicate result when reduce, the correctness of search has no effect
+		// and growing segment will be removed after handoff
+		for _, channel := range channelInfo.ChannelIDs {
+			watchInfo := &querypb.DmChannelWatchInfo{
+				CollectionID: collectionID,
+				ChannelName:  channel,
+				WatchType:    querypb.WatchType_WatchCollection,
+			}
+			channelInfo.WatchInfos = append(channelInfo.WatchInfos, watchInfo)
+		}
+
+		for _, watchInfo := range channelInfo.WatchInfos {
+			if _, ok := nodeID2WatchInfos[nodeID]; !ok {
+				nodeID2WatchInfos[nodeID] = make(map[string]*querypb.DmChannelWatchInfo)
+			}
+
+			channelName := watchInfo.ChannelName
+			if _, ok := nodeID2WatchInfos[nodeID][channelName]; !ok {
+				nodeID2WatchInfos[nodeID][channelName] = watchInfo
+				continue
+			}
+
+			watchedChannelInfo := nodeID2WatchInfos[nodeID][channelName]
+			// watchedChannelInfo.WatchType == watchCollection
+			if watchedChannelInfo.WatchType == querypb.WatchType_WatchCollection {
+				continue
+			}
+
+			// watchedChannelInfo.WatchType == watchPartition && watchInfo.WatchType == watchCollection
+			if watchInfo.WatchType == querypb.WatchType_WatchCollection {
+				nodeID2WatchInfos[nodeID][channelName] = watchInfo
+				continue
+			}
+
+			// watchedChannelInfo.WatchType == watchPartition && watchInfo.WatchType == watchPartition
+			for _, partitionID := range watchInfo.PartitionIDs {
+				hasWatchedPartition := false
+				for _, watchedPartitionID := range watchedChannelInfo.PartitionIDs {
+					if watchedPartitionID == partitionID {
+						hasWatchedPartition = true
+						break
+					}
+				}
+
+				if !hasWatchedPartition {
+					watchedChannelInfo.PartitionIDs = append(watchedChannelInfo.PartitionIDs, partitionID)
+				}
+			}
+		}
+	}
+
+	result := make([]*querypb.DmChannelInfo, 0)
+	for nodeID, watchInfos := range nodeID2WatchInfos {
+		dmChannelInfo := &querypb.DmChannelInfo{
+			NodeIDLoaded: nodeID,
+		}
+		for _, watchInfo := range watchInfos {
+			dmChannelInfo.WatchInfos = append(dmChannelInfo.WatchInfos, watchInfo)
+		}
+		result = append(result, dmChannelInfo)
+	}
+
+	return result
 }

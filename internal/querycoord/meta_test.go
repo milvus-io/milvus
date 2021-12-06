@@ -152,14 +152,12 @@ func TestMetaFunc(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	t.Run("Test GetDmChannelsByNodeIDFail", func(t *testing.T) {
-		res, err := meta.getDmChannelsByNodeID(defaultCollectionID, nodeID)
-		assert.NotNil(t, err)
-		assert.Nil(t, res)
-	})
-
 	t.Run("Test AddDmChannelFail", func(t *testing.T) {
-		err := meta.addDmChannel(defaultCollectionID, nodeID, dmChannels)
+		err := meta.addDmChannel(nodeID, &querypb.DmChannelWatchInfo{
+			CollectionID: defaultCollectionID,
+			ChannelName:  dmChannels[0],
+			WatchType:    querypb.WatchType_WatchCollection,
+		})
 		assert.NotNil(t, err)
 	})
 
@@ -218,14 +216,23 @@ func TestMetaFunc(t *testing.T) {
 	})
 
 	t.Run("Test AddDmChannel", func(t *testing.T) {
-		err := meta.addDmChannel(defaultCollectionID, nodeID, dmChannels)
+		err := meta.addDmChannel(nodeID, &querypb.DmChannelWatchInfo{
+			CollectionID: defaultCollectionID,
+			ChannelName:  dmChannels[0],
+			WatchType:    querypb.WatchType_WatchCollection,
+		})
+		assert.Nil(t, err)
+		err = meta.addDmChannel(nodeID, &querypb.DmChannelWatchInfo{
+			CollectionID: defaultCollectionID,
+			ChannelName:  dmChannels[1],
+			WatchType:    querypb.WatchType_WatchCollection,
+		})
 		assert.Nil(t, err)
 	})
 
-	t.Run("Test GetDmChannelsByNodeID", func(t *testing.T) {
-		channels, err := meta.getDmChannelsByNodeID(defaultCollectionID, nodeID)
-		assert.Nil(t, err)
-		assert.Equal(t, 2, len(channels))
+	t.Run("Test GetDmChannelWatchInfosByNodeID", func(t *testing.T) {
+		watchInfos := meta.getDmChannelWatchInfosByNodeID(nodeID)
+		assert.Equal(t, 2, len(watchInfos))
 	})
 
 	t.Run("Test SetSegmentInfo", func(t *testing.T) {
@@ -284,11 +291,20 @@ func TestMetaFunc(t *testing.T) {
 	})
 
 	t.Run("Test RemoveDmChannel", func(t *testing.T) {
-		err := meta.removeDmChannel(defaultCollectionID, nodeID, dmChannels)
+		err := meta.removeDmChannel(nodeID, &querypb.DmChannelWatchInfo{
+			CollectionID: defaultCollectionID,
+			ChannelName:  dmChannels[0],
+			WatchType:    querypb.WatchType_WatchCollection,
+		})
 		assert.Nil(t, err)
-		channels, err := meta.getDmChannelsByNodeID(defaultCollectionID, nodeID)
+		err = meta.removeDmChannel(nodeID, &querypb.DmChannelWatchInfo{
+			CollectionID: defaultCollectionID,
+			ChannelName:  dmChannels[1],
+			WatchType:    querypb.WatchType_WatchCollection,
+		})
 		assert.Nil(t, err)
-		assert.Equal(t, 0, len(channels))
+		watchInfo := meta.getDmChannelWatchInfosByNodeID(nodeID)
+		assert.Equal(t, 0, len(watchInfo))
 	})
 
 	t.Run("Test DeleteSegmentInfoByNodeID", func(t *testing.T) {
@@ -388,5 +404,65 @@ func TestReloadMetaFromKV(t *testing.T) {
 
 		err = meta.reloadFromKV()
 		assert.Error(t, err)
+	})
+}
+
+func TestUpgradeDmChannelInfos(t *testing.T) {
+	t.Run("test upgradeChannelIDs", func(t *testing.T) {
+		dmChannelInfo := &querypb.DmChannelInfo{
+			NodeIDLoaded: defaultQueryNodeID,
+			ChannelIDs:   []string{"test1", "test2"},
+		}
+
+		newChannelInfo := upgradeDmChannelInfos(defaultCollectionID, []*querypb.DmChannelInfo{dmChannelInfo})
+		assert.Equal(t, 1, len(newChannelInfo))
+		assert.Equal(t, 2, len(newChannelInfo[0].WatchInfos))
+	})
+
+	t.Run("test multiWatchType", func(t *testing.T) {
+		dmChannelInfo1 := &querypb.DmChannelInfo{
+			NodeIDLoaded: defaultQueryNodeID,
+			WatchInfos: []*querypb.DmChannelWatchInfo{{
+				CollectionID: defaultCollectionID,
+				ChannelName:  "test1",
+				WatchType:    querypb.WatchType_WatchCollection,
+			}},
+		}
+
+		dmChannelInfo2 := &querypb.DmChannelInfo{
+			NodeIDLoaded: defaultQueryNodeID,
+			WatchInfos: []*querypb.DmChannelWatchInfo{{
+				CollectionID: defaultCollectionID,
+				PartitionIDs: []UniqueID{defaultPartitionID},
+				ChannelName:  "test1",
+				WatchType:    querypb.WatchType_WatchPartition,
+			}},
+		}
+
+		dmChannelInfo3 := &querypb.DmChannelInfo{
+			NodeIDLoaded: defaultQueryNodeID,
+			WatchInfos: []*querypb.DmChannelWatchInfo{{
+				CollectionID: defaultCollectionID,
+				PartitionIDs: []UniqueID{defaultPartitionID, defaultPartitionID + 1},
+				ChannelName:  "test1",
+				WatchType:    querypb.WatchType_WatchPartition,
+			}},
+		}
+
+		newDmChannelInfos1 := upgradeDmChannelInfos(defaultCollectionID, []*querypb.DmChannelInfo{dmChannelInfo1, dmChannelInfo2})
+		assert.Equal(t, 1, len(newDmChannelInfos1))
+		assert.Equal(t, 1, len(newDmChannelInfos1[0].WatchInfos))
+		assert.Equal(t, querypb.WatchType_WatchCollection, newDmChannelInfos1[0].WatchInfos[0].WatchType)
+
+		newDmChannelInfos2 := upgradeDmChannelInfos(defaultCollectionID, []*querypb.DmChannelInfo{dmChannelInfo2, dmChannelInfo1})
+		assert.Equal(t, 1, len(newDmChannelInfos2))
+		assert.Equal(t, 1, len(newDmChannelInfos2[0].WatchInfos))
+		assert.Equal(t, querypb.WatchType_WatchCollection, newDmChannelInfos2[0].WatchInfos[0].WatchType)
+
+		newDmChannelInfos3 := upgradeDmChannelInfos(defaultCollectionID, []*querypb.DmChannelInfo{dmChannelInfo2, dmChannelInfo3})
+		assert.Equal(t, 1, len(newDmChannelInfos3))
+		assert.Equal(t, 1, len(newDmChannelInfos3[0].WatchInfos))
+		assert.Equal(t, querypb.WatchType_WatchPartition, newDmChannelInfos3[0].WatchInfos[0].WatchType)
+		assert.Equal(t, 2, len(newDmChannelInfos3[0].WatchInfos[0].PartitionIDs))
 	})
 }

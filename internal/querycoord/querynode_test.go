@@ -129,7 +129,11 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	err = removeNodeSession(queryNode2.queryNodeID)
 	assert.Nil(t, err)
 
+	queryNode3, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+
 	waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+	queryNode3.stop()
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
@@ -157,10 +161,11 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	queryNode1.stop()
 	err = removeNodeSession(queryNode1.queryNodeID)
 	assert.Nil(t, err)
-	queryNode3, err := startQueryNodeServer(baseCtx)
-	assert.Nil(t, err)
 
-	time.Sleep(100 * time.Millisecond)
+	queryNode2, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode2.queryNodeID)
+
 	_, err = queryCoord.ReleaseCollection(baseCtx, &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleaseCollection,
@@ -170,11 +175,16 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	assert.Nil(t, err)
 	nodes, err := queryCoord.cluster.onlineNodes()
 	assert.Nil(t, err)
-	queryNode3.stop()
-	err = removeNodeSession(queryNode3.queryNodeID)
+	queryNode2.stop()
+	err = removeNodeSession(queryNode2.queryNodeID)
 	assert.Nil(t, err)
 
+	queryNode3, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, queryNode3.queryNodeID)
+
 	waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+	queryNode3.stop()
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)

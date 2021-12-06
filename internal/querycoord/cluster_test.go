@@ -520,9 +520,10 @@ func TestGrpcRequest(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		loadSegmentReq := &querypb.LoadSegmentsRequest{
-			DstNodeID: nodeID,
-			Infos:     []*querypb.SegmentLoadInfo{segmentLoadInfo},
-			Schema:    genCollectionSchema(defaultCollectionID, false),
+			DstNodeID:    nodeID,
+			Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+			Schema:       genCollectionSchema(defaultCollectionID, false),
+			CollectionID: defaultCollectionID,
 		}
 		err := cluster.loadSegments(baseCtx, nodeID, loadSegmentReq)
 		assert.Nil(t, err)
