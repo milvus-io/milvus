@@ -42,6 +42,7 @@ type Meta struct {
 	revision  int64
 }
 
+// metaTable records the mapping of IndexBuildID to Meta.
 type metaTable struct {
 	client            *etcdkv.EtcdKV    // client of a reliable kv service, i.e. etcd client
 	indexBuildID2Meta map[UniqueID]Meta // index build id to index meta
