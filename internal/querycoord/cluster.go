@@ -322,7 +322,7 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 
 		return nil
 	}
-	return fmt.Errorf("watchDmChannels: Can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("watchDmChannels: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error {
@@ -348,7 +348,7 @@ func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64,
 		return nil
 	}
 
-	return fmt.Errorf("watchDeltaChannels: Can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("watchDeltaChannels: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) hasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {
@@ -549,7 +549,7 @@ func (c *queryNodeCluster) getNumDmChannels(nodeID int64) (int, error) {
 	defer c.RUnlock()
 
 	if _, ok := c.nodes[nodeID]; !ok {
-		return 0, fmt.Errorf("getNumDmChannels: Can't find query node by nodeID, nodeID = %d", nodeID)
+		return 0, fmt.Errorf("getNumDmChannels: can't find query node by nodeID, nodeID = %d", nodeID)
 	}
 
 	numChannel := 0
@@ -569,7 +569,7 @@ func (c *queryNodeCluster) getNumSegments(nodeID int64) (int, error) {
 	defer c.RUnlock()
 
 	if _, ok := c.nodes[nodeID]; !ok {
-		return 0, fmt.Errorf("getNumSegments: Can't find query node by nodeID, nodeID = %d", nodeID)
+		return 0, fmt.Errorf("getNumSegments: can't find query node by nodeID, nodeID = %d", nodeID)
 	}
 
 	numSegment := 0
