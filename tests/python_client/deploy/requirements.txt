@@ -2,4 +2,4 @@
 docker==5.0.0
 grpcio==1.37.1
 grpcio-tools==1.37.1
-pymilvus==2.0.0rc7.dev22
+pymilvus==2.0.0rc8
