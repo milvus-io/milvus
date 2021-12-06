@@ -24,6 +24,7 @@ MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
 MILVUS_IMAGE_TAG="${MILVUS_IMAGE_TAG:-latest}"
 MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
+# Increase timeout from 500 to 800 because pulsar has one more node now
 MILVUS_INSTALL_TIMEOUT="${MILVUS_INSTALL_TIMEOUT:-800s}"
 
 # Delete any previous Milvus cluster
