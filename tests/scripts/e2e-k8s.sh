@@ -341,12 +341,6 @@ if [[ -z "${SKIP_INSTALL:-}" ]]; then
 fi
 
 if [[ -z "${SKIP_TEST:-}" ]]; then
-# Prepare e2e test,install pytest requirements 
-  if [[ -n "${DISABLE_KIND:-}" ]]; then
-    trace "prepare e2e test"  install_pytest_requirements  
-  else
-    trace "prepare e2e test" "${ROOT}/tests/scripts/prepare_e2e.sh"
-  fi
 
   if [[ -n "${TEST_TIMEOUT:-}" ]]; then
     if [[ -n "${DISABLE_KIND:-}" ]]; then
