@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1638461467785,
+  "iteration": 1638787260028,
   "links": [],
   "panels": [
     {
@@ -3180,7 +3180,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": null,
+          "min": "0",
           "show": true
         },
         {
@@ -4538,7 +4538,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "prometheus",
-      "description": "Process memory of milvus pods.",
+      "description": "Process memory of milvus pod",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -5425,7 +5425,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Rate of memory mallocs",
+      "description": "Rate of mallocs",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -5479,7 +5479,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Memory Malloc Rate",
+      "title": "Malloc Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -5799,6 +5799,7 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
           "text": "None",
           "value": ""
@@ -5830,13 +5831,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": [
-            "None"
-          ],
-          "value": [
-            ""
-          ]
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -5865,13 +5863,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": [
-            "None"
-          ],
-          "value": [
-            ""
-          ]
+          "text": "None",
+          "value": ""
         },
         "datasource": "${datasource}",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , app_kubernetes_io_component)",
@@ -5933,5 +5928,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 182
+  "version": 185
 }
