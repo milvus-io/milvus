@@ -498,8 +498,8 @@ func (s *Segment) getIndexPaths(fieldID int64) []string {
 }
 
 func (s *Segment) getIndexParams(fieldID int64) map[string]string {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
+	s.paramMutex.RLock()
+	defer s.paramMutex.RUnlock()
 	if _, ok := s.indexInfos[fieldID]; !ok {
 		return nil
 	}
