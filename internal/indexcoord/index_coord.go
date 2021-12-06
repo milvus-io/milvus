@@ -727,7 +727,7 @@ func (i *IndexCoord) watchNodeLoop() {
 	}
 }
 
-// watchMetaLoop is used to monitor whether the Meta in ETCD has been changed.
+// watchMetaLoop is used to monitor whether the Meta in etcd has been changed.
 func (i *IndexCoord) watchMetaLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
