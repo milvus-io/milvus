@@ -46,7 +46,7 @@ class TestQueryParams(TestcaseBase):
         res = vectors[0].iloc[0:pos, :1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_empty_collection(self):
         """
         target: test query empty collection
@@ -110,7 +110,7 @@ class TestQueryParams(TestcaseBase):
         res = [m["int64"] for m in res]
         assert sorted(list(set(res))) == sorted(res)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_auto_id_not_existed_primary_values(self):
         """
         target: test query on auto_id true collection
@@ -128,7 +128,7 @@ class TestQueryParams(TestcaseBase):
         res, _ = collection_w.query(term_expr)
         assert len(res) == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_none(self):
         """
         target: test query with none expr
@@ -139,7 +139,7 @@ class TestQueryParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
         collection_w.query(None, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_non_string_expr(self):
         """
         target: test query with non-string expr
@@ -152,7 +152,7 @@ class TestQueryParams(TestcaseBase):
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_invalid_string(self):
         """
         target: test query with invalid expr
@@ -177,7 +177,7 @@ class TestQueryParams(TestcaseBase):
         res = vectors[0].iloc[:2, :1].to_dict('records')
         collection_w.query(default_term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_not_existed_field(self):
         """
         target: test query with not existed field
@@ -189,7 +189,7 @@ class TestQueryParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "fieldName(field) not found"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_non_primary_fields(self):
         """
         target: test query on non-primary non-vector fields
@@ -254,7 +254,7 @@ class TestQueryParams(TestcaseBase):
             res, _ = self.collection_wrap.query(expr)
             assert len(res) == ct.default_nb / 2
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_by_int8_field(self):
         """
         target: test query by int8 field
@@ -287,7 +287,7 @@ class TestQueryParams(TestcaseBase):
             pytest.skip("query with "" expr is invalid")
         yield request.param
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_with_expression(self, get_normal_expr):
         """
         target: test query with different expr
@@ -314,7 +314,7 @@ class TestQueryParams(TestcaseBase):
         query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
         assert query_ids == set(filter_ids)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_wrong_term_keyword(self):
         """
         target: test query with wrong term expr keyword
@@ -351,7 +351,7 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.query(term_expr, output_fields=["*"],
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("pos", [0, ct.default_nb])
     def test_query_expr_not_in_empty_and_all(self, pos):
         """
@@ -391,7 +391,7 @@ class TestQueryParams(TestcaseBase):
         res = df.iloc[random_values, :1].to_dict('records')
         self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tag(CaseLabel.L2)
     def test_query_expr_not_in_random(self):
         """
         target: test query with fixed filter values
@@ -413,7 +413,7 @@ class TestQueryParams(TestcaseBase):
         res = df.iloc[:10, :1].to_dict('records')
         self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_non_array_term(self):
         """
         target: test query with non-array term expr
@@ -428,7 +428,7 @@ class TestQueryParams(TestcaseBase):
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_empty_term_array(self):
         """
         target: test query with empty array term expr
@@ -440,7 +440,7 @@ class TestQueryParams(TestcaseBase):
         res, _ = collection_w.query(term_expr)
         assert len(res) == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_inconsistent_mix_term_array(self):
         """
         target: test query with term expr that field and array are inconsistent or mix type
@@ -455,7 +455,7 @@ class TestQueryParams(TestcaseBase):
             term_expr = f'{ct.default_int64_field_name} in {values}'
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_non_constant_array_term(self):
         """
         target: test query with non-constant array term expr
@@ -511,7 +511,7 @@ class TestQueryParams(TestcaseBase):
                                            check_items={exp_res: res, "with_vec": True})
         assert set(actual_res[0].keys()) == set(all_fields)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_output_float_vec_field(self):
         """
         target: test query with vec output field
@@ -590,7 +590,7 @@ class TestQueryParams(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res, "with_vec": True})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_output_binary_vec_field(self):
         """
         target: test query with binary vec output field
@@ -614,7 +614,7 @@ class TestQueryParams(TestcaseBase):
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name])
         assert list(res[0].keys()) == [ct.default_int64_field_name]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_output_not_existed_field(self):
         """
         target: test query output not existed field
@@ -644,7 +644,6 @@ class TestQueryParams(TestcaseBase):
                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     def test_query_output_fields_simple_wildcard(self):
         """
         target: test query output_fields with simple wildcard (* and %)
@@ -652,8 +651,9 @@ class TestQueryParams(TestcaseBase):
         expected: output all scale field; output all fields
         """
         # init collection with fields: int64, float, float_vec, float_vector1
-        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
-        collection_w.load()
+        # collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        df = vectors[0]
 
         # query with wildcard scale(*)
         output_fields = [ct.default_int64_field_name, ct.default_float_field_name]
@@ -662,8 +662,9 @@ class TestQueryParams(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res})
 
-        # query with wildcard %
-        output_fields2 = [ct.default_int64_field_name, ct.default_float_vec_field_name, ct.another_float_vec_field_name]
+        # query with wildcard % output_fields2 = [ct.default_int64_field_name, ct.default_float_vec_field_name,
+        # ct.another_float_vec_field_name]
+        output_fields2 = [ct.default_int64_field_name, ct.default_float_vec_field_name]
         res2 = df.loc[:1, output_fields2].to_dict('records')
         collection_w.query(default_term_expr, output_fields=["%"],
                            check_task=CheckTasks.check_query_results,
@@ -676,15 +677,15 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res3, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     def test_query_output_fields_part_scale_wildcard(self):
         """
         target: test query output_fields with part wildcard
         method: specify output_fields as wildcard and part field
         expected: verify query result
         """
-        # init collection with fields: int64, float, float_vec, float_vector1
-        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        # init collection with fields: int64, float, float_vec
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        df = vectors[0]
 
         # query with output_fields=["*", float_vector)
         res = df.iloc[:2, :3].to_dict('records')
@@ -725,8 +726,7 @@ class TestQueryParams(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res2, "with_vec": True})
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
     def test_query_invalid_wildcard(self, output_fields):
         """
@@ -734,8 +734,8 @@ class TestQueryParams(TestcaseBase):
         method: output_fields is invalid output wildcard
         expected: raise exception
         """
-        # init collection with fields: int64, float, float_vec, float_vector1
-        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        # init collection with fields: int64, float, float_vec
+        collection_w = self.init_collection_general(prefix, insert_data=True, nb=100)[0]
         collection_w.load()
 
         # query with invalid output_fields
@@ -760,7 +760,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_partition_without_loading(self):
         """
         target: test query on partition without loading
@@ -788,7 +788,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[ct.default_partition_name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_empty_partition(self):
         """
         target: test query on empty partition
@@ -802,7 +802,7 @@ class TestQueryParams(TestcaseBase):
         res, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
         assert len(res) == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_not_existed_partition(self):
         """
         target: test query on a not existed partition
@@ -845,7 +845,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 0, ct.err_msg: cem.ConnectFirst})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_without_loading(self):
         """
         target: test query without loading
@@ -867,7 +867,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 1, ct.err_msg: clem.CollNotLoaded % collection_name})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
     def test_query_expr_single_term_array(self, term_expr):
         """
@@ -935,7 +935,7 @@ class TestQueryOperation(TestcaseBase):
         res, _ = collection_w.query(term_expr)
         assert len(res) == len(int_values)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_repeated_term_array(self):
         """
         target: test query with repeated term array on primary field with unique value
@@ -1037,7 +1037,7 @@ class TestQueryOperation(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res, "with_vec": True})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_binary_vec_field_after_index(self):
         """
         target: test query output vec field after index
@@ -1099,7 +1099,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(term_expr, partition_names=[partition_w.name], check_task=CheckTasks.check_query_results,
                            check_items={exp_res: []})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_multi_partitions_multi_results(self):
         """
         target: test query on multi partitions and get multi results
@@ -1199,7 +1199,7 @@ class TestQueryBase:
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_invalid(self, connect, collection):
         """
         target: test query
@@ -1235,7 +1235,7 @@ class TestQueryBase:
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_collection_not_existed(self, connect):
         """
         target: test query not existed collection
@@ -1246,7 +1246,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_invalid_collection_name(self, connect, get_collection_name):
         """
         target: test query with invalid collection name
@@ -1257,7 +1257,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection_name, default_term_expr)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr", [1, "1", "12-s", "中文", [], {}, ()])
     def test_query_expr_invalid_string(self, connect, collection, expr):
         """
@@ -1270,7 +1270,7 @@ class TestQueryBase:
             connect.query(collection, expr)
 
     @pytest.mark.parametrize("fields", ut.gen_invalid_strs())
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_invalid_output_fields(self, connect, collection, fields):
         """
         target: test query with invalid output fields
