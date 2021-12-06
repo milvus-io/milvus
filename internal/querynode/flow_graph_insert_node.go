@@ -42,6 +42,7 @@ type insertNode struct {
 	streamingReplica ReplicaInterface
 }
 
+// insertData stores the valid insert data
 type insertData struct {
 	insertIDs        map[UniqueID][]int64
 	insertTimestamps map[UniqueID][]Timestamp
