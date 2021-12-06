@@ -159,6 +159,7 @@ func (s *Server) Stop() error {
 	}
 	s.cancel()
 	if s.grpcServer != nil {
+		log.Debug("Graceful stop grpc server...")
 		// make graceful stop has a timeout
 		stopped := make(chan struct{})
 		go func() {
