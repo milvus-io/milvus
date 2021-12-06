@@ -35,6 +35,7 @@ class AccuracyRunner(BaseRunner):
         filter_query = []
         top_ks = collection["top_ks"]
         nqs = collection["nqs"]
+        guarantee_timestamp = collection["guarantee_timestamp"] if "guarantee_timestamp" in collection else None
         search_params = collection["search_params"]
         search_params = utils.generate_combinations(search_params)
         cases = list()
@@ -67,7 +68,8 @@ class AccuracyRunner(BaseRunner):
                             "nq": nq,
                             "topk": top_k,
                             "search_param": search_param,
-                            "filter": filter_param
+                            "filter": filter_param,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         vector_query = {"vector": {index_field_name: search_info}}
                         case = {
@@ -79,7 +81,8 @@ class AccuracyRunner(BaseRunner):
                             "vector_type": vector_type,
                             "collection_size": collection_size,
                             "filter_query": filter_query,
-                            "vector_query": vector_query
+                            "vector_query": vector_query,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         cases.append(case)
                         case_metrics.append(case_metric)
@@ -96,7 +99,8 @@ class AccuracyRunner(BaseRunner):
         collection_size = case_param["collection_size"]
         nq = case_metric.search["nq"]
         top_k = case_metric.search["topk"]
-        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                                      guarantee_timestamp=case_param["guarantee_timestamp"])
         true_ids = utils.get_ground_truth_ids(collection_size)
         logger.debug({"true_ids": [len(true_ids[0]), len(true_ids[0])]})
         result_ids = self.milvus.get_ids(query_res)
