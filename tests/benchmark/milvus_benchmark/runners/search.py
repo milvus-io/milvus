@@ -23,6 +23,7 @@ class SearchRunner(BaseRunner):
         top_ks = collection["top_ks"]
         nqs = collection["nqs"]
         filters = collection["filters"] if "filters" in collection else []
+        guarantee_timestamp = collection["guarantee_timestamp"] if "guarantee_timestamp" in collection else None
         
         search_params = collection["search_params"]
         # TODO: get fields by describe_index
@@ -73,7 +74,8 @@ class SearchRunner(BaseRunner):
                             "nq": nq,
                             "topk": top_k,
                             "search_param": search_param,
-                            "filter": filter_param
+                            "filter": filter_param,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         vector_query = {"vector": {index_field_name: search_info}}
                         case = {
@@ -82,6 +84,7 @@ class SearchRunner(BaseRunner):
                             "run_count": run_count,
                             "filter_query": filter_query,
                             "vector_query": vector_query,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         cases.append(case)
                         case_metrics.append(case_metric)
@@ -108,7 +111,8 @@ class SearchRunner(BaseRunner):
         for i in range(run_count):
             logger.debug("Start run query, run %d of %s" % (i+1, run_count))
             start_time = time.time()
-            _query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+            _query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                                           guarantee_timestamp=case_param["guarantee_timestamp"])
             interval_time = time.time() - start_time
             total_query_time += interval_time
             if (i == 0) or (min_query_time > interval_time):
