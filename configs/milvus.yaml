@@ -100,7 +100,7 @@ queryCoord:
   address: localhost
   port: 19531
   autoHandoff: true
-  autoBalance: false
+  autoBalance: true
   overloadedMemoryThresholdPercentage: 90
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
