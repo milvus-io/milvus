@@ -13,12 +13,13 @@
 #include <string>
 #include <exception>
 #include <stdexcept>
+
 #include "index/thirdparty/faiss/MetricType.h"
 
-namespace milvus {
-namespace segcore {
+namespace milvus::segcore {
+
 static inline constexpr const char*
-FaissMetricTypeToString(faiss::MetricType metric_type) {
+MetricTypeToString(faiss::MetricType metric_type) {
     switch (metric_type) {
         case faiss::MetricType::METRIC_INNER_PRODUCT:
             return "METRIC_INNER_PRODUCT";
@@ -50,5 +51,5 @@ FaissMetricTypeToString(faiss::MetricType metric_type) {
             return "Unsupported";
     }
 }
-}  // namespace segcore
-}  // namespace milvus
+
+}  // namespace milvus::segcore
