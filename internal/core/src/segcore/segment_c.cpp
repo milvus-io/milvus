@@ -13,13 +13,13 @@
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "common/type_c.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "log/Log.h"
+
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
-#include "segcore/segment_c.h"
 #include "segcore/SimilarityCorelation.h"
+#include "segcore/segment_c.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
