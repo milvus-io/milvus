@@ -256,6 +256,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	return msg
 }
 
+// newFilteredDmNode returns a new filterDmNode
 func newFilteredDmNode(replica ReplicaInterface,
 	loadType loadType,
 	collectionID UniqueID,
