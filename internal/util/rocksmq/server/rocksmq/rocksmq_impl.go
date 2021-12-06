@@ -717,7 +717,7 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	key := constructCurrentID(topicName, groupName)
 	if !rmq.checkKeyExist(key) {
 		log.Warn("RocksMQ: channel " + key + " not exists")
-		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
+		return fmt.Errorf("consumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 	storeKey, err := combKey(topicName, msgID)
 	if err != nil {
