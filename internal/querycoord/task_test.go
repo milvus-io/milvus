@@ -737,7 +737,6 @@ func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node2.queryNodeID)
-	parentTask := loadSegmentTask.parentTask
 
 	kv := &testKv{
 		returnFn: failedResult,
@@ -745,7 +744,7 @@ func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 	queryCoord.meta.setKvClient(kv)
 
 	assert.Panics(t, func() {
-		updateSegmentInfoFromTask(ctx, parentTask, queryCoord.meta)
+		updateSegmentInfoFromTask(ctx, []task{loadSegmentTask}, queryCoord.meta)
 	})
 
 	queryCoord.Stop()

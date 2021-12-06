@@ -374,7 +374,13 @@ func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in
 	c.RUnlock()
 
 	if targetNode != nil {
-		err := targetNode.addQueryChannel(ctx, in)
+		queryChannelInfo, err := c.clusterMeta.getQueryChannelInfoByID(in.CollectionID)
+		if err != nil {
+			log.Debug("addQueryChannel: getQueryChannelInfoByID error", zap.Error(err))
+			return err
+		}
+		in.SeekPosition = queryChannelInfo.SeekPosition
+		err = targetNode.addQueryChannel(ctx, in)
 		if err != nil {
 			log.Debug("addQueryChannel: queryNode add query channel error", zap.String("error", err.Error()))
 			return err

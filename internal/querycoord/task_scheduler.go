@@ -586,6 +586,12 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			}
 		}
 		activeTaskWg.Wait()
+		if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+			err := updateSegmentInfoFromTask(scheduler.ctx, activateTasks, scheduler.meta)
+			if err != nil {
+				triggerTask.setResultInfo(err)
+			}
+		}
 	}
 
 	removeTaskFromKVFn := func(triggerTask task) error {
@@ -643,16 +649,9 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
 					processInternalTaskFn(lowPriorityTasks, triggerTask)
 				}
-				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
-					err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
-					if err != nil {
-						triggerTask.setResultInfo(err)
-					}
-				}
-				resultInfo := triggerTask.getResultInfo()
-				if resultInfo.ErrorCode != commonpb.ErrorCode_Success {
+				if triggerTask.getResultInfo().ErrorCode != commonpb.ErrorCode_Success {
 					if !alreadyNotify {
-						triggerTask.notify(errors.New(resultInfo.Reason))
+						triggerTask.notify(errors.New(triggerTask.getResultInfo().Reason))
 						alreadyNotify = true
 					}
 					rollBackTasks := triggerTask.rollBack(scheduler.ctx)
@@ -864,37 +863,28 @@ func (scheduler *TaskScheduler) Close() {
 	scheduler.wg.Wait()
 }
 
-func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta) error {
-	segmentInfosToSave := make(map[UniqueID][]*querypb.SegmentInfo)
-	segmentInfosToRemove := make(map[UniqueID][]*querypb.SegmentInfo)
+func updateSegmentInfoFromTask(ctx context.Context, tasks []task, meta Meta) error {
+	for _, t := range tasks {
+		segmentInfosToSave := make(map[UniqueID][]*querypb.SegmentInfo)
 
-	var sealedSegmentChangeInfos col2SealedSegmentChangeInfos
-	var err error
-	switch triggerTask.msgType() {
-	case commonpb.MsgType_ReleaseCollection:
-		// release all segmentInfo of the collection when release collection
-		req := triggerTask.(*releaseCollectionTask).ReleaseCollectionRequest
-		collectionID := req.CollectionID
-		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, nil)
-	case commonpb.MsgType_ReleasePartitions:
-		// release all segmentInfo of the partitions when release partitions
-		req := triggerTask.(*releasePartitionTask).ReleasePartitionsRequest
-		collectionID := req.CollectionID
-		segmentInfos := meta.showSegmentInfos(collectionID, req.PartitionIDs)
-		for _, info := range segmentInfos {
-			if info.CollectionID == collectionID {
-				if _, ok := segmentInfosToRemove[collectionID]; !ok {
-					segmentInfosToRemove[collectionID] = make([]*querypb.SegmentInfo, 0)
-				}
-				segmentInfosToRemove[collectionID] = append(segmentInfosToRemove[collectionID], info)
-			}
-		}
-		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
-	default:
-		// save new segmentInfo when load segment
-		for _, childTask := range triggerTask.getChildTask() {
-			if childTask.msgType() == commonpb.MsgType_LoadSegments {
-				req := childTask.(*loadSegmentTask).LoadSegmentsRequest
+		var sealedSegmentChangeInfos col2SealedSegmentChangeInfos
+		var err error
+
+		switch t.msgType() {
+		case commonpb.MsgType_ReleaseCollection:
+			// release all segmentInfo of the collection when release collection
+			req := t.(*releaseCollectionTask).ReleaseCollectionRequest
+			collectionID := req.CollectionID
+			sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, nil)
+		case commonpb.MsgType_ReleasePartitions:
+			// release all segmentInfo of the partitions when release partitions
+			req := t.(*releasePartitionTask).ReleasePartitionsRequest
+			collectionID := req.CollectionID
+			sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
+		default:
+			// save new segmentInfo when load segment
+			if t.msgType() == commonpb.MsgType_LoadSegments {
+				req := t.(*loadSegmentTask).LoadSegmentsRequest
 				dstNodeID := req.DstNodeID
 				for _, loadInfo := range req.Infos {
 					collectionID := loadInfo.CollectionID
@@ -913,27 +903,27 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 					segmentInfosToSave[collectionID] = append(segmentInfosToSave[collectionID], segmentInfo)
 				}
 			}
+			sealedSegmentChangeInfos, err = meta.saveGlobalSealedSegInfos(segmentInfosToSave)
 		}
-		sealedSegmentChangeInfos, err = meta.saveGlobalSealedSegInfos(segmentInfosToSave)
-	}
 
-	if err != nil {
-		log.Error("Failed to update global sealed seg infos, begin to rollback", zap.Error(err))
-		rollBackSegmentChangeInfoErr := retry.Do(ctx, func() error {
-			rollBackChangeInfos := reverseSealedSegmentChangeInfo(sealedSegmentChangeInfos)
-			for collectionID, infos := range rollBackChangeInfos {
-				_, _, sendErr := meta.sendSealedSegmentChangeInfos(collectionID, infos)
-				if sendErr != nil {
-					return sendErr
+		if err != nil {
+			log.Error("Failed to update global sealed seg infos, begin to rollback", zap.Error(err))
+			rollBackSegmentChangeInfoErr := retry.Do(ctx, func() error {
+				rollBackChangeInfos := reverseSealedSegmentChangeInfo(sealedSegmentChangeInfos)
+				for collectionID, infos := range rollBackChangeInfos {
+					_, _, sendErr := meta.sendSealedSegmentChangeInfos(collectionID, infos)
+					if sendErr != nil {
+						return sendErr
+					}
 				}
+				return nil
+			}, retry.Attempts(20))
+			if rollBackSegmentChangeInfoErr != nil {
+				log.Error("scheduleLoop: Restore the information of global sealed segments in query node failed", zap.Error(rollBackSegmentChangeInfoErr))
 			}
-			return nil
-		}, retry.Attempts(20))
-		if rollBackSegmentChangeInfoErr != nil {
-			log.Error("scheduleLoop: Restore the information of global sealed segments in query node failed", zap.Error(rollBackSegmentChangeInfoErr))
+			log.Info("Successfully roll back segment info change")
+			return err
 		}
-		log.Info("Successfully roll back segment info change")
-		return err
 	}
 
 	return nil
