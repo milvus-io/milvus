@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
+// DataCoordClient mocks of DataCoordClient
 type DataCoordClient struct {
 	Err error
 }
