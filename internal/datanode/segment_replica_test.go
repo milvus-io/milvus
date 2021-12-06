@@ -367,6 +367,18 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		}
 	})
 
+	t.Run("Test_addNormalSegmentWithNilDml", func(t *testing.T) {
+		sr, err := newReplica(context.Background(), rc, 1)
+		require.NoError(t, err)
+		sr.minIOKV = &mockMinioKV{}
+		segID := int64(101)
+		require.False(t, sr.hasSegment(segID, true))
+		assert.NotPanics(t, func() {
+			err = sr.addNormalSegment(segID, 1, 10, "empty_dml_chan", 0, []*datapb.FieldBinlog{}, nil)
+			assert.NoError(t, err)
+		})
+	})
+
 	t.Run("Test_listSegmentsCheckPoints", func(t *testing.T) {
 		tests := []struct {
 			newSegID UniqueID

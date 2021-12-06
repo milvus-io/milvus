@@ -215,7 +215,7 @@ func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (coll
 		return seg.collectionID, seg.partitionID, nil
 	}
 
-	return 0, 0, fmt.Errorf("Cannot find segment, id = %v", segID)
+	return 0, 0, fmt.Errorf("cannot find segment, id = %v", segID)
 }
 
 // addNewSegment adds a *New* and *NotFlushed* new segment. Before add, please make sure there's no
@@ -313,12 +313,13 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 		channelName:  channelName,
 		numRows:      numOfRows,
 
-		checkPoint: *cp,
-		endPos:     &cp.pos,
-
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 		minPK:    math.MaxInt64, // use max value, represents no value
 		maxPK:    math.MinInt64, // use min value represents no value
+	}
+	if cp != nil {
+		seg.checkPoint = *cp
+		seg.endPos = &cp.pos
 	}
 	err := replica.initPKBloomFilter(seg, statsBinlogs)
 	if err != nil {
@@ -343,7 +344,7 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
 			zap.Int64("expected ID", replica.collectionID))
-		return fmt.Errorf("Mismatch collection, ID=%d", collID)
+		return fmt.Errorf("mismatch collection, ID=%d", collID)
 	}
 
 	log.Debug("Add Flushed segment",
