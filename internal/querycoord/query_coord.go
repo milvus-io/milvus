@@ -480,7 +480,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					nodeID2SegmentInfos[nodeID] = leastSegmentInfos
 				}
 			}
-			log.Debug("loadBalanceSegmentLoop: memory usage rage of all online query node", zap.Any("mem rate", nodeID2MemUsageRate))
+			log.Debug("loadBalanceSegmentLoop: memory usage rate of all online query node", zap.Any("mem rate", nodeID2MemUsageRate))
 			if len(onlineNodeIDs) <= 1 {
 				log.Warn("loadBalanceSegmentLoop: there are too few online query nodes to balance", zap.Int64s("onlineNodeIDs", onlineNodeIDs))
 				continue
