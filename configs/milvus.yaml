@@ -99,7 +99,7 @@ proxy:
 queryCoord:
   address: localhost
   port: 19531
-  autoHandoff: true
+  autoHandoff: true # Enable auto handoff
   autoBalance: true
   overloadedMemoryThresholdPercentage: 90
   balanceIntervalSeconds: 60
