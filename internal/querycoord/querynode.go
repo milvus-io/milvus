@@ -168,7 +168,7 @@ func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.Colle
 		qn.collectionInfos[collectionID] = newCollection
 		err := saveNodeCollectionInfo(collectionID, newCollection, qn.id, qn.kvClient)
 		if err != nil {
-			log.Error("AddCollection: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			log.Error("addCollection: save collectionInfo error", zap.Int64("nodeID", qn.id), zap.Int64("collectionID", collectionID), zap.Any("error", err.Error()))
 			return err
 		}
 		log.Debug("queryNode addCollection", zap.Int64("nodeID", qn.id), zap.Any("collectionInfo", newCollection))
