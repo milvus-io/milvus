@@ -106,7 +106,7 @@ func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 
 }
 
-// Register register proxy at etcd
+// Register registers proxy at etcd
 func (node *Proxy) Register() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.ProxyRole, Params.NetworkAddress, false)
@@ -389,22 +389,22 @@ func (node *Proxy) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
-// SetRootCoordClient set rootcoord client for proxy.
+// SetRootCoordClient sets rootcoord client for proxy.
 func (node *Proxy) SetRootCoordClient(cli types.RootCoord) {
 	node.rootCoord = cli
 }
 
-// SetIndexCoordClient set IndexCoord client for proxy.
+// SetIndexCoordClient sets IndexCoord client for proxy.
 func (node *Proxy) SetIndexCoordClient(cli types.IndexCoord) {
 	node.indexCoord = cli
 }
 
-// SetDataCoordClient set DataCoord client for proxy.
+// SetDataCoordClient sets DataCoord client for proxy.
 func (node *Proxy) SetDataCoordClient(cli types.DataCoord) {
 	node.dataCoord = cli
 }
 
-// SetQueryCoordClient set QueryCoord client for proxy.
+// SetQueryCoordClient sets QueryCoord client for proxy.
 func (node *Proxy) SetQueryCoordClient(cli types.QueryCoord) {
 	node.queryCoord = cli
 }
