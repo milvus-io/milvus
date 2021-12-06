@@ -171,6 +171,9 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 			if err != nil {
 				return err
 			}
+			if ackedTsVal == "" {
+				break
+			}
 			ackedTs, err := strconv.ParseInt(ackedTsVal, 10, 64)
 			if err != nil {
 				return err
