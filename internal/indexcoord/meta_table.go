@@ -90,6 +90,7 @@ func (mt *metaTable) reloadFromKV() error {
 	return nil
 }
 
+// saveIndexMeta saves the index meta to ETCD.
 // metaTable.lock.Lock() before call this function
 func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 	value, err := proto.Marshal(meta.indexMeta)
