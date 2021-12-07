@@ -54,7 +54,7 @@ rootCoord:
   port: 53100
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, Maximum data size received by the server
     serverMaxSendSize: 2147483647 # math.MaxInt32
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
