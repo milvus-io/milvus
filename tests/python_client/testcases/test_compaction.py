@@ -729,7 +729,7 @@ class TestCompactionOperation(TestcaseBase):
         method: 1.create with shard_num=1
                 2.insert flush 10 times (merge threshold 10)
                 3.wait for compaction, load
-        expected: Get query segments into to verify segments auto-merged into one
+        expected: Get query segments info to verify segments auto-merged into one
         """
         threshold = ct.compact_segment_num_threshold
 
