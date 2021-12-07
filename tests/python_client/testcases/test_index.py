@@ -154,7 +154,7 @@ class TestIndexOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index)
-        
+
         assert len(collection_w.indexes) == 1
         assert collection_w.indexes[0].params["index_type"] == default_index["index_type"]
 
@@ -181,7 +181,7 @@ class TestIndexOperation(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(ct.default_nb)
+        data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         index_params = index_param
         index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, index_params)
@@ -197,7 +197,7 @@ class TestIndexOperation(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(ct.default_nb)
+        data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         self._connect().flush([collection_w.name])
         index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
@@ -517,7 +517,8 @@ class TestIndexBase:
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        params, _ = gen_search_vectors_params(field_name, default_entities, default_top_k, nq, search_params=search_param)
+        params, _ = gen_search_vectors_params(field_name, default_entities, default_top_k, nq,
+                                              search_params=search_param)
         connect.load_collection(collection)
         res = connect.search(collection, **params)
         assert len(res) == nq
@@ -605,13 +606,13 @@ class TestIndexBase:
         """
         result = connect.insert(collection, default_entities)
         connect.flush([collection])
-        indexs = [default_index, {"metric_type":"L2", "index_type": "FLAT", "params":{"nlist": 1024}}]
+        indexs = [default_index, {"metric_type": "L2", "index_type": "FLAT", "params": {"nlist": 1024}}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
             connect.release_collection(collection)
             connect.load_collection(collection)
         index = connect.describe_index(collection, "")
-        assert not index    # FLAT is the last index_type, drop all indexes in server
+        assert not index  # FLAT is the last index_type, drop all indexes in server
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -827,6 +828,7 @@ class TestIndexBase:
       The following cases are used to test `drop_index` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_index(self, connect, collection, get_simple_index):
         """
@@ -1018,6 +1020,7 @@ class TestIndexBinary:
       The following cases are used to test `create_index` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, binary_collection, get_jaccard_index):
@@ -1086,6 +1089,7 @@ class TestIndexBinary:
       The following cases are used to test `describe_index` function
     ***************************************************************
     """
+
     @pytest.mark.skip("repeat with test_create_index binary")
     def _test_get_index_info(self, connect, binary_collection, get_jaccard_index):
         """
@@ -1134,6 +1138,7 @@ class TestIndexBinary:
       The following cases are used to test `drop_index` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index(self, connect, binary_collection, get_jaccard_index):
         """
@@ -1249,6 +1254,7 @@ class TestIndexAsync:
       The following cases are used to test `create_index` function
     ******************************************************************
     """
+
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         """
