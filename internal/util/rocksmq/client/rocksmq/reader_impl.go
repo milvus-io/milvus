@@ -72,6 +72,7 @@ func (r *reader) HasNext() bool {
 	return r.c.server.HasNext(r.topic, r.name, r.startMessageIDInclusive)
 }
 
+// Close close the reader and stop the blocking reader
 func (r *reader) Close() {
 	r.c.server.CloseReader(r.topic, r.name)
 }
