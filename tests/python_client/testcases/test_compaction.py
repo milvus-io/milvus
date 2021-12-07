@@ -758,7 +758,7 @@ class TestCompactionOperation(TestcaseBase):
         method: 1.create collection with shard_num = 1
                 2.insert flush 9 times (segments threshold 10)
                 3.after a while, load
-        expected: Verify segments no merge
+        expected: Verify segments are not merged
         """
         less_threshold = ct.compact_segment_num_threshold - 1
 
