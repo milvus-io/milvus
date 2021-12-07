@@ -18,6 +18,7 @@
 
 # Exit immediately for non zero status
 set -e
+# Print commands
 set -x
 
 # Absolute path to the toplevel milvus directory.
