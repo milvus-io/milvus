@@ -110,6 +110,7 @@ func (ic *IndexChecker) close() {
 	ic.wg.Wait()
 }
 
+// reloadFromKV  reload collection/partition, remove from etcd if failed.
 func (ic *IndexChecker) reloadFromKV() error {
 	_, handoffReqValues, version, err := ic.client.LoadWithRevision(handoffSegmentPrefix)
 	if err != nil {
