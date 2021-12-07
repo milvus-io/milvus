@@ -130,6 +130,7 @@ class AccAccuracyRunner(AccuracyRunner):
         index_params = collection["index_params"]
         top_ks = collection["top_ks"]
         nqs = collection["nqs"]
+        guarantee_timestamp = collection["guarantee_timestamp"] if "guarantee_timestamp" in collection else None
         search_params = collection["search_params"]
         vector_type = utils.get_vector_type(data_type)
         index_field_name = utils.get_default_field_name(vector_type)
@@ -184,7 +185,8 @@ class AccAccuracyRunner(AccuracyRunner):
                                     "nq": nq,
                                     "topk": top_k,
                                     "search_param": search_param,
-                                    "filter": filter_param
+                                    "filter": filter_param,
+                                    "guarantee_timestamp": guarantee_timestamp
                                 }
                                 vector_query = {"vector": {index_field_name: search_info}}
                                 case = {
@@ -199,7 +201,8 @@ class AccAccuracyRunner(AccuracyRunner):
                                     "index_param": index_param,
                                     "filter_query": filter_query,
                                     "vector_query": vector_query,
-                                    "true_ids": true_ids
+                                    "true_ids": true_ids,
+                                    "guarantee_timestamp": guarantee_timestamp
                                 }
                                 # Obtain the parameters of the use case to be tested
                                 cases.append(case)
@@ -272,10 +275,12 @@ class AccAccuracyRunner(AccuracyRunner):
         end_time = start_time + 500
         cnt = 0
         while cnt < 100 and start_time < end_time:
-            self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+            self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                              guarantee_timestamp=case_param["guarantee_timestamp"])
             cnt += 1
             start_time = time.time()
-        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                                      guarantee_timestamp=case_param["guarantee_timestamp"])
         result_ids = self.milvus.get_ids(query_res)
         # Calculate the accuracy of the result of query
         acc_value = utils.get_recall_value(true_ids[:nq, :top_k].tolist(), result_ids)
