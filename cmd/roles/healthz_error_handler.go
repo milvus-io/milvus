@@ -51,3 +51,7 @@ func dataCoordNotServingHandler(w http.ResponseWriter, r *http.Request) {
 func indexCoordNotServingHandler(w http.ResponseWriter, r *http.Request) {
 	componentsNotServingHandler(w, r, milvuserrors.MsgIndexCoordNotServing)
 }
+
+func proxyNotServingHandler(w http.ResponseWriter, r *http.Request) {
+	componentsNotServingHandler(w, r, milvuserrors.MsgProxyNotServing)
+}
