@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1638859047502,
+  "iteration": 1638864224296,
   "links": [],
   "panels": [
     {
@@ -343,121 +343,107 @@
       }
     },
     {
-      "datasource": "$datasource",
-      "description": "Total count of describe_collection requests",
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "prometheus",
+      "description": "per-minute increasing rate of describe_collection requests",
       "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
+        "defaults": {},
         "overrides": []
       },
+      "fill": 1,
+      "fillGradient": 0,
       "gridPos": {
-        "h": 5,
-        "w": 4,
+        "h": 6,
+        "w": 8,
         "x": 0,
         "y": 7
       },
-      "id": 123162,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
+      "hiddenSeries": false,
+      "id": 123145,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
       },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
       "pluginVersion": "7.5.4",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
+          "expr": "sum(increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
           "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
+          "legendFormat": "total",
           "queryType": "randomWalk",
           "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Describe Collection Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of describe_collection requests",
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 7
-      },
-      "id": 123166,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
+          "expr": "sum(increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
           "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
+          "legendFormat": "success",
+          "refId": "B"
         }
       ],
+      "thresholds": [],
       "timeFrom": null,
+      "timeRegions": [],
       "timeShift": null,
-      "title": "Describe Collection Success",
-      "type": "stat"
+      "title": "Describe Collection Rate",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": "0",
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
     },
     {
       "datasource": "$datasource",
@@ -696,8 +682,8 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "prometheus",
-      "description": "per-minute increasing rate of describe_collection requests",
+      "datasource": "$datasource",
+      "description": "per-minute increasing rate of drop_collection requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -707,11 +693,11 @@
       "gridPos": {
         "h": 6,
         "w": 8,
-        "x": 0,
+        "x": 8,
         "y": 12
       },
       "hiddenSeries": false,
-      "id": 123145,
+      "id": 123147,
       "legend": {
         "avg": false,
         "current": false,
@@ -739,7 +725,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
+          "expr": "sum(increase(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
           "interval": "",
           "legendFormat": "total",
           "queryType": "randomWalk",
@@ -747,7 +733,7 @@
         },
         {
           "exemplar": true,
-          "expr": "sum(increase(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
+          "expr": "sum(increase(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
           "interval": "",
           "legendFormat": "success",
           "refId": "B"
@@ -757,7 +743,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Describe Collection Rate",
+      "title": "Drop Collection Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -793,122 +779,6 @@
         "align": false,
         "alignLevel": null
       }
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Total count of drop_collection requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 8,
-        "y": 12
-      },
-      "id": 123167,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Drop Collection Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of drop_collection requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 12,
-        "y": 12
-      },
-      "id": 123168,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Drop Collection Success",
-      "type": "stat"
     },
     {
       "datasource": "$datasource",
@@ -1027,107 +897,120 @@
       "type": "stat"
     },
     {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of drop_collection requests",
+      "description": "Total count of show_partition requests",
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "super-light-blue",
+                "value": null
+              }
+            ]
+          }
+        },
         "overrides": []
       },
-      "fill": 1,
-      "fillGradient": 0,
       "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 8,
-        "y": 17
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 13
       },
-      "hiddenSeries": false,
-      "id": 123147,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
+      "id": 123181,
       "options": {
-        "alertThreshold": true
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
       },
-      "percentage": false,
       "pluginVersion": "7.5.4",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(increase(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[2m])/2)",
+          "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "instant": false,
           "interval": "",
-          "legendFormat": "total",
+          "intervalFactor": 2,
+          "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Show Partition Total",
+      "type": "stat"
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Success count of show_partition requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 13
+      },
+      "id": 123170,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
         {
           "exemplar": true,
-          "expr": "sum(increase(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[2m])/2)",
+          "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "instant": false,
           "interval": "",
-          "legendFormat": "success",
-          "refId": "B"
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
-      "timeRegions": [],
       "timeShift": null,
-      "title": "Drop Collection Rate",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": "0",
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "title": "Show Partition Success",
+      "type": "stat"
     },
     {
       "aliasColors": {},
@@ -1233,122 +1116,6 @@
       }
     },
     {
-      "datasource": "$datasource",
-      "description": "Total count of show_partition requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 18
-      },
-      "id": 123181,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Show Partition Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of show_partition requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 18
-      },
-      "id": 123170,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Show Partition Success",
-      "type": "stat"
-    },
-    {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
@@ -1365,7 +1132,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 23
+        "y": 18
       },
       "hiddenSeries": false,
       "id": 123153,
@@ -1450,6 +1217,122 @@
         "align": false,
         "alignLevel": null
       }
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Total count of drop_collection requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "super-light-blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 18
+      },
+      "id": 123167,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Drop Collection Total",
+      "type": "stat"
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Success count of drop_collection requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 18
+      },
+      "id": 123168,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Drop Collection Success",
+      "type": "stat"
     },
     {
       "datasource": "$datasource",
@@ -1684,6 +1567,122 @@
       "type": "stat"
     },
     {
+      "datasource": "$datasource",
+      "description": "Total count of create_index requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "super-light-blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 24
+      },
+      "id": 123174,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Create Index Total",
+      "type": "stat"
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Success count of create_index requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 24
+      },
+      "id": 123182,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Create Index Success",
+      "type": "stat"
+    },
+    {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
@@ -1890,122 +1889,6 @@
       }
     },
     {
-      "datasource": "$datasource",
-      "description": "Total count of create_index requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 29
-      },
-      "id": 123174,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Create Index Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of create_index requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 29
-      },
-      "id": 123182,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Create Index Success",
-      "type": "stat"
-    },
-    {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
@@ -2022,7 +1905,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 34
+        "y": 29
       },
       "hiddenSeries": false,
       "id": 123183,
@@ -2341,6 +2224,122 @@
       "type": "stat"
     },
     {
+      "datasource": "$datasource",
+      "description": "Total count of show_segments requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "super-light-blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 35
+      },
+      "id": 123195,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Show Segments Total",
+      "type": "stat"
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Success count of show_segments requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 35
+      },
+      "id": 123191,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Show Segments Success",
+      "type": "stat"
+    },
+    {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
@@ -2547,122 +2546,6 @@
       }
     },
     {
-      "datasource": "$datasource",
-      "description": "Total count of show_segments requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 40
-      },
-      "id": 123195,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Show Segments Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of show_segments requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 40
-      },
-      "id": 123191,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Show Segments Success",
-      "type": "stat"
-    },
-    {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
@@ -2679,7 +2562,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 45
+        "y": 40
       },
       "hiddenSeries": false,
       "id": 123151,
@@ -2994,8 +2877,8 @@
       "gridPos": {
         "h": 6,
         "w": 8,
-        "x": 8,
-        "y": 50
+        "x": 0,
+        "y": 46
       },
       "hiddenSeries": false,
       "id": 123194,
@@ -3088,7 +2971,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 52
       },
       "id": 123172,
       "panels": [],
@@ -3117,7 +3000,7 @@
         "h": 5,
         "w": 4,
         "x": 0,
-        "y": 57
+        "y": 53
       },
       "id": 123190,
       "options": {
@@ -3175,7 +3058,7 @@
         "h": 5,
         "w": 4,
         "x": 4,
-        "y": 57
+        "y": 53
       },
       "id": 123196,
       "options": {
@@ -3233,7 +3116,7 @@
         "h": 5,
         "w": 4,
         "x": 8,
-        "y": 57
+        "y": 53
       },
       "id": 123198,
       "options": {
@@ -3291,7 +3174,7 @@
         "h": 5,
         "w": 4,
         "x": 12,
-        "y": 57
+        "y": 53
       },
       "id": 123199,
       "options": {
@@ -3344,7 +3227,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 57
+        "y": 53
       },
       "hiddenSeries": false,
       "id": 123207,
@@ -3441,7 +3324,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 62
+        "y": 58
       },
       "hiddenSeries": false,
       "id": 123197,
@@ -3544,7 +3427,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 62
+        "y": 58
       },
       "hiddenSeries": false,
       "id": 123200,
@@ -3647,7 +3530,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 63
+        "y": 59
       },
       "hiddenSeries": false,
       "id": 123210,
@@ -3743,7 +3626,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 68
+        "y": 64
       },
       "hiddenSeries": false,
       "id": 123208,
@@ -3839,7 +3722,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 68
+        "y": 64
       },
       "hiddenSeries": false,
       "id": 123209,
@@ -3935,7 +3818,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 69
+        "y": 65
       },
       "hiddenSeries": false,
       "id": 123214,
@@ -4021,7 +3904,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 71
       },
       "id": 123157,
       "panels": [],
@@ -4045,7 +3928,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 76
+        "y": 72
       },
       "hiddenSeries": false,
       "id": 123202,
@@ -4141,7 +4024,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 76
+        "y": 72
       },
       "hiddenSeries": false,
       "id": 123204,
@@ -4239,7 +4122,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 76
+        "y": 72
       },
       "hiddenSeries": false,
       "id": 123206,
@@ -4336,7 +4219,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 82
+        "y": 78
       },
       "hiddenSeries": false,
       "id": 123135,
@@ -4433,7 +4316,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 82
+        "y": 78
       },
       "hiddenSeries": false,
       "id": 123133,
@@ -4541,7 +4424,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 82
+        "y": 78
       },
       "hiddenSeries": false,
       "id": 123125,
@@ -4638,7 +4521,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 88
+        "y": 84
       },
       "hiddenSeries": false,
       "id": 123137,
@@ -4735,7 +4618,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 88
+        "y": 84
       },
       "hiddenSeries": false,
       "id": 123131,
@@ -4831,7 +4714,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 88
+        "y": 84
       },
       "hiddenSeries": false,
       "id": 123127,
@@ -4929,7 +4812,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 94
+        "y": 90
       },
       "hiddenSeries": false,
       "id": 123129,
@@ -5026,7 +4909,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 94
+        "y": 90
       },
       "hiddenSeries": false,
       "id": 123211,
@@ -5124,7 +5007,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 94
+        "y": 90
       },
       "hiddenSeries": false,
       "id": 123212,
@@ -5222,7 +5105,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 100
+        "y": 96
       },
       "hiddenSeries": false,
       "id": 123213,
@@ -5320,7 +5203,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 100
+        "y": 96
       },
       "hiddenSeries": false,
       "id": 123215,
@@ -5418,7 +5301,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 100
+        "y": 96
       },
       "hiddenSeries": false,
       "id": 123216,
@@ -5516,7 +5399,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 106
+        "y": 102
       },
       "hiddenSeries": false,
       "id": 123217,
@@ -5652,9 +5535,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": "default",
-          "value": "default"
+          "selected": false,
+          "text": "chaos-testing",
+          "value": "chaos-testing"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -5683,10 +5566,9 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": "mic-compact",
+          "value": "mic-compact"
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}, app_kubernetes_io_instance)",
@@ -5715,10 +5597,13 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": [
+            "mic-compact-milvus-datacoord-5bf5dc4584-t9qxp"
+          ],
+          "value": [
+            "mic-compact-milvus-datacoord-5bf5dc4584-t9qxp"
+          ]
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -5747,12 +5632,12 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
+          "selected": false,
           "text": [
-            "None"
+            "datacoord"
           ],
           "value": [
-            ""
+            "datacoord"
           ]
         },
         "datasource": "${datasource}",
@@ -5815,5 +5700,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 187
+  "version": 189
 }
