@@ -57,6 +57,7 @@ type deleteData struct {
 	deleteOffset     map[UniqueID]int64
 }
 
+// Name returns the name of insertNode
 func (iNode *insertNode) Name() string {
 	return "iNode"
 }
