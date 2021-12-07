@@ -1477,7 +1477,7 @@ class TestCollectionCountBinary:
         """
         target: test count_entities, after index have been created
         method: add vectors in db, and create index, then calling count_entities with correct params
-        expected: count_entities raise exception
+        expected: count_entities equals entities count just inserted
         """
         raw_vectors, entities = gen_binary_entities(insert_count)
         connect.insert(binary_collection, entities)
