@@ -157,6 +157,7 @@ func newIVFConfAdapter() *IVFConfAdapter {
 	return &IVFConfAdapter{}
 }
 
+// IVFPQConfAdapter checks if a IVF_PQ index can be built.
 type IVFPQConfAdapter struct {
 	IVFConfAdapter
 }
