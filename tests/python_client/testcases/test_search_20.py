@@ -782,7 +782,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": f"`round_decimal` value {round_decimal} is illegal"})
 
-
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
 
@@ -1423,54 +1422,6 @@ class TestCollectionSearch(TestcaseBase):
                                                  "ids": insert_ids,
                                                  "limit": default_limit,
                                                  "_async": _async})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_search_multiple_vectors(self, nb, nq, dim, auto_id, _async):
-        """
-        target: test search with multiple vectors
-        method: create connection, collection with multiple
-                vectors, insert and search
-        expected: search successfully with limit(topK)
-        """
-        # 1. connect
-        self._connect()
-        # 2. create collection with multiple vectors
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
-                  cf.gen_float_vec_field(dim=dim), cf.gen_float_vec_field(name="tmp", dim=dim)]
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
-        collection_w = self.collection_wrap.init_collection(c_name, schema=schema,
-                                                            check_task=CheckTasks.check_collection_property,
-                                                            check_items={"name": c_name, "schema": schema})[0]
-        # 3. insert
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
-        vectors_tmp = [[random.random() for _ in range(dim)] for _ in range(nb)]
-        data = [[i for i in range(nb)], [np.float32(i) for i in range(nb)], vectors, vectors_tmp]
-        if auto_id:
-            data = [[np.float32(i) for i in range(nb)], vectors, vectors_tmp]
-        res = collection_w.insert(data)
-        insert_ids = res.primary_keys
-        assert collection_w.num_entities == nb
-        # 4. load
-        collection_w.load()
-        # 5. search all the vectors
-        log.info("test_search_multiple_vectors: searching collection %s" % collection_w.name)
-        collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit,
-                                         "_async": _async})
-        collection_w.search(vectors[:nq], "tmp",
-                            default_search_params, default_limit,
-                            default_search_exp, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit,
-                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue #12680")
