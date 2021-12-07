@@ -1,6 +1,6 @@
 from enum import Enum
 from random import randint
-import datetime
+import time
 from time import sleep
 from delayed_assert import expect
 from base.collection_wrapper import ApiCollectionWrapper
@@ -36,6 +36,7 @@ class Checker:
     def __init__(self):
         self._succ = 0
         self._fail = 0
+        self.average_time = 0
         self.c_wrap = ApiCollectionWrapper()
         self.c_wrap.init_collection(name=cf.gen_unique_str('Checker_'),
                                     schema=cf.gen_default_collection_schema(),
@@ -55,6 +56,7 @@ class Checker:
     def reset(self):
         self._succ = 0
         self._fail = 0
+        self.average_time = 0
 
 
 class SearchChecker(Checker):
@@ -66,6 +68,7 @@ class SearchChecker(Checker):
     def keep_running(self):
         while True:
             search_vec = cf.gen_vectors(5, ct.default_dim)
+            t0 = time.time()
             _, result = self.c_wrap.search(
                 data=search_vec,
                 anns_field=ct.default_float_vec_field_name,
@@ -74,12 +77,14 @@ class SearchChecker(Checker):
                 enable_traceback=enable_traceback,
                 check_task=CheckTasks.check_nothing
             )
+            t1 = time.time()
             if result:
+                self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
+                log.info(f"search success, time: {t1 - t0}, average_time: {self.average_time}")
             else:
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
-
 
 class InsertFlushChecker(Checker):
     """check Insert and flush operations in a dependent thread"""
@@ -90,29 +95,33 @@ class InsertFlushChecker(Checker):
 
     def keep_running(self):
         while True:
+            t0 = time.time()
             _, insert_result = \
                 self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.DELTA_PER_INS),
                                    timeout=timeout,
                                    enable_traceback=enable_traceback,
                                    check_task=CheckTasks.check_nothing)
+            t1 = time.time()
             if not self._flush:
                 if insert_result:
+                    self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                     self._succ += 1
+                    log.info(f"insert success, time: {t1 - t0}, average_time: {self.average_time}")
                 else:
                     self._fail += 1
                 sleep(constants.WAIT_PER_OP / 10)
             else:
                 # call flush in property num_entities
-                t0 = datetime.datetime.now()
+                t0 = time.time()
                 num_entities = self.c_wrap.num_entities
-                tt = datetime.datetime.now() - t0
-                log.info(f"flush time cost: {tt}")
+                t1 = time.time()
                 if num_entities == (self.initial_entities + constants.DELTA_PER_INS):
+                    self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                     self._succ += 1
+                    log.info(f"flush success, time: {t1 - t0}, average_time: {self.average_time}")
                     self.initial_entities += constants.DELTA_PER_INS
                 else:
                     self._fail += 1
-
 
 class CreateChecker(Checker):
     """check create operations in a dependent thread"""
@@ -121,19 +130,24 @@ class CreateChecker(Checker):
 
     def keep_running(self):
         while True:
+            t0 = time.time()
             _, result = self.c_wrap.init_collection(
                 name=cf.gen_unique_str("CreateChecker_"),
                 schema=cf.gen_default_collection_schema(),
                 timeout=timeout,
                 enable_traceback=enable_traceback,
                 check_task=CheckTasks.check_nothing)
+            t1 = time.time()
             if result:
+                self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
-                self.c_wrap.drop(timeout=timeout, enable_traceback=enable_traceback)
+                log.info(f"create success, time: {t1 - t0}, average_time: {self.average_time}")
+                self.c_wrap.drop(timeout=timeout)
+
             else:
                 self._fail += 1
+                log.info(f"create failed, time: {t1 - t0}")
             sleep(constants.WAIT_PER_OP / 10)
-
 
 class IndexChecker(Checker):
     """check Insert operations in a dependent thread"""
@@ -145,18 +159,23 @@ class IndexChecker(Checker):
 
     def keep_running(self):
         while True:
+            t0 = time.time()
             _, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
                                                  constants.DEFAULT_INDEX_PARAM,
                                                  name=cf.gen_unique_str('index_'),
                                                  timeout=timeout,
                                                  enable_traceback=enable_traceback,
                                                  check_task=CheckTasks.check_nothing)
+            t1 = time.time()
             if result:
+                self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
-                self.c_wrap.drop_index(timeout=timeout, enable_traceback=enable_traceback)
+                log.info(f"index success, time: {t1 - t0}, average_time: {self.average_time}")
+                self.c_wrap.drop_index(timeout=timeout)
+
             else:
                 self._fail += 1
-
+                log.info(f"index failed, time: {t1 - t0}")
 
 class QueryChecker(Checker):
     """check query operations in a dependent thread"""
@@ -170,15 +189,18 @@ class QueryChecker(Checker):
             for _ in range(5):
                 int_values.append(randint(0, constants.ENTITIES_FOR_SEARCH))
             term_expr = f'{ct.default_int64_field_name} in {int_values}'
+            t0 = time.time()
             _, result = self.c_wrap.query(term_expr, timeout=timeout,
                                           enable_traceback=enable_traceback,
                                           check_task=CheckTasks.check_nothing)
+            t1 = time.time()
             if result:
+                self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
+                log.info(f"query success, time: {t1 - t0}, average_time: {self.average_time}")
             else:
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
-
 
 def assert_statistic(checkers, expectations={}):
     for k in checkers.keys():
