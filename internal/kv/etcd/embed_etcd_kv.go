@@ -97,6 +97,7 @@ func (kv *EmbedEtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+// LoadWithPrefix2 returns all the keys and values with versions by the given key prefix
 func (kv *EmbedEtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
 	key = path.Join(kv.rootPath, key)
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
