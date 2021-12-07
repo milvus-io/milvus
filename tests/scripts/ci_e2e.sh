@@ -52,7 +52,8 @@ cd ${ROOT}/tests/python_client
 
 # print python3 version, python version 3.6.8 is more stable for test
 python3 -V
- 
+
+# pytest will try to get ${CI_LOG_PATH} from environment variables first,then use default path
 export CI_LOG_PATH=/tmp/ci_logs/test
 
 if [ ! -d "${CI_LOG_PATH}" ]; then
