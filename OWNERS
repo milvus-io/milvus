@@ -13,6 +13,14 @@ filters:
     approvers:
       - maintainers
 
+  "Makefile$":
+    labels:
+      - area/compilation
+
+  "CMakeLists\\.txt$":
+    labels:
+      - area/compilation
+
   # markdown files should be reviewed by authors
   "*\\.md$":
     required_reviewers:
