@@ -33,7 +33,7 @@ type RocksdbKV struct {
 }
 
 const (
-	// LRUCacheSize is the lru cache size of rocksdb, default 3 << 30
+	// LRUCacheSize is the lru cache size of rocksdb, default 0
 	LRUCacheSize = 0
 )
 
