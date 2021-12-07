@@ -977,6 +977,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	searchResults := make([]*SearchResult, 0)
 
 	// historical search
+	log.Debug("historical search start", zap.Int64("msgID", msg.ID()))
 	hisSearchResults, sealedSegmentSearched, err := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err != nil {
 		return err
@@ -984,6 +985,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	searchResults = append(searchResults, hisSearchResults...)
 	tr.Record("historical search done")
 
+	log.Debug("streaming search start", zap.Int64("msgID", msg.ID()))
 	for _, channel := range collection.getVChannels() {
 		var strSearchResults []*SearchResult
 		strSearchResults, err := q.streaming.search(searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
