@@ -39,6 +39,7 @@
 
 # Exit immediately for non zero status
 set -e
+# Print commands
 set -x
 
 # The purpose of this file is to unify prow/lib.sh in both istio and istio.io
