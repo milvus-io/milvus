@@ -1,6 +1,6 @@
 # scale object
-IMAGE_REPOSITORY = "milvusdb/milvus-dev"  # repository of milvus image
-IMAGE_TAG = "master-latest"  # tag of milvus image
+IMAGE_REPOSITORY = "harbor.zilliz.cc/milvus/milvus"  # repository of milvus image
+IMAGE_TAG = "master-20211207-4cd314d"  # tag of milvus image
 NAMESPACE = "chaos-testing"  # namespace
 IF_NOT_PRESENT = "IfNotPresent"  # image pullPolicy IfNotPresent
 ALWAYS = "Always"  # image pullPolicy Always
