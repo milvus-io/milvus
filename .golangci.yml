@@ -8,11 +8,16 @@ run:
     - internal/core
 
 linters-settings:
-  golint:
-    min-confidence: 0.8
-
   misspell:
     locale: US
+
+  revive:
+    ignore-generated-header: true
+    severity: warning
+    confidence: 0.8
+    rules:
+      - name: context-as-argument
+        severity: warning
 
 linters:
   disable-all: true
@@ -21,10 +26,10 @@ linters:
     - goimports
     - misspell
     - govet
-    - golint
     - ineffassign
     - gosimple
     - gosec
+    - revive
 
 issues:
   exclude-use-default: false
