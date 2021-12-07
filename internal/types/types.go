@@ -44,6 +44,7 @@ type Component interface {
 type DataNode interface {
 	Component
 
+	// Deprecated
 	WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error)
 
 	// FlushSegments notifies DataNode to flush the segments req provids. The flush tasks are async to this
