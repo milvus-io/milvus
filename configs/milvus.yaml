@@ -86,9 +86,9 @@ proxy:
       pulsarBufSize: 1024 # pulsar chan buffer size
     timeTick:
       bufSize: 512
-  maxNameLength: 255  # max name length of collection or alias
-  maxFieldNum: 256     # max field number of a collection
-  maxDimension: 32768 # Maximum dimension of vector
+  maxNameLength: 255  # Maximum length of name for a collection or alias
+  maxFieldNum: 256     # Maximum number of fields in a collection
+  maxDimension: 32768 # Maximum dimension of a vector
   maxShardNum: 256 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue
   bufFlagExpireTime: 3600 # second, the time to expire bufFlag from cache in collectResultLoop
