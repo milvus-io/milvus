@@ -2149,7 +2149,7 @@ class TestCreateCollectionInvalid(object):
         expected: raise exception
         """
         collection_name = gen_unique_str(uid_create)
-        limit_num = 64
+        limit_num = 256
         fields = copy.deepcopy(cons.default_fields)
         for i in range(limit_num):
             field_name = gen_unique_str("field_name")
@@ -2162,7 +2162,7 @@ class TestCreateCollectionInvalid(object):
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "maximum field's number should be limited to 64"
+            assert message == "maximum field's number should be limited to 256"
 
 
 class TestDescribeCollection:
