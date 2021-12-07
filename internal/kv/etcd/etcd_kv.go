@@ -29,11 +29,11 @@ import (
 )
 
 const (
-	// RequestTimeout default timeout for etcd request.
+	// RequestTimeout is default timeout for etcd request.
 	RequestTimeout = 10 * time.Second
 )
 
-// EtcdKV implements TxnKv interface, it supports to process multiple kvs in a transaction.
+// EtcdKV implements TxnKV interface, it supports to process multiple kvs in a transaction.
 type EtcdKV struct {
 	client   *clientv3.Client
 	rootPath string
