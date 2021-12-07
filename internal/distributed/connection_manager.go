@@ -88,6 +88,7 @@ func NewConnectionManager(session *sessionutil.Session) *ConnectionManager {
 	}
 }
 
+// AddDependency add a dependency by role name.
 func (cm *ConnectionManager) AddDependency(roleName string) error {
 	if !cm.checkroleName(roleName) {
 		return errors.New("roleName is illegal")
