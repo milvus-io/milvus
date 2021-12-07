@@ -109,7 +109,7 @@ The following graph shows the core logic of `Time Synchronization System` in `Mi
 
 ![upload time tick](./graphs/timesync_proxy_upload_time_tick.png)
 
-This is the `Proto` that used by `Proxy` to report timestamp to `RootCoord`:
+This is the `Proto` that is used by `Proxy` to report timestamp to `RootCoord`:
 
 ```proto
 service RootCoord {
