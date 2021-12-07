@@ -14,10 +14,10 @@ if(NOT DEFINED FIU_VERSION)
    set(FIU_VERSION 1.00)
 endif()
 
-if ( DEFINED ENV{Knowhere_FIU_URL} )
+if ( DEFINED ENV{KNOWHERE_FIU_URL} )
     set( FIU_SOURCE_URL "$ENV{MILVUS_FIU_URL}" )
 else ()
-    set( FIU_SOURCE_URL "https://github.com.cnpmjs.org/albertito/libfiu/archive/${FIU_VERSION}.tar.gz" )
+    set( FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz" )
 endif ()
 
 macro( build_fiu )
