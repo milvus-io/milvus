@@ -2453,6 +2453,14 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
+	wg.Add(1)
+	t.Run("DropAlias fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.DropAlias(shortCtx, &milvuspb.DropAliasRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
 	wg.Wait()
 	cancel()
 }
