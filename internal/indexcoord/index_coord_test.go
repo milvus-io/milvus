@@ -255,4 +255,9 @@ func TestIndexCoord_NotHealthy(t *testing.T) {
 	resp, err := ic.BuildIndex(context.Background(), req)
 	assert.Error(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+
+	req2 := &indexpb.DropIndexRequest{}
+	status, err := ic.DropIndex(context.Background(), req2)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
