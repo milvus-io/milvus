@@ -1180,7 +1180,7 @@ func (c *Core) Start() error {
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
 
-		c.stateCode.Store(internalpb.StateCode_Healthy)
+		c.UpdateStateCode(internalpb.StateCode_Healthy)
 		log.Debug(typeutil.RootCoordRole+" start successfully ", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
 	})
 
@@ -1189,9 +1189,10 @@ func (c *Core) Start() error {
 
 // Stop stop rootcoord
 func (c *Core) Stop() error {
+	c.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	c.cancel()
 	c.wg.Wait()
-	c.stateCode.Store(internalpb.StateCode_Abnormal)
 	// wait at most one second to revoke
 	c.session.Revoke(time.Second)
 	return nil
