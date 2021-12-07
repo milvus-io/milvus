@@ -55,6 +55,7 @@ func (r *reader) Topic() string {
 	return r.topic
 }
 
+// Next return the next message of reader, blocking until a message is available
 func (r *reader) Next(ctx context.Context) (Message, error) {
 	cMsg, err := r.c.server.Next(ctx, r.topic, r.name, r.startMessageIDInclusive)
 	if err != nil {
