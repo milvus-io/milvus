@@ -15,7 +15,7 @@ The following figure shows the design of the indexCoord component:
 
 ## 8.1 Use etcd as a reliable service
 
-Based on etcd service discovery, IndexCoord component, like other Milvus components, rely on etcd to implement
+IndexCoord, like the other Milvus components, relies on etcd to implement
 service discovery. IndexCoord relies on the lease mechanism of etcd to sense the online and offline news of IndexNode.
 
 In addition to service discovery, Milvus also uses etcd as a reliable meta storage, and writes all
