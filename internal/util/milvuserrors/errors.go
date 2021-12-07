@@ -25,6 +25,8 @@ const (
 	MsgDataCoordNotServing = "data coordinator is not serving"
 	// MsgIndexCoordNotServing means that index coordinator not serving
 	MsgIndexCoordNotServing = "index coordinator is not serving"
+	// MsgProxyNotServing means that proxy node not serving
+	MsgProxyNotServing = "proxy node is not serving"
 )
 
 // MsgCollectionAlreadyExist is used to construct an error message of collection already exist

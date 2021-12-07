@@ -26,7 +26,9 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/healthz"
 	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 
@@ -417,20 +419,32 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	if localMsg {
 		standaloneHealthzHandler := func(w http.ResponseWriter, r *http.Request) {
-			if rc == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			req := &internalpb.GetComponentStatesRequest{}
+			validateResp := func(resp *internalpb.ComponentStates, err error) bool {
+				return err == nil && resp != nil && resp.GetState().GetStateCode() == internalpb.StateCode_Healthy
+			}
+			if rc == nil || !validateResp(rc.GetComponentStates(ctx, req)) {
 				rootCoordNotServingHandler(w, r)
 				return
 			}
-			if qs == nil {
+			if qs == nil || !validateResp(qs.GetComponentStates(ctx, req)) {
 				queryCoordNotServingHandler(w, r)
 				return
 			}
-			if ds == nil {
+
+			if ds == nil || !validateResp(ds.GetComponentStates(ctx, req)) {
 				dataCoordNotServingHandler(w, r)
 				return
 			}
-			if is == nil {
+			if is == nil || !validateResp(is.GetComponentStates(ctx, req)) {
 				indexCoordNotServingHandler(w, r)
+				return
+			}
+
+			if pn == nil || !validateResp(pn.GetComponentStates(ctx, req)) {
+				proxyNotServingHandler(w, r)
 				return
 			}
 			// TODO(dragondriver): need to check node state?
