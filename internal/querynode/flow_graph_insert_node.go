@@ -51,6 +51,7 @@ type insertData struct {
 	insertPKs        map[UniqueID][]int64
 }
 
+// deleteData stores the valid delete data
 type deleteData struct {
 	deleteIDs        map[UniqueID][]int64
 	deleteTimestamps map[UniqueID][]Timestamp
