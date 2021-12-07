@@ -413,7 +413,7 @@ func (m *MetaReplica) setSegmentInfos(segmentInfos map[UniqueID]*querypb.Segment
 
 func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2SealedSegmentChangeInfos, error) {
 	if len(saves) == 0 {
-		return nil, nil
+		return nil, errors.New("col2SegmentInfos is empty")
 	}
 	// generate segment change info according segment info to updated
 	col2SegmentChangeInfos := make(col2SealedSegmentChangeInfos)
@@ -593,7 +593,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitionIDs []UniqueID) (col2SealedSegmentChangeInfos, error) {
 	removes := m.showSegmentInfos(collectionID, partitionIDs)
 	if len(removes) == 0 {
-		return nil, nil
+		return nil, errors.New("removes is empty")
 	}
 	// get segmentInfos to remove
 	segmentChangeInfos := &querypb.SealedSegmentsChangeInfo{

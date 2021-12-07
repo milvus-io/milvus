@@ -171,7 +171,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 
 func parseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
 	if exprStr == "" {
-		return nil, nil
+		return nil, fmt.Errorf("empty string")
 	}
 	ast, err := ant_parser.Parse(exprStr)
 	if err != nil {

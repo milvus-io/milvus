@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -435,16 +436,16 @@ func (t *compactionTrigger) globalSingleCompaction(segments []*SegmentInfo, isFo
 
 func (t *compactionTrigger) singleCompaction(segment *SegmentInfo, isForce bool, signal *compactionSignal) (*datapb.CompactionPlan, error) {
 	if segment == nil {
-		return nil, nil
+		return nil, errors.New("segment is nil")
 	}
 
 	if !isForce && !t.shouldDoSingleCompaction(segment, signal.timetravel) {
-		return nil, nil
+		return nil, errors.New("should not perform single compaction")
 	}
 
 	plan := t.singleCompactionPolicy.generatePlan(segment, signal.timetravel)
 	if plan == nil {
-		return nil, nil
+		return nil, errors.New("generated plan is nil")
 	}
 
 	if err := t.fillOriginPlan(plan); err != nil {

@@ -590,7 +590,7 @@ func (ms *mqMsgStream) Next(ctx context.Context, channelName string) (TsMsg, err
 	}
 	if msg.Payload() == nil {
 		log.Warn("mqMsgStream reader Next get msg whose payload is nil")
-		return nil, nil
+		return nil, errors.New("mqMsgStream reader Next get msg whose payload is nil")
 	}
 	tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
 	if err != nil {

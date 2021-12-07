@@ -475,7 +475,7 @@ func TestPrintIndexFile(t *testing.T) {
 	}
 
 	err = PrintBinlogFiles(binlogFiles)
-	assert.Nil(t, err)
+	assert.Equal(t, ErrEOF, err)
 
 	// remove tmp files
 	for _, file := range binlogFiles {

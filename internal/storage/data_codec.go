@@ -404,7 +404,7 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 		totalLength := 0
 		for {
 			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
+			if err != nil && err != ErrEOF {
 				return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 			}
 			if eventReader == nil {
@@ -750,7 +750,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 
 		pid, sid = binlogReader.PartitionID, binlogReader.SegmentID
 		eventReader, err := binlogReader.NextEventReader()
-		if err != nil {
+		if err != nil && err != ErrEOF {
 			binlogReader.Close()
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
@@ -955,7 +955,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 
 		for {
 			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
+			if err != nil && err != ErrEOF {
 				binlogReader.Close()
 				return nil, nil, err
 			}
@@ -1169,7 +1169,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 
 		for {
 			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
+			if err != nil && err != ErrEOF {
 				log.Warn("failed to get next event reader",
 					zap.Error(err))
 				binlogReader.Close()

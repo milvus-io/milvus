@@ -32,7 +32,7 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 		return nil, errors.New("bin log reader is closed")
 	}
 	if reader.buffer.Len() <= 0 {
-		return nil, nil
+		return nil, ErrEOF
 	}
 	eventReader, err := newEventReader(reader.descriptorEvent.PayloadDataType, reader.buffer)
 	if err != nil {
@@ -83,5 +83,6 @@ func NewBinlogReader(data []byte) (*BinlogReader, error) {
 	if _, err := reader.readDescriptorEvent(); err != nil {
 		return nil, err
 	}
+
 	return reader, nil
 }

@@ -513,7 +513,7 @@ func (mt *MetaTable) ListCollections(ts typeutil.Timestamp) (map[string]*pb.Coll
 	_, vals, err := mt.snapshot.LoadWithPrefix(CollectionMetaPrefix, ts)
 	if err != nil {
 		log.Debug("load with prefix error", zap.Uint64("timestamp", ts), zap.Error(err))
-		return nil, nil
+		return nil, err
 	}
 	for _, val := range vals {
 		collMeta := pb.CollectionInfo{}

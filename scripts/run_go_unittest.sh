@@ -36,7 +36,6 @@ go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
 go test -race -cover "${MILVUS_DIR}/msgstream/..." -failfast
 go test -race -cover "${MILVUS_DIR}/storage" -failfast
 go test -race -cover "${MILVUS_DIR}/tso/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/dablooms/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/funcutil/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/mqclient/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/paramtable/..." -failfast

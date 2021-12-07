@@ -71,6 +71,6 @@ func TestBinlogWriterReader(t *testing.T) {
 	assert.EqualValues(t, 3, payload[2])
 
 	reader, err := binlogReader.NextEventReader()
-	assert.Nil(t, err)
+	assert.Equal(t, ErrEOF, err)
 	assert.Nil(t, reader)
 }
