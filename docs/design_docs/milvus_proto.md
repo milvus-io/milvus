@@ -209,6 +209,7 @@ message HasCollectionRequest {
 
 ## LoadCollection
 Load a collection data into cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
+Note: this interface only send a request to server ask to load collection, it returns at once after the request is consumed. Collection loading progress is asynchronously.
 ```
 rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
 ```
@@ -467,6 +468,7 @@ message HasPartitionRequest {
 
 ## LoadPartitions
 Load multiple partitions data into cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
+Note: this interface only send a request to server ask to load partitions, it returns at once after the request is consumed. Loading progress is asynchronously.
 ```
 rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {}
 ```
