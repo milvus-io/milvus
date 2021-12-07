@@ -221,12 +221,13 @@ func (qc *QueryCoord) Start() error {
 
 // Stop function stops watching the meta and node updates
 func (qc *QueryCoord) Stop() error {
+	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	qc.scheduler.Close()
 	log.Debug("close scheduler ...")
 	qc.indexChecker.close()
 	log.Debug("close index checker ...")
 	qc.loopCancel()
-	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	qc.loopWg.Wait()
 	qc.session.Revoke(time.Second)
