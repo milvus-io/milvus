@@ -2,7 +2,7 @@
 
 ## Background
 
-In Milvus, one entity encapsulates multiple vectors and scalars.
+In Milvus, a collection has multiple fields, mainly there are two kinds fields: vector field and scalar field. We call a row as an entity, one entity encapsulates multiple vectors and scalar values.
 
 When creating a collection, you can specify using the primary key generated automatically, or using the user-provided primary key.
 If a user sets to use the user-provided primary key, each entity inserted must contain the primary key field. Otherwise, the insertion fails.
