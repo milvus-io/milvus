@@ -16,7 +16,7 @@ tmp_nb = 100
 # @pytest.mark.skip(reason="Ci failed")
 class TestCompactionParams(TestcaseBase):
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_compact_without_connection(self):
         """
         target: test compact without connection
@@ -33,7 +33,7 @@ class TestCompactionParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
         collection_w.compact(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_twice(self):
         """
         target: test compact twice
@@ -67,7 +67,7 @@ class TestCompactionParams(TestcaseBase):
         assert target_1 in c_plans2.plans[0].sources
         log.debug(c_plans2.plans[0].target)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_partition(self):
         """
         target: test compact partition
@@ -137,7 +137,7 @@ class TestCompactionParams(TestcaseBase):
         c_plans, _ = collection_w.get_compaction_plans()
         assert len(c_plans.plans) == 0
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("delete_pos", [1, tmp_nb // 2])
     def test_compact_after_delete(self, delete_pos):
         """
@@ -360,7 +360,7 @@ class TestCompactionOperation(TestcaseBase):
         for hits in search_res:
             assert len(hits) == ct.default_limit
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_after_binary_index(self):
         """
         target: test compact after create index
@@ -661,7 +661,7 @@ class TestCompactionOperation(TestcaseBase):
         c_plans, _ = collection_w.get_compaction_plans()
         assert len(c_plans.plans) == 0
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_merge_multi_segments(self):
         """
         target: test compact and merge multi small segments
@@ -831,7 +831,7 @@ class TestCompactionOperation(TestcaseBase):
         expr_1 = f'{ct.default_int64_field_name} in {[1]}'
         collection_w.query(expr_1, check_task=CheckTasks.check_query_results, check_items={'exp_res': [{'int64': 1}]})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_cross_shards(self):
         """
         target: test compact cross shards
@@ -854,7 +854,7 @@ class TestCompactionOperation(TestcaseBase):
         # Actually no merged
         assert len(c_plans.plans) == 0
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_cross_partition(self):
         """
         target: test compact cross partitions
