@@ -21,6 +21,7 @@ all: build-cpp build-go
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
+# attention: upgrade golangci-lint should also change Dockerfiles in build/docker/builder/cpu/<os>
 getdeps:
 	@mkdir -p ${GOPATH}/bin
 	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.43.0)
