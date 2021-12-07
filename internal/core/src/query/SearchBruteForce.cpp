@@ -59,8 +59,8 @@ raw_search(MetricType metric_type,
         // only matched ids will be chosen, not to use heap
         binary_distance_knn_mc(metric_type, x, xb, n, ntotal, k, code_size, D, labels, bitset);
     } else {
-        std::string msg = std::string("do binary search with unsupported metric type: ") +
-                          segcore::FaissMetricTypeToString(metric_type);
+        std::string msg =
+            std::string("binary search not support metric type: ") + segcore::MetricTypeToString(metric_type);
         PanicInfo(msg);
     }
 }
