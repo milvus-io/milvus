@@ -2,6 +2,7 @@ package sessionutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -13,6 +14,11 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 var Params paramtable.BaseTable
@@ -115,7 +121,7 @@ func TestUpdateSessions(t *testing.T) {
 	sessions, rev, err := s.GetSessions("test")
 	assert.Nil(t, err)
 	assert.Equal(t, len(sessions), 0)
-	eventCh := s.WatchServices("test", rev)
+	eventCh := s.WatchServices("test", rev, nil)
 
 	sList := []*Session{}
 
@@ -201,6 +207,138 @@ func TestSessionLivenessCheck(t *testing.T) {
 	})
 
 	assert.False(t, flag)
+}
+
+func TestWatcherHandleWatchResp(t *testing.T) {
+	ctx := context.Background()
+	Params.Init()
+
+	endpoints, err := Params.Load("_EtcdEndpoints")
+	require.NoError(t, err)
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, "/by-dev/session-ut")
+	require.NoError(t, err)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("/by-dev/session-ut")
+	s := NewSession(ctx, metaRoot, etcdEndpoints)
+	defer s.Revoke(time.Second)
+
+	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
+		return &sessionWatcher{
+			s:       s,
+			prefix:  "test",
+			rewatch: rewatch,
+			eventCh: make(chan *SessionEvent, 10),
+		}
+	}
+
+	t.Run("handle normal events", func(t *testing.T) {
+		w := getWatcher(s, nil)
+		wresp := clientv3.WatchResponse{
+			Events: []*clientv3.Event{
+				{
+					Type: mvccpb.PUT,
+					Kv: &mvccpb.KeyValue{
+						Value: []byte(`{"ServerID": 1, "ServerName": "test1"}`),
+					},
+				},
+				{
+					Type: mvccpb.DELETE,
+					PrevKv: &mvccpb.KeyValue{
+						Value: []byte(`{"ServerID": 2, "ServerName": "test2"}`),
+					},
+				},
+			},
+		}
+		err := w.handleWatchResponse(wresp)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(w.eventCh))
+	})
+
+	t.Run("handle abnormal events", func(t *testing.T) {
+		w := getWatcher(s, nil)
+		wresp := clientv3.WatchResponse{
+			Events: []*clientv3.Event{
+				{
+					Type: mvccpb.PUT,
+					Kv: &mvccpb.KeyValue{
+						Value: []byte(``),
+					},
+				},
+				{
+					Type: mvccpb.DELETE,
+					PrevKv: &mvccpb.KeyValue{
+						Value: []byte(``),
+					},
+				},
+			},
+		}
+		var err error
+		assert.NotPanics(t, func() {
+			err = w.handleWatchResponse(wresp)
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(w.eventCh))
+	})
+
+	t.Run("err compacted resp, nil Rewatch", func(t *testing.T) {
+		w := getWatcher(s, nil)
+		wresp := clientv3.WatchResponse{
+			CompactRevision: 1,
+		}
+		err := w.handleWatchResponse(wresp)
+		assert.Error(t, err)
+		assert.Equal(t, v3rpc.ErrCompacted, err)
+	})
+
+	t.Run("err compacted resp, valid Rewatch", func(t *testing.T) {
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			return nil
+		})
+		wresp := clientv3.WatchResponse{
+			CompactRevision: 1,
+		}
+		err := w.handleWatchResponse(wresp)
+		assert.NoError(t, err)
+	})
+
+	t.Run("err canceled", func(t *testing.T) {
+		w := getWatcher(s, nil)
+		wresp := clientv3.WatchResponse{
+			Canceled: true,
+		}
+		err := w.handleWatchResponse(wresp)
+		assert.Error(t, err)
+	})
+
+	t.Run("err handled but list failed", func(t *testing.T) {
+		s := NewSession(ctx, "/by-dev/session-ut", etcdEndpoints)
+		s.etcdCli.Close()
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			return nil
+		})
+		wresp := clientv3.WatchResponse{
+			CompactRevision: 1,
+		}
+
+		err = w.handleWatchResponse(wresp)
+		assert.Error(t, err)
+	})
+
+	t.Run("err handled but rewatch failed", func(t *testing.T) {
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			return errors.New("mocked")
+		})
+		wresp := clientv3.WatchResponse{
+			CompactRevision: 1,
+		}
+		err := w.handleWatchResponse(wresp)
+
+		assert.Error(t, err)
+	})
 }
 
 func TestSessionRevoke(t *testing.T) {
