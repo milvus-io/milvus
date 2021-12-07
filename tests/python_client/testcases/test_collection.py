@@ -421,20 +421,24 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe"}
         self.collection_schema_wrap.init_collection_schema([field], check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_multi_float_vectors(self):
         """
         target: test collection with multi float vectors
         method: create collection with two float-vec fields
-        expected: raise exception
+        expected: raise exception (not supported yet)
         """
+        # 1. connect
         self._connect()
+        # 2. create collection with multiple vectors
         c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_vec_field(), cf.gen_float_vec_field(name="tmp")]
-        schema = cf.gen_collection_schema(fields=fields, auto_id=True)
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: schema})
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_float_vec_field(dim=default_dim), cf.gen_float_vec_field(name="tmp", dim=default_dim)]
+        schema = cf.gen_collection_schema(fields=fields)
+        err_msg = "multiple vector fields is not supported"
+        self.collection_wrap.init_collection(c_name, schema=schema,
+                                             check_task=CheckTasks.err_res,
+                                             check_items={"err_code": 1, "err_msg": err_msg})[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
