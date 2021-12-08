@@ -12,6 +12,7 @@ type rmqReader struct {
 	r rocksmq.Reader
 }
 
+// Topic returns the topic name of a reader
 func (rr *rmqReader) Topic() string {
 	return rr.r.Topic()
 }
