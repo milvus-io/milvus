@@ -31,6 +31,7 @@ type allocator interface {
 	allocID(context.Context) (UniqueID, error)
 }
 
+// make sure rootCoordAllocator implements allocator interface
 var _ allocator = (*rootCoordAllocator)(nil)
 
 // rootCoordAllocator use RootCoord as allocator
