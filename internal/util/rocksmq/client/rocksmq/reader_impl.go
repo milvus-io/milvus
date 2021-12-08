@@ -69,6 +69,7 @@ func (r *reader) Next(ctx context.Context) (Message, error) {
 	return msg, nil
 }
 
+// HasNext check if there is a message available to read
 func (r *reader) HasNext() bool {
 	return r.c.server.HasNext(r.topic, r.name, r.startMessageIDInclusive)
 }
