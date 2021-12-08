@@ -63,6 +63,7 @@ func (iNode *insertNode) Name() string {
 	return "iNode"
 }
 
+// Operate handles input messages, to execute insert operations
 func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do insertNode operation")
 
