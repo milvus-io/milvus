@@ -626,6 +626,9 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 // Stop will release DataNode resources and shutdown datanode
 func (node *DataNode) Stop() error {
+	// https://github.com/milvus-io/milvus/issues/12282
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	node.cancel()
 
 	node.chanMut.RLock()
@@ -645,9 +648,6 @@ func (node *DataNode) Stop() error {
 	}
 
 	node.session.Revoke(time.Second)
-
-	// https://github.com/milvus-io/milvus/issues/12282
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	return nil
 }
