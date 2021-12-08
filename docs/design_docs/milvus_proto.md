@@ -266,7 +266,7 @@ message DescribeCollectionRequest {
   // Not useful for now
   string db_name = 2;
 
-  // The collection name you want to describe, you can pass collection_name or collectionID
+  // The collection name you want to describe, you can pass collection_name or collectionID. (Required)
   string collection_name = 3;
 
   // The collection ID you want to describe
@@ -326,7 +326,7 @@ message GetCollectionStatisticsRequest {
   common.MsgBase base = 1;
   // Not useful for now
   string db_name = 2;
-  // The collection name you want get statistics
+  // The collection name you want get statistics. (Required)
   string collection_name = 3;
 }
 ```
