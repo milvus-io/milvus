@@ -65,6 +65,7 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string) (*EmbedEtcdKV, error) 
 	return kv, nil
 }
 
+// Close closes the embedded etcd
 func (kv *EmbedEtcdKV) Close() {
 	kv.closeOnce.Do(func() {
 		kv.client.Close()
@@ -73,6 +74,7 @@ func (kv *EmbedEtcdKV) Close() {
 
 }
 
+// GetPath returns the full path by given key
 func (kv *EmbedEtcdKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
 }
