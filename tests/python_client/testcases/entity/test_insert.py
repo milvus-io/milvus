@@ -276,7 +276,7 @@ class TestInsertBase:
 
     # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_twice_ids_no_ids(self, connect, id_collection):
         """
         target: check the result of insert, with params ids and no ids
