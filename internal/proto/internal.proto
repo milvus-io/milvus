@@ -157,6 +157,7 @@ message SearchRequest {
   repeated int64 output_fields_id = 10;
   uint64 travel_timestamp = 11;
   uint64 guarantee_timestamp = 12;
+  uint64 timeout_timestamp = 13;
 }
 
 message SearchResults {
@@ -185,6 +186,7 @@ message RetrieveRequest {
   repeated int64 output_fields_id = 7;
   uint64 travel_timestamp = 8;
   uint64 guarantee_timestamp = 9;
+  uint64 timeout_timestamp = 10;
 }
 
 message RetrieveResults {

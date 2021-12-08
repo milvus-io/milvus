@@ -44,6 +44,7 @@ type queryMsg interface {
 	msgstream.TsMsg
 	GuaranteeTs() Timestamp
 	TravelTs() Timestamp
+	TimeoutTs() Timestamp
 }
 
 type queryCollection struct {
@@ -299,6 +300,21 @@ func (q *queryCollection) setServiceableTime(t Timestamp) {
 	q.serviceableTime = t
 }
 
+func (q *queryCollection) checkTimeout(msg queryMsg) bool {
+	curTime := tsoutil.GetCurrentTime()
+	//curTimePhysical, _ := tsoutil.ParseTS(curTime)
+	//timeoutTsPhysical, _ := tsoutil.ParseTS(msg.TimeoutTs())
+	//log.Debug("check if query timeout",
+	//	zap.Any("collectionID", q.collectionID),
+	//	zap.Any("msgID", msg.ID()),
+	//	zap.Any("TimeoutTs", msg.TimeoutTs()),
+	//	zap.Any("curTime", curTime),
+	//	zap.Any("timeoutTsPhysical", timeoutTsPhysical),
+	//	zap.Any("curTimePhysical", curTimePhysical),
+	//)
+	return msg.TimeoutTs() > typeutil.ZeroTimestamp && curTime >= msg.TimeoutTs()
+}
+
 func (q *queryCollection) consumeQuery() {
 	for {
 		select {
@@ -426,6 +442,17 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("receiveQueryMsg %d", msg.ID()))
+
+	if q.checkTimeout(msg) {
+		err := errors.New(fmt.Sprintln("do query failed in receiveQueryMsg because timeout"+
+			", collectionID = ", collectionID,
+			", msgID = ", msg.ID()))
+		publishErr := q.publishFailedQueryResult(msg, err.Error())
+		if publishErr != nil {
+			return fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+		}
+		return err
+	}
 
 	// check if collection has been released
 	collection, err := q.historical.replica.getCollectionByID(collectionID)
@@ -561,6 +588,19 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 					zap.Any("guaranteeTime_l", guaranteeTs),
 					zap.Any("serviceTime_l", serviceTime),
 				)
+
+				if q.checkTimeout(m) {
+					err := errors.New(fmt.Sprintln("do query failed in doUnsolvedQueryMsg because timeout"+
+						", collectionID = ", q.collectionID,
+						", msgID = ", m.ID()))
+					log.Warn(err.Error())
+					publishErr := q.publishFailedQueryResult(m, err.Error())
+					if publishErr != nil {
+						log.Error(publishErr.Error())
+					}
+					continue
+				}
+
 				if guaranteeTs <= q.getServiceableTime() {
 					unSolvedMsg = append(unSolvedMsg, m)
 					continue
@@ -1370,10 +1410,5 @@ func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg s
 		return fmt.Errorf("publish invalid msgType %d", msgType)
 	}
 
-	err := q.queryResultMsgStream.Produce(&msgPack)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return q.queryResultMsgStream.Produce(&msgPack)
 }

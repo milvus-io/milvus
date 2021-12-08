@@ -274,6 +274,11 @@ func (st *SearchMsg) TravelTs() Timestamp {
 	return st.GetTravelTimestamp()
 }
 
+// TimeoutTs returns the timestamp of timeout
+func (st *SearchMsg) TimeoutTs() Timestamp {
+	return st.GetTimeoutTimestamp()
+}
+
 // Marshal is used to serializing a message pack to byte array
 func (st *SearchMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchTask := input.(*SearchMsg)
@@ -394,6 +399,11 @@ func (rm *RetrieveMsg) GuaranteeTs() Timestamp {
 // TravelTs returns the timestamp of a time travel query request
 func (rm *RetrieveMsg) TravelTs() Timestamp {
 	return rm.GetTravelTimestamp()
+}
+
+// TimeoutTs returns the timestamp of timeout
+func (rm *RetrieveMsg) TimeoutTs() Timestamp {
+	return rm.GetTimeoutTimestamp()
 }
 
 // Marshal is used to serializing a message pack to byte array

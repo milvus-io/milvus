@@ -205,6 +205,7 @@ func TestSearchMsg(t *testing.T) {
 			OutputFieldsId:     []int64{},
 			TravelTimestamp:    6,
 			GuaranteeTimestamp: 7,
+			TimeoutTimestamp:   8,
 		},
 	}
 
@@ -219,6 +220,7 @@ func TestSearchMsg(t *testing.T) {
 	assert.Equal(t, int64(3), searchMsg.SourceID())
 	assert.Equal(t, uint64(7), searchMsg.GuaranteeTs())
 	assert.Equal(t, uint64(6), searchMsg.TravelTs())
+	assert.Equal(t, uint64(8), searchMsg.TimeoutTs())
 
 	bytes, err := searchMsg.Marshal(searchMsg)
 	assert.Nil(t, err)
@@ -310,6 +312,7 @@ func TestRetrieveMsg(t *testing.T) {
 			OutputFieldsId:     []int64{8, 9},
 			TravelTimestamp:    10,
 			GuaranteeTimestamp: 11,
+			TimeoutTimestamp:   12,
 		},
 	}
 
@@ -324,6 +327,7 @@ func TestRetrieveMsg(t *testing.T) {
 	assert.Equal(t, int64(3), retrieveMsg.SourceID())
 	assert.Equal(t, uint64(11), retrieveMsg.GuaranteeTs())
 	assert.Equal(t, uint64(10), retrieveMsg.TravelTs())
+	assert.Equal(t, uint64(12), retrieveMsg.TimeoutTs())
 
 	bytes, err := retrieveMsg.Marshal(retrieveMsg)
 	assert.Nil(t, err)
