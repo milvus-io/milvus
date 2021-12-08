@@ -468,7 +468,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ReleaseCollection")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
@@ -546,7 +546,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeCollection")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
@@ -790,7 +790,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreatePartition")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
@@ -876,7 +876,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropPartition")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
@@ -1079,6 +1079,11 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ReleasePartitions")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	rpt := &releasePartitionsTask{
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
@@ -1086,44 +1091,72 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		queryCoord:               node.queryCoord,
 	}
 
-	log.Debug("ReleasePartitions enqueue",
-		zap.String("role", Params.RoleName),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames))
-	err := node.sched.ddQueue.Enqueue(rpt)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
+	method := "ReleasePartitions"
 
-	log.Debug("ReleasePartitions",
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
-	defer func() {
-		log.Debug("ReleasePartitions Done",
+
+	if err := node.sched.ddQueue.Enqueue(rpt); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames))
-	}()
 
-	err = rpt.WaitToFinish()
-	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", rpt.Base.MsgID),
+		zap.Uint64("BeginTS", rpt.BeginTs()),
+		zap.Uint64("EndTS", rpt.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames))
+
+	if err := rpt.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", rpt.Base.MsgID),
+			zap.Uint64("BeginTS", rpt.BeginTs()),
+			zap.Uint64("EndTS", rpt.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("partitions", request.PartitionNames))
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", rpt.Base.MsgID),
+		zap.Uint64("BeginTS", rpt.BeginTs()),
+		zap.Uint64("EndTS", rpt.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames))
 
 	return rpt.result, nil
 }
