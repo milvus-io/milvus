@@ -145,7 +145,7 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	collectionID := req.CollectionID
 	//schema := req.Schema
-	log.Debug("LoadCollectionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID),
+	log.Debug("loadCollectionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID),
 		zap.Stringer("schema", req.Schema))
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -182,7 +182,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		return status, nil
 	}
 
-	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Any("status", status))
+	log.Debug("loadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Any("status", status))
 	return status, nil
 }
 
