@@ -60,6 +60,7 @@ target_link_libraries(index_builder_test
         milvus_indexbuilder
         log
         pthread
+        gperftools
         )
 
 target_link_libraries(all_tests

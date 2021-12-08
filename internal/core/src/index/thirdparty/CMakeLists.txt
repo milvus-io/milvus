@@ -189,8 +189,3 @@ if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
     link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
 endif ()
-
-if ( BUILD_UNIT_TEST STREQUAL "ON" )
-    add_subdirectory(profilers)
-endif ()
-
