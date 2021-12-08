@@ -57,7 +57,7 @@ macro( build_arrow )
         "-Dutf8proc_SOURCE=BUNDLED"
         "-DARROW_S3=OFF"
         "-DCMAKE_VERBOSE_MAKEFILE=ON"
-        "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
         "-DCMAKE_INCLUDE_PATH=${Boost_INCLUDE_DIRS}"
         )
 
@@ -66,7 +66,7 @@ macro( build_arrow )
             PREFIX              ${CMAKE_BINARY_DIR}/3rdparty_download/arrow-subbuild
             BINARY_DIR          arrow-bin
             DOWNLOAD_DIR        ${THIRDPARTY_DOWNLOAD_PATH}
-            INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}
+            INSTALL_DIR         ${CMAKE_INSTALL_PREFIX}
             SOURCE_SUBDIR       "cpp"
             URL                 ${ARROW_SOURCE_URL}
             URL_MD5             "e00927820d0350879c2abbc77e72c863"
@@ -75,37 +75,20 @@ macro( build_arrow )
             )
 
     ExternalProject_Get_Property( arrow-ep INSTALL_DIR )
-    ExternalProject_Get_Property( arrow-ep BINARY_DIR )
-    set( THRIFT_LOCATION ${BINARY_DIR}/thrift_ep-install )
-    set( UTF8PROC_LOCATION ${BINARY_DIR}/utf8proc_ep-install )
-
     if( NOT IS_DIRECTORY ${INSTALL_DIR}/include )
         file( MAKE_DIRECTORY "${INSTALL_DIR}/include" )
     endif()
-    if( NOT IS_DIRECTORY ${THRIFT_LOCATION}/include )
-        file( MAKE_DIRECTORY "${THRIFT_LOCATION}/include" )
-    endif()
-    if( NOT IS_DIRECTORY ${UTF8PROC_LOCATION}/include )
-        file( MAKE_DIRECTORY "${UTF8PROC_LOCATION}/include" )
-    endif()
 
     include(GNUInstallDirs)
+    set( CMAKE_INSTALL_LIBDIR lib )
 
-    add_library( thrift STATIC IMPORTED )
-    set_target_properties( thrift
+    add_library( arrow_bundled STATIC IMPORTED )
+    set_target_properties( arrow_bundled
             PROPERTIES
                 IMPORTED_GLOBAL                 TRUE
-                IMPORTED_LOCATION               ${THRIFT_LOCATION}/lib/libthrift.a
-                INTERFACE_INCLUDE_DIRECTORIES   ${THRIFT_LOCATION}/include )
-    add_dependencies(thrift arrow-ep)
-
-    add_library( utf8proc STATIC IMPORTED )
-    set_target_properties( utf8proc
-            PROPERTIES
-                IMPORTED_GLOBAL                 TRUE
-                IMPORTED_LOCATION               ${UTF8PROC_LOCATION}/lib/libutf8proc.a
-                INTERFACE_INCLUDE_DIRECTORIES   ${UTF8PROC_LOCATION}/include )
-    add_dependencies(utf8proc arrow-ep)
+                IMPORTED_LOCATION               ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/libarrow_bundled_dependencies.a
+                INTERFACE_INCLUDE_DIRECTORIES   ${INSTALL_DIR}/include )
+    add_dependencies(arrow_bundled arrow-ep )
 
     add_library( arrow STATIC IMPORTED )
     set_target_properties( arrow
@@ -113,7 +96,9 @@ macro( build_arrow )
                 IMPORTED_GLOBAL                 TRUE
                 IMPORTED_LOCATION               ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/libarrow.a
                 INTERFACE_INCLUDE_DIRECTORIES   ${INSTALL_DIR}/include )
-    add_dependencies(arrow arrow-ep )
+    add_dependencies(arrow arrow_bundled)
+    target_link_libraries(arrow INTERFACE arrow_bundled)
+
 
     add_library( parquet STATIC IMPORTED )
     set_target_properties( parquet
@@ -122,29 +107,22 @@ macro( build_arrow )
                 IMPORTED_LOCATION               ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/libparquet.a
                 INTERFACE_INCLUDE_DIRECTORIES   ${INSTALL_DIR}/include )
     add_dependencies(parquet arrow-ep)
-    target_link_libraries(parquet INTERFACE arrow thrift utf8proc)
+    target_link_libraries(parquet INTERFACE arrow )
 endmacro()
+
 
 build_arrow()
 
 add_library(wrapper STATIC)
-target_sources(wrapper PUBLIC ParquetWrapper.cpp PayloadStream.cpp
-    
-    )
+target_sources(wrapper PUBLIC ParquetWrapper.cpp PayloadStream.cpp)
 set_target_properties( wrapper PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR} )
-target_link_libraries(wrapper PUBLIC parquet pthread)
+target_link_libraries( wrapper PUBLIC parquet pthread)
 
 if(NOT CMAKE_INSTALL_PREFIX)
     set(CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
-get_target_property( THRIFT_LIB thrift LOCATION )
-get_target_property( ARROW_LIB  arrow LOCATION )
-get_target_property( PARQUET_LIB  parquet LOCATION )
-get_target_property( UTF8PROC_LIB  utf8proc LOCATION )
-install(TARGETS wrapper DESTINATION ${CMAKE_INSTALL_PREFIX})
-install(
-    FILES ${ARROW_LIB} ${PARQUET_LIB} ${THRIFT_LIB} ${UTF8PROC_LIB} DESTINATION ${CMAKE_INSTALL_PREFIX})
+install( TARGETS wrapper )
 
 if (BUILD_TESTING)
     add_subdirectory(test)

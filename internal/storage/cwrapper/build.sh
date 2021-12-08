@@ -27,11 +27,6 @@ if [ ! -d ${CMAKE_BUILD} ];then
     mkdir ${CMAKE_BUILD}
 fi
 
-if [ -d ${OUTPUT_LIB} ];then
-    rm -rf ${OUTPUT_LIB}
-fi
-mkdir ${OUTPUT_LIB}
-
 BUILD_TYPE="Debug"
 CUSTOM_THIRDPARTY_PATH=""
 
