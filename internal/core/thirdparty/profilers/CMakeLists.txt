@@ -10,8 +10,6 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
-set( LIBUNWIND_VERSION 1.6.2 )
-set( GPERFTOOLS_VERSION 2.9.1 )
 
 if ( DEFINED ENV{KNOWHERE_LIBUNWIND_URL} )
     set( LIBUNWIND_SOURCE_URL "$ENV{KNOWHERE_LIBUNWIND_URL}" )
