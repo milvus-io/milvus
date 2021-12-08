@@ -173,7 +173,7 @@ func (i *IndexCoord) Init() error {
 
 		}
 		log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
-		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1)
+		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
 		nodeTasks := i.metaTable.GetNodeTaskStats()
 		for nodeID, taskNum := range nodeTasks {
 			i.nodeManager.pq.UpdatePriority(nodeID, taskNum)

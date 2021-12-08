@@ -331,7 +331,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 		log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
 	}
 
-	qc.eventChan = qc.session.WatchServices(typeutil.QueryNodeRole, qc.cluster.getSessionVersion()+1)
+	qc.eventChan = qc.session.WatchServices(typeutil.QueryNodeRole, qc.cluster.getSessionVersion()+1, nil)
 	for {
 		select {
 		case <-ctx.Done():
