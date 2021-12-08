@@ -662,6 +662,7 @@ class TestCompactionOperation(TestcaseBase):
         assert len(c_plans.plans) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #12957")
     def test_compact_merge_multi_segments(self):
         """
         target: test compact and merge multi small segments
