@@ -263,6 +263,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 		mergeCompactionPolicy           mergeCompactionPolicy
 		compactionHandler               compactionPlanContext
 		mergeCompactionSegmentThreshold int
+		autoCompactionEnabled           bool
 	}
 	type args struct {
 		timetravel *timetravel
@@ -343,6 +344,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 				(mergeCompactionFunc)(greedyMergeCompaction),
 				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
 				2,
+				true,
 			},
 			args{
 				&timetravel{200},
@@ -396,10 +398,88 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 				},
 			},
 		},
+		{
+			"test auto compaction diabled",
+			fields{
+				&meta{
+					segments: &SegmentsInfo{
+						map[int64]*SegmentInfo{
+							1: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:             1,
+									CollectionID:   1,
+									PartitionID:    1,
+									LastExpireTime: 100,
+									NumOfRows:      10,
+									MaxRowNum:      100,
+									InsertChannel:  "ch1",
+									State:          commonpb.SegmentState_Flushed,
+									Binlogs: []*datapb.FieldBinlog{
+										{FieldID: 1, Binlogs: []string{"binlog1"}},
+									},
+									Deltalogs: []*datapb.DeltaLogInfo{
+										{RecordEntries: 5, DeltaLogPath: "deltalog1"},
+									},
+								},
+							},
+							2: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:             2,
+									CollectionID:   2,
+									PartitionID:    1,
+									LastExpireTime: 100,
+									NumOfRows:      300,
+									MaxRowNum:      1000,
+									InsertChannel:  "ch2",
+									State:          commonpb.SegmentState_Flushed,
+									Binlogs: []*datapb.FieldBinlog{
+										{FieldID: 1, Binlogs: []string{"binlog2"}},
+									},
+									Deltalogs: []*datapb.DeltaLogInfo{
+										{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+									},
+								},
+							},
+							3: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:             3,
+									CollectionID:   2,
+									PartitionID:    1,
+									LastExpireTime: 100,
+									NumOfRows:      300,
+									MaxRowNum:      1000,
+									InsertChannel:  "ch2",
+									State:          commonpb.SegmentState_Flushed,
+									Binlogs: []*datapb.FieldBinlog{
+										{FieldID: 1, Binlogs: []string{"binlog3"}},
+									},
+									Deltalogs: []*datapb.DeltaLogInfo{
+										{RecordEntries: 5, DeltaLogPath: "deltalog3"},
+									},
+								},
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				make(chan *compactionSignal, 1),
+				(singleCompactionFunc)(chooseAllBinlogs),
+				(mergeCompactionFunc)(greedyMergeCompaction),
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
+				2,
+				false,
+			},
+			args{
+				&timetravel{200},
+			},
+			false,
+			[]*datapb.CompactionPlan{},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			Params.EnableAutoCompaction = tt.fields.autoCompactionEnabled
 			tr := &compactionTrigger{
 				meta:                            tt.fields.meta,
 				allocator:                       tt.fields.allocator,
@@ -436,6 +516,7 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 		mergeCompactionPolicy  mergeCompactionPolicy
 		compactionHandler      compactionPlanContext
 		globalTrigger          *time.Ticker
+		enableAutoCompaction   bool
 	}
 	type args struct {
 		collectionID int64
@@ -502,7 +583,8 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 				compactionHandler: &spyCompactionHandler{
 					spyChan: make(chan *datapb.CompactionPlan, 1),
 				},
-				globalTrigger: time.NewTicker(time.Hour),
+				globalTrigger:        time.NewTicker(time.Hour),
+				enableAutoCompaction: true,
 			},
 			args: args{
 				collectionID: 1,
@@ -585,7 +667,8 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 				compactionHandler: &spyCompactionHandler{
 					spyChan: make(chan *datapb.CompactionPlan, 1),
 				},
-				globalTrigger: time.NewTicker(time.Hour),
+				globalTrigger:        time.NewTicker(time.Hour),
+				enableAutoCompaction: true,
 			},
 			args: args{
 				collectionID: 1,
@@ -664,7 +747,8 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 				compactionHandler: &spyCompactionHandler{
 					spyChan: make(chan *datapb.CompactionPlan, 1),
 				},
-				globalTrigger: time.NewTicker(time.Hour),
+				globalTrigger:        time.NewTicker(time.Hour),
+				enableAutoCompaction: true,
 			},
 			args: args{
 				collectionID: 1,
@@ -693,10 +777,95 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "auto compacted disabled",
+			fields: fields{
+				meta: &meta{
+					segments: &SegmentsInfo{
+						map[int64]*SegmentInfo{
+							101: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:             101,
+									CollectionID:   1,
+									PartitionID:    10,
+									InsertChannel:  "test_chan_01",
+									NumOfRows:      10000,
+									State:          commonpb.SegmentState_Flushed,
+									MaxRowNum:      12000,
+									LastExpireTime: 100,
+									StartPosition: &internalpb.MsgPosition{
+										ChannelName: "",
+										MsgID:       []byte{},
+										MsgGroup:    "",
+										Timestamp:   10,
+									},
+									DmlPosition: &internalpb.MsgPosition{
+										ChannelName: "",
+										MsgID:       []byte{},
+										MsgGroup:    "",
+										Timestamp:   45,
+									},
+									Binlogs:   []*datapb.FieldBinlog{},
+									Statslogs: []*datapb.FieldBinlog{},
+									Deltalogs: []*datapb.DeltaLogInfo{
+										{
+											RecordEntries: 1000,
+											TimestampFrom: 10,
+											TimestampTo:   20,
+										},
+										{
+											RecordEntries: 1001,
+											TimestampFrom: 30,
+											TimestampTo:   45,
+										},
+									},
+									CreatedByCompaction: false,
+									CompactionFrom:      []int64{},
+								},
+								isCompacting: false,
+							},
+						},
+					},
+				},
+				allocator:              newMockAllocator(),
+				signals:                make(chan *compactionSignal, 1),
+				singleCompactionPolicy: (singleCompactionFunc)(chooseAllBinlogs),
+				mergeCompactionPolicy:  (mergeCompactionFunc)(greedyGeneratePlans),
+				compactionHandler: &spyCompactionHandler{
+					spyChan: make(chan *datapb.CompactionPlan, 1),
+				},
+				globalTrigger:        time.NewTicker(time.Hour),
+				enableAutoCompaction: false,
+			},
+			args: args{
+				collectionID: 1,
+				partitionID:  10,
+				segmentID:    101,
+				channelName:  "test_ch_01",
+				timetravel: &timetravel{
+					time: 30,
+				},
+			},
+			wantErr:  false,
+			wantPlan: false,
+			wantBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:           101,
+					FieldBinlogs:        []*datapb.FieldBinlog{},
+					Field2StatslogPaths: []*datapb.FieldBinlog{},
+					Deltalogs: []*datapb.DeltaLogInfo{
+						{
+							RecordEntries: 2001,
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			Params.EnableAutoCompaction = tt.fields.enableAutoCompaction
 			tr := &compactionTrigger{
 				meta:                   tt.fields.meta,
 				allocator:              tt.fields.allocator,

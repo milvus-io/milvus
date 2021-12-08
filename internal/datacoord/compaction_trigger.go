@@ -107,6 +107,11 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 	defer logutil.LogPanic()
 	defer t.wg.Done()
 
+	// If AutoCompaction diabled, global loop will not start
+	if !Params.EnableAutoCompaction {
+		return
+	}
+
 	for {
 		select {
 		case <-t.quit:
@@ -150,6 +155,11 @@ func (t *compactionTrigger) triggerCompaction(timetravel *timetravel) error {
 
 // triggerSingleCompaction triger a compaction bundled with collection-partiiton-channel-segment
 func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, timetravel *timetravel) error {
+	// If AutoCompaction diabled, flush request will not trigger compaction
+	if !Params.EnableAutoCompaction {
+		return nil
+	}
+
 	id, err := t.allocSignalID()
 	if err != nil {
 		return err
@@ -244,7 +254,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		log.Debug("global merge compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("plans", getPlanIDs(mergeCompactionPlans)))
 	}
 
-	log.Info("handle global compaction cost", zap.Int64("millliseconds", time.Since(t1).Milliseconds()))
+	log.Info("handle global compaction cost", zap.Int64("milliseconds", time.Since(t1).Milliseconds()))
 }
 
 func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
@@ -262,7 +272,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	if err != nil {
 		log.Warn("failed to do single compaction", zap.Int64("segmentID", segment.ID), zap.Error(err))
 	} else {
-		log.Info("time cost of generating single compaction plan", zap.Int64("milllis", time.Since(t1).Milliseconds()),
+		log.Info("time cost of generating single compaction plan", zap.Int64("millis", time.Since(t1).Milliseconds()),
 			zap.Int64("planID", singleCompactionPlan.GetPlanID()), zap.Int64("signalID", signal.id))
 	}
 

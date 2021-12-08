@@ -81,6 +81,7 @@ type ParamTable struct {
 	EnableGarbageCollection bool
 
 	CompactionRetentionDuration int64
+	EnableAutoCompaction        bool
 
 	// Garbage Collection
 	GCInterval         time.Duration
@@ -135,6 +136,7 @@ func (p *ParamTable) Init() {
 	p.initMinioRootPath()
 
 	p.initCompactionRetentionDuration()
+	p.initEnableAutoCompaction()
 
 	p.initEnableGarbageCollection()
 	p.initGCInterval()
@@ -377,4 +379,8 @@ func (p *ParamTable) initMinioRootPath() {
 
 func (p *ParamTable) initCompactionRetentionDuration() {
 	p.CompactionRetentionDuration = p.ParseInt64WithDefault("dataCoord.compaction.retentionDuration", 432000)
+}
+
+func (p *ParamTable) initEnableAutoCompaction() {
+	p.EnableAutoCompaction = p.ParseBool("dataCoord.compaction.enableAutoCompaction", false)
 }
