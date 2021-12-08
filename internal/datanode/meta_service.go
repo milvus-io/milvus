@@ -62,7 +62,7 @@ func (mService *metaService) getCollectionSchema(ctx context.Context, collID Uni
 
 	response, err := mService.rootCoord.DescribeCollection(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("Grpc error when describe collection %v from rootcoord: %s", collID, err.Error())
+		return nil, fmt.Errorf("grpc error when describe collection %v from rootcoord: %s", collID, err.Error())
 	}
 
 	if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
