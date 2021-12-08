@@ -16,6 +16,9 @@ jobs:
         pod: [querynode, datanode, indexnode, proxy]
     
     steps:
+      - name: Set env param
+        run: |
+          echo "RELEASE=test-${{ matrix.pod }}-pod-failure" >> $GITHUB_ENV
 
       - name: Creating kind cluster
         uses: helm/kind-action@v1.2.0
@@ -64,11 +67,11 @@ jobs:
           declare -A pod_map=( ["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
-          helm install --wait --timeout 720s milvus-chaos milvus/milvus --set ${pod_map[${{ matrix.pod }}]}.replicas=2 -f cluster-values.yaml  -n=chaos-testing
+          helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set ${pod_map[${{ matrix.pod }}]}.replicas=2 -f cluster-values.yaml  -n=chaos-testing
           kubectl get pods -n chaos-testing
           sleep 20s
           kubectl get pods -n chaos-testing
-          kubectl port-forward service/milvus-chaos 19530 -n chaos-testing >/dev/null 2>&1 &
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
           sleep 20s
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
@@ -95,8 +98,8 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           kubectl get pod -n chaos-testing
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
-          kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s          
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
           python scripts/hello_milvus.py
 
       - name: Data Consist Test
@@ -114,8 +117,8 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           kubectl get pod -n chaos-testing
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
-          kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s          
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
           python scripts/hello_milvus.py
 
       - name: Export logs
