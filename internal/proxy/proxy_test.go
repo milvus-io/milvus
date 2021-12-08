@@ -2572,3 +2572,11 @@ func TestProxy_GetComponentStates(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }
+
+func TestProxy_GetComponentStates_state_code(t *testing.T) {
+	p := &Proxy{}
+	p.stateCode.Store("not internalpb.StateCode")
+	states, err := p.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
+}
