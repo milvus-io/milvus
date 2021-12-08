@@ -385,7 +385,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	//dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
-	log.Debug("ReleasePartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID), zap.Int64s("partitionIDs", partitionIDs))
+	log.Debug("releasePartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID), zap.Int64s("partitionIDs", partitionIDs))
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
@@ -399,7 +399,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 
 	hasCollection := qc.meta.hasCollection(collectionID)
 	if !hasCollection {
-		log.Warn("release partitions end, query coordinator don't have the log of", zap.Int64("collectionID", collectionID))
+		log.Warn("release partitions end, query coordinator don't have the log of", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 		return status, nil
 	}
 
@@ -407,7 +407,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("partitionIDs are empty")
 		status.Reason = err.Error()
-		log.Debug("releasePartitionsRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID))
+		log.Debug("releasePartitionsRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID), zap.Int64s("partitionIDs", partitionIDs))
 		return status, nil
 	}
 
@@ -419,7 +419,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		}
 	}
 	if len(toReleasedPartitions) == 0 {
-		log.Warn("release partitions end, query coordinator don't have the log of", zap.Int64s("partitionIDs", partitionIDs))
+		log.Warn("release partitions end, query coordinator don't have the log of", zap.Int64("collectionID", req.CollectionID), zap.Int64s("partitionIDs", partitionIDs))
 		return status, nil
 	}
 
@@ -443,7 +443,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		status.Reason = err.Error()
 		return status, nil
 	}
-	log.Debug("ReleasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
+	log.Debug("releasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 	//qc.MetaReplica.printMeta()
 	//qc.cluster.printMeta()
 	return status, nil
