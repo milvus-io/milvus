@@ -111,6 +111,7 @@ func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 	return nil
 }
 
+// reloadMeta reloads the index meta corresponding indexBuildID from ETCD.
 func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
 	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
 
