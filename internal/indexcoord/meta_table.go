@@ -163,6 +163,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	return mt.saveIndexMeta(meta)
 }
 
+// BuildIndex set the index state to be InProgress. It means IndexNode is building the index.
 func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
