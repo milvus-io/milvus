@@ -323,7 +323,6 @@ func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 		return client.(datapb.DataCoordClient).SaveBinlogPaths(ctx, req)
 	})
-	log.Debug("abc,", zap.Any("ret", ret), zap.Error(err))
 	if err != nil || ret == nil {
 		return nil, err
 	}
