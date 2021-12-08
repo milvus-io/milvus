@@ -36,9 +36,9 @@ function milvus_ci_release_name(){
         name+="-${CHANGE_ID:-}"
     fi 
 
-    if [[ -n ${GIT_COMMIT:-} ]]; then 
-            name+="-${GIT_COMMIT:0:4}"
-    fi 
+    # if [[ -n ${GIT_COMMIT:-} ]]; then 
+    #         name+="-${GIT_COMMIT:0:4}"
+    # fi 
 
     # [remove-kind] Add Jenkins BUILD_ID into Name
     if [[ -n ${JENKINS_BUILD_ID:-} ]]; then 
