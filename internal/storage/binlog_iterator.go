@@ -25,7 +25,7 @@ var (
 	ErrDisposed = errors.New("iterator is disposed")
 )
 
-// Iterator is the iterator interface
+// Iterator is the iterator interface.
 type Iterator interface {
 	// HasNext returns true if the iterator have unread record
 	HasNext() bool
