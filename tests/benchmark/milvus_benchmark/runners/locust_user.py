@@ -55,13 +55,15 @@ class MyUser(User):
 
 def locust_executor(host, port, collection_name, connection_type="single", run_params=None):
     m = MilvusClient(host=host, port=port, collection_name=collection_name)
-    MyUser.tasks = {}
+    # MyUser.tasks = {}
     MyUser.op_info = run_params["op_info"]
     MyUser.params = {}
     tasks = run_params["tasks"]
     for op, value in tasks.items():
-        task = {eval("Tasks." + op): value["weight"]}
-        MyUser.tasks.update(task)
+        # task = {eval("Tasks." + op): value["weight"]}
+        # MyUser.tasks.update(task)
+        for i in range(int(value["weight"])):
+            MyUser.tasks.append(eval("Tasks." + op))
         MyUser.params[op] = value["params"] if "params" in value else None
     logger.info(MyUser.tasks)
 
