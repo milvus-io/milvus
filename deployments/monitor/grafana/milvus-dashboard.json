@@ -4092,7 +4092,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "process cpu usage",
+      "description": "cpu usage of process.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
