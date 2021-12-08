@@ -21,7 +21,6 @@ import (
 	"errors"
 	"math"
 	"math/rand"
-	"path"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
@@ -555,17 +554,6 @@ func genSimpleInsertData() (*storage.InsertData, error) {
 	return genInsertData(defaultMsgLength, schema)
 }
 
-func genKey(collectionID, partitionID, segmentID UniqueID, fieldID int64) string {
-	ids := []string{
-		defaultKVRootPath,
-		strconv.FormatInt(collectionID, 10),
-		strconv.FormatInt(partitionID, 10),
-		strconv.FormatInt(segmentID, 10),
-		strconv.FormatInt(fieldID, 10),
-	}
-	return path.Join(ids...)
-}
-
 func genStorageBlob(collectionID UniqueID,
 	partitionID UniqueID,
 	segmentID UniqueID,
@@ -684,7 +672,7 @@ func saveBinLog(ctx context.Context,
 			return nil, err
 		}
 
-		key := genKey(collectionID, partitionID, segmentID, fieldID)
+		key := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
 		kvs[key] = string(blob.Value[:])
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
