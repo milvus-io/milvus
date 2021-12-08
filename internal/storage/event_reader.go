@@ -73,12 +73,11 @@ func (reader *EventReader) readData() error {
 
 // Close closes EventReader object. It mainly calls the Close method of inner PayloadReaderInterface and
 // mark itself as closed.
-func (reader *EventReader) Close() error {
+func (reader *EventReader) Close() {
 	if !reader.isClosed {
 		reader.isClosed = true
-		return reader.PayloadReaderInterface.Close()
+		reader.PayloadReaderInterface.Close()
 	}
-	return nil
 }
 
 func newEventReader(datatype schemapb.DataType, buffer *bytes.Buffer) (*EventReader, error) {

@@ -62,7 +62,7 @@ CStatus GetBinaryVectorFromPayload(CPayloadReader payloadReader, uint8_t **value
 CStatus GetFloatVectorFromPayload(CPayloadReader payloadReader, float **values, int *dimension, int *length);
 
 int GetPayloadLengthFromReader(CPayloadReader payloadReader);
-CStatus ReleasePayloadReader(CPayloadReader payloadReader);
+void ReleasePayloadReader(CPayloadReader payloadReader);
 
 #ifdef __cplusplus
 }

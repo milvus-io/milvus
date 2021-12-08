@@ -59,17 +59,14 @@ func (reader *BinlogReader) readDescriptorEvent() (*descriptorEvent, error) {
 
 // Close closes the BinlogReader object.
 // It mainly calls the Close method of the internal events, reclaims resources, and marks itself as closed.
-func (reader *BinlogReader) Close() error {
+func (reader *BinlogReader) Close() {
 	if reader.isClose {
-		return nil
+		return
 	}
 	for _, e := range reader.eventList {
-		if err := e.Close(); err != nil {
-			return err
-		}
+		e.Close()
 	}
 	reader.isClose = true
-	return nil
 }
 
 // NewBinlogReader creates binlogReader to read binlog file.

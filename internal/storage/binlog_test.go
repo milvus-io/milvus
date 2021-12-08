@@ -198,8 +198,7 @@ func TestInsertBinlog(t *testing.T) {
 	e1a, err := e1r.GetInt64FromPayload()
 	assert.Nil(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
-	err = e1r.Close()
-	assert.Nil(t, err)
+	e1r.Close()
 
 	//start of e2
 	pos = int(e1NxtPos)
@@ -241,8 +240,7 @@ func TestInsertBinlog(t *testing.T) {
 	e2a, err := e2r.GetInt64FromPayload()
 	assert.Nil(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
-	err = e2r.Close()
-	assert.Nil(t, err)
+	e2r.Close()
 
 	assert.Equal(t, int(e2NxtPos), len(buf))
 
@@ -445,8 +443,7 @@ func TestDeleteBinlog(t *testing.T) {
 	e1a, err := e1r.GetInt64FromPayload()
 	assert.Nil(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
-	err = e1r.Close()
-	assert.Nil(t, err)
+	e1r.Close()
 
 	//start of e2
 	pos = int(e1NxtPos)
@@ -488,8 +485,7 @@ func TestDeleteBinlog(t *testing.T) {
 	e2a, err := e2r.GetInt64FromPayload()
 	assert.Nil(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
-	err = e2r.Close()
-	assert.Nil(t, err)
+	e2r.Close()
 
 	assert.Equal(t, int(e2NxtPos), len(buf))
 
@@ -692,8 +688,7 @@ func TestDDLBinlog1(t *testing.T) {
 	e1a, err := e1r.GetInt64FromPayload()
 	assert.Nil(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
-	err = e1r.Close()
-	assert.Nil(t, err)
+	e1r.Close()
 
 	//start of e2
 	pos = int(e1NxtPos)
@@ -735,8 +730,7 @@ func TestDDLBinlog1(t *testing.T) {
 	e2a, err := e2r.GetInt64FromPayload()
 	assert.Nil(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
-	err = e2r.Close()
-	assert.Nil(t, err)
+	e2r.Close()
 
 	assert.Equal(t, int(e2NxtPos), len(buf))
 
@@ -939,8 +933,7 @@ func TestDDLBinlog2(t *testing.T) {
 	e1a, err := e1r.GetInt64FromPayload()
 	assert.Nil(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
-	err = e1r.Close()
-	assert.Nil(t, err)
+	e1r.Close()
 
 	//start of e2
 	pos = int(e1NxtPos)
@@ -982,8 +975,7 @@ func TestDDLBinlog2(t *testing.T) {
 	e2a, err := e2r.GetInt64FromPayload()
 	assert.Nil(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
-	err = e2r.Close()
-	assert.Nil(t, err)
+	e2r.Close()
 
 	assert.Equal(t, int(e2NxtPos), len(buf))
 
@@ -1206,8 +1198,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.Nil(t, event1)
 	assert.NotNil(t, err)
 
-	err = reader.Close()
-	assert.Nil(t, err)
+	reader.Close()
 }
 
 func TestNewBinlogWriterTsError(t *testing.T) {
