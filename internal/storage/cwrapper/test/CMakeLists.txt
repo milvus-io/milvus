@@ -19,11 +19,9 @@ set(BUILD_GMOCK CACHE BOOL OFF)
 set(INSTALL_GTEST CACHE BOOL OFF)
 FetchContent_MakeAvailable(googletest)
 
-target_link_libraries(wrapper_test
+target_link_libraries(wrapper_test PRIVATE
         gtest_main
-        pthread
         wrapper
-        parquet
         )
 
 install(TARGETS wrapper_test DESTINATION ${CMAKE_INSTALL_PREFIX})
