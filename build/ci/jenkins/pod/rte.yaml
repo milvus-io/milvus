@@ -18,6 +18,13 @@ spec:
     securityContext:
       privileged: true
     args: ["cat"]
+    resources:
+      limits:
+        cpu: "6"
+        memory: 12Gi
+      requests:
+        cpu: "2"
+        memory: 10Gi
     volumeMounts:
     - mountPath: /docker-graph
       name: docker-graph
