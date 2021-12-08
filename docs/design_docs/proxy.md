@@ -26,7 +26,7 @@ parameters check, constraints check, etc. Dynamic check will check some related 
 search requests for example, Proxy should check if the related collection exists in Milvus.
 
 Also, Proxy will do some preprocessing for every request. Proxy will do little things for some requests in the
-preprocessing stage and a lot more for other requests. Every object in Milvus will be assigned with a `ID`, such as
+preprocessing stage and a lot more for other requests. Every object in Milvus will be assigned with an `ID`, such as
 `CollectionID`, `PartitionID`, `IndexID`, `SegmentID`, etc. Components in Milvus communicate with each other by the
 object IDs, however, users only know the object name. So as a user access layer of Milvus, Proxy should translate
 the object name into object ID. Also taking search request as example, Proxy should translate the `CollectionName` into
