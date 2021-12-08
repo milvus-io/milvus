@@ -34,14 +34,17 @@ type Int64Stats struct {
 	BF      *bloom.BloomFilter `json:"bf"`
 }
 
+// StatsWriter writes stats to buffer
 type StatsWriter struct {
 	buffer []byte
 }
 
+// GetBuffer returns buffer
 func (sw *StatsWriter) GetBuffer() []byte {
 	return sw.buffer
 }
 
+// StatsInt64 writes Int64Stats from @msgs with @fieldID to @buffer
 func (sw *StatsWriter) StatsInt64(fieldID int64, isPrimaryKey bool, msgs []int64) error {
 	if len(msgs) < 1 {
 		// return error: msgs must has one element at least
