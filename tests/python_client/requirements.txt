@@ -25,6 +25,8 @@ kubernetes==17.17.0
 PyYAML==5.4.1
 pytest-sugar==0.9.4
 pytest-reportportal==5.0.10
+pytest-parallel
+pytest-random-order
 
 # for customize config test
 python-benedict==0.24.3
