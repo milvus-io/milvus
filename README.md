@@ -1,7 +1,4 @@
-<a href="https://milvus.io/hacktoberfest-2021">
-    <img src="https://assets.zilliz.com/milvus_hacktoberfest_15ba8e5083.jpeg" alt="Join Hacktoberfest with Milvus">
-</a>
-
+<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_en_6c5b3a1466.png" alt="milvus banner">
 
 <div class="column" align="middle">
   <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
@@ -373,8 +370,9 @@ For guidance on installation, development, deployment, and administration, check
 The implemented SDK and its API documentation are listed below:
 
 - [PyMilvus SDK](https://github.com/milvus-io/pymilvus)
-- [Java SDK](https://github.com/milvus-io/milvus-sdk-java)(under development)
-- [Go SDK](https://github.com/milvus-io/milvus-sdk-go)(under development)
+- [Java SDK](https://github.com/milvus-io/milvus-sdk-java)(ready for test)
+- [Go SDK](https://github.com/milvus-io/milvus-sdk-go)(ready for test)
+- [Cpp SDK](https://github.com/milvus-io/milvus-sdk-go)(under development)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
 ### Milvus insight
