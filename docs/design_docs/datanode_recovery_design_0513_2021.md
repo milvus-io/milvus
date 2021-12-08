@@ -147,7 +147,7 @@ WatchDmChannels -> new dataSyncService -> HEALTH
 
 #### The boring design
 
-• If collection:flowgraph = 1 : 1, datanode must have ability to scale flowgraph.
+• If collection:flowgraph = 1 : 1, datanode must have the ability to scale flowgraph.
 
 ![datanode_design](graphs/collection_flowgraph_1_1.jpg)
 
