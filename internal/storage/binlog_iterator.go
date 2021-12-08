@@ -21,7 +21,7 @@ import (
 var (
 	// ErrNoMoreRecord is the error that the iterator does not have next record
 	ErrNoMoreRecord = errors.New("no more record")
-	// ErrDisposed is the error that the iterator is disposed
+	// ErrDisposed is the error that the iterator is disposed.
 	ErrDisposed = errors.New("iterator is disposed")
 )
 
