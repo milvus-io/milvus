@@ -458,7 +458,7 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("query coordinator is not healthy")
 		status.Reason = err.Error()
-		log.Debug("createQueryChannel end with query coordinator not healthy")
+		log.Error("createQueryChannel end with query coordinator not healthy", zap.Int64("collectionID", req.CollectionID))
 		return &querypb.CreateQueryChannelResponse{
 			Status: status,
 		}, nil
@@ -469,12 +469,13 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		log.Debug("createQueryChannel end with error")
+		log.Error("createQueryChannel end with error", zap.Int64("collectionID", req.CollectionID))
 		return &querypb.CreateQueryChannelResponse{
 			Status: status,
 		}, nil
 	}
 
+	log.Debug("createQueryChannel complete", zap.Int64("collectionID", req.CollectionID))
 	return &querypb.CreateQueryChannelResponse{
 		Status:         status,
 		RequestChannel: info.QueryChannelID,
