@@ -449,7 +449,7 @@ func (c *Core) setMsgStreams() error {
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
-	log.Debug("rootcoord AsProducer: " + Params.TimeTickChannel)
+	log.Debug("RootCoord register timetick producer success", zap.String("channel name", Params.TimeTickChannel))
 
 	c.SendTimeTick = func(t typeutil.Timestamp, reason string) error {
 		msgPack := ms.MsgPack{}
@@ -1181,7 +1181,7 @@ func (c *Core) Start() error {
 		Params.UpdatedTime = time.Now()
 
 		c.UpdateStateCode(internalpb.StateCode_Healthy)
-		log.Debug(typeutil.RootCoordRole+" start successfully ", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
+		log.Debug("RootCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	})
 
 	return nil
