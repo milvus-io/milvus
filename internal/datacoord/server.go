@@ -429,7 +429,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Debug("stats channel shutdown")
+				log.Debug("statistics channel shutdown")
 				return
 			default:
 			}
