@@ -1195,6 +1195,11 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 			Status: unhealthyStatus(),
 		}, nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ShowPartitions")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	spt := &showPartitionsTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
@@ -1204,11 +1209,22 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		result:                nil,
 	}
 
-	log.Debug("ShowPartitions enqueue",
+	method := "ShowPartitions"
+
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.Any("request", request))
-	err := node.sched.ddQueue.Enqueue(spt)
-	if err != nil {
+
+	if err := node.sched.ddQueue.Enqueue(spt); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Any("request", request))
+
 		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1217,21 +1233,30 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		}, nil
 	}
 
-	log.Debug("ShowPartitions",
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", spt.ID()),
+		zap.Uint64("BeginTS", spt.BeginTs()),
+		zap.Uint64("EndTS", spt.EndTs()),
 		zap.String("db", spt.ShowPartitionsRequest.DbName),
 		zap.String("collection", spt.ShowPartitionsRequest.CollectionName),
-		zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames),
-	)
-	defer func() {
-		log.Debug("ShowPartitions Done",
-			zap.Error(err),
-			zap.String("role", Params.RoleName),
-			zap.Any("result", spt.result))
-	}()
+		zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames))
 
-	err = spt.WaitToFinish()
-	if err != nil {
+	if err := spt.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", spt.ID()),
+			zap.Uint64("BeginTS", spt.BeginTs()),
+			zap.Uint64("EndTS", spt.EndTs()),
+			zap.String("db", spt.ShowPartitionsRequest.DbName),
+			zap.String("collection", spt.ShowPartitionsRequest.CollectionName),
+			zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames))
+
 		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1239,6 +1264,18 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 			},
 		}, nil
 	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", spt.ID()),
+		zap.Uint64("BeginTS", spt.BeginTs()),
+		zap.Uint64("EndTS", spt.EndTs()),
+		zap.String("db", spt.ShowPartitionsRequest.DbName),
+		zap.String("collection", spt.ShowPartitionsRequest.CollectionName),
+		zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames))
+
 	return spt.result, nil
 }
 
