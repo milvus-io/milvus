@@ -78,10 +78,10 @@ After syntax analysis, the following rules will be applied:
 
 1. non-vector column must exist in Schema.
 2. CompareExpr/TermExpr requires operand type matching.
-3. CompareExpr between non-vector columns of different types is available
+3. CompareExpr between non-vector columns of different types is available.
 4. The modulo operation requires all operands to be integers.
 5. Integer columns can only match integer operands. While float columns can match both integer and float operands.
-6. In BinaryOp, the `and`/`&&` operator has higher priority than the `or`/`||` operator
+6. In BinaryOp, the `and`/`&&` operator has higher priority than the `or`/`||` operator.
 
 example：
 
