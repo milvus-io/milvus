@@ -78,7 +78,7 @@ func (mt *metaTable) reloadFromKV() error {
 		indexMeta := indexpb.IndexMeta{}
 		err = proto.Unmarshal([]byte(values[i]), &indexMeta)
 		if err != nil {
-			return fmt.Errorf("IndexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
+			return fmt.Errorf("indexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
 
 		meta := &Meta{
