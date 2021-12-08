@@ -55,7 +55,7 @@ rootCoord:
 
   grpc:
     serverMaxRecvSize: 2147483647 # math.MaxInt32, Maximum data size received by the server
-    serverMaxSendSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32, Maximum data size sent by the server
     clientMaxRecvSize: 104857600 # 100 MB, Maximum data size received by the client
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
