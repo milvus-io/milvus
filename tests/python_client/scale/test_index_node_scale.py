@@ -29,7 +29,7 @@ class TestIndexNodeScale:
                 4.create index with one indexNode
         expected: The cost of one indexNode is about twice that of two indexNodes
         """
-        release_name = "tmp-index"
+        release_name = "scale-index"
         image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
@@ -37,6 +37,7 @@ class TestIndexNodeScale:
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.indexNode.replicas': 1,
+            'spec.components.dataNode.replicas': 2,
             'spec.config.dataCoord.enableCompaction': True,
             'spec.config.dataCoord.enableGarbageCollection': True
         }
