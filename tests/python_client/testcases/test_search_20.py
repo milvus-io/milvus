@@ -1744,7 +1744,6 @@ class TestCollectionSearch(TestcaseBase):
         time.sleep(gracefulTime)
         log.info("test_search_without_expression: searching collection %s with time_stamp_2 '%d'"
                  % (collection_w.name, time_stamp_2))
-        log.info(time_stamp_2)
         search_res = collection_w.search(vectors, default_search_field,
                                          default_search_params, default_limit,
                                          travel_timestamp=time_stamp_2,
