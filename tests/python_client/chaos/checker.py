@@ -81,7 +81,7 @@ class SearchChecker(Checker):
             if result:
                 self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
-                log.info(f"search success, time: {t1 - t0}, average_time: {self.average_time}")
+                log.debug(f"search success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
             else:
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
@@ -106,7 +106,7 @@ class InsertFlushChecker(Checker):
                 if insert_result:
                     self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                     self._succ += 1
-                    log.info(f"insert success, time: {t1 - t0}, average_time: {self.average_time}")
+                    log.debug(f"insert success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
                 else:
                     self._fail += 1
                 sleep(constants.WAIT_PER_OP / 10)
@@ -118,7 +118,7 @@ class InsertFlushChecker(Checker):
                 if num_entities == (self.initial_entities + constants.DELTA_PER_INS):
                     self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                     self._succ += 1
-                    log.info(f"flush success, time: {t1 - t0}, average_time: {self.average_time}")
+                    log.debug(f"flush success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
                     self.initial_entities += constants.DELTA_PER_INS
                 else:
                     self._fail += 1
@@ -141,12 +141,12 @@ class CreateChecker(Checker):
             if result:
                 self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
-                log.info(f"create success, time: {t1 - t0}, average_time: {self.average_time}")
+                log.debug(f"create success, time: {t1 - t0:.4f}, average_time: {self.average_time:4f}")
                 self.c_wrap.drop(timeout=timeout)
 
             else:
                 self._fail += 1
-                log.info(f"create failed, time: {t1 - t0}")
+                log.error(f"create failed, time: {t1 - t0:.4f}")
             sleep(constants.WAIT_PER_OP / 10)
 
 class IndexChecker(Checker):
@@ -170,12 +170,12 @@ class IndexChecker(Checker):
             if result:
                 self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
-                log.info(f"index success, time: {t1 - t0}, average_time: {self.average_time}")
+                log.debug(f"index success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
                 self.c_wrap.drop_index(timeout=timeout)
 
             else:
                 self._fail += 1
-                log.info(f"index failed, time: {t1 - t0}")
+                log.error(f"index failed, time: {t1 - t0}")
 
 class QueryChecker(Checker):
     """check query operations in a dependent thread"""
@@ -197,7 +197,7 @@ class QueryChecker(Checker):
             if result:
                 self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
-                log.info(f"query success, time: {t1 - t0}, average_time: {self.average_time}")
+                log.debug(f"query success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
             else:
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
