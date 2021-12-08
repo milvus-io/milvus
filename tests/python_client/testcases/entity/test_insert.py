@@ -67,7 +67,7 @@ class TestInsertBase:
             connect.insert(collection, entities)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_None(self, connect, collection):
+    def test_insert_with_none(self, connect, collection):
         """
         target: test insert with None
         method: set None as insert method params
