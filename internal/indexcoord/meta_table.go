@@ -206,6 +206,7 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 	return nil
 }
 
+// UpdateVersion updates the version of the index meta, whenever the task is built once, the version will be updated once.
 func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
