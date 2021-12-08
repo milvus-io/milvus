@@ -67,7 +67,7 @@ func (cos *ChannelOpSet) Add(id int64, channels []*channel) {
 	})
 }
 
-// Delete remove the mapping between channels and node
+// Delete removes the mapping between channels and node
 func (cos *ChannelOpSet) Delete(id int64, channels []*channel) {
 	*cos = append(*cos, &ChannelOp{
 		NodeID:   id,
@@ -159,7 +159,7 @@ func (c *ChannelStore) Reload() error {
 	return nil
 }
 
-// Add create a new node-channels mapping, but no channels are assigned to this node
+// Add creates a new node-channels mapping, but no channels are assigned to this node
 func (c *ChannelStore) Add(nodeID int64) {
 	if _, ok := c.channelsInfo[nodeID]; ok {
 		return
