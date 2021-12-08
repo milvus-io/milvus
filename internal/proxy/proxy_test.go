@@ -1971,6 +1971,14 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("AlterAlias fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("GetPersistentSegmentInfo fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{})
