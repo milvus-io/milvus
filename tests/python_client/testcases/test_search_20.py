@@ -1190,7 +1190,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": limit_check,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_load_flush_load(self, nb, nq, dim, auto_id, _async):
         """
         target: test search when load before flush
