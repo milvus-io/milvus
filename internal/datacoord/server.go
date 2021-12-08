@@ -406,7 +406,7 @@ func (s *Server) startServerLoop() {
 	s.startFlushLoop(s.serverLoopCtx)
 	s.garbageCollector.start()
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		log.Error("Data Coord disconnected from etcd, process will exit", zap.Int64("Server Id", s.session.ServerID))
+		log.Error("DataCoord disconnected from etcd, process will exit", zap.Int64("ServerID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
