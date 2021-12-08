@@ -26,8 +26,12 @@ class Tasks(TaskSet):
                     filter_query.append(eval(filter["range"]))
                 if isinstance(filter, dict) and "term" in filter:
                     filter_query.append(eval(filter["term"]))
+
+        guarantee_timestamp = self.params[op]["guarantee_timestamp"] if "guarantee_timestamp" in self.params[op] else None
+
         # logger.debug(filter_query)
-        self.client.query(vector_query, filter_query=filter_query, log=False, timeout=30)
+        self.client.query(vector_query, filter_query=filter_query, log=False, guarantee_timestamp=guarantee_timestamp,
+                          timeout=30)
 
     @task
     def flush(self):
