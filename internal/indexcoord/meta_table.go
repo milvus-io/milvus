@@ -64,6 +64,7 @@ func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 	return mt, nil
 }
 
+// reloadFromKV reloads the index meta from ETCD.
 func (mt *metaTable) reloadFromKV() error {
 	mt.indexBuildID2Meta = make(map[UniqueID]Meta)
 	key := "indexes"
@@ -78,7 +79,7 @@ func (mt *metaTable) reloadFromKV() error {
 		indexMeta := indexpb.IndexMeta{}
 		err = proto.Unmarshal([]byte(values[i]), &indexMeta)
 		if err != nil {
-			return fmt.Errorf("IndexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
+			return fmt.Errorf("indexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
 
 		meta := &Meta{
@@ -90,6 +91,7 @@ func (mt *metaTable) reloadFromKV() error {
 	return nil
 }
 
+// saveIndexMeta saves the index meta to ETCD.
 // metaTable.lock.Lock() before call this function
 func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 	value, err := proto.Marshal(meta.indexMeta)
@@ -109,6 +111,7 @@ func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 	return nil
 }
 
+// reloadMeta reloads the index meta corresponding indexBuildID from ETCD.
 func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
 	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
 

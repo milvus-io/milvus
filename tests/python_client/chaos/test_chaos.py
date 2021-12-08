@@ -24,14 +24,15 @@ def assert_statistic(checkers, expectations={}):
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
+        average_time = checkers[k].average_time
         if expectations.get(k, '') == constants.FAIL:
-            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
+            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
             expect(succ_rate < 0.49 or total < 2,
-                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
+                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
         else:
-            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
+            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
             expect(succ_rate > 0.90 or total > 2,
-                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
+                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
 
 
 def record_results(checkers):

@@ -20,26 +20,6 @@ num_loaded_entities = "num_loaded_entities"
 num_total_entities = "num_total_entities"
 
 
-def get_segment_distribution(res):
-    """
-    Get segment distribution
-    """
-    from collections import defaultdict
-    segment_distribution = defaultdict(lambda: {"growing": [], "sealed": []})
-    for r in res:
-        if r.nodeID not in segment_distribution:
-            segment_distribution[r.nodeID] = {
-                "growing": [],
-                "sealed": []
-            }
-        if r.state == 3:
-            segment_distribution[r.nodeID]["sealed"].append(r.segmentID)
-        if r.state == 2:
-            segment_distribution[r.nodeID]["growing"].append(r.segmentID)
-
-    return segment_distribution
-
-
 class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
 
@@ -1429,9 +1409,41 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.load()
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         assert len(res) > 0
+        segment_ids = []
         cnt = 0
         for r in res:
-            cnt += r.num_rows
+            log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows} ")
+            if r.segmentID not in segment_ids:
+                segment_ids.append(r.segmentID)
+                cnt += r.num_rows
+        assert cnt == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_get_sealed_query_segment_info_after_create_index(self):
+        """
+        target: test getting sealed query segment info of collection with data
+        method: init a collection, insert data, flush, create index, load, and get query segment info
+        expected:
+            1. length of segment is greater than 0
+            2. the sum num_rows of each segment is equal to num of entities
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        nb = 3000
+        df = cf.gen_default_dataframe_data(nb)
+        collection_w.insert(df)
+        collection_w.num_entities
+        collection_w.create_index(default_field_name, default_index_params)
+        collection_w.load()
+        res, _ = self.utility_wrap.get_query_segment_info(c_name)
+        assert len(res) > 0
+        segment_ids = []
+        cnt = 0
+        for r in res:
+            log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows} ")
+            if r.segmentID not in segment_ids:
+                segment_ids.append(r.segmentID)
+                cnt += r.num_rows
         assert cnt == nb
 
     @pytest.mark.tags(CaseLabel.Loadbalance)
@@ -1455,7 +1467,7 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.load()
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
-        segment_distribution = get_segment_distribution(res)
+        segment_distribution = cf.get_segment_distribution(res)
         all_querynodes = [node["identifier"] for node in ms.query_nodes]
         assert len(all_querynodes) > 1
         all_querynodes = sorted(all_querynodes,
@@ -1468,7 +1480,7 @@ class TestUtilityAdvanced(TestcaseBase):
         self.utility_wrap.load_balance(src_node_id, des_node_ids, sealed_segment_ids)
         # get segments distribution after load balance
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
-        segment_distribution = get_segment_distribution(res)
+        segment_distribution = cf.get_segment_distribution(res)
         des_sealed_segment_ids = []
         for des_node_id in des_node_ids:
             des_sealed_segment_ids += segment_distribution[des_node_id]["sealed"]

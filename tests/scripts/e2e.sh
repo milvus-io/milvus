@@ -62,7 +62,7 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
     fi
   fi
 fi
-echo "[debug] DISABLE_KIND is ${DISABLE_KIND:-},PARALLEL_NUM is ${PARALLEL_NUM},MILVUS_SERVICE_IP is ${MILVUS_SERVICE_IP},MILVUS_SERVICE_PORT is ${MILVUS_SERVICE_PORT}"
+
 #[remove-kind] use pytest run in the krte when remove kinD cluster
 if [[ -n "${DISABLE_KIND:-}" ]]; then
   cd ${ROOT}/tests/python_client

@@ -462,8 +462,8 @@ func (s *Segment) setBuildID(fieldID int64, id UniqueID) error {
 }
 
 func (s *Segment) getIndexName(fieldID int64) string {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
+	s.paramMutex.RLock()
+	defer s.paramMutex.RUnlock()
 	if _, ok := s.indexInfos[fieldID]; !ok {
 		return ""
 	}
@@ -489,8 +489,8 @@ func (s *Segment) getBuildID(fieldID int64) UniqueID {
 }
 
 func (s *Segment) getIndexPaths(fieldID int64) []string {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
+	s.paramMutex.RLock()
+	defer s.paramMutex.RUnlock()
 	if _, ok := s.indexInfos[fieldID]; !ok {
 		return nil
 	}

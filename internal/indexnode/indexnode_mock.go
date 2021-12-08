@@ -176,7 +176,7 @@ func (inm *Mock) Stop() error {
 	return nil
 }
 
-// Register registers an IndexNode role in ETCD, if the internal member `Err` is true, it will return an error.
+// Register registers an IndexNode role in etcd, if the internal member `Err` is true, it will return an error.
 func (inm *Mock) Register() error {
 	if inm.Err {
 		return errors.New("IndexNode register failed")

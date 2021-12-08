@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
-// MsgType is an alias ofo commonpb.MsgType
+// MsgType is an alias of commonpb.MsgType
 type MsgType = commonpb.MsgType
 
 // MarshalType is an empty interface
@@ -124,12 +124,12 @@ func (it *InsertMsg) Type() MsgType {
 	return it.Base.MsgType
 }
 
-// SourceID indicated which component generated this message
+// SourceID indicates which component generated this message
 func (it *InsertMsg) SourceID() int64 {
 	return it.Base.SourceID
 }
 
-// Marshal is used to serializing a message pack to byte array
+// Marshal is used to serialize a message pack to byte array
 func (it *InsertMsg) Marshal(input TsMsg) (MarshalType, error) {
 	insertMsg := input.(*InsertMsg)
 	insertRequest := &insertMsg.InsertRequest
@@ -140,7 +140,7 @@ func (it *InsertMsg) Marshal(input TsMsg) (MarshalType, error) {
 	return mb, nil
 }
 
-// Unmarshal is used to deserializing a message pack from byte array
+// Unmarshal is used to deserialize a message pack from byte array
 func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	insertRequest := internalpb.InsertRequest{}
 	in, err := convertToByteArray(input)
@@ -274,6 +274,11 @@ func (st *SearchMsg) TravelTs() Timestamp {
 	return st.GetTravelTimestamp()
 }
 
+// TimeoutTs returns the timestamp of timeout
+func (st *SearchMsg) TimeoutTs() Timestamp {
+	return st.GetTimeoutTimestamp()
+}
+
 // Marshal is used to serializing a message pack to byte array
 func (st *SearchMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchTask := input.(*SearchMsg)
@@ -394,6 +399,11 @@ func (rm *RetrieveMsg) GuaranteeTs() Timestamp {
 // TravelTs returns the timestamp of a time travel query request
 func (rm *RetrieveMsg) TravelTs() Timestamp {
 	return rm.GetTravelTimestamp()
+}
+
+// TimeoutTs returns the timestamp of timeout
+func (rm *RetrieveMsg) TimeoutTs() Timestamp {
+	return rm.GetTimeoutTimestamp()
 }
 
 // Marshal is used to serializing a message pack to byte array

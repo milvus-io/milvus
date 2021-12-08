@@ -74,7 +74,7 @@ func (m *meta) reloadFromKV() error {
 		segmentInfo := &datapb.SegmentInfo{}
 		err = proto.Unmarshal([]byte(value), segmentInfo)
 		if err != nil {
-			return fmt.Errorf("DataCoord reloadFromKV UnMarshal datapb.SegmentInfo err:%w", err)
+			return fmt.Errorf("dataCoord reloadFromKV UnMarshal datapb.SegmentInfo err:%w", err)
 		}
 		m.segments.SetSegment(segmentInfo.GetID(), NewSegmentInfo(segmentInfo))
 	}
@@ -316,7 +316,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	for _, segment := range modSegments {
 		segBytes, err := proto.Marshal(segment.SegmentInfo)
 		if err != nil {
-			return fmt.Errorf("DataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
+			return fmt.Errorf("dataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
 		}
 		key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 		kv[key] = string(segBytes)

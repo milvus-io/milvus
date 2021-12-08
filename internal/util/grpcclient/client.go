@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
+// GrpcClient abstracts client of grpc
 type GrpcClient interface {
 	SetRole(string)
 	GetRole() string

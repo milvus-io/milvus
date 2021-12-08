@@ -125,11 +125,11 @@ func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.E
 
 func (qn *queryNode) start() error {
 	if err := qn.client.Init(); err != nil {
-		log.Error("Start: init queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
+		log.Error("start: init queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
 		return err
 	}
 	if err := qn.client.Start(); err != nil {
-		log.Error("Start: start queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
+		log.Error("start: start queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
 		return err
 	}
 
@@ -138,7 +138,7 @@ func (qn *queryNode) start() error {
 		qn.state = online
 	}
 	qn.stateLock.Unlock()
-	log.Debug("Start: queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
+	log.Debug("start: queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
 	return nil
 }
 
@@ -168,7 +168,7 @@ func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.Colle
 		qn.collectionInfos[collectionID] = newCollection
 		err := saveNodeCollectionInfo(collectionID, newCollection, qn.id, qn.kvClient)
 		if err != nil {
-			log.Error("AddCollection: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			log.Error("addCollection: save collectionInfo error", zap.Int64("nodeID", qn.id), zap.Int64("collectionID", collectionID), zap.Any("error", err.Error()))
 			return err
 		}
 		log.Debug("queryNode addCollection", zap.Int64("nodeID", qn.id), zap.Any("collectionInfo", newCollection))
@@ -184,7 +184,7 @@ func (qn *queryNode) setCollectionInfo(info *querypb.CollectionInfo) error {
 	qn.collectionInfos[info.CollectionID] = info
 	err := saveNodeCollectionInfo(info.CollectionID, info, qn.id, qn.kvClient)
 	if err != nil {
-		log.Error("SetCollectionInfo: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", info.CollectionID))
+		log.Error("setCollectionInfo: save collectionInfo error", zap.Int64("nodeID", qn.id), zap.Int64("collectionID", info.CollectionID), zap.Any("error", err.Error()))
 		return err
 	}
 	return nil

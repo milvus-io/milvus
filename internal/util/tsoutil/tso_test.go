@@ -15,8 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestParseHybridTs(t *testing.T) {
@@ -27,4 +30,23 @@ func TestParseHybridTs(t *testing.T) {
 		zap.Int64("physical", physical),
 		zap.Int64("logical", logical),
 		zap.Any("physical time", physicalTime))
+}
+
+func Test_Tso(t *testing.T) {
+	t.Run("test ComposeTSByTime", func(t *testing.T) {
+		physical := time.Now()
+		logical := int64(1000)
+		timestamp := ComposeTSByTime(physical, logical)
+		pRes, lRes := ParseTS(timestamp)
+		assert.Equal(t, physical.Unix(), pRes.Unix())
+		assert.Equal(t, uint64(logical), lRes)
+	})
+
+	t.Run("test GetCurrentTime", func(t *testing.T) {
+		curTime := GetCurrentTime()
+		p, l := ParseTS(curTime)
+		subTime := time.Since(p)
+		assert.Less(t, subTime, time.Millisecond)
+		assert.Equal(t, typeutil.ZeroTimestamp, l)
+	})
 }

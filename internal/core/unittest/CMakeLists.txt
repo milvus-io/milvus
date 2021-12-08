@@ -60,6 +60,7 @@ target_link_libraries(index_builder_test
         milvus_indexbuilder
         log
         pthread
+        gperftools
         )
 
 target_link_libraries(all_tests
@@ -68,7 +69,9 @@ target_link_libraries(all_tests
         milvus_indexbuilder
         log
         pthread
+        gperftools
         )
 
 install(TARGETS all_tests DESTINATION unittest)
 install(TARGETS index_builder_test DESTINATION unittest)
+

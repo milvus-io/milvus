@@ -528,3 +528,23 @@ def _check_primary_keys(primary_keys, nb):
         if primary_keys[i] >= primary_keys[i + 1]:
             return False
     return True
+
+
+def get_segment_distribution(res):
+    """
+    Get segment distribution
+    """
+    from collections import defaultdict
+    segment_distribution = defaultdict(lambda: {"growing": [], "sealed": []})
+    for r in res:
+        if r.nodeID not in segment_distribution:
+            segment_distribution[r.nodeID] = {
+                "growing": [],
+                "sealed": []
+            }
+        if r.state == 3:
+            segment_distribution[r.nodeID]["sealed"].append(r.segmentID)
+        if r.state == 2:
+            segment_distribution[r.nodeID]["growing"].append(r.segmentID)
+
+    return segment_distribution

@@ -48,8 +48,8 @@ then
 fi
 
 # wait all pod ready
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=milvus-chaos -n chaos-testing --timeout=360s
-kubectl wait --for=condition=Ready pod -l release=milvus-chaos -n chaos-testing --timeout=360s
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} -n chaos-testing --timeout=360s
+kubectl wait --for=condition=Ready pod -l release=${release} -n chaos-testing --timeout=360s
 
 popd
 
@@ -71,7 +71,7 @@ then
 else
     host=$(kubectl get svc/${release}-milvus -o jsonpath="{.spec.clusterIP}")
 fi
-
+pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no
 python scripts/hello_milvus.py --host "$host"
 # chaos test
 export ENABLE_TRACEBACK=False
@@ -90,6 +90,7 @@ echo "start running e2e test"
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} -n chaos-testing --timeout=360s
 kubectl wait --for=condition=Ready pod -l release=${release} -n chaos-testing --timeout=360s
 
+pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no
 python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
 
 # save logs

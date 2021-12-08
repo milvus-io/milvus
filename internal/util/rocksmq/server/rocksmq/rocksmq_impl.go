@@ -62,7 +62,7 @@ const (
 	CurrentIDSuffix  = "current_id"
 	ReaderNamePrefix = "reader-"
 
-	RmqNotServingErrMsg = "Rocksmq is not serving"
+	RmqNotServingErrMsg = "rocksmq is not serving"
 )
 
 const (
@@ -717,7 +717,7 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	key := constructCurrentID(topicName, groupName)
 	if !rmq.checkKeyExist(key) {
 		log.Warn("RocksMQ: channel " + key + " not exists")
-		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
+		return fmt.Errorf("consumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 	storeKey, err := combKey(topicName, msgID)
 	if err != nil {
@@ -992,7 +992,7 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	}
 	nowTs, err := getNowTs(rmq.idAllocator)
 	if err != nil {
-		return "", errors.New("Can't get current ts from rocksmq idAllocator")
+		return "", errors.New("can't get current ts from rocksmq idAllocator")
 	}
 	readerName := subscriptionRolePrefix + ReaderNamePrefix + strconv.FormatInt(nowTs, 10)
 

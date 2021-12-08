@@ -67,7 +67,7 @@ class TestInsertBase:
             connect.insert(collection, entities)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_None(self, connect, collection):
+    def test_insert_with_none(self, connect, collection):
         """
         target: test insert with None
         method: set None as insert method params
@@ -276,7 +276,7 @@ class TestInsertBase:
 
     # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_twice_ids_no_ids(self, connect, id_collection):
         """
         target: check the result of insert, with params ids and no ids

@@ -22,7 +22,7 @@ Note, physical part is the UTC time in Milliseconds.
 
 ![Timestamp struct](./graphs/time_stamp_struct.jpg)
 
-For some users such as DBAs, they will want to sort the operations and list them in UTC time order.
+For some users such as DBAs, they would want to sort the operations and list them in UTC time order.
 
 Actually, we can use the TSO order to sort the `Insert` operations or `Delete` operations.
 

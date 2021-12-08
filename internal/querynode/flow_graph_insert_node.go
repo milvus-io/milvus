@@ -37,11 +37,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
+// insertNode is one of the nodes in query flow graph
 type insertNode struct {
 	baseNode
 	streamingReplica ReplicaInterface
 }
 
+// insertData stores the valid insert data
 type insertData struct {
 	insertIDs        map[UniqueID][]int64
 	insertTimestamps map[UniqueID][]Timestamp
@@ -50,16 +52,19 @@ type insertData struct {
 	insertPKs        map[UniqueID][]int64
 }
 
+// deleteData stores the valid delete data
 type deleteData struct {
 	deleteIDs        map[UniqueID][]int64
 	deleteTimestamps map[UniqueID][]Timestamp
 	deleteOffset     map[UniqueID]int64
 }
 
+// Name returns the name of insertNode
 func (iNode *insertNode) Name() string {
 	return "iNode"
 }
 
+// Operate handles input messages, to execute insert operations
 func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do insertNode operation")
 

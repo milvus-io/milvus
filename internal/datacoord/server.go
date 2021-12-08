@@ -370,7 +370,7 @@ func (s *Server) initServiceDiscovery() error {
 
 	s.cluster.Startup(datanodes)
 
-	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1)
+	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1, nil)
 	return nil
 }
 

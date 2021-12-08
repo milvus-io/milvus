@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/api/v3/mvccpb"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -30,6 +31,11 @@ const (
 
 // SessionEventType session event type
 type SessionEventType int
+
+// Rewatch defines the behavior outer session watch handles ErrCompacted
+// it should process the current full list of session
+// and returns err if meta error or anything else goes wrong
+type Rewatch func(sessions map[string]*Session) error
 
 const (
 	// SessionNoneEvent place holder for zero value
@@ -304,6 +310,36 @@ type SessionEvent struct {
 	Session   *Session
 }
 
+type sessionWatcher struct {
+	s       *Session
+	rch     clientv3.WatchChan
+	eventCh chan *SessionEvent
+	prefix  string
+	rewatch Rewatch
+}
+
+func (w *sessionWatcher) start() {
+	go func() {
+		for {
+			select {
+			case <-w.s.ctx.Done():
+				return
+			case wresp, ok := <-w.rch:
+				if !ok {
+					return
+				}
+
+				err := w.handleWatchResponse(wresp)
+				// internal error not handled,goroutine quit
+				if err != nil {
+					log.Warn("watch goroutine found error", zap.Error(err))
+					return
+				}
+			}
+		}
+	}()
+}
+
 // WatchServices watch the service's up and down in etcd, and send event to
 // eventChannel.
 // prefix is a parameter to know which service to watch and can be obtained in
@@ -312,58 +348,86 @@ type SessionEvent struct {
 // in GetSessions.
 // If a server up, a event will be add to channel with eventType SessionAddType.
 // If a server down, a event will be add to channel with eventType SessionDelType.
-func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-chan *SessionEvent) {
-	eventCh := make(chan *SessionEvent, 100)
-	rch := s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
-	go func() {
-		for {
-			select {
-			case <-s.ctx.Done():
-				return
-			case wresp, ok := <-rch:
-				if !ok {
-					return
-				}
-				if wresp.Err() != nil {
-					//close event channel
-					log.Warn("Watch service found error", zap.Error(wresp.Err()))
-					close(eventCh)
-					return
-				}
-				for _, ev := range wresp.Events {
-					session := &Session{}
-					var eventType SessionEventType
-					switch ev.Type {
-					case mvccpb.PUT:
-						log.Debug("watch services",
-							zap.Any("add kv", ev.Kv))
-						err := json.Unmarshal([]byte(ev.Kv.Value), session)
-						if err != nil {
-							log.Error("watch services", zap.Error(err))
-							continue
-						}
-						eventType = SessionAddEvent
-					case mvccpb.DELETE:
-						log.Debug("watch services",
-							zap.Any("delete kv", ev.PrevKv))
-						err := json.Unmarshal([]byte(ev.PrevKv.Value), session)
-						if err != nil {
-							log.Error("watch services", zap.Error(err))
-							continue
-						}
-						eventType = SessionDelEvent
-					}
-					log.Debug("WatchService", zap.Any("event type", eventType))
-					eventCh <- &SessionEvent{
-						EventType: eventType,
-						Session:   session,
-					}
-				}
+func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) (eventChannel <-chan *SessionEvent) {
+	w := &sessionWatcher{
+		s:       s,
+		eventCh: make(chan *SessionEvent, 100),
+		rch:     s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		prefix:  prefix,
+		rewatch: rewatch,
+	}
+	w.start()
+	return w.eventCh
+}
 
+func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) error {
+	if wresp.Err() != nil {
+		return w.handleWatchErr(wresp.Err())
+	}
+	for _, ev := range wresp.Events {
+		session := &Session{}
+		var eventType SessionEventType
+		switch ev.Type {
+		case mvccpb.PUT:
+			log.Debug("watch services",
+				zap.Any("add kv", ev.Kv))
+			err := json.Unmarshal([]byte(ev.Kv.Value), session)
+			if err != nil {
+				log.Error("watch services", zap.Error(err))
+				continue
 			}
+			eventType = SessionAddEvent
+		case mvccpb.DELETE:
+			log.Debug("watch services",
+				zap.Any("delete kv", ev.PrevKv))
+			err := json.Unmarshal([]byte(ev.PrevKv.Value), session)
+			if err != nil {
+				log.Error("watch services", zap.Error(err))
+				continue
+			}
+			eventType = SessionDelEvent
 		}
-	}()
-	return eventCh
+		log.Debug("WatchService", zap.Any("event type", eventType))
+		w.eventCh <- &SessionEvent{
+			EventType: eventType,
+			Session:   session,
+		}
+	}
+	return nil
+}
+
+func (w *sessionWatcher) handleWatchErr(err error) error {
+	// if not ErrCompacted, just close the channel
+	if err != v3rpc.ErrCompacted {
+		//close event channel
+		log.Warn("Watch service found error", zap.Error(err))
+		close(w.eventCh)
+		return err
+	}
+
+	// rewatch is nil, no logic to handle
+	if w.rewatch == nil {
+		log.Warn("Watch service with ErrCompacted but no rewatch logic provided")
+		close(w.eventCh)
+		return err
+	}
+
+	sessions, revision, err := w.s.GetSessions(w.prefix)
+	if err != nil {
+		log.Warn("GetSession before rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
+		close(w.eventCh)
+		return err
+	}
+
+	err = w.rewatch(sessions)
+	if err != nil {
+		log.Warn("WatchServices rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
+		close(w.eventCh)
+		return err
+	}
+
+	w.rch = w.s.etcdCli.Watch(w.s.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
+	return nil
 }
 
 // LivenessCheck performs liveness check with provided context and channel

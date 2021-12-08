@@ -287,6 +287,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.datanode.GetStatisticsChannel(ctx)
 }
 
+// Deprecated
 func (s *Server) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	return s.datanode.WatchDmChannels(ctx, req)
 }

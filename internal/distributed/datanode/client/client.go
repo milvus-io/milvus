@@ -87,6 +87,7 @@ func (c *Client) getAddr() (string, error) {
 	return c.addr, nil
 }
 
+// GetComponentStates returns ComponentStates
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -115,6 +116,7 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// Deprecated
 // WatchDmChannels create consumers on dmChannels to reveive Incremental data
 func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
@@ -150,6 +152,7 @@ func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 	return ret.(*commonpb.Status), err
 }
 
+// GetMetrics returns metrics
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -163,6 +166,7 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
 
+// Compaction return compaction by given plan
 func (c *Client) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {

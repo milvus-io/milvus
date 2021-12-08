@@ -221,12 +221,13 @@ func (qc *QueryCoord) Start() error {
 
 // Stop function stops watching the meta and node updates
 func (qc *QueryCoord) Stop() error {
+	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	qc.scheduler.Close()
 	log.Debug("close scheduler ...")
 	qc.indexChecker.close()
 	log.Debug("close index checker ...")
 	qc.loopCancel()
-	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	qc.loopWg.Wait()
 	qc.session.Revoke(time.Second)
@@ -330,7 +331,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 		log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
 	}
 
-	qc.eventChan = qc.session.WatchServices(typeutil.QueryNodeRole, qc.cluster.getSessionVersion()+1)
+	qc.eventChan = qc.session.WatchServices(typeutil.QueryNodeRole, qc.cluster.getSessionVersion()+1, nil)
 	for {
 		select {
 		case <-ctx.Done():

@@ -209,6 +209,7 @@ message HasCollectionRequest {
 
 ## LoadCollection
 Load a collection data into cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
+Note: this interface only send a request to server ask to load collection, it returns at once after the request is consumed. Collection loading progress is asynchronously.
 ```
 rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
 ```
@@ -265,7 +266,7 @@ message DescribeCollectionRequest {
   // Not useful for now
   string db_name = 2;
 
-  // The collection name you want to describe, you can pass collection_name or collectionID
+  // The collection name you want to describe, you can pass collection_name or collectionID. (Required)
   string collection_name = 3;
 
   // The collection ID you want to describe
@@ -325,7 +326,7 @@ message GetCollectionStatisticsRequest {
   common.MsgBase base = 1;
   // Not useful for now
   string db_name = 2;
-  // The collection name you want get statistics
+  // The collection name you want get statistics. (Required)
   string collection_name = 3;
 }
 ```
@@ -467,6 +468,7 @@ message HasPartitionRequest {
 
 ## LoadPartitions
 Load multiple partitions data into cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
+Note: this interface only send a request to server ask to load partitions, it returns at once after the request is consumed. Loading progress is asynchronously.
 ```
 rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {}
 ```

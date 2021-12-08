@@ -18,7 +18,7 @@
 etcd:
   endpoints:
     - localhost:2379
-  rootPath: by-dev
+  rootPath: by-dev # The root path where data is stored in etcd
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
   segmentBinlogSubPath: datacoord/binlog/segment  # Full Path = rootPath/metaSubPath/segmentBinlogSubPath
@@ -54,10 +54,10 @@ rootCoord:
   port: 53100
 
   grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, Maximum data size received by the server
+    serverMaxSendSize: 2147483647 # math.MaxInt32, Maximum data size sent by the server
+    clientMaxRecvSize: 104857600 # 100 MB, Maximum data size received by the client
+    clientMaxSendSize: 104857600 # 100 MB, Maximum data size sent by the client
 
   dmlChannelNum: 256 # The number of dml channels created at system startup
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
@@ -86,9 +86,9 @@ proxy:
       pulsarBufSize: 1024 # pulsar chan buffer size
     timeTick:
       bufSize: 512
-  maxNameLength: 255  # max name length of collection or alias
-  maxFieldNum: 256     # max field number of a collection
-  maxDimension: 32768 # Maximum dimension of vector
+  maxNameLength: 255  # Maximum length of name for a collection or alias
+  maxFieldNum: 256     # Maximum number of fields in a collection
+  maxDimension: 32768 # Maximum dimension of a vector
   maxShardNum: 256 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue
   bufFlagExpireTime: 3600 # second, the time to expire bufFlag from cache in collectResultLoop
@@ -168,7 +168,7 @@ dataCoord:
     serverMaxSendSize: 2147483647 # math.MaxInt32
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
-  enableCompaction: false # Enable data segment compression
+  enableCompaction: true # Enable data segment compression
   enableGarbageCollection: false
 
   segment:

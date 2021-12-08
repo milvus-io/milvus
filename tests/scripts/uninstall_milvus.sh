@@ -64,8 +64,8 @@ MILVUS_LABELS1="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME}"
 MILVUS_LABELS2="release=${MILVUS_HELM_RELEASE_NAME}"
 
 # Clean up pvc
-kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS1}" -o jsonpath='{range.items[*]}{.metadata.name} ') || true
-kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS2}" -o jsonpath='{range.items[*]}{.metadata.name} ') || true
+kubectl delete pvc --wait -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS1}" -o jsonpath='{range.items[*]}{.metadata.name} ') || true
+kubectl delete pvc --wait -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS2}" -o jsonpath='{range.items[*]}{.metadata.name} ') || true
 
 # Add check & delete pvc again in case pvc need time to be deleted 
 clean_label_pvc(){
@@ -81,7 +81,7 @@ clean_label_pvc(){
         else
             sleep 5
             echo "PVCs are ${PVC}"
-            kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" ${PVC}
+            kubectl delete pvc --wait -n "${MILVUS_HELM_NAMESPACE}" ${PVC}
         fi
     done
 }

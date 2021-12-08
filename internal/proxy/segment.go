@@ -148,6 +148,7 @@ type segIDAssigner struct {
 	countPerRPC uint32
 }
 
+// newSegIDAssigner creates a new segIDAssigner
 func newSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func() Timestamp) (*segIDAssigner, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	sa := &segIDAssigner{

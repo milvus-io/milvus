@@ -8,11 +8,11 @@ update: 6.21.2021, by [Goose](https://github.com/XuanYang-cn)
 
 DataNode processes insert data and persist them.
 
-DataNode is based on flowgraph; each flowgraph cares about only one vchannel. There are ddl messages, dml
+DataNode is based on flowgraph; each flowgraph cares about only one vchannel. There are data definition language (DDL) messages, data manipulation language (DML)
 messages, and timetick messages inside one vchannel, FIFO log stream.
 
-One vchannel only contains dml messages of one collection. A collection consists of many segments, hence
-a vchannel contains dml messages of many segments. **Most importantly, the dml messages of the same segment can appear anywhere in vchannel.**
+One vchannel only contains DML messages of one collection. A collection consists of many segments, hence
+a vchannel contains DML messages of many segments. **Most importantly, the DML messages of the same segment can appear anywhere in vchannel.**
 
 ## What is the real meaning of DataNode recovery?
 
@@ -147,7 +147,7 @@ WatchDmChannels -> new dataSyncService -> HEALTH
 
 #### The boring design
 
-• If collection:flowgraph = 1 : 1, datanode must have ability to scale flowgraph.
+• If collection:flowgraph = 1 : 1, datanode must have the ability to scale flowgraph.
 
 ![datanode_design](graphs/collection_flowgraph_1_1.jpg)
 

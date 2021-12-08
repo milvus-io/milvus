@@ -29,9 +29,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/allocator"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -42,8 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
-	"github.com/stretchr/testify/assert"
 )
 
 // TODO(dragondriver): add more test cases
@@ -3010,6 +3011,16 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		},
 	}
 
+	// search task with timeout
+	ctx1, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	// before preExecute
+	assert.Equal(t, typeutil.ZeroTimestamp, task.TimeoutTimestamp)
+	task.ctx = ctx1
+	assert.NoError(t, task.PreExecute(ctx))
+	// after preExecute
+	assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
+
 	// field not exist
 	task.query.OutputFields = []string{int64Field + funcutil.GenRandomStr()}
 	assert.Error(t, task.PreExecute(ctx))
@@ -3467,7 +3478,18 @@ func TestQueryTask_all(t *testing.T) {
 	}()
 
 	assert.NoError(t, task.OnEnqueue())
+
+	// test query task with timeout
+	ctx1, cancel1 := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel1()
+	// before preExecute
+	assert.Equal(t, typeutil.ZeroTimestamp, task.TimeoutTimestamp)
+	task.ctx = ctx1
 	assert.NoError(t, task.PreExecute(ctx))
+	// after preExecute
+	assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
+	task.ctx = ctx
+
 	assert.NoError(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
 

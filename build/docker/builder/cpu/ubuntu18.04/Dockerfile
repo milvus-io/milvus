@@ -25,7 +25,7 @@ ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
 RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-amd64.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOPATH}/bin v1.27.0 && \
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOPATH}/bin v1.43.0 && \
     export GO111MODULE=on && go get github.com/quasilyte/go-ruleguard/cmd/ruleguard@v0.2.1 && \
     go get -v github.com/ramya-rao-a/go-outline && \
     go get -v golang.org/x/tools/gopls && \

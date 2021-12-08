@@ -16,6 +16,8 @@ import (
 	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -26,6 +28,16 @@ const (
 // ComposeTS returns a timestamp composed of physical part and logical part
 func ComposeTS(physical, logical int64) uint64 {
 	return uint64((physical << logicalBits) + logical)
+}
+
+// ComposeTSByTime returns a timestamp composed of physical time.Time and logical time
+func ComposeTSByTime(physical time.Time, logical int64) uint64 {
+	return ComposeTS(physical.UnixNano()/int64(time.Millisecond), logical)
+}
+
+// GetCurrentTime returns the current timestamp
+func GetCurrentTime() typeutil.Timestamp {
+	return ComposeTSByTime(time.Now(), 0)
 }
 
 // ParseTS parses the ts to (physical,logical).

@@ -173,7 +173,7 @@ func (i *IndexCoord) Init() error {
 
 		}
 		log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
-		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1)
+		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
 		nodeTasks := i.metaTable.GetNodeTaskStats()
 		for nodeID, taskNum := range nodeTasks {
 			i.nodeManager.pq.UpdatePriority(nodeID, taskNum)
@@ -434,6 +434,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 
 // GetIndexStates gets the index states from IndexCoord.
 func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
+	log.Debug("IndexCoord get index states", zap.Int64s("IndexBuildIDs", req.IndexBuildIDs))
 	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
 	defer sp.Finish()
 	var (
@@ -476,6 +477,14 @@ func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexSt
 // index tasks. Therefore, when DropIndex, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
 func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	log.Debug("IndexCoord DropIndex", zap.Int64("IndexID", req.IndexID))
+	if !i.isHealthy() {
+		errMsg := "IndexCoord is not healthy"
+		log.Warn(errMsg)
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errMsg,
+		}, nil
+	}
 	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
 	defer sp.Finish()
 
@@ -727,7 +736,7 @@ func (i *IndexCoord) watchNodeLoop() {
 	}
 }
 
-// watchMetaLoop is used to monitor whether the Meta in ETCD has been changed.
+// watchMetaLoop is used to monitor whether the Meta in etcd has been changed.
 func (i *IndexCoord) watchMetaLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 

@@ -399,11 +399,13 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 	}
 }
 
+// ReleasePayloadReader release payload reader.
 func (r *PayloadReader) ReleasePayloadReader() error {
 	status := C.ReleasePayloadReader(r.payloadReaderPtr)
 	return HandleCStatus(&status, "ReleasePayloadReader failed")
 }
 
+// GetBoolFromPayload returns bool slice from payload.
 func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
 	if r.colType != schemapb.DataType_Bool {
 		return nil, errors.New("incorrect data type")
@@ -421,6 +423,7 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
 	return slice, nil
 }
 
+// GetInt8FromPayload returns int8 slice from payload
 func (r *PayloadReader) GetInt8FromPayload() ([]int8, error) {
 	if r.colType != schemapb.DataType_Int8 {
 		return nil, errors.New("incorrect data type")
