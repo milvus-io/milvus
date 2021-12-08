@@ -64,6 +64,7 @@ func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 	return mt, nil
 }
 
+// reloadFromKV reloads the index meta from ETCD.
 func (mt *metaTable) reloadFromKV() error {
 	mt.indexBuildID2Meta = make(map[UniqueID]Meta)
 	key := "indexes"
