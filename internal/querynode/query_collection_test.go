@@ -308,6 +308,13 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 		msg.Base.MsgType = commonpb.MsgType_CreateCollection
 		runConsumeQuery(msg)
 	})
+
+	t.Run("consume timeout msg", func(t *testing.T) {
+		msg, err := genSimpleRetrieveMsg()
+		assert.NoError(t, err)
+		msg.TimeoutTimestamp = tsoutil.GetCurrentTime() - Timestamp(time.Second<<18)
+		runConsumeQuery(msg)
+	})
 }
 
 func TestQueryCollection_TranslateHits(t *testing.T) {
@@ -557,19 +564,38 @@ func TestQueryCollection_mergeRetrieveResults(t *testing.T) {
 func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
-	assert.NoError(t, err)
+	t.Run("test doUnsolvedQueryMsg", func(t *testing.T) {
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		assert.NoError(t, err)
 
-	timestamp := Timestamp(1000)
-	updateTSafe(queryCollection, timestamp)
+		timestamp := Timestamp(1000)
+		updateTSafe(queryCollection, timestamp)
 
-	go queryCollection.doUnsolvedQueryMsg()
+		go queryCollection.doUnsolvedQueryMsg()
 
-	msg, err := genSimpleSearchMsg()
-	assert.NoError(t, err)
-	queryCollection.addToUnsolvedMsg(msg)
+		msg, err := genSimpleSearchMsg()
+		assert.NoError(t, err)
+		queryCollection.addToUnsolvedMsg(msg)
 
-	time.Sleep(200 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
+	})
+
+	t.Run("test doUnsolvedQueryMsg timeout", func(t *testing.T) {
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		assert.NoError(t, err)
+
+		timestamp := Timestamp(1000)
+		updateTSafe(queryCollection, timestamp)
+
+		go queryCollection.doUnsolvedQueryMsg()
+
+		msg, err := genSimpleSearchMsg()
+		assert.NoError(t, err)
+		msg.TimeoutTimestamp = tsoutil.GetCurrentTime() - Timestamp(time.Second<<18)
+		queryCollection.addToUnsolvedMsg(msg)
+
+		time.Sleep(2000 * time.Millisecond)
+	})
 }
 
 func TestQueryCollection_search(t *testing.T) {
