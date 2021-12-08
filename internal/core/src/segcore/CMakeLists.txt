@@ -44,5 +44,6 @@ target_link_libraries(milvus_segcore
         milvus_proto
         milvus_query
         milvus_utils
+#        gperftools
         )
 

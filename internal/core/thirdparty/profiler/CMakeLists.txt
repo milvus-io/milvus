@@ -85,12 +85,12 @@ macro( build_gperftools )
 
     ExternalProject_Get_Property( gperftools_ep INSTALL_DIR )
     file(MAKE_DIRECTORY ${INSTALL_DIR}/include)
-    # libprofiler.a
-    add_library( gperftools STATIC IMPORTED )
+    # libprofiler.so
+    add_library( gperftools SHARED IMPORTED )
     set_target_properties( gperftools
             PROPERTIES
                 IMPORTED_GLOBAL                 TRUE
-                IMPORTED_LOCATION               "${INSTALL_DIR}/lib/libtcmalloc_and_profiler.a"
+                IMPORTED_LOCATION               "${INSTALL_DIR}/lib/libtcmalloc_and_profiler.so"
                 INTERFACE_INCLUDE_DIRECTORIES   "${INSTALL_DIR}/include"
                 INTERFACE_LINK_LIBRARIES        libunwind
                 )
@@ -100,3 +100,6 @@ endmacro()
 
 build_libunwind()
 build_gperftools()
+get_target_property( GPERFTOOLS_LIB gperftools LOCATION )
+install(FILES ${GPERFTOOLS_LIB} DESTINATION ${CMAKE_INSTALL_PREFIX})
+
