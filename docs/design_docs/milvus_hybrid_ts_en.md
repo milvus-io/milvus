@@ -28,7 +28,7 @@ Actually, we can use the TSO order to sort the `Insert` operations or `Delete` o
 
 So the question becomes how we get the UTC time from TSO.
 
-As we have described above, physical part consists the front 46 bits of TSO.
+As we have described above, physical part consists of the front 46 bits of TSO.
 
 So given a TSO which is returned by `Insert` or `Delete`, we can directly shift left 18 bits to get the UTC time.
 
