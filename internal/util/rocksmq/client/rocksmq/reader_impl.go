@@ -79,6 +79,7 @@ func (r *reader) Close() {
 	r.c.server.CloseReader(r.topic, r.name)
 }
 
+// Seek seek the reader to the position of message id
 func (r *reader) Seek(msgID UniqueID) error { //nolint:govet
 	r.c.server.ReaderSeek(r.topic, r.name, msgID)
 	return nil
