@@ -42,7 +42,7 @@ find_package( Threads REQUIRED )
 if ( MILVUS_BUILD_TESTS )
     add_subdirectory( gtest )
     add_subdirectory( google_benchmark )
-    add_subdirectory( profilers )
+    add_subdirectory( profiler )
 endif()
 
 
