@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
@@ -79,41 +80,70 @@ func getSystemInfoMetrics(
 	}
 	metricsinfo.FillDeployMetricsWithEnv(&(proxyTopologyNode.Infos.(*metricsinfo.ProxyInfos).SystemInfo))
 
-	queryCoordResp, queryCoordErr := node.queryCoord.GetMetrics(ctx, request)
-	queryCoordRoleName := ""
+	var wg sync.WaitGroup
+
+	var queryCoordResp *milvuspb.GetMetricsResponse
+	var queryCoordErr error
 	var queryCoordTopology metricsinfo.QueryCoordTopology
-	if queryCoordErr == nil && queryCoordResp != nil {
+	queryCoordRoleName := ""
+
+	var dataCoordResp *milvuspb.GetMetricsResponse
+	var dataCoordErr error
+	var dataCoordTopology metricsinfo.DataCoordTopology
+	dataCoordRoleName := ""
+
+	var indexCoordResp *milvuspb.GetMetricsResponse
+	var indexCoordErr error
+	var indexCoordTopology metricsinfo.IndexCoordTopology
+	indexCoordRoleName := ""
+
+	var rootCoordResp *milvuspb.GetMetricsResponse
+	var rootCoordErr error
+	var rootCoordTopology metricsinfo.RootCoordTopology
+	rootCoordRoleName := ""
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		queryCoordResp, queryCoordErr = node.queryCoord.GetMetrics(ctx, request)
 		queryCoordRoleName = queryCoordResp.ComponentName
 		queryCoordErr = metricsinfo.UnmarshalTopology(queryCoordResp.Response, &queryCoordTopology)
-		identifierMap[queryCoordRoleName] = int(queryCoordTopology.Cluster.Self.ID)
-	}
+	}()
 
-	dataCoordResp, dataCoordErr := node.dataCoord.GetMetrics(ctx, request)
-	dataCoordRoleName := ""
-	var dataCoordTopology metricsinfo.DataCoordTopology
-	if dataCoordErr == nil && dataCoordResp != nil {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		dataCoordResp, dataCoordErr = node.dataCoord.GetMetrics(ctx, request)
 		dataCoordRoleName = dataCoordResp.ComponentName
 		dataCoordErr = metricsinfo.UnmarshalTopology(dataCoordResp.Response, &dataCoordTopology)
-		identifierMap[dataCoordRoleName] = int(dataCoordTopology.Cluster.Self.ID)
-	}
+	}()
 
-	indexCoordResp, indexCoordErr := node.indexCoord.GetMetrics(ctx, request)
-	indexCoordRoleName := ""
-	var indexCoordTopology metricsinfo.IndexCoordTopology
-	if indexCoordErr == nil && indexCoordResp != nil {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		indexCoordResp, indexCoordErr = node.indexCoord.GetMetrics(ctx, request)
 		indexCoordRoleName = indexCoordResp.ComponentName
 		indexCoordErr = metricsinfo.UnmarshalTopology(indexCoordResp.Response, &indexCoordTopology)
-		identifierMap[indexCoordRoleName] = int(indexCoordTopology.Cluster.Self.ID)
-	}
+	}()
 
-	rootCoordResp, rootCoordErr := node.rootCoord.GetMetrics(ctx, request)
-	rootCoordRoleName := ""
-	var rootCoordTopology metricsinfo.RootCoordTopology
-	if rootCoordErr == nil && rootCoordResp != nil {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		rootCoordResp, rootCoordErr = node.rootCoord.GetMetrics(ctx, request)
 		rootCoordRoleName = rootCoordResp.ComponentName
 		rootCoordErr = metricsinfo.UnmarshalTopology(rootCoordResp.Response, &rootCoordTopology)
-		identifierMap[rootCoordRoleName] = int(rootCoordTopology.Self.ID)
-	}
+	}()
+
+	wg.Wait()
+
+	identifierMap[queryCoordRoleName] = int(queryCoordTopology.Cluster.Self.ID)
+	identifierMap[dataCoordRoleName] = int(dataCoordTopology.Cluster.Self.ID)
+	identifierMap[indexCoordRoleName] = int(indexCoordTopology.Cluster.Self.ID)
+	identifierMap[rootCoordRoleName] = int(rootCoordTopology.Self.ID)
 
 	if queryCoordErr == nil && queryCoordResp != nil {
 		proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
