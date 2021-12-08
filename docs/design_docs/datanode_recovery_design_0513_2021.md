@@ -40,8 +40,8 @@ After DataNode subscribes to a stateful vchannel, DataNode starts to work, or mo
 Vchannel is stateful because we don't want to process twice what's already processed, as a "processed" message means its
 already persistent. In DataNode's terminology, a message is processed if it's been flushed.
 
-DataCoord tells DataNode stateful vchannel info through RPC `WatchDmChannels`, so that DataNode won't process
-the same messages over and over again. So flowgraph needs ability to consume messages in the middle of a vchannel.
+DataCoord tells DataNode stateful vchannel info through RPC `WatchDmChannels` so that DataNode won't process
+the same messages over and over again. So flowgraph needs the ability to consume messages in the middle of a vchannel.
 
 DataNode tells DataCoord vchannel states after each flush through RPC `SaveBinlogPaths`, so that DataCoord
 keeps the vchannel states update.
