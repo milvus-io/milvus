@@ -1059,6 +1059,11 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	lpt := &loadPartitionsTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
@@ -1066,44 +1071,72 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		queryCoord:            node.queryCoord,
 	}
 
-	log.Debug("LoadPartitions enqueue",
-		zap.String("role", Params.RoleName),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames))
-	err := node.sched.ddQueue.Enqueue(lpt)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
+	method := "LoadPartitions"
 
-	log.Debug("LoadPartitions",
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
-	defer func() {
-		log.Debug("LoadPartitions Done",
+
+	if err := node.sched.ddQueue.Enqueue(lpt); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames))
-	}()
 
-	err = lpt.WaitToFinish()
-	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", lpt.ID()),
+		zap.Uint64("BeginTS", lpt.BeginTs()),
+		zap.Uint64("EndTS", lpt.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames))
+
+	if err := lpt.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.Int64("MsgID", lpt.ID()),
+			zap.Uint64("BeginTS", lpt.BeginTs()),
+			zap.Uint64("EndTS", lpt.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("partitions", request.PartitionNames))
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", lpt.ID()),
+		zap.Uint64("BeginTS", lpt.BeginTs()),
+		zap.Uint64("EndTS", lpt.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames))
 
 	return lpt.result, nil
 }
