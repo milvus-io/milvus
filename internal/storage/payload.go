@@ -62,8 +62,8 @@ type PayloadReaderInterface interface {
 	GetBinaryVectorFromPayload() ([]byte, int, error)
 	GetFloatVectorFromPayload() ([]float32, int, error)
 	GetPayloadLengthFromReader() (int, error)
-	ReleasePayloadReader() error
-	Close() error
+	ReleasePayloadReader()
+	Close()
 }
 
 type PayloadWriter struct {
@@ -400,9 +400,8 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 }
 
 // ReleasePayloadReader release payload reader.
-func (r *PayloadReader) ReleasePayloadReader() error {
-	status := C.ReleasePayloadReader(r.payloadReaderPtr)
-	return HandleCStatus(&status, "ReleasePayloadReader failed")
+func (r *PayloadReader) ReleasePayloadReader() {
+	C.ReleasePayloadReader(r.payloadReaderPtr)
 }
 
 // GetBoolFromPayload returns bool slice from payload.
@@ -586,8 +585,8 @@ func (r *PayloadReader) GetPayloadLengthFromReader() (int, error) {
 	return int(length), nil
 }
 
-func (r *PayloadReader) Close() error {
-	return r.ReleasePayloadReader()
+func (r *PayloadReader) Close() {
+	r.ReleasePayloadReader()
 }
 
 // HandleCStatus deal with the error returned from CGO
