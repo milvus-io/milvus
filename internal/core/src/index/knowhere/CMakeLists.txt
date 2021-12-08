@@ -46,7 +46,7 @@ set(external_srcs
 
 set (LOG_SRC
         knowhere/common/Log.cpp
-        ${KNOWHERE_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 add_library(index_log STATIC ${LOG_SRC})
 set_target_properties(index_log PROPERTIES RULE_LAUNCH_COMPILE "")

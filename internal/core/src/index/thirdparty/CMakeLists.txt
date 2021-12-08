@@ -48,10 +48,6 @@ if ( KNOWHERE_BUILD_TESTS )
 endif()
 
 
-if(NOT TARGET fiu)
-    add_subdirectory(fiu)
-endif()
-
 # ****************************** Thirdparty NGT ***************************************
 add_subdirectory(NGT)
 
