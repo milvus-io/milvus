@@ -221,7 +221,7 @@ func (c *ChannelManager) AddNode(nodeID int64) error {
 	return c.store.Update(updates)
 }
 
-// DeleteNode delete the node whose id is nodeID
+// DeleteNode deletes the node from the cluster
 func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
