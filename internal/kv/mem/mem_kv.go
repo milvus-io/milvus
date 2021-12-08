@@ -220,7 +220,7 @@ func (kv *MemoryKV) RemoveWithPrefix(key string) error {
 	return nil
 }
 
-// item already in memory, just slice the value.
+// LoadPartial item already in memory, just slice the value.
 func (kv *MemoryKV) LoadPartial(key string, start, end int64) ([]byte, error) {
 	value, err := kv.Load(key)
 	if err != nil {
