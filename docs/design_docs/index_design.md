@@ -41,7 +41,7 @@ When the index task is marked as deleted, and the index status is complete, the 
 deleted from the MetaTable.
 
 When IndexCoord receives a query index status request from other components, it will first check whether the corresponding
-index task is marked for deletion in the MetaTable. If marked for deletion, it returns index does not exist, otherwise,
+index task is marked for deletion in the MetaTable. If marked for deletion, it returns that index does not exist, otherwise,
 it returns the index information.
 
 ## 8.3 Feature Design
