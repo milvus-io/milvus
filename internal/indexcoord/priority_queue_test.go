@@ -93,6 +93,25 @@ func TestPriorityQueue_IncPriority(t *testing.T) {
 	assert.Equal(t, key, peekKey)
 }
 
+func TestPriorityQueue_SetMemory(t *testing.T) {
+	ret := &PriorityQueue{
+		policy: PeekClientV1,
+	}
+	for i := 0; i < QueueLen; i++ {
+		item := &PQItem{
+			key:      UniqueID(i),
+			priority: i,
+			index:    i,
+			totalMem: 1000,
+		}
+		ret.items = append(ret.items, item)
+	}
+	heap.Init(ret)
+	ret.SetMemory(1, 100000)
+	peeKey := ret.Peek(99999, []*commonpb.KeyValuePair{}, []*commonpb.KeyValuePair{})
+	assert.Equal(t, int64(1), peeKey)
+}
+
 func TestPriorityQueue(t *testing.T) {
 	ret := &PriorityQueue{
 		policy: PeekClientV0,
