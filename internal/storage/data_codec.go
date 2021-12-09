@@ -335,7 +335,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 		writer.SetEventTimeStamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
 
-		err = writer.Close()
+		err = writer.Finish()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -349,6 +349,8 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			Key:   blobKey,
 			Value: buffer,
 		})
+		eventWriter.Close()
+		writer.Close()
 
 		// stats fields
 		switch field.DataType {
@@ -715,7 +717,7 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	// Since the implementation of golang map may differ from version, so we'd better not to use this magic method.
 	binlogWriter.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
-	err = binlogWriter.Close()
+	err = binlogWriter.Finish()
 	if err != nil {
 		return nil, err
 	}
@@ -726,6 +728,8 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	blob := &Blob{
 		Value: buffer,
 	}
+	eventWriter.Close()
+	binlogWriter.Close()
 	return blob, nil
 
 }
@@ -840,7 +844,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	// https://github.com/milvus-io/milvus/issues/9620
 	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", binary.Size(int64Ts)))
 
-	err = writer.Close()
+	err = writer.Finish()
 
 	if err != nil {
 		return nil, err
@@ -853,6 +857,8 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		Key:   Ts,
 		Value: buffer,
 	})
+	eventWriter.Close()
+	writer.Close()
 
 	writer = NewDDLBinlogWriter(schemapb.DataType_String, dataDefinitionCodec.collectionID)
 
@@ -907,7 +913,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	// https://github.com/milvus-io/milvus/issues/9620
 	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
-	err = writer.Close()
+	err = writer.Finish()
 	if err != nil {
 		return nil, err
 	}
@@ -919,6 +925,8 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		Key:   DDL,
 		Value: buffer,
 	})
+	eventWriter.Close()
+	writer.Close()
 
 	return blobs, nil
 }
@@ -1050,7 +1058,7 @@ func (codec *IndexFileBinlogCodec) Serialize(
 		// https://github.com/milvus-io/milvus/issues/9620
 		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", len(datas[pos].Value)))
 
-		err = writer.Close()
+		err = writer.Finish()
 		if err != nil {
 			return nil, err
 		}
@@ -1064,6 +1072,8 @@ func (codec *IndexFileBinlogCodec) Serialize(
 			//Key:   strconv.Itoa(pos),
 			Value: buffer,
 		})
+		eventWriter.Close()
+		writer.Close()
 	}
 
 	// save index params
@@ -1096,7 +1106,7 @@ func (codec *IndexFileBinlogCodec) Serialize(
 	// len(params) is also not accurate, indexParams is a map
 	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", len(params)))
 
-	err = writer.Close()
+	err = writer.Finish()
 	if err != nil {
 		return nil, err
 	}
@@ -1110,6 +1120,8 @@ func (codec *IndexFileBinlogCodec) Serialize(
 		//Key:   strconv.Itoa(len(datas)),
 		Value: buffer,
 	})
+	eventWriter.Close()
+	writer.Close()
 
 	return blobs, nil
 }

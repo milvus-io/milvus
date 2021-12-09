@@ -166,8 +166,7 @@ func TestInsertEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -337,8 +336,7 @@ func TestInsertEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -408,8 +406,7 @@ func TestDeleteEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -579,8 +576,7 @@ func TestDeleteEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -650,8 +646,7 @@ func TestCreateCollectionEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -695,8 +690,7 @@ func TestCreateCollectionEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -766,8 +760,7 @@ func TestDropCollectionEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -811,8 +804,7 @@ func TestDropCollectionEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -882,8 +874,7 @@ func TestCreatePartitionEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -927,8 +918,7 @@ func TestCreatePartitionEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -998,8 +988,7 @@ func TestDropPartitionEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -1043,8 +1032,7 @@ func TestDropPartitionEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -1108,8 +1096,7 @@ func TestIndexFileEvent(t *testing.T) {
 		var buf bytes.Buffer
 		err = w.Write(&buf)
 		assert.Nil(t, err)
-		err = w.Close()
-		assert.Nil(t, err)
+		w.Close()
 
 		wBuf := buf.Bytes()
 		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
@@ -1281,8 +1268,7 @@ func TestEventClose(t *testing.T) {
 	var buf bytes.Buffer
 	err = w.Write(&buf)
 	assert.Nil(t, err)
-	err = w.Close()
-	assert.Nil(t, err)
+	w.Close()
 
 	wBuf := buf.Bytes()
 	r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))

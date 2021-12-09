@@ -45,8 +45,8 @@ type PayloadWriterInterface interface {
 	FinishPayloadWriter() error
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)
-	ReleasePayloadWriter() error
-	Close() error
+	ReleasePayloadWriter()
+	Close()
 }
 
 type PayloadReaderInterface interface {
@@ -328,13 +328,12 @@ func (w *PayloadWriter) GetPayloadLengthFromWriter() (int, error) {
 	return int(length), nil
 }
 
-func (w *PayloadWriter) ReleasePayloadWriter() error {
-	status := C.ReleasePayloadWriter(w.payloadWriterPtr)
-	return HandleCStatus(&status, "ReleasePayloadWriter failed")
+func (w *PayloadWriter) ReleasePayloadWriter() {
+	C.ReleasePayloadWriter(w.payloadWriterPtr)
 }
 
-func (w *PayloadWriter) Close() error {
-	return w.ReleasePayloadWriter()
+func (w *PayloadWriter) Close() {
+	w.ReleasePayloadWriter()
 }
 
 func NewPayloadReader(colType schemapb.DataType, buf []byte) (*PayloadReader, error) {

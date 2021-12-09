@@ -45,7 +45,7 @@ CStatus AddFloatVectorToPayload(CPayloadWriter payloadWriter, float *values, int
 CStatus FinishPayloadWriter(CPayloadWriter payloadWriter);
 CBuffer GetPayloadBufferFromWriter(CPayloadWriter payloadWriter);
 int GetPayloadLengthFromWriter(CPayloadWriter payloadWriter);
-CStatus ReleasePayloadWriter(CPayloadWriter handler);
+void ReleasePayloadWriter(CPayloadWriter handler);
 
 //============= payload reader ======================
 typedef void *CPayloadReader;

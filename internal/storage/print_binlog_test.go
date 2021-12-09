@@ -61,10 +61,11 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 	assert.NotNil(t, err)
 	sizeTotal := 20000000
 	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
-	err = w.Close()
+	err = w.Finish()
 	assert.Nil(t, err)
 	buf, err := w.GetBuffer()
 	assert.Nil(t, err)
+	w.Close()
 
 	fd, err := ioutil.TempFile("", "binlog_int64.db")
 	assert.Nil(t, err)
