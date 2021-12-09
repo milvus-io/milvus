@@ -975,7 +975,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
 		}
 		if err = retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200)); err != nil {
-			return fmt.Errorf("Failed to seek, error %s", err.Error())
+			return fmt.Errorf("failed to seek, error %s", err.Error())
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
 		ms.chanMsgPos[consumer] = (proto.Clone(mp)).(*MsgPosition)
