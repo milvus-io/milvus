@@ -90,7 +90,7 @@ echo "start running e2e test"
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} -n chaos-testing --timeout=360s
 kubectl wait --for=condition=Ready pod -l release=${release} -n chaos-testing --timeout=360s
 
-pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no
+pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no || echo "e2e test fail"
 python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
 
 # save logs
