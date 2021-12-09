@@ -104,7 +104,7 @@ func (alloc *allocator) genKey(ids ...UniqueID) (string, error) {
 
 // JoinIDPath joins ids to path format.
 func JoinIDPath(ids ...UniqueID) string {
-	idStr := make([]string, len(ids))
+	idStr := make([]string, 0, len(ids))
 	for _, id := range ids {
 		idStr = append(idStr, strconv.FormatInt(id, 10))
 	}

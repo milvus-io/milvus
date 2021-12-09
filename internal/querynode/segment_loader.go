@@ -536,7 +536,7 @@ func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID Unique
 
 // JoinIDPath joins ids to path format.
 func JoinIDPath(ids ...UniqueID) string {
-	idStr := make([]string, len(ids))
+	idStr := make([]string, 0, len(ids))
 	for _, id := range ids {
 		idStr = append(idStr, strconv.FormatInt(id, 10))
 	}
