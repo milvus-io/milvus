@@ -57,6 +57,17 @@ class TestChaosBase:
     health_checkers = {}
 
     def parser_testcase_config(self, chaos_yaml, chaos_config):
+        # TODO: need a better way (maybe recursion) to parse chaos_config
+        # selector key is located in different depth when chaos config's kind is different
+        # for now, there are two kinds of chaos config: xxChaos and Schedule(applied in pod kill chaos).
+        if chaos_config["kind"] == "Schedule":
+            for k, v in chaos_config["spec"].items():
+                if "Chaos" in k and "selector" in v.keys():
+                    selector = v["selector"]
+                    break
+        else:
+            selector = chaos_config["spec"]["selector"]
+        log.info(f"chaos target selector: {selector}")
         tests_yaml = constants.TESTS_CONFIG_LOCATION + 'testcases.yaml'
         tests_config = cc.gen_experiment_config(tests_yaml)
         test_collections = tests_config.get('Collections', None)
@@ -65,8 +76,8 @@ class TestChaosBase:
             if test_chaos in chaos_yaml:
                 expects = t.get('testcase', {}).get('expectation', {}).get('cluster_1_node', {})
                 # get the nums of pods
-                namespace = chaos_config["spec"]["selector"]["namespaces"][0]
-                labels_dict = chaos_config["spec"]["selector"]["labelSelectors"]
+                namespace = selector["namespaces"][0]
+                labels_dict = selector["labelSelectors"]
                 labels_list = []
                 for k,v in labels_dict.items():
                     labels_list.append(k+"="+v)
