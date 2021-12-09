@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
-// getSystemInfoMetrics compose data cluster metrics
+// getSystemInfoMetrics composes data cluster metrics
 func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
