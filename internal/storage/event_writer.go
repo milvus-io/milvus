@@ -111,7 +111,7 @@ type EventWriter interface {
 	// Finish set meta in header and no data can be added to event writer
 	Finish() error
 	// Close release resources
-	Close() error
+	Close()
 	// Write serialize to buffer, should call Finish first
 	Write(buffer *bytes.Buffer) error
 	GetMemoryUsageInBytes() (int32, error)
@@ -170,15 +170,12 @@ func (writer *baseEventWriter) Finish() error {
 	return nil
 }
 
-func (writer *baseEventWriter) Close() error {
+func (writer *baseEventWriter) Close() {
 	if !writer.isClosed {
 		writer.isFinish = true
 		writer.isClosed = true
-		if err := writer.ReleasePayloadWriter(); err != nil {
-			return err
-		}
+		writer.ReleasePayloadWriter()
 	}
-	return nil
 }
 
 func (writer *baseEventWriter) SetOffset(offset int32) {

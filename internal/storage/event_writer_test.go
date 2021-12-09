@@ -55,8 +55,7 @@ func TestSizeofStruct(t *testing.T) {
 func TestEventWriter(t *testing.T) {
 	insertEvent, err := newInsertEventWriter(schemapb.DataType_Int32)
 	assert.Nil(t, err)
-	err = insertEvent.Close()
-	assert.Nil(t, err)
+	insertEvent.Close()
 
 	insertEvent, err = newInsertEventWriter(schemapb.DataType_Int32)
 	assert.Nil(t, err)
@@ -83,8 +82,7 @@ func TestEventWriter(t *testing.T) {
 	length, err = insertEvent.GetMemoryUsageInBytes()
 	assert.Nil(t, err)
 	assert.EqualValues(t, length, buffer.Len())
-	err = insertEvent.Close()
-	assert.Nil(t, err)
+	insertEvent.Close()
 }
 
 func TestReadMagicNumber(t *testing.T) {

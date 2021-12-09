@@ -339,13 +339,10 @@ int GetPayloadLengthFromWriter(CPayloadWriter payloadWriter) {
 }
 
 extern "C"
-CStatus ReleasePayloadWriter(CPayloadWriter handler) {
-  CStatus st;
-  st.error_code = static_cast<int>(ErrorCode::SUCCESS);
-  st.error_msg = nullptr;
+void ReleasePayloadWriter(CPayloadWriter handler) {
   auto p = reinterpret_cast<wrapper::PayloadWriter *>(handler);
   if (p != nullptr) delete p;
-  return st;
+  arrow::default_memory_pool()->ReleaseUnused();
 }
 
 extern "C"
@@ -529,7 +526,9 @@ int GetPayloadLengthFromReader(CPayloadReader payloadReader) {
 extern "C"
 void ReleasePayloadReader(CPayloadReader payloadReader) {
   auto p = reinterpret_cast<wrapper::PayloadReader *>(payloadReader);
-  delete[] p->bValues;
-  delete p;
+  if (p != nullptr) {
+    delete[] p->bValues;
+    delete p;
+  }
   arrow::default_memory_pool()->ReleaseUnused();
 }

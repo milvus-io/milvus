@@ -87,7 +87,7 @@ func (writer *baseBinlogWriter) GetBuffer() ([]byte, error) {
 }
 
 // Close allocate buffer and release resource
-func (writer *baseBinlogWriter) Close() error {
+func (writer *baseBinlogWriter) Finish() error {
 	if writer.buffer != nil {
 		return nil
 	}
@@ -125,11 +125,14 @@ func (writer *baseBinlogWriter) Close() error {
 			return err
 		}
 		writer.length += int32(rows)
-		if err := w.ReleasePayloadWriter(); err != nil {
-			return err
-		}
 	}
 	return nil
+}
+
+func (writer *baseBinlogWriter) Close() {
+	for _, e := range writer.eventWriters {
+		e.Close()
+	}
 }
 
 // InsertBinlogWriter is an object to write binlog file which saves insert data.
