@@ -1705,9 +1705,9 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tag(CaseLabel.L2)
-    def test_search_without_expression(self, auto_id):
+    def test_search_travel_time_without_expression(self, auto_id):
         """
-        target: test search without expression
+        target: test search using travel time without expression
         method: 1. create connections,collection
                 2. first insert, and return with timestamp1
                 3. second insert, and return with timestamp2
