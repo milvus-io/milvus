@@ -1741,7 +1741,6 @@ class TestCollectionSearch(TestcaseBase):
         for i in range(len(search_res)):
             assert insert_ids_2[i] not in search_res[i].ids
         # 5. search with insert timestamp2
-        time.sleep(gracefulTime)
         log.info("test_search_without_expression: searching collection %s with time_stamp_2 '%d'"
                  % (collection_w.name, time_stamp_2))
         search_res = collection_w.search(vectors, default_search_field,
