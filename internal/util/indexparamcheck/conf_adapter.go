@@ -229,6 +229,7 @@ func (adapter *IVFPQConfAdapter) checkCPUPQParams(dimension, m int) bool {
 	return (dimension % m) == 0
 }
 
+// IVFSQConfAdapter checks if a IVF_SQ index can be built.
 func newIVFPQConfAdapter() *IVFPQConfAdapter {
 	return &IVFPQConfAdapter{}
 }
