@@ -203,6 +203,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
+// processDeleteMessages would execute delete operations for growing segments
 func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, delData *deleteData) {
 	var partitionIDs []UniqueID
 	var err error
