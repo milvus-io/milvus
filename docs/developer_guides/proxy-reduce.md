@@ -44,7 +44,7 @@ for i -> topk:
 
 This algorithm is originated from the merging phase of merge sort. The common point of the two is that the results have been sorted when merging, and the difference is that merge sort merges two-way results, proxy reduces merges multiple results.
 
-In contrast, in merge sort, two pointers are used to record the offsets of the two-way results, and proxy reduce uses multiple pointers `locs` to record the offsets of the `k-way` results.
+In contrast, in merge sort, two pointers are used to record the offsets of the two-way results, and proxy reduces uses multiple pointers `locs` to record the offsets of the `k-way` results.
 
 In our specific situation, n indicates that there are 4 results to be merged, `multiple_results` is an array of four `topk`, and each `choiceOffset` in `locs` records the offset of each way being merged.
 
