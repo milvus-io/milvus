@@ -177,7 +177,7 @@ dataCoord:
     assignmentExpiration: 2000 # The time of the assignment expiration in ms 
 
   compaction:
-    enableAutoCompaction: false
+    enableAutoCompaction: true
     retentionDuration: 432000 # 5 days in seconds
 
   gc:
