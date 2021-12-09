@@ -47,7 +47,7 @@ macro( build_arrow )
         "-DARROW_TEST_MEMCHECK=OFF"
         "-DARROW_BUILD_BENCHMARKS=OFF"
         "-DARROW_CUDA=OFF"
-        "-DARROW_JEMALLOC=OFF"
+        "-DARROW_JEMALLOC=ON"
         "-DARROW_PYTHON=OFF"
         "-DARROW_WITH_RE2=OFF"
         "-DARROW_BUILD_UTILITIES=OFF"
