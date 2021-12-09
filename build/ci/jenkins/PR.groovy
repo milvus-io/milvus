@@ -191,20 +191,25 @@ pipeline {
                         }
                         }
                     }
-                    unsuccessful {
-                        container('jnlp') {
-                            script {
-                                def authorEmail = sh returnStdout: true, script: 'git --no-pager show -s --format=\'%ae\' HEAD'
-                                emailext subject: '$DEFAULT_SUBJECT',
-                                body: '$DEFAULT_CONTENT',
-                                recipientProviders: [developers(), culprits()],
-                                replyTo: '$DEFAULT_REPLYTO',
-                                to: "${authorEmail},devops@zilliz.com"
-                            }
+
+                }
+            }
+        }
+    }
+    post{
+                unsuccessful {
+                container('jnlp') {
+                    dir ('tests/scripts') {
+                        script {
+                            def authorEmail = sh(returnStdout: true, script: './get_author_email.sh ')
+                            emailext subject: '$DEFAULT_SUBJECT',
+                            body: '$DEFAULT_CONTENT',
+                            recipientProviders: [developers(), culprits()],
+                            replyTo: '$DEFAULT_REPLYTO',
+                            to: "${authorEmail},devops@zilliz.com"
                         }
                     }
                 }
             }
         }
-    }
 }
