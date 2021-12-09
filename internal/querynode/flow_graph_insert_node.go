@@ -244,6 +244,7 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 	}
 }
 
+// filterSegmentsByPKs would filter segments by primary keys
 func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
 	if pks == nil {
 		return nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
