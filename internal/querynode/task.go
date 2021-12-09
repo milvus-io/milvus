@@ -787,6 +787,16 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	log.Debug("Execute release collection task", zap.Any("collectionID", r.req.CollectionID))
 	errMsg := "release collection failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
 	log.Debug("release streaming", zap.Any("collectionID", r.req.CollectionID))
+	// sleep to wait for query tasks done
+	const gracefulReleaseTime = 1
+	time.Sleep(gracefulReleaseTime * time.Second)
+	log.Debug("Starting release collection...",
+		zap.Any("collectionID", r.req.CollectionID),
+	)
+
+	// remove query collection
+	r.node.queryService.stopQueryCollection(r.req.CollectionID)
+
 	err := r.releaseReplica(r.node.streaming.replica, replicaStreaming)
 	if err != nil {
 		return errors.New(errMsg + err.Error())
@@ -799,8 +809,6 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		return errors.New(errMsg + err.Error())
 	}
 	r.node.historical.removeGlobalSegmentIDsByCollectionID(r.req.CollectionID)
-	// remove query collection
-	r.node.queryService.stopQueryCollection(r.req.CollectionID)
 
 	log.Debug("ReleaseCollection done", zap.Int64("collectionID", r.req.CollectionID))
 	return nil
@@ -815,12 +823,6 @@ func (r *releaseCollectionTask) releaseReplica(replica ReplicaInterface, replica
 	log.Debug("set release time", zap.Any("collectionID", r.req.CollectionID))
 	collection.setReleaseTime(r.req.Base.Timestamp)
 
-	// sleep to wait for query tasks done
-	const gracefulReleaseTime = 1
-	time.Sleep(gracefulReleaseTime * time.Second)
-	log.Debug("Starting release collection...",
-		zap.Any("collectionID", r.req.CollectionID),
-	)
 	if replicaType == replicaStreaming {
 		r.node.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
 		// remove partition flow graphs which partitions belong to the target collection
