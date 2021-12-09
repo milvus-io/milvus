@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -439,11 +440,13 @@ func (t *compactionTask) compact() error {
 
 	//  Compaction I: update pk range.
 	//  Compaction II: remove the segments and add a new flushed segment with pk range.
-	fd := []UniqueID{}
-	for _, iData := range iDatas {
-		fd = append(fd, iData.Data[0].(*storage.Int64FieldData).Data...)
-	}
+	fd := make([]UniqueID, 0, numRows)
+	if numRows > 0 {
+		for _, iData := range iDatas {
+			fd = append(fd, iData.Data[common.TimeStampField].(*storage.Int64FieldData).Data...)
+		}
 
+	}
 	if t.hasSegment(targetSegID, true) {
 		t.refreshFlushedSegStatistics(targetSegID, numRows)
 		t.refreshFlushedSegmentPKRange(targetSegID, fd)

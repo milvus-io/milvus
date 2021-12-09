@@ -1856,7 +1856,7 @@ func TestCompleteCompaction(t *testing.T) {
 func TestManualCompaction(t *testing.T) {
 	Params.EnableCompaction = true
 	t.Run("test manual compaction successfully", func(t *testing.T) {
-		svr := &Server{}
+		svr := &Server{allocator: &MockAllocator{}}
 		svr.isServing = ServerStateHealthy
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
@@ -1875,7 +1875,7 @@ func TestManualCompaction(t *testing.T) {
 	})
 
 	t.Run("test manual compaction failure", func(t *testing.T) {
-		svr := &Server{}
+		svr := &Server{allocator: &MockAllocator{}}
 		svr.isServing = ServerStateHealthy
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
