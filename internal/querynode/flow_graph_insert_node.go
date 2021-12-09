@@ -263,6 +263,7 @@ func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
 	return res, nil
 }
 
+// insert would execute insert operations for specific growing segment
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) {
 	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
 	var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
