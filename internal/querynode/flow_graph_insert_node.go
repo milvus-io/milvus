@@ -326,7 +326,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 }
 
 // TODO: remove this function to proper file
-// TODO: why not return error?
+// getPrimaryKeys would get primary keys by insert messages
 func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface) ([]int64, error) {
 	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
 		log.Warn("misaligned messages detected")
