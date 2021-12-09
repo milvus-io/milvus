@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1638864224296,
+  "iteration": 1639031798196,
   "links": [],
   "panels": [
     {
@@ -1574,7 +1574,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total count of show_partition requests",
+      "description": "Total count of create_index requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1596,7 +1596,7 @@
         "x": 0,
         "y": 31
       },
-      "id": 123181,
+      "id": 123174,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -1616,7 +1616,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -1627,12 +1627,12 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Show Partition Total",
+      "title": "Create Index Total",
       "type": "stat"
     },
     {
       "datasource": "$datasource",
-      "description": "Success count of show_partition requests",
+      "description": "Success count of create_index requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1654,7 +1654,7 @@
         "x": 4,
         "y": 31
       },
-      "id": 123170,
+      "id": 123182,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -1674,7 +1674,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -1685,7 +1685,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Show Partition Success",
+      "title": "Create Index Success",
       "type": "stat"
     },
     {
@@ -1922,7 +1922,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total count of create_index requests",
+      "description": "Total count of show_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1944,7 +1944,7 @@
         "x": 0,
         "y": 36
       },
-      "id": 123174,
+      "id": 123195,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -1964,7 +1964,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -1975,12 +1975,12 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Create Index Total",
+      "title": "Show Segments Total",
       "type": "stat"
     },
     {
       "datasource": "$datasource",
-      "description": "Success count of create_index requests",
+      "description": "Success count of show_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2002,7 +2002,7 @@
         "x": 4,
         "y": 36
       },
-      "id": 123182,
+      "id": 123191,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -2022,7 +2022,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -2033,7 +2033,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Create Index Success",
+      "title": "Show Segments Success",
       "type": "stat"
     },
     {
@@ -2270,7 +2270,7 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total count of show_segments requests",
+      "description": "Total count of describe_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2292,7 +2292,7 @@
         "x": 0,
         "y": 41
       },
-      "id": 123195,
+      "id": 123192,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -2312,7 +2312,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "expr": "sum(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -2323,12 +2323,12 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Show Segments Total",
+      "title": "Describe Segments Total",
       "type": "stat"
     },
     {
       "datasource": "$datasource",
-      "description": "Success count of show_segments requests",
+      "description": "Success count of describe_segments requests",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -2350,7 +2350,7 @@
         "x": 4,
         "y": 41
       },
-      "id": 123191,
+      "id": 123193,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -2370,7 +2370,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "expr": "sum(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
           "instant": false,
           "interval": "",
           "intervalFactor": 2,
@@ -2381,7 +2381,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Show Segments Success",
+      "title": "Describe Segments Success",
       "type": "stat"
     },
     {
@@ -2617,579 +2617,18 @@
       "type": "stat"
     },
     {
-      "datasource": "$datasource",
-      "description": "Total count of describe_segments requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 46
-      },
-      "id": 123192,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Describe Segments Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of describe_segments requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 46
-      },
-      "id": 123193,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Describe Segments Success",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Total count of describe_index requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 8,
-        "y": 46
-      },
-      "id": 123187,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Describe Index Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of describe_index requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 12,
-        "y": 46
-      },
-      "id": 123188,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Describe Index Success",
-      "type": "stat"
-    },
-    {
       "collapsed": false,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 46
       },
       "id": 123172,
       "panels": [],
       "title": "Data Coordinator",
       "type": "row"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Total count of flush_segments requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 52
-      },
-      "id": 123190,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Flush Segments Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of flush_segments requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 52
-      },
-      "id": 123196,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Flush Segments Success",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Total count of watch_dm_channels requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 8,
-        "y": 52
-      },
-      "id": 123198,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Watch dm_channels Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
-      "description": "Success count of watch_dm_channels requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 12,
-        "y": 52
-      },
-      "id": 123199,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Watch dm_channels Success",
-      "type": "stat"
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": "$datasource",
-      "description": "List of data nodes which has register with etcd",
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 16,
-        "y": 52
-      },
-      "hiddenSeries": false,
-      "id": 123207,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.4",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_dataCoord_list_of_data_node{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "total",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Data Node List",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": "0",
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
     },
     {
       "aliasColors": {},
@@ -3208,7 +2647,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 57
+        "y": 47
       },
       "hiddenSeries": false,
       "id": 123197,
@@ -3311,7 +2750,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 57
+        "y": 47
       },
       "hiddenSeries": false,
       "id": 123200,
@@ -3403,6 +2842,335 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
+      "description": "List of data nodes which has register with etcd",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 47
+      },
+      "hiddenSeries": false,
+      "id": 123207,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.5.4",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_dataCoord_list_of_data_node{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "total",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Data Node List",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": "0",
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Total count of flush_segments requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "super-light-blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 53
+      },
+      "id": 123190,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Flush Segments Total",
+      "type": "stat"
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Success count of flush_segments requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 53
+      },
+      "id": 123196,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Flush Segments Success",
+      "type": "stat"
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Total count of watch_dm_channels requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "super-light-blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 53
+      },
+      "id": 123198,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Watch dm_channels Total",
+      "type": "stat"
+    },
+    {
+      "datasource": "$datasource",
+      "description": "Success count of watch_dm_channels requests",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 53
+      },
+      "id": 123199,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.5.4",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"})",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Watch dm_channels Success",
+      "type": "stat"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$datasource",
       "description": "0.95 quantile of Pulsar client producer rpc latency",
       "fieldConfig": {
         "defaults": {},
@@ -3414,7 +3182,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 58
+        "y": 53
       },
       "hiddenSeries": false,
       "id": 123210,
@@ -3510,7 +3278,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 63
+        "y": 58
       },
       "hiddenSeries": false,
       "id": 123208,
@@ -3606,7 +3374,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 63
+        "y": 58
       },
       "hiddenSeries": false,
       "id": 123209,
@@ -3702,7 +3470,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 64
+        "y": 59
       },
       "hiddenSeries": false,
       "id": 123214,
@@ -3788,7 +3556,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 65
       },
       "id": 123157,
       "panels": [],
@@ -3812,7 +3580,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 71
+        "y": 66
       },
       "hiddenSeries": false,
       "id": 123202,
@@ -3908,7 +3676,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 71
+        "y": 66
       },
       "hiddenSeries": false,
       "id": 123204,
@@ -4006,7 +3774,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 71
+        "y": 66
       },
       "hiddenSeries": false,
       "id": 123206,
@@ -4092,7 +3860,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "cpu usage of process.",
+      "description": "process cpu usage",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -4103,7 +3871,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 77
+        "y": 72
       },
       "hiddenSeries": false,
       "id": 123135,
@@ -4189,7 +3957,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "prometheus",
-      "description": "Process memory of milvus pods.",
+      "description": "Process memory of milvus pod",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -4200,7 +3968,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 77
+        "y": 72
       },
       "hiddenSeries": false,
       "id": 123133,
@@ -4308,7 +4076,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 77
+        "y": 72
       },
       "hiddenSeries": false,
       "id": 123125,
@@ -4405,7 +4173,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 83
+        "y": 78
       },
       "hiddenSeries": false,
       "id": 123137,
@@ -4502,7 +4270,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 83
+        "y": 78
       },
       "hiddenSeries": false,
       "id": 123131,
@@ -4598,7 +4366,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 83
+        "y": 78
       },
       "hiddenSeries": false,
       "id": 123127,
@@ -4641,7 +4409,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "OS Threads",
+      "title": "OS  Threads",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -4696,7 +4464,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 89
+        "y": 84
       },
       "hiddenSeries": false,
       "id": 123129,
@@ -4793,7 +4561,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 89
+        "y": 84
       },
       "hiddenSeries": false,
       "id": 123211,
@@ -4891,7 +4659,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 89
+        "y": 84
       },
       "hiddenSeries": false,
       "id": 123212,
@@ -4989,7 +4757,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 95
+        "y": 90
       },
       "hiddenSeries": false,
       "id": 123213,
@@ -5087,7 +4855,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 95
+        "y": 90
       },
       "hiddenSeries": false,
       "id": 123215,
@@ -5185,7 +4953,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 95
+        "y": 90
       },
       "hiddenSeries": false,
       "id": 123216,
@@ -5283,7 +5051,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 101
+        "y": 96
       },
       "hiddenSeries": false,
       "id": 123217,
@@ -5419,9 +5187,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": "chaos-testing",
-          "value": "chaos-testing"
+          "selected": false,
+          "text": "default",
+          "value": "default"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -5450,9 +5218,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": "mic-compact",
-          "value": "mic-compact"
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}, app_kubernetes_io_instance)",
@@ -5481,13 +5250,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": [
-            "mic-compact-milvus-datacoord-5bf5dc4584-t9qxp"
-          ],
-          "value": [
-            "mic-compact-milvus-datacoord-5bf5dc4584-t9qxp"
-          ]
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -5516,12 +5282,12 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
-            "datacoord"
+            "None"
           ],
           "value": [
-            "datacoord"
+            ""
           ]
         },
         "datasource": "${datasource}",
