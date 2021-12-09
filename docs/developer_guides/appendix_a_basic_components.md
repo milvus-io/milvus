@@ -60,7 +60,7 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/sessio
 
 - Registration is achieved through etcd's lease mechanism.
 
-- The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is available through the key.
+- The service creates a lease with ETCD and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is available through the key.
 
 - key: metaRoot + "/session" + "/ServerName(-ServerID)(optional)"
 
