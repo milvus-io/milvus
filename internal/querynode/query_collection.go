@@ -270,12 +270,12 @@ func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
 			t = ts
 		}
 	}
-	p, _ := tsoutil.ParseTS(t)
-	log.Debug("waitNewTSafe",
-		zap.Any("collectionID", q.collectionID),
-		zap.Any("tSafe", t),
-		zap.Any("tSafe_p", p),
-	)
+	//p, _ := tsoutil.ParseTS(t)
+	//log.Debug("waitNewTSafe",
+	//	zap.Any("collectionID", q.collectionID),
+	//	zap.Any("tSafe", t),
+	//	zap.Any("tSafe_p", p),
+	//)
 	return t, nil
 }
 
