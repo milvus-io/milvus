@@ -4,7 +4,7 @@
 
 In Milvus, a collection has multiple fields, mainly there are two kinds of fields: vector field and scalar field. We call a row as an entity, one entity encapsulates multiple vectors and scalar values.
 
-When creating a collection, you can specify using the primary key generated automatically, or using the user-provided primary key.
+When creating a collection, you can specify using the auto-generated primary key, or using the user-provided primary key.
 If a user sets to use the user-provided primary key, each entity inserted must contain the primary key field. Otherwise, the insertion fails.
 The primary keys will be returned after the insertion request is successful.
 
