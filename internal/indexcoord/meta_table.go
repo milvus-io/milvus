@@ -243,6 +243,7 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	return nil
 }
 
+// MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
 func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
