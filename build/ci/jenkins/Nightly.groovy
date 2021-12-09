@@ -202,31 +202,30 @@ pipeline {
                             }
                         }
                     }
-                    always {
-                        container('pytest') {
-                            dir ('tests/scripts') {
-                            script {
-                                    def release_name=sh(returnStdout: true, script: './get_release_name.sh')
-                                    sh "./ci_logs.sh --log-dir /ci-logs  --artifacts-name ${env.ARTIFACTS}/artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs \
-                                    --release-name ${release_name} "
-                                    dir("${env.ARTIFACTS}") {
-                                          if ("${MILVUS_CLIENT}" == "pymilvus") {
-                                            sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz /tmp/ci_logs/test --remove-files || true"
-                                        }
-                                        archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
-                                    }
-                            }
-                            }
-                        }
-                    }
-                    cleanup {
+                     always {
                         container('main') {
                             dir ('tests/scripts') {  
                                 script {
-                                def release_name=sh(returnStdout: true, script: './get_release_name.sh')
-                                sh "./uninstall_milvus.sh --release-name ${release_name}"
+                                    def release_name=sh(returnStdout: true, script: './get_release_name.sh')
+                                    sh "./uninstall_milvus.sh --release-name ${release_name}"
                                 }
                             }
+                        }
+                        container('pytest') {
+                            dir ('tests/scripts') {
+                            script {
+                                    def release_name = sh(returnStdout: true, script: './get_release_name.sh ')
+                                    sh "./ci_logs.sh --log-dir /ci-logs  --artifacts-name ${env.ARTIFACTS}/artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs \
+                                    --release-name ${release_name}"
+                                    dir("${env.ARTIFACTS}") {
+                                        if ("${MILVUS_CLIENT}" == "pymilvus") {
+                                            sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz /tmp/ci_logs/test --remove-files || true"
+                                            }
+                                        archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ", allowEmptyArchive: true
+                                        archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs.tar.gz", allowEmptyArchive: true
+                                    }
+                            }
+                        }
                         }
                     }
                 }
