@@ -46,7 +46,7 @@ class TestDeleteParams(TestcaseBase):
         # query with deleted ids
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_without_connection(self):
         """
         target: test delete without connect
@@ -64,7 +64,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w.delete(expr=tmp_expr, check_task=CheckTasks.err_res, check_items=error)
 
     # Not Milvus Exception
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_expr_none(self):
         """
         target: test delete with None expr
@@ -102,7 +102,7 @@ class TestDeleteParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: f"failed to create expr plan, expr = {expr}"}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_expr_empty_value(self):
         """
         target: test delete with empty array expr
@@ -148,7 +148,7 @@ class TestDeleteParams(TestcaseBase):
 
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_not_existed_values(self):
         """
         target: test delete not existed values
@@ -177,7 +177,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w.delete(expr=expr)[0]
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_expr_inconsistent_values(self):
         """
         target: test delete with inconsistent type values
@@ -233,7 +233,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w.query(f'{ct.default_int64_field_name} in [1]',
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_default_partition(self):
         """
         target: test delete from default partition
@@ -269,7 +269,7 @@ class TestDeleteOperation(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_from_empty_collection(self):
         """
         target: test delete entities from an empty collection
@@ -362,7 +362,7 @@ class TestDeleteOperation(TestcaseBase):
         log.debug(inter)
         assert len(inter) == 0
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_query_ids_both_sealed_and_channel(self):
         """
         target: test query that delete ids from both channel and sealed
@@ -396,7 +396,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, tmp_nb]}',
                            check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_search(self):
         """
         target: test delete and search
@@ -681,7 +681,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.load()
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_sealed_segment_with_twice_flush(self):
         """
         target: test delete data from sealed segment and flush delta log
