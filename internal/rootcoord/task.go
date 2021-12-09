@@ -57,12 +57,15 @@ func executeTask(t reqTask) error {
 	}()
 	select {
 	case <-t.Core().ctx.Done():
-		return fmt.Errorf("context canceled")
+		return fmt.Errorf("core context canceled")
 	case <-t.Ctx().Done():
-		return fmt.Errorf("context canceled")
+		return fmt.Errorf("task context canceled")
 	case err := <-errChan:
-		if t.Core().ctx.Err() != nil || t.Ctx().Err() != nil {
-			return fmt.Errorf("context canceled")
+		if t.Core().ctx.Err() != nil {
+			return fmt.Errorf("core context canceled: %s", t.Core().ctx.Err().Error())
+		}
+		if t.Ctx().Err() != nil {
+			return fmt.Errorf("task context canceled: %s", t.Ctx().Err().Error())
 		}
 		return err
 	}
