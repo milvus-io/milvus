@@ -30,7 +30,7 @@ In Milvus, index building is performed asynchronously. When IndexCoord receives 
 RootCoord, it will first check whether the same index has been created according to the index parameters. If yes, it would
 return the IndexBuildID of the existing task. Otherwise, it would assign a globally unique IndexBuildID to the task,
 record the task in the MetaTable, write the MetaTable to etcd, and then return the IndexBuildID to RootCoord.
-RootCoord confirms the index building was generated successfully by the IndexBuildID. At this time, the index construction
+RootCoord confirms that the index building is generated successfully by the IndexBuildID. At this time, the index construction
 is not completed yet. IndexCoord starts a background process to find all the index tasks that need to be
 allocated periodically, and then allocates them to IndexNode for actual execution.
 
