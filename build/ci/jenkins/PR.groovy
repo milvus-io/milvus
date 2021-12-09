@@ -75,7 +75,7 @@ pipeline {
         }
 
 
-        stage ('Install & E2E Test') {
+        stage('Install & E2E Test') {
                 matrix {
                     axes {
                         axis {
