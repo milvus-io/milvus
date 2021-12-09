@@ -31,7 +31,7 @@ Suppose there are two users, `u1` and `u2`. They connect to Milvus and do the fo
 
 Ideally, `u2` expects `C0` to be empty at `t2`, and could only see `A1` at `t7`; while `u2` could see both `A1` and `A2` at `t12`, but only see `A2` at `t17`.
 
-It's easy to achieve this in a `single-node` database. But for a `Distributed System`, such as `Milvus`, it's a little difficult; the following problems need to be solved.
+It's easy to achieve this in a `single-node` database. But for a `Distributed System`, such as `Milvus`, it's a little difficult; the following problems need to be solved:
 
 1. If `u1` and `u2` are on different nodes, and their time clock is not synchronized. To give an extreme example, suppose that the time of `u2` is 24 hours later than `u1`, then all the operations of `u1` can't been seen by `u2` until next day.
 2. Network latency. If `u2` starts the `Search on C0` at `t17`, then how can it be guaranteed that all the `events` before `t17` have been processed? If the events of `delete A1 from C0` has been delayed due to the network latency, then it would lead to incorrect state: `u2` would see both `A1` and `A2` at `t17`.
