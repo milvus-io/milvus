@@ -24,11 +24,12 @@ type ServerHandler struct {
 	s *Server
 }
 
+// newServerHandler creates a new ServerHandler
 func newServerHandler(s *Server) *ServerHandler {
 	return &ServerHandler{s: s}
 }
 
-// GetVChanPositions get vchannel latest postitions with provided dml channel names
+// GetVChanPositions gets vchannel latest postitions with provided dml channel names
 func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
