@@ -181,7 +181,7 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 // RemoveWithPrefix removes a batch of key-values with specified prefix
 func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 	if kv.DB == nil {
-		return errors.New("Rocksdb instance is nil when do RemoveWithPrefix")
+		return errors.New("rocksdb instance is nil when do RemoveWithPrefix")
 	}
 	kv.ReadOptions.SetPrefixSameAsStart(true)
 	kv.DB.Close()
