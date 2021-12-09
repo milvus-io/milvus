@@ -7,7 +7,6 @@ from pymilvus import connections
 from base.collection_wrapper import ApiCollectionWrapper
 from common.common_type import CaseLabel
 from customize.milvus_operator import MilvusOperator
-from scale.helm_env import HelmEnv
 from scale import constants
 from common import common_func as cf
 from common import common_type as ct
@@ -105,8 +104,22 @@ class TestIndexNodeScale:
         expected: The cost of one indexNode is about twice that of two indexNodes
         """
         release_name = "scale-index"
-        env = HelmEnv(release_name=release_name, indexNode=2)
-        host = env.helm_install_cluster_milvus()
+        image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
+        data_config = {
+            'metadata.namespace': constants.NAMESPACE,
+            'metadata.name': release_name,
+            'spec.components.image': image,
+            'spec.components.proxy.serviceType': 'LoadBalancer',
+            'spec.components.indexNode.replicas': 2,
+            'spec.components.dataNode.replicas': 2,
+            'spec.config.dataCoord.enableCompaction': True,
+            'spec.config.dataCoord.enableGarbageCollection': True
+        }
+        mic = MilvusOperator()
+        mic.install(data_config)
+        healthy = mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200)
+        log.info(f"milvus healthy: {healthy}")
+        host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
 
         # connect
         connections.add_connection(default={"host": host, "port": 19530})
@@ -137,7 +150,7 @@ class TestIndexNodeScale:
         assert not collection_w.has_index()[0]
 
         # expand indexNode from 2 to 1
-        env.helm_upgrade_cluster_milvus(indexNode=1)
+        mic.upgrade(release_name, {'spec.components.indexNode.replicas': 1}, constants.NAMESPACE)
 
         start = datetime.datetime.now()
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
@@ -148,3 +161,4 @@ class TestIndexNodeScale:
         log.debug(t1 / t0)
         assert round(t1 / t0) == 2
 
+        # mic.uninstall(release_name, namespace=constants.NAMESPACE)
