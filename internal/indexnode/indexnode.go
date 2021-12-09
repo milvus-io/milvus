@@ -269,10 +269,11 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 			ctx:  ctx2,
 			done: make(chan error),
 		},
-		req:    request,
-		kv:     i.kv,
-		etcdKV: i.etcdKV,
-		nodeID: Params.NodeID,
+		req:            request,
+		kv:             i.kv,
+		etcdKV:         i.etcdKV,
+		nodeID:         Params.NodeID,
+		serializedSize: 0,
 	}
 
 	ret := &commonpb.Status{

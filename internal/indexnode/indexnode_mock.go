@@ -289,12 +289,74 @@ func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		}, nil
 	}
 
+	metricType, _ := metricsinfo.ParseMetricType(req.Request)
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		metrics, err := getMockSystemInfoMetrics(ctx, req, inm)
+
+		log.Debug("IndexNode.GetMetrics",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return metrics, nil
+	}
+
+	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
+	}, nil
+}
+
+func getMockSystemInfoMetrics(
+	ctx context.Context,
+	req *milvuspb.GetMetricsRequest,
+	node *Mock,
+) (*milvuspb.GetMetricsResponse, error) {
+	// TODO(dragondriver): add more metrics
+	nodeInfos := metricsinfo.IndexNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.NodeID),
+			HardwareInfos: metricsinfo.HardwareMetrics{
+				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+				CPUCoreUsage: metricsinfo.GetCPUUsage(),
+				Memory:       metricsinfo.GetMemoryCount(),
+				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+				Disk:         metricsinfo.GetDiskCount(),
+				DiskUsage:    metricsinfo.GetDiskUsage(),
+			},
+			SystemInfo:  metricsinfo.DeployMetrics{},
+			CreatedTime: Params.CreatedTime.String(),
+			UpdatedTime: Params.UpdatedTime.String(),
+			Type:        typeutil.IndexNodeRole,
+		},
+		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
+			MinioBucketName: Params.MinioBucketName,
+
+			SimdType: Params.SimdType,
+		},
+	}
+
+	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
+
+	resp, _ := metricsinfo.MarshalComponentInfos(nodeInfos)
+
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Response:      "",
-		ComponentName: "IndexNode",
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.NodeID),
 	}, nil
 }

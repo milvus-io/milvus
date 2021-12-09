@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -73,12 +75,17 @@ func TestIndexNodeMock(t *testing.T) {
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
-		req := &milvuspb.GetMetricsRequest{
-			Request: "",
-		}
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.Nil(t, err)
 		resp, err := inm.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		req2, err := metricsinfo.ConstructRequestByMetricType("IndexNode")
+		assert.Nil(t, err)
+		resp2, err := inm.GetMetrics(ctx, req2)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp2.Status.ErrorCode)
 	})
 
 	err = inm.Stop()

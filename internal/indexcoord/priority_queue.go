@@ -19,6 +19,8 @@ package indexcoord
 import (
 	"container/heap"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
 // PQItem is something we manage in a priority queue.
@@ -30,12 +32,15 @@ type PQItem struct {
 	weight int // The weight of the item in the queue.
 	// When the priority is the same, a smaller weight is more preferred.
 	index int // The index of the item in the heap.
+
+	totalMem uint64 // The total memory of the IndexNode.
 }
 
 // PriorityQueue implements heap.Interface and holds Items.
 type PriorityQueue struct {
-	items []*PQItem
-	lock  sync.RWMutex
+	items  []*PQItem
+	lock   sync.RWMutex
+	policy PeekClientPolicy
 }
 
 // Len is the length of the priority queue.
@@ -139,14 +144,14 @@ func (pq *PriorityQueue) Remove(key UniqueID) {
 }
 
 // Peek picks an key with the lowest load.
-func (pq *PriorityQueue) Peek() UniqueID {
+func (pq *PriorityQueue) Peek(memorySize uint64, indexParams []*commonpb.KeyValuePair, typeParams []*commonpb.KeyValuePair) UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
 
 	if pq.Len() == 0 {
 		return UniqueID(-1)
 	}
-	return pq.items[0].key
+	return pq.policy(memorySize, indexParams, typeParams, pq)
 }
 
 // PeekAll return the key of all the items.

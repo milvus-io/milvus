@@ -21,6 +21,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"google.golang.org/grpc"
 
@@ -29,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -169,7 +170,8 @@ func TestIndexNodeClient(t *testing.T) {
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
-		req := &milvuspb.GetMetricsRequest{}
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.Nil(t, err)
 		resp, err := inc.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
