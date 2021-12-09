@@ -280,7 +280,7 @@ func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) error {
 // SetDataCoord sets data coordinator's client
 func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) error {
 	if dataCoord == nil {
-		return errors.New("null data coordinator interface")
+		return errors.New("null DataCoord interface")
 	}
 
 	qc.dataCoordClient = dataCoord
