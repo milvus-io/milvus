@@ -270,7 +270,7 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 // SetRootCoord sets root coordinator's client
 func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) error {
 	if rootCoord == nil {
-		return errors.New("null root coordinator interface")
+		return errors.New("null RootCoord interface")
 	}
 
 	qc.rootCoordClient = rootCoord
