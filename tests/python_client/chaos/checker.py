@@ -146,7 +146,6 @@ class CreateChecker(Checker):
 
             else:
                 self._fail += 1
-                log.error(f"create failed, time: {t1 - t0:.4f}")
             sleep(constants.WAIT_PER_OP / 10)
 
 class IndexChecker(Checker):
@@ -172,10 +171,8 @@ class IndexChecker(Checker):
                 self._succ += 1
                 log.debug(f"index success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
                 self.c_wrap.drop_index(timeout=timeout)
-
             else:
                 self._fail += 1
-                log.error(f"index failed, time: {t1 - t0}")
 
 class QueryChecker(Checker):
     """check query operations in a dependent thread"""
