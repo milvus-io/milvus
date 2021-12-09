@@ -238,6 +238,7 @@ type IVFSQConfAdapter struct {
 	IVFConfAdapter
 }
 
+// CheckTrain returns true if the index can be built with the specific index parameters.
 func (adapter *IVFSQConfAdapter) CheckTrain(params map[string]string) bool {
 	params[NBITS] = strconv.Itoa(DefaultNBits)
 	return adapter.IVFConfAdapter.CheckTrain(params)
