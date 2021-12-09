@@ -40,7 +40,6 @@ type GlobalIDAllocator struct {
 // NewGlobalIDAllocator creates GlobalIDAllocator for allocates ID.
 func NewGlobalIDAllocator(key string, base kv.TxnKV) *GlobalIDAllocator {
 	allocator := tso.NewGlobalTSOAllocator(key, base)
-	allocator.SetLimitMaxLogic(false)
 	return &GlobalIDAllocator{
 		allocator: allocator,
 	}

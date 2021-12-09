@@ -33,7 +33,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/pkg/errors"
 )
@@ -61,8 +60,7 @@ type timestampOracle struct {
 	txnKV kv.TxnKV
 
 	// TODO: remove saveInterval
-	saveInterval  time.Duration
-	maxResetTSGap func() time.Duration
+	saveInterval time.Duration
 	// For tso, set after the PD becomes a leader.
 	TSO           unsafe.Pointer
 	lastSavedTime atomic.Value
@@ -125,34 +123,6 @@ func (t *timestampOracle) InitTimestamp() error {
 	return nil
 }
 
-// ResetUserTimestamp update the physical part with specified tso.
-func (t *timestampOracle) ResetUserTimestamp(tso uint64) error {
-	physical, _ := tsoutil.ParseTS(tso)
-	next := physical.Add(time.Millisecond)
-	prev := (*atomicObject)(atomic.LoadPointer(&t.TSO))
-
-	// do not update
-	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
-		return errors.New("the specified ts too small than now")
-	}
-
-	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.maxResetTSGap() {
-		return errors.New("the specified ts too large than now")
-	}
-
-	save := next.Add(t.saveInterval)
-	if err := t.saveTimestamp(save); err != nil {
-		return err
-	}
-	update := &atomicObject{
-		physical: next,
-	}
-	// atomic unsafe pointer
-	/* #nosec G103 */
-	atomic.CompareAndSwapPointer(&t.TSO, unsafe.Pointer(prev), unsafe.Pointer(update))
-	return nil
-}
-
 // UpdateTimestamp is used to update the timestamp.
 // This function will do two things:
 // 1. When the logical time is going to be used up, increase the current physical time.
@@ -206,14 +176,4 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(current))
 
 	return nil
-}
-
-// ResetTimestamp is used to reset the timestamp.
-func (t *timestampOracle) ResetTimestamp() {
-	zero := &atomicObject{
-		physical: time.Now(),
-	}
-	// atomic unsafe pointer
-	/* #nosec G103 */
-	atomic.StorePointer(&t.TSO, unsafe.Pointer(zero))
 }

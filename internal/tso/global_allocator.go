@@ -45,32 +45,24 @@ type Allocator interface {
 	Initialize() error
 	// UpdateTSO is used to update the TSO in memory and the time window in etcd.
 	UpdateTSO() error
-	// SetTSO sets the physical part with given tso. It's mainly used for BR restore
-	// and can not forcibly set the TSO smaller than now.
-	SetTSO(tso uint64) error
 	// GenerateTSO is used to generate a given number of TSOs.
 	// Make sure you have initialized the TSO allocator before calling.
 	GenerateTSO(count uint32) (uint64, error)
-	// Reset is used to reset the TSO allocator.
-	Reset()
 }
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
-	tso           *timestampOracle
-	LimitMaxLogic bool
+	tso *timestampOracle
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
 func NewGlobalTSOAllocator(key string, txnKV kv.TxnKV) *GlobalTSOAllocator {
 	return &GlobalTSOAllocator{
 		tso: &timestampOracle{
-			txnKV:         txnKV,
-			saveInterval:  3 * time.Second,
-			maxResetTSGap: func() time.Duration { return 3 * time.Second },
-			key:           key,
+			txnKV:        txnKV,
+			saveInterval: 3 * time.Second,
+			key:          key,
 		},
-		LimitMaxLogic: true,
 	}
 }
 
@@ -79,21 +71,9 @@ func (gta *GlobalTSOAllocator) Initialize() error {
 	return gta.tso.InitTimestamp()
 }
 
-// SetLimitMaxLogic is to enable or disable the maximum limit on the logical part of the hybrid timestamp.
-// When enabled, if the logical part of the hybrid timestamp exceeds the maximum limit,
-// GlobalTSOAllocator will sleep for a period and try to allocate the timestamp again.
-func (gta *GlobalTSOAllocator) SetLimitMaxLogic(flag bool) {
-	gta.LimitMaxLogic = flag
-}
-
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (gta *GlobalTSOAllocator) UpdateTSO() error {
 	return gta.tso.UpdateTimestamp()
-}
-
-// SetTSO sets the physical part with given tso.
-func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
-	return gta.tso.ResetUserTimestamp(tso)
 }
 
 // GenerateTSO is used to generate a given number of TSOs.
@@ -117,7 +97,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 
 		physical = current.physical.UnixNano() / int64(time.Millisecond)
 		logical = atomic.AddInt64(&current.logical, int64(count))
-		if logical >= maxLogical && gta.LimitMaxLogic {
+		if logical >= maxLogical {
 			log.Println("logical part outside of max logical interval, please check ntp time",
 				zap.Int("retry-count", i))
 			time.Sleep(UpdateTimestampStep)
@@ -135,19 +115,10 @@ func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
 	if err != nil {
 		return typeutil.ZeroTimestamp, err
 	}
-	//ret := make([]typeutil.Timestamp, count)
-	//for i:=uint32(0); i < count; i++{
-	//	ret[i] = start + uint64(i)
-	//}
 	return start, err
 }
 
 // AllocOne only allocates one timestamp.
 func (gta *GlobalTSOAllocator) AllocOne() (typeutil.Timestamp, error) {
 	return gta.GenerateTSO(1)
-}
-
-// Reset is used to reset the TSO allocator.
-func (gta *GlobalTSOAllocator) Reset() {
-	gta.tso.ResetTimestamp()
 }

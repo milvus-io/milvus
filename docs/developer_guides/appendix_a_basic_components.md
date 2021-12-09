@@ -348,14 +348,12 @@ type timestampOracle struct {
 	txnkv kv.TxnKV
 
 	saveInterval  time.Duration
-	maxResetTSGap func() time.Duration
 
 	TSO           unsafe.Pointer
 	lastSavedTime atomic.Value
 }
 
 func (t *timestampOracle) InitTimestamp() error
-func (t *timestampOracle) ResetUserTimestamp(tso uint64) error
 func (t *timestampOracle) UpdateTimestamp() error
 func (t *timestampOracle) ResetTimestamp()
 ```

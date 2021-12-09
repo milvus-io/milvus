@@ -96,7 +96,6 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		}
 	})
 
-	gTestTsoAllocator.SetLimitMaxLogic(false)
 	t.Run("GenerateTSO2", func(t *testing.T) {
 		count := 1000
 		maxL := 1 << 18
@@ -116,17 +115,6 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	gTestTsoAllocator.SetLimitMaxLogic(true)
-	t.Run("SetTSO", func(t *testing.T) {
-		ts, err2 := gTestTsoAllocator.GenerateTSO(1)
-		assert.Nil(t, err2)
-		curTime, logical := tsoutil.ParseTS(ts)
-		nextTime := curTime.Add(2 * time.Second)
-		physical := nextTime.UnixNano() / int64(time.Millisecond)
-		err := gTestTsoAllocator.SetTSO(tsoutil.ComposeTS(physical, int64(logical)))
-		assert.Nil(t, err)
-	})
-
 	t.Run("UpdateTSO", func(t *testing.T) {
 		err := gTestTsoAllocator.UpdateTSO()
 		assert.Nil(t, err)
@@ -140,10 +128,6 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 	t.Run("AllocOne", func(t *testing.T) {
 		_, err := gTestTsoAllocator.AllocOne()
 		assert.Nil(t, err)
-	})
-
-	t.Run("Reset", func(t *testing.T) {
-		gTestTsoAllocator.Reset()
 	})
 }
 
@@ -166,25 +150,12 @@ func TestGlobalTSOAllocator_Fail(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	gTestTsoAllocator.SetLimitMaxLogic(true)
-	t.Run("SetTSO_invalid", func(t *testing.T) {
-		err := gTestTsoAllocator.SetTSO(0)
-		assert.NotNil(t, err)
-
-		err = gTestTsoAllocator.SetTSO(math.MaxUint64)
-		assert.NotNil(t, err)
-	})
-
 	t.Run("Alloc_invalid", func(t *testing.T) {
 		_, err := gTestTsoAllocator.Alloc(0)
 		assert.NotNil(t, err)
 
 		_, err = gTestTsoAllocator.Alloc(math.MaxUint32)
 		assert.NotNil(t, err)
-	})
-
-	t.Run("Reset", func(t *testing.T) {
-		gTestTsoAllocator.Reset()
 	})
 }
 
@@ -230,8 +201,6 @@ func TestGlobalTSOAllocator_load(t *testing.T) {
 	nextTime := curTime.Add(2 * time.Second)
 	physical := nextTime.UnixNano() / int64(time.Millisecond)
 	target := tsoutil.ComposeTS(physical, int64(logical))
-	err = gTestTsoAllocator.SetTSO(target)
-	assert.Nil(t, err)
 
 	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", etcdKV)
 	err = gTestTsoAllocator.Initialize()
