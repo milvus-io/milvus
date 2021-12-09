@@ -7,6 +7,7 @@ String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 int total_timeout_minutes = 660
 def imageTag=''
+
 pipeline {
     triggers {
         cron """${cron_timezone}
