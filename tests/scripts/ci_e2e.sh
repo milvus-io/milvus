@@ -62,9 +62,9 @@ fi
 trace "prepare e2e test"  install_pytest_requirements  
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-  timeout  "${TEST_TIMEOUT}" pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
+  timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
                                       --html=${CI_LOG_PATH}/report.html  --self-contained-html ${@:-}
 else
-  pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
+  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
                                       --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
 fi

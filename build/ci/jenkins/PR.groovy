@@ -153,7 +153,7 @@ pipeline {
                                                 MILVUS_HELM_RELEASE_NAME="${release_name}" \
                                                 MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                                 TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                                ./ci_e2e.sh  "-x --tags L0 L1" 
+                                                ./ci_e2e.sh  "-n 6 -x --tags L0 L1" 
                                                 """
                                             } else {
                                             error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
