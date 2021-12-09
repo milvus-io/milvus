@@ -54,7 +54,7 @@ type TimeTickProvider interface {
 
 ###### ServerID
 
-The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/session/id". The initial value is 0. When a service is registered, it is incremented by 1 and returned to the next registered service.
+The ID is stored in a key-value pair on ETCD. The key is metaRootPath + "/session/id". The initial value is 0. When a service is registered, it is incremented by 1 and returned to the next registered service.
 
 ###### Registration
 
