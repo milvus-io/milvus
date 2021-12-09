@@ -13,6 +13,7 @@ package distance
 
 import "strings"
 
+// PositivelyRelated return if metricType are "ip" or "IP"
 func PositivelyRelated(metricType string) bool {
 	mUpper := strings.ToUpper(metricType)
 	return mUpper == strings.ToUpper(IP)
