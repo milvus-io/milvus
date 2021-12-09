@@ -465,8 +465,8 @@ class TestNameInvalid(object):
 
 class TestNewCase(object):
 
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_drop_default_partition_A(self, connect, collection):
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_default_partition(self, connect, collection):
         """
         target: test drop partition of default, check status returned
         method: call function: drop_partition
@@ -483,7 +483,7 @@ class TestNewCase(object):
         assert '_default' in list_partition
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_drop_default_partition_B(self, connect, collection):
+    def test_drop_default_partition_after_manual_create(self, connect, collection):
         """
         target: test drop partition of default, check status returned
         method: call function drop_partition after manual create the default partition
