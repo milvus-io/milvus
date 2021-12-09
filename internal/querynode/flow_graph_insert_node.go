@@ -298,6 +298,7 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 	wg.Done()
 }
 
+// delete would execute delete operations for specific growing segment
 func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
