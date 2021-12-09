@@ -195,7 +195,7 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 		return "", nil, err
 	}
 
-	k, err := b.genKey(true, collID, partID, segID)
+	k, err := b.genKey(collID, partID, segID)
 	if err != nil {
 		return "", nil, err
 	}

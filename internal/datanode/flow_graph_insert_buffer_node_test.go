@@ -295,7 +295,7 @@ func TestFlushSegment(t *testing.T) {
 	assert.NotNil(t, fu.field2Path)
 	assert.Equal(t, fu.segID, segmentID)
 
-	k, _ := idAllocMock.genKey(false, collectionID, partitionID, segmentID, 0)
+    k := JoinIDPath(collectionID, partitionID, segmentID, 0)
 	key := path.Join(Params.StatsBinlogRootPath, k)
 	_, values, _ := mockMinIO.LoadWithPrefix(key)
 	assert.Equal(t, len(values), 1)

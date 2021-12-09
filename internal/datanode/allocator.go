@@ -31,7 +31,7 @@ import (
 type allocatorInterface interface {
 	allocID() (UniqueID, error)
 	allocIDBatch(count uint32) (UniqueID, uint32, error)
-	genKey(alloc bool, ids ...UniqueID) (key string, err error)
+	genKey(ids ...UniqueID) (key string, err error)
 }
 
 type allocator struct {
@@ -93,16 +93,12 @@ func (alloc *allocator) allocIDBatch(count uint32) (UniqueID, uint32, error) {
 }
 
 // genKey gives a valid key string for lists of UniqueIDs:
-//  if alloc is true, the returned keys will have a generated-unique ID at the end.
-//  if alloc is false, the returned keys will only consist of provided ids.
-func (alloc *allocator) genKey(isalloc bool, ids ...UniqueID) (string, error) {
-	if isalloc {
-		idx, err := alloc.allocID()
-		if err != nil {
-			return "", err
-		}
-		ids = append(ids, idx)
+func (alloc *allocator) genKey(ids ...UniqueID) (string, error) {
+	idx, err := alloc.allocID()
+	if err != nil {
+		return "", err
 	}
+	ids = append(ids, idx)
 	return JoinIDPath(ids...), nil
 }
 

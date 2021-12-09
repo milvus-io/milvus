@@ -23,8 +23,6 @@ import (
 	"errors"
 	"math"
 	"math/rand"
-	"path"
-	"strconv"
 	"sync"
 	"time"
 
@@ -596,22 +594,13 @@ func (alloc *AllocatorFactory) allocIDBatch(count uint32) (UniqueID, uint32, err
 	return start, count, err
 }
 
-func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string, err error) {
-	if isalloc {
-		idx, err := alloc.allocID()
-		if err != nil {
-			return "", err
-		}
-		ids = append(ids, idx)
+func (alloc *AllocatorFactory) genKey(ids ...UniqueID) (string, error) {
+	idx, err := alloc.allocID()
+	if err != nil {
+		return "", err
 	}
-
-	idStr := make([]string, len(ids))
-	for _, id := range ids {
-		idStr = append(idStr, strconv.FormatInt(id, 10))
-	}
-
-	key = path.Join(idStr...)
-	return
+	ids = append(ids, idx)
+	return JoinIDPath(ids...), nil
 }
 
 // If id == 0, AllocID will return not successful status
