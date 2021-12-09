@@ -85,6 +85,7 @@ func CalcIP(dim int64, left []float32, lIndex int64, right []float32, rIndex int
 	return sum
 }
 
+// CalcFFBatch calculate the distance of @left & @right vectors in batch by given @metic, store result in @result
 func CalcFFBatch(dim int64, left []float32, lIndex int64, right []float32, metric string, result *[]float32) {
 	rightNum := int64(len(right)) / dim
 	for i := int64(0); i < rightNum; i++ {
@@ -98,6 +99,8 @@ func CalcFFBatch(dim int64, left []float32, lIndex int64, right []float32, metri
 	}
 }
 
+// CalcFloatDistance calculate float distance by given metric
+// it will checks input, and calculate the distance concurrently
 func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float32, error) {
 	if dim <= 0 {
 		err := errors.New("invalid dimension")
