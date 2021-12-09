@@ -2925,6 +2925,7 @@ func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, c
 	return ret, nil
 }
 
+// Dummy handles dummy request
 func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
 	failedResponse := &milvuspb.DummyResponse{
 		Response: `{"status": "fail"}`,
