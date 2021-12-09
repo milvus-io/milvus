@@ -300,6 +300,7 @@ func (mt *metaTable) GetIndexStates(indexBuildIDs []UniqueID) []*indexpb.IndexIn
 	return indexStates
 }
 
+// GetIndexFilePathInfo gets the index file paths from meta table.
 func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.IndexFilePathInfo, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
