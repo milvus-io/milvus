@@ -47,7 +47,7 @@ it returns the index information.
 ## 8.3 Feature Design
 
 IndexCoord has two main structures, NodeManager and MetaTable. NodeManager is used to manage IndexNode node information,
-and MetaTable is used to maintain index related information.
+and MetaTable is used to maintain index-related information.
 
 IndexCoord mainly has these functions: 
 
