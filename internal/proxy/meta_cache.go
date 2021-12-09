@@ -274,6 +274,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 	}, nil
 }
 
+// Get the collection information from rootcoord.
 func (m *MetaCache) describeCollection(ctx context.Context, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
