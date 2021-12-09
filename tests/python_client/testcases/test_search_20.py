@@ -1837,7 +1837,7 @@ class TestCollectionSearch(TestcaseBase):
 
         # 4. search with different expressions
         expression = f"{default_bool_field_name} == {bool_type}"
-        log.info("test_search_with_expression_bool: searching with expression: %s" % expression)
+        log.info("test_search_with_expression_bool: searching with bool expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
 
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
