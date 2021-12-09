@@ -10,9 +10,8 @@ from pymilvus import connections
 from chaos.checker import (CreateChecker, InsertFlushChecker,
                            SearchChecker, QueryChecker, IndexChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
-from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready
+from utils.util_k8s import wait_pods_ready, get_pod_list
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from chaos import constants
@@ -57,25 +56,25 @@ class TestChaosBase:
     _chaos_config = None
     health_checkers = {}
 
-    def parser_testcase_config(self, chaos_yaml):
+    def parser_testcase_config(self, chaos_yaml, chaos_config):
         tests_yaml = constants.TESTS_CONFIG_LOCATION + 'testcases.yaml'
         tests_config = cc.gen_experiment_config(tests_yaml)
         test_collections = tests_config.get('Collections', None)
-        ms = MilvusSys(alias="default")
-        node_map = {
-            "querynode": "query_nodes",
-            "datanode": "data_nodes",
-            "indexnode": "index_nodes",
-            "proxy": "proxy_nodes"
-        }
         for t in test_collections:
             test_chaos = t.get('testcase', {}).get('chaos', {})
             if test_chaos in chaos_yaml:
                 expects = t.get('testcase', {}).get('expectation', {}).get('cluster_1_node', {})
-                # for cluster_n_node mode
-                for node in node_map.keys():
-                    if node in test_chaos and len(getattr(ms, node_map[node])) > 1:
-                        expects = t.get('testcase', {}).get('expectation', {}).get('cluster_n_node', {})
+                # get the nums of pods
+                namespace = chaos_config["spec"]["selector"]["namespaces"][0]
+                labels_dict = chaos_config["spec"]["selector"]["labelSelectors"]
+                labels_list = []
+                for k,v in labels_dict.items():
+                    labels_list.append(k+"="+v)
+                labels_str = ",".join(labels_list)
+                pods = get_pod_list(namespace, labels_str)
+                # for the cluster_n_node
+                if len(pods) > 1:
+                    expects = t.get('testcase', {}).get('expectation', {}).get('cluster_n_node', {})
                 log.info(f"yaml.expects: {expects}")
                 self.expect_create = expects.get(Op.create.value, constants.SUCC)
                 self.expect_insert = expects.get(Op.insert.value, constants.SUCC)
@@ -135,11 +134,6 @@ class TestChaos(TestChaosBase):
 
         # parse chaos object
         chaos_config = cc.gen_experiment_config(chaos_yaml)
-        # parse the test expectations in testcases.yaml
-        if self.parser_testcase_config(chaos_yaml) is False:
-            log.error("Fail to get the testcase info in testcases.yaml")
-            assert False
-
         meta_name = chaos_config.get('metadata', None).get('name', None)
         release_name = meta_name
         chaos_config_str = json.dumps(chaos_config)
@@ -147,6 +141,10 @@ class TestChaos(TestChaosBase):
         chaos_config = json.loads(chaos_config_str)
         self._chaos_config = chaos_config  # cache the chaos config for tear down
         log.info(f"chaos_config: {chaos_config}")
+        # parse the test expectations in testcases.yaml
+        if self.parser_testcase_config(chaos_yaml, chaos_config) is False:
+            log.error("Fail to get the testcase info in testcases.yaml")
+            assert False
 
         # init report
         dir_name = "./reports"
