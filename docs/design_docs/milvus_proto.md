@@ -1763,6 +1763,7 @@ message DoubleArray {
 
 ## BytesArray
 Byte values array. For special fields such as binary vector.
+Note: each bit is one dimension.
 ```
 message BytesArray {
   repeated bytes data = 1;
