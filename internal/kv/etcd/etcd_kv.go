@@ -75,7 +75,7 @@ func (kv *EtcdKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
 }
 
-// LoadWithPrefix returns all the the keys and values with the given key prefix.
+// LoadWithPrefix returns all the keys and values with the given key prefix.
 func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
