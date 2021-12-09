@@ -401,6 +401,8 @@ func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface)
 
 	return pks, nil
 }
+
+// newInsertNode returns a new insertNode
 func newInsertNode(streamingReplica ReplicaInterface) *insertNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
