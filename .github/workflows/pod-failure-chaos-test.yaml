@@ -129,7 +129,7 @@ jobs:
           #in this step, verify whether pod has been killed by pod's age
           kubectl get po -n chaos-testing
           # export k8s log for chaos mesh and milvus
-          bash ../../scripts/export_log_k8s.sh chaos-testing milvus-chaos
+          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }}
           bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon
       
       - name: Upload logs
