@@ -49,7 +49,7 @@ type meta struct {
 	segments    *SegmentsInfo                       // segment id to segment info
 }
 
-// NewMeta create meta from provided `kv.TxnKV`
+// NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(kv kv.TxnKV) (*meta, error) {
 	mt := &meta{
 		client:      kv,
@@ -63,7 +63,7 @@ func newMeta(kv kv.TxnKV) (*meta, error) {
 	return mt, nil
 }
 
-// reloadFromKV load meta from KV storage
+// reloadFromKV loads meta from KV storage
 func (m *meta) reloadFromKV() error {
 	_, values, err := m.client.LoadWithPrefix(segmentPrefix)
 	if err != nil {
@@ -82,7 +82,7 @@ func (m *meta) reloadFromKV() error {
 	return nil
 }
 
-// AddCollection add collection into meta
+// AddCollection adds a collection into meta
 // Note that collection info is just for caching and will not be set into etcd from datacoord
 func (m *meta) AddCollection(collection *datapb.CollectionInfo) {
 	m.Lock()
