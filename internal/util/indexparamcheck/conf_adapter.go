@@ -233,6 +233,7 @@ func newIVFPQConfAdapter() *IVFPQConfAdapter {
 	return &IVFPQConfAdapter{}
 }
 
+// IVFSQConfAdapter checks if a IVF_SQ index can be built.
 type IVFSQConfAdapter struct {
 	IVFConfAdapter
 }
