@@ -929,7 +929,8 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: -1, ct.err_msg: f"expected one of: int, long"}
         self.collection_wrap.init_collection(c_name, schema=default_schema, shards_num=error_type_shards_num,
                                              check_task=CheckTasks.err_res,
-                                             check_items=error)                                           
+                                             check_items=error)  
+                                                                                      
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_maximum_fields(self):
         """
