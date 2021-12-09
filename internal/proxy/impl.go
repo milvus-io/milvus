@@ -2902,7 +2902,7 @@ func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, c
 		return nil, errors.New(showPartitionsResp.Status.Reason)
 	}
 
-	ret := make([]UniqueID, 0)
+	var ret []UniqueID
 	for _, partitionID := range showPartitionsResp.PartitionIDs {
 		showSegmentResponse, err := node.rootCoord.ShowSegments(ctx, &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
