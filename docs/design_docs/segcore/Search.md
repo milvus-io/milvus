@@ -22,7 +22,7 @@ After obtaining the AST, execution engine uses the visitor mode to explain and e
 
 1. Each Node includes two steps, a mandatory vector search and an optional predicate.
 
-   1. If Predicate exist, execute predicate expression stage to generate bitset as the vector search bitmask.
+   1. If Predicate exists, execute predicate expression stage to generate bitset as the vector search bitmask.
    2. If Predicate does not exist, vector search bitmask will be empty.
    3. Bitmask will be used to mark filtered out / deleted entities in the vector execution engine.
 
