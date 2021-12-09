@@ -132,6 +132,7 @@ pipeline {
                                                     --install-extra-arg "--set etcd.persistence.storageClass=local-path \
                                                     --set minio.persistence.storageClass=local-path \
                                                     --set etcd.metrics.enabled=true \
+                                                    --set etcd.metrics.podMonitor.enabled=true \
                                                     --set metrics.serviceMonitor.enabled=true" 
                                                     """
                                                 }
