@@ -2,6 +2,7 @@
 # Use Internal docker mirror to solve  https://www.docker.com/increase-rate-limits
 set -e
 
+# Use nexus as docker mirror registry
 MIRROR_URL="http://nexus-nexus-repository-manager-docker-5000.nexus:5000"
 set_daemon_json_file(){
     DOCKER_DAEMON_JSON_FILE="/etc/docker/daemon.json"
