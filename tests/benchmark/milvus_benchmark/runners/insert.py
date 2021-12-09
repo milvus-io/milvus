@@ -83,8 +83,7 @@ class InsertRunner(BaseRunner):
             logger.debug("Start drop collection")
             self.milvus.drop()
             time.sleep(utils.DELETE_INTERVAL_TIME)
-        self.milvus.create_collection(dimension, data_type=vector_type,
-                                          other_fields=other_fields)
+        self.milvus.create_collection(dimension, data_type=vector_type, other_fields=other_fields)
         # TODO: update fields in collection_info
         # fields = self.get_fields(self.milvus, collection_name)
         # collection_info = {
@@ -98,7 +97,7 @@ class InsertRunner(BaseRunner):
                 self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"], index_param=case_param["index_param"])
                 logger.debug(self.milvus.describe_index(index_field_name))
             else:
-                build_index = False
+                # build_index = False
                 logger.warning("Please specify the index_type")
 
     # TODO: error handler
