@@ -50,23 +50,6 @@ func NewNodeManager() *NodeManager {
 }
 
 func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) error {
-	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-	if err != nil {
-		log.Error("create metrics request failed", zap.Error(err))
-		return err
-	}
-	metrics, err := client.GetMetrics(context.Background(), req)
-	if err != nil {
-		log.Error("get indexnode metrics failed", zap.Error(err))
-		return err
-	}
-
-	infos := &metricsinfo.IndexNodeInfos{}
-	err = metricsinfo.UnmarshalComponentInfos(metrics.Response, infos)
-	if err != nil {
-		log.Error("get indexnode metrics info failed", zap.Error(err))
-		return err
-	}
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 
@@ -76,7 +59,7 @@ func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) error 
 		key:      nodeID,
 		priority: 0,
 		weight:   0,
-		totalMem: infos.HardwareInfos.Memory,
+		totalMem: 0,
 	}
 	nm.nodeClients[nodeID] = client
 	nm.pq.Push(item)
@@ -147,6 +130,27 @@ func (nm *NodeManager) ListNode() []UniqueID {
 	clients := []UniqueID{}
 	for id := range nm.nodeClients {
 		clients = append(clients, id)
+		if item := (nm.pq.getItemByKey(id)).(*PQItem); item.totalMem == 0 {
+			req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+			if err != nil {
+				log.Error("create metrics request failed", zap.Error(err))
+				continue
+			}
+			metrics, err := nm.nodeClients[id].GetMetrics(context.Background(), req)
+			if err != nil {
+				log.Error("get indexnode metrics failed", zap.Error(err))
+				continue
+			}
+
+			infos := &metricsinfo.IndexNodeInfos{}
+			err = metricsinfo.UnmarshalComponentInfos(metrics.Response, infos)
+			if err != nil {
+				log.Error("get indexnode metrics info failed", zap.Error(err))
+				continue
+			}
+			nm.pq.SetMemory(id, infos.HardwareInfos.Memory)
+		}
+
 	}
 	return clients
 }
