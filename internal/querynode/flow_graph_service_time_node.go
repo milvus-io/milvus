@@ -133,7 +133,7 @@ func newServiceTimeNode(ctx context.Context,
 		// TODO: use param table
 		timeTickChannel := "query-node-time-tick-0"
 		timeTimeMsgStream.AsProducer([]string{timeTickChannel})
-		log.Debug("query node AsProducer: " + timeTickChannel)
+		log.Debug("QueryNode serviceTimeNode AsProducer succeed", zap.String("channel name", timeTickChannel))
 	}
 
 	return &serviceTimeNode{
