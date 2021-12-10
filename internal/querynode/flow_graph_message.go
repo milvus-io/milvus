@@ -34,6 +34,7 @@ type insertMsg struct {
 	timeRange      TimeRange
 }
 
+// deleteMsg is an implementation of interface Msg
 type deleteMsg struct {
 	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
