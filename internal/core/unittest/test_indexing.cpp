@@ -52,8 +52,6 @@ generate_data(int N) {
 }  // namespace
 
 TEST(Indexing, SmartBruteForce) {
-    // how to ?
-    // I'd know
     constexpr int N = 100000;
     constexpr int DIM = 16;
     constexpr int TOPK = 10;
@@ -239,11 +237,11 @@ TEST(Indexing, IVFFlatNM) {
                                  {knowhere::meta::DEVICEID, 0}};
 
     auto database = knowhere::GenDataset(N, DIM, raw_data.data());
-    std::cout << "init ivf " << timer.get_step_seconds() << " seconds" << std::endl;
+    std::cout << "init ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
     indexing->Train(database, conf);
-    std::cout << "train ivf " << timer.get_step_seconds() << " seconds" << std::endl;
+    std::cout << "train ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
     indexing->AddWithoutIds(database, conf);
-    std::cout << "insert ivf " << timer.get_step_seconds() << " seconds" << std::endl;
+    std::cout << "insert ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
 
     indexing->SetIndexSize(NQ * DIM * sizeof(float));
     milvus::knowhere::BinarySet bs = indexing->Serialize(conf);
@@ -259,7 +257,7 @@ TEST(Indexing, IVFFlatNM) {
     auto dataset = knowhere::GenDataset(NQ, DIM, raw_data.data() + DIM * 4200);
 
     auto result = indexing->Query(dataset, conf, nullptr);
-    std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << std::endl;
+    std::cout << "query ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
 
     auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
