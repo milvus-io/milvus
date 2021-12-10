@@ -387,9 +387,11 @@ func (colReplica *collectionReplica) addPartitionPrivate(collectionID UniqueID, 
 		return err
 	}
 
-	collection.addPartitionID(partitionID)
-	var newPartition = newPartition(collectionID, partitionID)
-	colReplica.partitions[partitionID] = newPartition
+	if !colReplica.hasPartitionPrivate(partitionID) {
+		collection.addPartitionID(partitionID)
+		var newPartition = newPartition(collectionID, partitionID)
+		colReplica.partitions[partitionID] = newPartition
+	}
 	return nil
 }
 
