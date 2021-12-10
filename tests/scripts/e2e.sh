@@ -63,34 +63,22 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
   fi
 fi
 
-#[remove-kind] use pytest run in the krte when remove kinD cluster
-if [[ -n "${DISABLE_KIND:-}" ]]; then
-  cd ${ROOT}/tests/python_client
-  python3 -V
-  export CI_LOG_PATH=/tmp/ci_logs/test
-  if [ ! -d "${CI_LOG_PATH}" ]; then
-    mkdir -p ${CI_LOG_PATH}
+pushd "${ROOT}/tests/docker"
+  if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
+    export PRE_EXIST_NETWORK="true"
+    export PYTEST_NETWORK="kind"
   fi
-  pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
-                                            --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
+
+  export MILVUS_SERVICE_IP="${MILVUS_SERVICE_IP:-127.0.0.1}"
+  export MILVUS_SERVICE_PORT="${MILVUS_SERVICE_PORT:-19530}"
+
+if [[ "${MANUAL:-}" == "true" ]]; then
+  docker-compose up -d
 else
-  pushd "${ROOT}/tests/docker"
-    if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
-      export PRE_EXIST_NETWORK="true"
-      export PYTEST_NETWORK="kind"
-    fi
-
-    export MILVUS_SERVICE_IP="${MILVUS_SERVICE_IP:-127.0.0.1}"
-    export MILVUS_SERVICE_PORT="${MILVUS_SERVICE_PORT:-19530}"
-
-  if [[ "${MANUAL:-}" == "true" ]]; then
-    docker-compose up -d
-  else
-    if [[ "${MILVUS_CLIENT}" == "pymilvus" ]]; then
-      export MILVUS_PYTEST_WORKSPACE="/milvus/tests/python_client"
-      docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
-                                                   --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-}"
-    fi
+  if [[ "${MILVUS_CLIENT}" == "pymilvus" ]]; then
+    export MILVUS_PYTEST_WORKSPACE="/milvus/tests/python_client"
+    docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
+                                                  --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-}"
   fi
-  popd
 fi
+popd
