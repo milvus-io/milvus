@@ -62,6 +62,7 @@ jobs:
         run: |
           sed -i "s#^IMAGE_TAG=.*#IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
           sed -i "s#^LATEST_IMAGE_TAG=.*#LATEST_IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
+          sed -i "s#^pytest:.*#pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./build/ci/jenkins/pod/rte.yaml
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .env
