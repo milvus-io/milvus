@@ -221,7 +221,7 @@ func (kv *RocksdbKV) Remove(key string) error {
 // MultiRemove is used to remove a batch of key-values
 func (kv *RocksdbKV) MultiRemove(keys []string) error {
 	if kv.DB == nil {
-		return errors.New("Rocksdb instance is nil when do MultiRemove")
+		return errors.New("rocksdb instance is nil when do MultiRemove")
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
