@@ -64,16 +64,7 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
 fi
 
 
-if [[ -n "${DISABLE_KIND:-}" ]]; then
-  cd ${ROOT}/tests/python_client
-  python3 -V
-  export CI_LOG_PATH=/tmp/ci_logs/test
-  if [ ! -d "${CI_LOG_PATH}" ]; then
-    mkdir -p ${CI_LOG_PATH}
-  fi
-  pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
-                                            --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
-else
+
   pushd "${ROOT}/tests/docker"
     if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
       export PRE_EXIST_NETWORK="true"
@@ -93,4 +84,3 @@ else
     fi
   fi
   popd
-fi
