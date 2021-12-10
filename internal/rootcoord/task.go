@@ -183,7 +183,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	reason := fmt.Sprintf("create collection %d", collID)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
-		return fmt.Errorf("TSO alloc fail, error = %w", err)
+		return fmt.Errorf("tso alloc fail, error = %w", err)
 	}
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
