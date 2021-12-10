@@ -376,7 +376,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	reason := fmt.Sprintf("create collection %d", collID)
 	ts, err := core.TSOAllocator(1)
 	if err != nil {
-		return fmt.Errorf("TSO alloc fail, error = %w", err)
+		return fmt.Errorf("tso alloc fail, error = %w", err)
 	}
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
