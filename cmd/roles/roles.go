@@ -323,7 +323,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 	return in
 }
 
-// Run runs Milvus components.
+// Run Milvus components.
 func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
