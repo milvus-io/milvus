@@ -120,7 +120,6 @@ def run_suite(run_type, suite, env_mode, env_params, timeout=None):
         if deploy_mode:
             # Save all reported data to the database
             api.save(metric)
-        # time.sleep(10)
         env.tear_down()
         if metric.status != "RUN_SUCC":
             return False
