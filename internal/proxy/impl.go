@@ -2967,6 +2967,7 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 	return failedResponse, nil
 }
 
+// RegisterLink registers a link
 func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	log.Debug("RegisterLink",
