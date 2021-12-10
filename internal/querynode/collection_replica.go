@@ -550,7 +550,6 @@ func (colReplica *collectionReplica) removeSegment(segmentID UniqueID) error {
 
 // removeSegmentPrivate is private function in collectionReplica, to remove a segment from collectionReplica
 func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) error {
-	log.Debug("remove segment", zap.Int64("segmentID", segmentID))
 	segment, err := colReplica.getSegmentByIDPrivate(segmentID)
 	if err != nil {
 		return err

@@ -54,7 +54,7 @@ func (s *streaming) close() {
 	s.replica.freeAll()
 }
 
-func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, error) {
+func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 	retrieveResults := make([]*segcorepb.RetrieveResults, 0)
 	retrieveSegmentIDs := make([]UniqueID, 0)
 
@@ -62,7 +62,7 @@ func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *Retrieve
 	if len(partIDs) == 0 {
 		strPartIDs, err := s.replica.getPartitionIDs(collID)
 		if err != nil {
-			return retrieveResults, retrieveSegmentIDs, err
+			return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 		}
 		retrievePartIDs = strPartIDs
 	} else {
@@ -77,30 +77,32 @@ func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *Retrieve
 	for _, partID := range retrievePartIDs {
 		segIDs, err := s.replica.getSegmentIDs(partID)
 		if err != nil {
-			return retrieveResults, retrieveSegmentIDs, err
+			return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 		}
 		for _, segID := range segIDs {
 			seg, err := s.replica.getSegmentByID(segID)
 			if err != nil {
-				return retrieveResults, retrieveSegmentIDs, err
+				return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 			}
 			result, err := seg.retrieve(plan)
 			if err != nil {
-				return retrieveResults, retrieveSegmentIDs, err
+				return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 			}
 
 			retrieveResults = append(retrieveResults, result)
 			retrieveSegmentIDs = append(retrieveSegmentIDs, segID)
 		}
 	}
-	return retrieveResults, retrieveSegmentIDs, nil
+
+	return retrieveResults, retrieveSegmentIDs, retrievePartIDs, nil
 }
 
 // search will search all the target segments in streaming
 func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
-	plan *SearchPlan, searchTs Timestamp) ([]*SearchResult, error) {
+	plan *SearchPlan, searchTs Timestamp) ([]*SearchResult, []UniqueID, []UniqueID, error) {
 
 	searchResults := make([]*SearchResult, 0)
+	searchSegmentIDs := make([]UniqueID, 0)
 
 	// get streaming partition ids
 	var searchPartIDs []UniqueID
@@ -108,10 +110,10 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 		strPartIDs, err := s.replica.getPartitionIDs(collID)
 		if len(strPartIDs) == 0 {
 			// no partitions in collection, do empty search
-			return nil, nil
+			return searchResults, searchSegmentIDs, searchPartIDs, nil
 		}
 		if err != nil {
-			return searchResults, err
+			return searchResults, searchSegmentIDs, searchPartIDs, err
 		}
 		log.Debug("no partition specified, search all partitions",
 			zap.Any("collectionID", collID),
@@ -135,33 +137,21 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 
 	col, err := s.replica.getCollectionByID(collID)
 	if err != nil {
-		return nil, err
+		return searchResults, searchSegmentIDs, searchPartIDs, err
 	}
 
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
 		err = errors.New("partitions have been released , collectionID = " + fmt.Sprintln(collID) + "target partitionIDs = " + fmt.Sprintln(partIDs))
-		return nil, err
+		return searchResults, searchSegmentIDs, searchPartIDs, err
 	}
 
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
 		if err = col.checkReleasedPartitions(partIDs); err != nil {
-			return nil, err
+			return searchResults, searchSegmentIDs, searchPartIDs, err
 		}
-		return nil, nil
+		return searchResults, searchSegmentIDs, searchPartIDs, nil
 	}
-
-	log.Debug("doing search in streaming",
-		zap.Any("collectionID", collID),
-		zap.Any("vChannel", vChannel),
-		zap.Any("reqPartitionIDs", partIDs),
-		zap.Any("searchPartitionIDs", searchPartIDs),
-	)
-
-	log.Debug("print streaming replica when searching...",
-		zap.Any("collectionID", collID),
-	)
-	s.replica.printReplica()
 
 	var segmentLock sync.RWMutex
 	for _, partID := range searchPartIDs {
@@ -174,7 +164,7 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 		)
 		if err != nil {
 			log.Warn(err.Error())
-			return searchResults, err
+			return searchResults, searchSegmentIDs, searchPartIDs, err
 		}
 
 		var err2 error
@@ -218,15 +208,16 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 				}
 				segmentLock.Lock()
 				searchResults = append(searchResults, searchResult)
+				searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)
 				segmentLock.Unlock()
 			}()
 
 		}
 		wg.Wait()
 		if err2 != nil {
-			return searchResults, err2
+			return searchResults, searchSegmentIDs, searchPartIDs, err2
 		}
 	}
 
-	return searchResults, nil
+	return searchResults, searchSegmentIDs, searchPartIDs, nil
 }

@@ -173,7 +173,7 @@ func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueI
 }
 
 func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.ChunkManager,
-	plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, error) {
+	plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 
 	retrieveResults := make([]*segcorepb.RetrieveResults, 0)
 	retrieveSegmentIDs := make([]UniqueID, 0)
@@ -183,7 +183,7 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 	if len(partIDs) == 0 {
 		hisPartIDs, err := h.replica.getPartitionIDs(collID)
 		if err != nil {
-			return retrieveResults, retrieveSegmentIDs, err
+			return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 		}
 		retrievePartIDs = hisPartIDs
 	} else {
@@ -198,31 +198,32 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 	for _, partID := range retrievePartIDs {
 		segIDs, err := h.replica.getSegmentIDs(partID)
 		if err != nil {
-			return retrieveResults, retrieveSegmentIDs, err
+			return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 		}
 		for _, segID := range segIDs {
 			seg, err := h.replica.getSegmentByID(segID)
 			if err != nil {
-				return retrieveResults, retrieveSegmentIDs, err
+				return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 			}
 			result, err := seg.retrieve(plan)
 			if err != nil {
-				return retrieveResults, retrieveSegmentIDs, err
+				return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 			}
 
 			if err = seg.fillVectorFieldsData(collID, vcm, result); err != nil {
-				return retrieveResults, retrieveSegmentIDs, err
+				return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 			}
 			retrieveResults = append(retrieveResults, result)
 			retrieveSegmentIDs = append(retrieveSegmentIDs, segID)
 		}
 	}
-	return retrieveResults, retrieveSegmentIDs, nil
+
+	return retrieveResults, retrieveSegmentIDs, retrievePartIDs, nil
 }
 
 // search will search all the target segments in historical
 func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
-	searchTs Timestamp) ([]*SearchResult, []UniqueID, error) {
+	searchTs Timestamp) ([]*SearchResult, []UniqueID, []UniqueID, error) {
 
 	searchResults := make([]*SearchResult, 0)
 	searchSegmentIDs := make([]UniqueID, 0)
@@ -232,7 +233,7 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 	if len(partIDs) == 0 {
 		hisPartIDs, err := h.replica.getPartitionIDs(collID)
 		if err != nil {
-			return searchResults, searchSegmentIDs, err
+			return searchResults, searchSegmentIDs, searchPartIDs, err
 		}
 		log.Debug("no partition specified, search all partitions",
 			zap.Any("collectionID", collID),
@@ -254,33 +255,27 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 
 	col, err := h.replica.getCollectionByID(collID)
 	if err != nil {
-		return nil, nil, err
+		return searchResults, searchSegmentIDs, searchPartIDs, err
 	}
 
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
-		return nil, nil, errors.New("partitions have been released , collectionID = " +
+		return searchResults, searchSegmentIDs, searchPartIDs, errors.New("partitions have been released , collectionID = " +
 			fmt.Sprintln(collID) + "target partitionIDs = " + fmt.Sprintln(partIDs))
 	}
 
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
 		if err = col.checkReleasedPartitions(partIDs); err != nil {
-			return nil, nil, err
+			return searchResults, searchSegmentIDs, searchPartIDs, err
 		}
-		return nil, nil, nil
+		return searchResults, searchSegmentIDs, searchPartIDs, nil
 	}
-
-	log.Debug("doing search in historical",
-		zap.Any("collectionID", collID),
-		zap.Any("reqPartitionIDs", partIDs),
-		zap.Any("searchPartitionIDs", searchPartIDs),
-	)
 
 	var segmentLock sync.RWMutex
 	for _, partID := range searchPartIDs {
 		segIDs, err := h.replica.getSegmentIDs(partID)
 		if err != nil {
-			return searchResults, searchSegmentIDs, err
+			return searchResults, searchSegmentIDs, searchPartIDs, err
 		}
 
 		var err2 error
@@ -313,9 +308,9 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 		}
 		wg.Wait()
 		if err2 != nil {
-			return searchResults, searchSegmentIDs, err2
+			return searchResults, searchSegmentIDs, searchPartIDs, err2
 		}
 	}
 
-	return searchResults, searchSegmentIDs, nil
+	return searchResults, searchSegmentIDs, searchPartIDs, nil
 }

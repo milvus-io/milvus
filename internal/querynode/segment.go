@@ -229,7 +229,7 @@ func deleteSegment(segment *Segment) {
 	C.DeleteSegment(cPtr)
 	segment.segmentPtr = nil
 
-	log.Debug("delete segment", zap.Int64("segmentID", segment.ID()))
+	log.Debug("delete segment from memory", zap.Int64("collectionID", segment.collectionID), zap.Int64("partitionID", segment.partitionID), zap.Int64("segmentID", segment.ID()))
 
 	segment = nil
 }
