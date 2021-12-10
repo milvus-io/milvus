@@ -158,7 +158,7 @@ def update_values(src_values_file, deploy_params_file):
         logging.error(str(e))
         raise Exception("File not found")
     deploy_mode = utils.get_deploy_mode(deploy_params)
-    print(deploy_mode)
+    print("[benchmark update] deploy_mode: %s" % str(deploy_mode))
     cluster = False
     values_dict["service"]["type"] = "ClusterIP"
     if deploy_mode != config.DEFUALT_DEPLOY_MODE:
