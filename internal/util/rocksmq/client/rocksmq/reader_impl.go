@@ -51,6 +51,7 @@ func newReader(c *client, readerOptions *ReaderOptions) (*reader, error) {
 	return reader, nil
 }
 
+//Topic return the topic name of the reader
 func (r *reader) Topic() string {
 	return r.topic
 }
