@@ -1,4 +1,4 @@
-import docker
+# import docker
 import copy
 from pymilvus import (
     connections, FieldSchema, CollectionSchema, DataType,
@@ -44,12 +44,12 @@ def gen_search_param(index_type, metric_type="L2"):
     return search_params
 
 
-def list_containers():
-    client = docker.from_env()
-    containers = client.containers.list()
-    for c in containers:
-        if "milvus" in c.name:
-            print(c.image)
+# def list_containers():
+#     client = docker.from_env()
+#     containers = client.containers.list()
+#     for c in containers:
+#         if "milvus" in c.name:
+#             print(c.image)
 
 
 def get_collections():
@@ -76,18 +76,28 @@ def create_collections_and_insert_data():
     print(list_collections())
     for col_name in all_index_types:
         print(f"\nCreate collection...")
-        collection = Collection(name=col_name, schema=default_schema)
-        #  insert data
-        nb = 3000
-        vectors = [[i / nb for _ in range(dim)] for i in range(nb)]
-        collection.insert(
-            [
-                [i for i in range(nb)],
-                [float(random.randrange(-20, -10)) for _ in range(nb)],
-                vectors
-            ]
-        )
+        collection = Collection(name=col_name, schema=default_schema) 
         print(f"collection name: {col_name}")
+        count = 50000
+        nb = 5000
+        print(f"begin insert, count: {count} nb: {nb}")
+        times = int(count / nb)
+        total_time = 0.0
+        vectors = [[random.random() for _ in range(dim)] for _ in range(count)]
+        for j in range(times):
+            start_time = time.time()
+            collection.insert(
+                [
+                    [i for i in range(nb * j, nb * j + nb)],
+                    [float(random.randrange(-20, -10)) for _ in range(nb)],
+                    vectors[nb*j:nb*j+nb]
+                ]
+            )
+            end_time = time.time()
+            print(f"[{j+1}/{times}] insert {nb} data, time: {end_time - start_time}")
+            total_time += end_time - start_time
+
+        print("end insert, time:", total_time)
         print("Get collection entities")
         start_time = time.time()
         print(f"collection entities: {collection.num_entities}")
