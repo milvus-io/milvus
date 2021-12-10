@@ -320,6 +320,7 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	return ret, nil
 }
 
+// DeleteIndex delete the index meta from meta table.
 func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
