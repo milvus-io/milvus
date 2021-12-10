@@ -59,8 +59,7 @@ jobs:
           git config --global user.email "sre-ci-robot@zilliz.com"
           git config --global user.name "sre-ci-robot"
           git add -u
-          git commit -s -m 'Update all contributors'
-          git push
+          git diff-index --cached --quiet HEAD || (git commit -s -m 'Update all contributors' && git push)
 
 
 
