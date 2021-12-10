@@ -370,6 +370,7 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 	return nil
 }
 
+// GetUnusedIndexFiles get the index files with lower version or corresponding the indexBuildIDs which has been deleted.
 func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
