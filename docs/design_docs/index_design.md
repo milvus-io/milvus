@@ -75,7 +75,7 @@ When an index building task needs to be allocated, the IndexNode with the lowest
 
 ### 8.3.3 MetaTable
 
-In order to maintain the status information of the index, we introduced MetaTable to record the status information
+To maintain the status information of the index, we introduced MetaTable to record the status information
 of the index. In order to ensure that the MetaTable information is not lost after IndexCoord is powered off and
 restarted, we write the MetaTable information into etcd. When the IndexCoord service starts, it will first load the
 existing Meta information from etcd, and then monitor the changes of Meta through watchNodeLoop. In order to distinguish
