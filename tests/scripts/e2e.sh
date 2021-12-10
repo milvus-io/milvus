@@ -63,7 +63,7 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
   fi
 fi
 
-#[remove-kind] use pytest run in the krte when remove kinD cluster
+
 if [[ -n "${DISABLE_KIND:-}" ]]; then
   cd ${ROOT}/tests/python_client
   python3 -V
