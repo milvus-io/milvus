@@ -331,6 +331,8 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	log.Debug("IndexCoord metaTable DeleteIndex", zap.Error(err))
 }
 
+// UpdateRecycleState update the recycle state corresponding the indexBuildID,
+// when the recycle state is true, means the index files has been recycled with lower version.
 func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
