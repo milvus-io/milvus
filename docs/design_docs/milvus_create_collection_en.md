@@ -41,7 +41,7 @@ message CollectionSchema {
 
 ```
 
-2. When received the `CreateCollection` request, `Proxy` would wrap this request into `CreateCollectionTask`, and pushes this task into `DdTaskQueue` queue. After that, `Proxy` would call `WaitToFinish` method to wait until the task is finished.
+2. When receiving the `CreateCollection` request, `Proxy` would wrap this request into `CreateCollectionTask`, and pushes this task into `DdTaskQueue` queue. After that, `Proxy` would call `WaitToFinish` method to wait until the task is finished.
 
 ```go
 type task interface {
