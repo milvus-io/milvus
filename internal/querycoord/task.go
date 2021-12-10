@@ -1539,7 +1539,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 			continue
 		}
 
-		//  segment which is compacted from should be exist in query node
+		//  segment which is compacted from should exist in query node
 		for _, compactedSegID := range segmentInfo.CompactionFrom {
 			_, err = ht.meta.getSegmentInfoByID(compactedSegID)
 			if err != nil {
