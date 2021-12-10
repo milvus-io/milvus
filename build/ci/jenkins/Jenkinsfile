@@ -1,8 +1,7 @@
 #!/usr/bin/env groovy
-
+// change to use pr.groovy in current ci workflow
 int total_timeout_minutes = 120
 int e2e_timeout_seconds = 70 * 60
-
 pipeline {
     agent none
     options {
