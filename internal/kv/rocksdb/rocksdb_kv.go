@@ -212,7 +212,7 @@ func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 // Remove is used to remove a pair of key-value
 func (kv *RocksdbKV) Remove(key string) error {
 	if kv.DB == nil {
-		return errors.New("Rocksdb instance is nil when do Remove")
+		return errors.New("rocksdb instance is nil when do Remove")
 	}
 	err := kv.DB.Delete(kv.WriteOptions, []byte(key))
 	return err
