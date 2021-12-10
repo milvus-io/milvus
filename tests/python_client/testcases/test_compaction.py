@@ -661,13 +661,13 @@ class TestCompactionOperation(TestcaseBase):
         c_plans, _ = collection_w.get_compaction_plans()
         assert len(c_plans.plans) == 0
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #12957")
-    def test_compact_merge_multi_segments(self):
+    @pytest.mark.tags(CaseLabel.L1)
+    # @pytest.mark.skip(reason="issue #12957")
+    def test_compact_manual_and_auto(self):
         """
-        target: test compact and merge multi small segments
+        target: test compact manual and auto
         method: 1.create with shard_num=1
-                2.insert one and flush (multi times)
+                2.insert one and flush (11 times)
                 3.compact
                 4.load and search
         expected: Verify segments info
@@ -680,10 +680,35 @@ class TestCompactionOperation(TestcaseBase):
 
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
+        collection_w.get_compaction_plans()[0]
+
+        collection_w.load()
+        segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        assert len(segments_info) == 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_compact_merge_multi_segments(self):
+        """
+        target: test compact and merge multi small segments
+        method: 1.create with shard_num=1
+                2.insert one and flush (less than threshold)
+                3.compact
+                4.load and search
+        expected: Verify segments info
+        """
+        # less than auto-merge threshold 10
+        num_of_segment = ct.compact_segment_num_threshold - 1
+
+        # create collection shard_num=1, insert 11 segments, each with one entity
+        collection_w = self.collection_insert_multi_segments_one_shard(prefix, num_of_segment=num_of_segment)
+
+        collection_w.compact()
+        collection_w.wait_for_compaction_completed()
 
         c_plans = collection_w.get_compaction_plans()[0]
-        assert len(c_plans.plans[0].sources) == 2
+        assert len(c_plans.plans[0].sources) == num_of_segment
         target = c_plans.plans[0].target
+
         collection_w.load()
         segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         assert len(segments_info) == 1
