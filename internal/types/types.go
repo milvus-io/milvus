@@ -122,9 +122,9 @@ type DataCoord interface {
 	//
 	// ctx is the context to control request deadline and cancellation
 	// req contains the requester's info(id and role) and the list of Assignment Request,
-	// which coontains the specified collection, partitaion id, the related VChannel Name and row count it needs
+	// which contains the specified collection, partition id, the related VChannel Name and row count it needs
 	//
-	// response struct `AssignSegmentIDResponse` contains the the assignment result for each request
+	// response struct `AssignSegmentIDResponse` contains the assignment result for each request
 	// error is returned only when some communication issue occurs
 	// if some error occurs in the process of `AssignSegmentID`, it will be recorded and returned in `Status` field of response
 	//
