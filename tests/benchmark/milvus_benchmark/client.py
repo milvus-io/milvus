@@ -348,9 +348,7 @@ class MilvusClient(object):
         must_params = [vector_query]
         if filter_query:
             must_params.extend(filter_query)
-        query = {
-            "bool": {"must": must_params}
-        }
+
         self.load_collection(tmp_collection_name)
 
         params = util.search_param_analysis(vector_query, filter_query)
