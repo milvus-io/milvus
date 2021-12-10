@@ -284,6 +284,7 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.datanode.GetComponentStates(ctx)
 }
 
+// GetStatisticsChannel gets the statistics channel of Datanode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.datanode.GetStatisticsChannel(ctx)
 }
