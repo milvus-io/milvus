@@ -977,19 +977,12 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	if rmq.isClosed() {
 		return "", errors.New(RmqNotServingErrMsg)
 	}
+	if _, ok := topicMu.Load(topicName); !ok {
+		return "", fmt.Errorf("topic=%s not exist", topicName)
+	}
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	readOpts.SetPrefixSameAsStart(true)
 	iter := rmq.store.NewIterator(readOpts)
-	fixChanName, err := fixChannelName(topicName)
-	if err != nil {
-		log.Debug("RocksMQ: fixChannelName " + topicName + " failed")
-		return "", err
-	}
-	dataKey := path.Join(fixChanName, strconv.FormatInt(startMsgID, 10))
-	iter.Seek([]byte(dataKey))
-	if !iter.Valid() {
-		log.Warn("iterator of startMsgID is invalid")
-	}
 	nowTs, err := getNowTs(rmq.idAllocator)
 	if err != nil {
 		return "", errors.New("can't get current ts from rocksmq idAllocator")
@@ -1006,6 +999,7 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 		messageIDInclusive: messageIDInclusive,
 		readerMutex:        make(chan struct{}, 1),
 	}
+	reader.Seek(startMsgID)
 	if vals, ok := rmq.readers.Load(topicName); ok {
 		readers := vals.([]*rocksmqReader)
 		readers = append(readers, reader)
@@ -1039,11 +1033,12 @@ func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID Unique
 		log.Warn("reader not exist", zap.String("topic", topicName), zap.String("readerName", readerName))
 		return
 	}
+
 	reader.Seek(msgID)
 }
 
 // Next get the next message of reader
-func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName string, messageIDInclusive bool) (*ConsumerMessage, error) {
+func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName string) (*ConsumerMessage, error) {
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
@@ -1051,11 +1046,11 @@ func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName strin
 	if reader == nil {
 		return nil, fmt.Errorf("reader of %s doesn't exist", topicName)
 	}
-	return reader.Next(ctx, messageIDInclusive)
+	return reader.Next(ctx)
 }
 
 // HasNext judge whether reader has next message
-func (rmq *rocksmq) HasNext(topicName string, readerName string, messageIDInclusive bool) bool {
+func (rmq *rocksmq) HasNext(topicName string, readerName string) bool {
 	if rmq.isClosed() {
 		return false
 	}
@@ -1064,7 +1059,7 @@ func (rmq *rocksmq) HasNext(topicName string, readerName string, messageIDInclus
 		log.Warn("reader not exist", zap.String("topic", topicName), zap.String("readerName", readerName))
 		return false
 	}
-	return reader.HasNext(messageIDInclusive)
+	return reader.HasNext()
 }
 
 // CloseReader close a reader

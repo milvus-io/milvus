@@ -13,10 +13,10 @@ package rocksmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
-	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/tecbot/gorocksdb"
@@ -38,152 +38,94 @@ type rocksmqReader struct {
 //Seek seek the rocksmq reader to the pointed position
 func (rr *rocksmqReader) Seek(msgID UniqueID) { //nolint:govet
 	rr.currentID = msgID
-	select {
-	case rr.readerMutex <- struct{}{}:
-	default:
+	fixChanName, _ := fixChannelName(rr.topic)
+	dataKey := path.Join(fixChanName, strconv.FormatInt(msgID, 10))
+	rr.iter.Seek([]byte(dataKey))
+	if !rr.messageIDInclusive {
+		rr.currentID++
+		rr.iter.Next()
 	}
 }
 
-func (rr *rocksmqReader) Next(ctx context.Context, messageIDInclusive bool) (*ConsumerMessage, error) {
-	ll, ok := topicMu.Load(rr.topic)
-	if !ok {
-		return nil, fmt.Errorf("topic name = %s not exist", rr.topic)
-	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return nil, fmt.Errorf("get mutex failed, topic name = %s", rr.topic)
-	}
-	lock.Lock()
-	defer lock.Unlock()
-	fixChanName, err := fixChannelName(rr.topic)
-	if err != nil {
-		log.Debug("RocksMQ: fixChannelName " + rr.topic + " failed")
-		return nil, err
-	}
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	defer readOpts.Destroy()
+func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
+	var err error
+	iter := rr.iter
 
 	var msg *ConsumerMessage
-	readOpts.SetPrefixSameAsStart(true)
-	iter := rr.store.NewIterator(readOpts)
-	defer iter.Close()
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Debug("Stop get next reader message!")
-			return nil, ctx.Err()
-		case _, ok := <-rr.readerMutex:
-			if !ok {
-				log.Warn("reader Mutex closed")
-				return nil, fmt.Errorf("reader Mutex closed")
-			}
-			dataKey := path.Join(fixChanName, strconv.FormatInt(rr.currentID, 10))
-			if iter.Seek([]byte(dataKey)); !iter.Valid() {
-				continue
-			}
-			if messageIDInclusive {
-				val, err := rr.store.Get(readOpts, []byte(dataKey))
-				if err != nil {
-					return nil, err
-				}
-				if !val.Exists() {
-					continue
-				}
-				msg = &ConsumerMessage{
-					MsgID: rr.currentID,
-				}
-				origData := val.Data()
-				dataLen := len(origData)
-				if dataLen == 0 {
-					msg.Payload = nil
-				} else {
-					msg.Payload = make([]byte, dataLen)
-					copy(msg.Payload, origData)
-				}
-				val.Free()
-
-				// Update nextID in readerOffset
-				var nextID UniqueID
-				iter.Next()
-				if iter.Valid() {
-					key := iter.Key()
-					nextID, err = strconv.ParseInt(string(key.Data())[FixedChannelNameLen+1:], 10, 64)
-					if key.Exists() {
-						key.Free()
-					}
-					if err != nil {
-						return nil, err
-					}
-					rr.readerMutex <- struct{}{}
-				} else {
-					nextID = rr.currentID + 1
-				}
-				rr.currentID = nextID
-			} else {
-				iter.Next()
-				if iter.Valid() {
-					key := iter.Key()
-					tmpKey := string(key.Data())
-					key.Free()
-					id, err := strconv.ParseInt(tmpKey[FixedChannelNameLen+1:], 10, 64)
-					if err != nil {
-						return nil, err
-					}
-					val := iter.Value()
-					msg = &ConsumerMessage{
-						MsgID: id,
-					}
-					origData := val.Data()
-					dataLen := len(origData)
-					if dataLen == 0 {
-						msg.Payload = nil
-					} else {
-						msg.Payload = make([]byte, dataLen)
-						copy(msg.Payload, origData)
-					}
-					val.Free()
-					rr.currentID = id
-					rr.readerMutex <- struct{}{}
-				}
-			}
-			return msg, nil
+	getMsg := func() {
+		key := iter.Key()
+		val := iter.Value()
+		tmpKey := string(key.Data())
+		var msgID UniqueID
+		msgID, err = strconv.ParseInt(tmpKey[FixedChannelNameLen+1:], 10, 64)
+		msg = &ConsumerMessage{
+			MsgID: msgID,
 		}
+		origData := val.Data()
+		dataLen := len(origData)
+		if dataLen > 0 {
+			msg.Payload = make([]byte, dataLen)
+			copy(msg.Payload, origData)
+		}
+		val.Free()
+		iter.Next()
+		rr.currentID = msgID
+	}
+	if iter.Valid() {
+		getMsg()
+		return msg, err
+	}
+
+	select {
+	case <-ctx.Done():
+		log.Debug("Stop get next reader message!")
+		return nil, ctx.Err()
+	case _, ok := <-rr.readerMutex:
+		if !ok {
+			log.Warn("reader Mutex closed")
+			return nil, fmt.Errorf("reader Mutex closed")
+		}
+		rr.iter.Close()
+		rr.iter = rr.store.NewIterator(rr.readOpts)
+		fixChanName, err := fixChannelName(rr.topic)
+		if err != nil {
+			log.Debug("RocksMQ: fixChannelName " + rr.topic + " failed")
+			return nil, err
+		}
+		dataKey := path.Join(fixChanName, strconv.FormatInt(rr.currentID+1, 10))
+		iter = rr.iter
+		iter.Seek([]byte(dataKey))
+		if !iter.Valid() {
+			return nil, errors.New("reader iterater is still invalid after receive mutex")
+		}
+		getMsg()
+		return msg, err
 	}
 }
 
-func (rr *rocksmqReader) HasNext(messageIDInclusive bool) bool {
-	ll, ok := topicMu.Load(rr.topic)
-	if !ok {
-		return false
-	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return false
-	}
-	lock.Lock()
-	defer lock.Unlock()
-	fixChanName, err := fixChannelName(rr.topic)
-	if err != nil {
-		log.Debug("RocksMQ: fixChannelName " + rr.topic + " failed")
-		return false
-	}
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	defer readOpts.Destroy()
-	readOpts.SetPrefixSameAsStart(true)
-	iter := rr.store.NewIterator(readOpts)
-	defer iter.Close()
-
-	dataKey := path.Join(fixChanName, strconv.FormatInt(rr.currentID, 10))
-	iter.Seek([]byte(dataKey))
-	if !iter.Valid() {
-		return false
-	}
-	if messageIDInclusive {
+func (rr *rocksmqReader) HasNext() bool {
+	if rr.iter.Valid() {
 		return true
 	}
-	iter.Next()
-	return iter.Valid()
+
+	select {
+	case _, ok := <-rr.readerMutex:
+		if !ok {
+			return false
+		}
+		rr.iter.Close()
+		rr.iter = rr.store.NewIterator(rr.readOpts)
+		fixChanName, err := fixChannelName(rr.topic)
+		if err != nil {
+			log.Debug("RocksMQ: fixChannelName " + rr.topic + " failed")
+			return false
+		}
+		dataKey := path.Join(fixChanName, strconv.FormatInt(rr.currentID+1, 10))
+		rr.iter.Seek([]byte(dataKey))
+		return rr.iter.Valid()
+	default:
+		return false
+	}
 }
 
 func (rr *rocksmqReader) Close() {
