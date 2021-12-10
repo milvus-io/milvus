@@ -100,6 +100,17 @@ jobs:
           kubectl get pod -n chaos-testing
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
           kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl get pod -n chaos-testing
+          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
+
+          sleep 20s
+          nc -vz 127.0.0.1 19530
+
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+          python chaos/scripts/hello_milvus.py --host 127.0.0.1
+          sleep 20s
+          nc -vz 127.0.0.1 19530
           python scripts/hello_milvus.py
 
       - name: Data Consist Test
@@ -119,7 +130,15 @@ jobs:
           kubectl get pod -n chaos-testing
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
           kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
-          python scripts/hello_milvus.py
+          kubectl get pod -n chaos-testing
+          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
+
+          sleep 20s
+          nc -vz 127.0.0.1 19530
+
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+          python chaos/scripts/hello_milvus.py --host 127.0.0.1
 
       - name: Export logs
         if: ${{ always() }}
