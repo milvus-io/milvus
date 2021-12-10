@@ -289,7 +289,7 @@ func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) error {
 
 func (qc *QueryCoord) SetIndexCoord(indexCoord types.IndexCoord) error {
 	if indexCoord == nil {
-		return errors.New("null index coordinator interface")
+		return errors.New("null IndexCoord interface")
 	}
 
 	qc.indexCoordClient = indexCoord
