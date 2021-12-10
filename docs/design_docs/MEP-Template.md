@@ -1,7 +1,7 @@
 # MEP(Milvus Enhancement Proposals) Templates
 Current state: [One of "Under Discussion", "Accepted", "Rejected"]
 
-ISSUE: link to the github issue
+ISSUE: link to the GitHub issue
 
 PRs: link to the github PRs
 
