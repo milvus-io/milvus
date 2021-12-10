@@ -76,4 +76,4 @@ As shown in the figure below, different GuaranteeTs correspond to four different
 - Read your own write (Session): Set GuaranteeTs to the client last write, in this way, every client will see all their
   own data.
 
-Milvus provides the strong consistency by default.
+Milvus provides strong consistency by default.
