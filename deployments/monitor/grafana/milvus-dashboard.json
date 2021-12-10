@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1639039567777,
+  "iteration": 1639102259480,
   "links": [],
   "panels": [
     {
@@ -2179,64 +2179,6 @@
     },
     {
       "datasource": "$datasource",
-      "description": "Total count of flush_segments requests",
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "super-light-blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 44
-      },
-      "id": 123190,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "7.5.4",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"})",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Flush Segments Total",
-      "type": "stat"
-    },
-    {
-      "datasource": "$datasource",
       "description": "Success count of flush_segments requests",
       "fieldConfig": {
         "defaults": {
@@ -4306,5 +4248,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 192
+  "version": 193
 }
