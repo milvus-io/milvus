@@ -321,7 +321,7 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 	if err != nil {
 		return err
 	}
-	log.Debug("Do insert done in segment loader", zap.Int("len", numOfRecords), zap.Int64("segmentID", segment.ID()))
+	log.Debug("Do insert done in segment loader", zap.Int("len", numOfRecords), zap.Int64("segmentID", segment.ID()), zap.Int64("collectionID", segment.collectionID))
 
 	return nil
 }

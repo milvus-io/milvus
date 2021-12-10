@@ -294,7 +294,7 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 		return
 	}
 
-	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])), zap.Int64("segmentID", segmentID))
+	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])), zap.Int64("collectionID", targetSegment.collectionID), zap.Int64("segmentID", segmentID))
 	wg.Done()
 }
 
