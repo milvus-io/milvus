@@ -84,3 +84,6 @@ else
                                "${MILVUS_HELM_RELEASE_NAME}" \
                                ${@:-} "${MILVUS_HELM_CHART_PATH}"
 fi
+
+echo "helm status"
+
