@@ -597,7 +597,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			childTaskKeys = append(childTaskKeys, taskKey)
 			childTaskKeys = append(childTaskKeys, stateKey)
 			err := scheduler.client.MultiRemove(childTaskKeys)
-			// after recover, child Task's state will be TaskDone, will not be repeat executed
+			// after recover, child Task's state will be TaskDone, will not be repeatedly executed
 			if err != nil {
 				panic(err)
 			}
