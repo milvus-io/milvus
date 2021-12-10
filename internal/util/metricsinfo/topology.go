@@ -59,6 +59,7 @@ const (
 // ConnectionTargetType is the type of connection target
 type ConnectionTargetType = string
 
+// ConnectionInfo contains info of connection target
 type ConnectionInfo struct {
 	TargetName string               `json:"target_name"`
 	TargetType ConnectionTargetType `json:"target_type"`
