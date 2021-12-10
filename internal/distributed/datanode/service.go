@@ -268,6 +268,7 @@ func (s *Server) init() error {
 	return nil
 }
 
+// start starts datanode's grpc service.
 func (s *Server) start() error {
 	if err := s.datanode.Start(); err != nil {
 		return err
