@@ -52,9 +52,9 @@ Add a new rpc `FlushAndDrop`, it's a vchannel scope rpc.
 
 Pros:
     1. much lesser rpc calls, equal to shard-numbers.
-    2. More clarity of flush procedure in DN.
+    2. More clarity of flush procedure in DataNode.
 Cons:
-    1. More efforts in DN and DC.
+    1. More efforts in DataNode and DataCoord.
 
 ```
 message FlushAndDropRequest {
