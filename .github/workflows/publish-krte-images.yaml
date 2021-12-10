@@ -3,6 +3,7 @@ name: Publish KRTE Images
 
 # This workflow is triggered on pushes or pull request to the repository.
 on:
+  workflow_dispatch:
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
