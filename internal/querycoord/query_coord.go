@@ -300,7 +300,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 	ctx, cancel := context.WithCancel(qc.loopCtx)
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("query coordinator start watch node loop")
+	log.Debug("QueryCoord start watch node loop")
 
 	offlineNodes, err := qc.cluster.offlineNodes()
 	if err == nil {
@@ -343,18 +343,18 @@ func (qc *QueryCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				log.Debug("start add a queryNode to cluster", zap.Any("nodeID", serverID))
+				log.Debug("start add a QueryNode to cluster", zap.Any("nodeID", serverID))
 				err := qc.cluster.registerNode(ctx, event.Session, serverID, disConnect)
 				if err != nil {
-					log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
+					log.Error("QueryCoord failed to register a QueryNode", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 				}
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
-				log.Debug("get a del event after queryNode down", zap.Int64("nodeID", serverID))
+				log.Debug("get a del event after QueryNode down", zap.Int64("nodeID", serverID))
 				nodeExist := qc.cluster.hasNode(serverID)
 				if !nodeExist {
-					log.Error("queryNode not exist", zap.Int64("nodeID", serverID))
+					log.Error("QueryNode not exist", zap.Int64("nodeID", serverID))
 					continue
 				}
 
