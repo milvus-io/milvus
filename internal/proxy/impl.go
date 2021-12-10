@@ -1511,6 +1511,11 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 			Status: unhealthyStatus(),
 		}, nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeIndex")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	dit := &describeIndexTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
@@ -1518,14 +1523,30 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		rootCoord:            node.rootCoord,
 	}
 
-	log.Debug("DescribeIndex enqueue",
+	method := "DescribeIndex"
+	// avoid data race
+	indexName := request.IndexName
+
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
-		zap.String("index name", request.IndexName))
-	err := node.sched.ddQueue.Enqueue(dit)
-	if err != nil {
+		zap.String("index name", indexName))
+
+	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", Params.RoleName),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("field", request.FieldName),
+			zap.String("index name", indexName))
+
 		return &milvuspb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1534,28 +1555,32 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	log.Debug("DescribeIndex",
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
 		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.Int64("MsgID", dit.ID()),
+		zap.Uint64("BeginTs", dit.BeginTs()),
+		zap.Uint64("EndTs", dit.EndTs()),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
-	)
-	defer func() {
-		log.Debug("DescribeIndex Done",
+		zap.String("index name", indexName))
+
+	if err := dit.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.Int64("MsgID", dit.ID()),
+			zap.Uint64("BeginTs", dit.BeginTs()),
+			zap.Uint64("EndTs", dit.EndTs()),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.String("field", request.FieldName),
-			zap.String("index name", request.IndexName))
-	}()
+			zap.String("index name", indexName))
 
-	err = dit.WaitToFinish()
-	if err != nil {
 		errCode := commonpb.ErrorCode_UnexpectedError
 		if dit.result != nil {
 			errCode = dit.result.Status.GetErrorCode()
@@ -1567,6 +1592,18 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 			},
 		}, nil
 	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", Params.RoleName),
+		zap.Int64("MsgID", dit.ID()),
+		zap.Uint64("BeginTs", dit.BeginTs()),
+		zap.Uint64("EndTs", dit.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("field", request.FieldName),
+		zap.String("index name", indexName))
 
 	return dit.result, nil
 }
