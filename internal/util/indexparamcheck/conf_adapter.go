@@ -143,6 +143,7 @@ type IVFConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain returns true if the index can be built with the specific index parameters.
 func (adapter *IVFConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, NLIST, MinNList, MaxNList) {
 		return false
