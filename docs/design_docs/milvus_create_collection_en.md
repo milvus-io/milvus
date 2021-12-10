@@ -129,7 +129,7 @@ message CreateCollectionRequest {
 
 ```
 
-9. After all these operations, `RootCoord` would update the internal timestamp and return, so `Proxy` would get the response.
+9. After the above operations, `RootCoord` would update the internal timestamp and return, so `Proxy` would get the response.
 
 _Notes:_
 
