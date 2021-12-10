@@ -27,6 +27,7 @@ type Msg = flowgraph.Msg
 // MsgStreamMsg is an implementation of interface Msg
 type MsgStreamMsg = flowgraph.MsgStreamMsg
 
+// insertMsg is an implementation of interface Msg
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
 	deleteMessages []*msgstream.DeleteMsg
