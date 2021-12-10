@@ -3182,6 +3182,7 @@ func (node *Proxy) checkHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
+//unhealthyStatus returns the proxy not healthy status
 func unhealthyStatus() *commonpb.Status {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
