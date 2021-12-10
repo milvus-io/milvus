@@ -42,7 +42,7 @@ Whether save successfully:
 
 1. We need all positions of all segments in this vchannel `p1, p2, ... pn`.
 
-A design of WatchDmChannelReq
+Proto design for WatchDmChannelReq:
 
 ```proto
 message VchannelInfo {
