@@ -1,7 +1,7 @@
 # Hybrid Timestamp in Milvus
 
 In chapter [Milvus TimeSync Mechanism](./milvus_timesync_en.md), we have already known why we need TSO in Milvus. Milvus
-borrows the [TiKV's](https://github.com/tikv/tikv) implementation into TSO. So if you are interested in how TSO was
+uses the [TiKV's](https://github.com/tikv/tikv) implementation into TSO. So if you are interested in how TSO is
 implemented, you can look into the official documentation of TiKV.
 
 This chapter will only introduce two points:
