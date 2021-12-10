@@ -12,7 +12,7 @@ Milvus exposes the following set of data features to applications:
 
 The requests' execution order is strictly in accordance with their issue-time order. We take proxy's issue time as a request's issue time. For a batch request, all its sub-requests share the same issue time. In cases there are multiple proxies, issue time from different proxies are regarded as coming from a central clock.
 
-Transaction is currently not supported by Milvus.
+The transaction is currently not supported by Milvus.
 
 A batch insert/delete is guaranteed to become visible atomically.
 
