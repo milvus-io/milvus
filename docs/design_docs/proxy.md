@@ -415,8 +415,7 @@ closed because maybe there are some data needs to be written into stream current
 
 ##### 6.6.3 channelsTimeTicker
 
-channelsTimeTicker is responsible for regularly collecting the synchronization timestamp information of all physical
-channels.
+channelsTimeTicker is responsible for regularly collecting the synchronization timestamp information of all physical channels.
 
 ```go
 type channelsTimeTicker interface {
