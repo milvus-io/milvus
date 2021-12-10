@@ -150,6 +150,7 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// Stop stops Datanode's grpc service.
 func (s *Server) Stop() error {
 	log.Debug("Datanode stop", zap.String("Address", Params.Address))
 	if s.closer != nil {
