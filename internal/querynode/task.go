@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -164,7 +163,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 		sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
 		if r.req.SeekPosition == nil || len(r.req.SeekPosition.MsgID) == 0 {
 			// as consumer
-			log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+			log.Debug("QueryNode AsConsumer", zap.Strings("channels", consumeChannels), zap.String("sub name", consumeSubName))
 		} else {
 			// seek query channel
 			err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{r.req.SeekPosition})
@@ -179,7 +178,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	// add result channel
 	producerChannels := []string{r.req.ResultChannelID}
 	sc.queryResultMsgStream.AsProducer(producerChannels)
-	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
+	log.Debug("QueryNode AsProducer", zap.Strings("channels", producerChannels))
 
 	// init global sealed segments
 	for _, segment := range r.req.GlobalSealedSegments {
