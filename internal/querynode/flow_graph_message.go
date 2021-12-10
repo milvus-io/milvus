@@ -38,6 +38,7 @@ type deleteMsg struct {
 	timeRange      TimeRange
 }
 
+// serviceTimeMsg is an implementation of interface Msg
 type serviceTimeMsg struct {
 	timeRange TimeRange
 }
