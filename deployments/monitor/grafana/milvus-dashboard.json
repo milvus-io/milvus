@@ -3365,7 +3365,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "OS  Threads",
+      "title": "OS Threads",
       "tooltip": {
         "shared": true,
         "sort": 0,
