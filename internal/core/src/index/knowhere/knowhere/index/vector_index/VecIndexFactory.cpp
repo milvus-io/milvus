@@ -26,7 +26,6 @@
 #include "knowhere/index/vector_index/IndexRHNSWFlat.h"
 #include "knowhere/index/vector_index/IndexRHNSWPQ.h"
 #include "knowhere/index/vector_index/IndexRHNSWSQ.h"
-#include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 #include "knowhere/index/vector_offset_index/IndexNSG_NM.h"
 
 #ifdef MILVUS_SUPPORT_SPTAG
@@ -60,7 +59,7 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
             return std::make_shared<knowhere::GPUIVF_NM>(gpu_device);
         }
 #endif
-        return std::make_shared<knowhere::IVF_NM>();
+        return std::make_shared<knowhere::IVF>();
     } else if (type == IndexEnum::INDEX_FAISS_IVFPQ) {
 #ifdef MILVUS_GPU_VERSION
         if (mode == IndexMode::MODE_GPU) {
