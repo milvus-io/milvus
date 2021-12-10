@@ -397,7 +397,7 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error {
+func (kv *EtcdKV) CompareVersionAndSwap(key string, source int64, target string, opts ...clientv3.OpOption) error {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
@@ -405,13 +405,14 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string
 		clientv3.Compare(
 			clientv3.Version(path.Join(kv.rootPath, key)),
 			"=",
-			version)).
+			source)).
 		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
 	if err != nil {
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s," +
+			" source version: %d, target version: %s", key, source, target)
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation compare version and swap")
 	return nil
