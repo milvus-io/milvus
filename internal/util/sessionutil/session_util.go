@@ -52,7 +52,7 @@ const (
 type Session struct {
 	ctx context.Context
 	// When outside context done, Session cancels its goroutines first, then uses
-	// keepAliceCancel to cancel the etcd KeepAlive
+	// keepAliveCancel to cancel the etcd KeepAlive
 	keepAliveCancel context.CancelFunc
 
 	ServerID   int64  `json:"ServerID,omitempty"`
@@ -340,7 +340,7 @@ func (w *sessionWatcher) start() {
 	}()
 }
 
-// WatchServices watch the service's up and down in etcd, and send event to
+// WatchServices watches the service's up and down in etcd, and sends event to
 // eventChannel.
 // prefix is a parameter to know which service to watch and can be obtained in
 // typeutil.type.go.
