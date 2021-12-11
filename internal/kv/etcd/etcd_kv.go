@@ -411,7 +411,7 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, source int64, target string,
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s," +
+		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s,"+
 			" source version: %d, target version: %s", key, source, target)
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation compare version and swap")
