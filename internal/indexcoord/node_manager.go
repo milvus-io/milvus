@@ -109,18 +109,18 @@ func (nm *NodeManager) PeekClient(meta Meta) (UniqueID, types.IndexNode) {
 		log.Error(err.Error())
 		return UniqueID(-1), nil
 	}
-	indexSize, err := estimateIndexSize(dim, meta.indexMeta.Req.NumRows, meta.indexMeta.Req.FieldSchema.DataType)
+	dataSize, err := estimateIndexSize(dim, meta.indexMeta.Req.NumRows, meta.indexMeta.Req.FieldSchema.DataType)
 	if err != nil {
 		log.Warn(err.Error())
 		return UniqueID(-1), nil
 	}
-	nodeID := nm.pq.Peek(indexSize, meta.indexMeta.Req.IndexParams, meta.indexMeta.Req.TypeParams)
+	nodeID := nm.pq.Peek(dataSize*indexSizeFactor, meta.indexMeta.Req.IndexParams, meta.indexMeta.Req.TypeParams)
 	client, ok := nm.nodeClients[nodeID]
 	if !ok {
 		log.Error("IndexCoord NodeManager PeekClient", zap.Any("There is no IndexNode client corresponding to NodeID", nodeID))
 		return nodeID, nil
 	}
-	log.Debug("IndexCoord NodeManager PeekClient ", zap.Int64("node", nodeID))
+	log.Debug("IndexCoord NodeManager PeekClient ", zap.Int64("node", nodeID), zap.Uint64("data size", dataSize))
 	return nodeID, client
 }
 
