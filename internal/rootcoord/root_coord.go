@@ -1262,7 +1262,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("CreateCollection", zap.String("role", Params.RoleName),
+	log.Debug("CreateCollection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &CreateCollectionReqTask{
 		baseReqTask: baseReqTask{
@@ -1273,11 +1273,11 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("CreateCollection failed", zap.String("role", Params.RoleName),
+		log.Error("CreateCollection failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "CreateCollection failed: "+err.Error()), nil
 	}
-	log.Debug("CreateCollection success", zap.String("role", Params.RoleName),
+	log.Debug("CreateCollection success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordCreateCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
@@ -1291,7 +1291,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("DropCollection", zap.String("role", Params.RoleName),
+	log.Debug("DropCollection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &DropCollectionReqTask{
 		baseReqTask: baseReqTask{
@@ -1302,11 +1302,11 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("DropCollection failed", zap.String("role", Params.RoleName),
+		log.Error("DropCollection failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "DropCollection failed: "+err.Error()), nil
 	}
-	log.Debug("DropCollection success", zap.String("role", Params.RoleName),
+	log.Debug("DropCollection success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordDropCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
@@ -1323,7 +1323,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 		}, nil
 	}
 
-	log.Debug("HasCollection", zap.String("role", Params.RoleName),
+	log.Debug("HasCollection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &HasCollectionReqTask{
 		baseReqTask: baseReqTask{
@@ -1335,14 +1335,14 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("HasCollection failed", zap.String("role", Params.RoleName),
+		log.Error("HasCollection failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasCollection failed: "+err.Error()),
 			Value:  false,
 		}, nil
 	}
-	log.Debug("HasCollection success", zap.String("role", Params.RoleName),
+	log.Debug("HasCollection success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordHasCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
@@ -1361,7 +1361,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 		}, nil
 	}
 
-	log.Debug("DescribeCollection", zap.String("role", Params.RoleName),
+	log.Debug("DescribeCollection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
@@ -1373,13 +1373,13 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("DescribeCollection failed", zap.String("role", Params.RoleName),
+		log.Error("DescribeCollection failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.DescribeCollectionResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "DescribeCollection failed: "+err.Error()),
 		}, nil
 	}
-	log.Debug("DescribeCollection success", zap.String("role", Params.RoleName),
+	log.Debug("DescribeCollection success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordDescribeCollectionCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
@@ -1396,7 +1396,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 		}, nil
 	}
 
-	log.Debug("ShowCollections", zap.String("role", Params.RoleName),
+	log.Debug("ShowCollections", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbname", in.DbName), zap.Int64("msgID", in.Base.MsgID))
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
@@ -1408,13 +1408,13 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("ShowCollections failed", zap.String("role", Params.RoleName),
+		log.Error("ShowCollections failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("dbname", in.DbName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.ShowCollectionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowCollections failed: "+err.Error()),
 		}, nil
 	}
-	log.Debug("ShowCollections success", zap.String("role", Params.RoleName),
+	log.Debug("ShowCollections success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbname", in.DbName), zap.Int("num of collections", len(t.Rsp.CollectionNames)),
 		zap.Int64("msgID", in.Base.MsgID))
 
@@ -1430,7 +1430,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("CreatePartition", zap.String("role", Params.RoleName),
+	log.Debug("CreatePartition", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &CreatePartitionReqTask{
@@ -1442,12 +1442,12 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("CreatePartition failed", zap.String("role", Params.RoleName),
+		log.Error("CreatePartition failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "CreatePartition failed: "+err.Error()), nil
 	}
-	log.Debug("CreatePartition success", zap.String("role", Params.RoleName),
+	log.Debug("CreatePartition success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 		zap.Int64("msgID", in.Base.MsgID))
 
@@ -1462,7 +1462,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("DropPartition", zap.String("role", Params.RoleName),
+	log.Debug("DropPartition", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &DropPartitionReqTask{
@@ -1474,12 +1474,12 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("DropPartition failed", zap.String("role", Params.RoleName),
+		log.Error("DropPartition failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "DropPartition failed: "+err.Error()), nil
 	}
-	log.Debug("DropPartition success", zap.String("role", Params.RoleName),
+	log.Debug("DropPartition success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 		zap.Int64("msgID", in.Base.MsgID))
 
@@ -1497,7 +1497,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 		}, nil
 	}
 
-	log.Debug("HasPartition", zap.String("role", Params.RoleName),
+	log.Debug("HasPartition", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &HasPartitionReqTask{
@@ -1510,7 +1510,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("HasPartition failed", zap.String("role", Params.RoleName),
+		log.Error("HasPartition failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.BoolResponse{
@@ -1518,7 +1518,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 			Value:  false,
 		}, nil
 	}
-	log.Debug("HasPartition success", zap.String("role", Params.RoleName),
+	log.Debug("HasPartition success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName),
 		zap.Int64("msgID", in.Base.MsgID))
 
@@ -1538,7 +1538,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 		}, nil
 	}
 
-	log.Debug("ShowPartitions", zap.String("role", Params.RoleName),
+	log.Debug("ShowPartitions", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &ShowPartitionReqTask{
 		baseReqTask: baseReqTask{
@@ -1550,13 +1550,13 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("ShowPartitions failed", zap.String("role", Params.RoleName),
+		log.Error("ShowPartitions failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.ShowPartitionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowPartitions failed: "+err.Error()),
 		}, nil
 	}
-	log.Debug("ShowPartitions success", zap.String("role", Params.RoleName),
+	log.Debug("ShowPartitions success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int("num of partitions", len(t.Rsp.PartitionNames)),
 		zap.Int64("msgID", t.Req.Base.MsgID))
 
@@ -1572,7 +1572,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("CreateIndex", zap.String("role", Params.RoleName),
+	log.Debug("CreateIndex", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &CreateIndexReqTask{
@@ -1584,12 +1584,12 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("CreateIndex failed", zap.String("role", Params.RoleName),
+		log.Error("CreateIndex failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "CreateIndex failed: "+err.Error()), nil
 	}
-	log.Debug("CreateIndex success", zap.String("role", Params.RoleName),
+	log.Debug("CreateIndex success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 		zap.Int64("msgID", in.Base.MsgID))
 
@@ -1606,7 +1606,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 		}, nil
 	}
 
-	log.Debug("DescribeIndex", zap.String("role", Params.RoleName),
+	log.Debug("DescribeIndex", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &DescribeIndexReqTask{
@@ -1619,7 +1619,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("DescribeIndex failed", zap.String("role", Params.RoleName),
+		log.Error("DescribeIndex failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.DescribeIndexResponse{
@@ -1630,7 +1630,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	for _, i := range t.Rsp.IndexDescriptions {
 		idxNames = append(idxNames, i.IndexName)
 	}
-	log.Debug("DescribeIndex success", zap.String("role", Params.RoleName),
+	log.Debug("DescribeIndex success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 		zap.Strings("index names", idxNames), zap.Int64("msgID", in.Base.MsgID))
 
@@ -1650,7 +1650,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("DropIndex", zap.String("role", Params.RoleName),
+	log.Debug("DropIndex", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 		zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
 	t := &DropIndexReqTask{
@@ -1662,12 +1662,12 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("DropIndex failed", zap.String("role", Params.RoleName),
+		log.Error("DropIndex failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 			zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "DropIndex failed: "+err.Error()), nil
 	}
-	log.Debug("DropIndex success", zap.String("role", Params.RoleName),
+	log.Debug("DropIndex success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName),
 		zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
 
@@ -1684,7 +1684,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 		}, nil
 	}
 
-	log.Debug("DescribeSegment", zap.String("role", Params.RoleName),
+	log.Debug("DescribeSegment", zap.String("role", typeutil.RootCoordRole),
 		zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &DescribeSegmentReqTask{
@@ -1697,14 +1697,14 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("DescribeSegment failed", zap.String("role", Params.RoleName),
+		log.Error("DescribeSegment failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.DescribeSegmentResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "DescribeSegment failed: "+err.Error()),
 		}, nil
 	}
-	log.Debug("DescribeSegment success", zap.String("role", Params.RoleName),
+	log.Debug("DescribeSegment success", zap.String("role", typeutil.RootCoordRole),
 		zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID),
 		zap.Int64("msgID", in.Base.MsgID))
 
@@ -1722,7 +1722,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 		}, nil
 	}
 
-	log.Debug("ShowSegments", zap.String("role", Params.RoleName),
+	log.Debug("ShowSegments", zap.String("role", typeutil.RootCoordRole),
 		zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &ShowSegmentReqTask{
@@ -1735,14 +1735,14 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("ShowSegments failed", zap.String("role", Params.RoleName),
+		log.Debug("ShowSegments failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.ShowSegmentsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowSegments failed: "+err.Error()),
 		}, nil
 	}
-	log.Debug("ShowSegments success", zap.String("role", Params.RoleName),
+	log.Debug("ShowSegments success", zap.String("role", typeutil.RootCoordRole),
 		zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID),
 		zap.Int64s("segments ids", t.Rsp.SegmentIDs),
 		zap.Int64("msgID", in.Base.MsgID))
@@ -1761,7 +1761,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 	}
 	ts, err := c.TSOAllocator(in.Count)
 	if err != nil {
-		log.Error("AllocTimestamp failed", zap.String("role", Params.RoleName),
+		log.Error("AllocTimestamp failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &rootcoordpb.AllocTimestampResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "AllocTimestamp failed: "+err.Error()),
@@ -1786,14 +1786,14 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 	}
 	start, _, err := c.IDAllocator(in.Count)
 	if err != nil {
-		log.Error("AllocID failed", zap.String("role", Params.RoleName),
+		log.Error("AllocID failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &rootcoordpb.AllocIDResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "AllocID failed: "+err.Error()),
 			Count:  in.Count,
 		}, nil
 	}
-	log.Debug("AllocID success", zap.String("role", Params.RoleName),
+	log.Debug("AllocID success", zap.String("role", typeutil.RootCoordRole),
 		zap.Int64("id start", start), zap.Uint32("count", in.Count), zap.Int64("msgID", in.Base.MsgID))
 
 	return &rootcoordpb.AllocIDResponse{
@@ -1814,7 +1814,7 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 	}
 	err := c.chanTimeTick.updateTimeTick(in, "gRPC")
 	if err != nil {
-		log.Error("UpdateTimeTick failed", zap.String("role", Params.RoleName),
+		log.Error("UpdateTimeTick failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "UpdateTimeTick failed: "+err.Error()), nil
 	}
@@ -1838,26 +1838,26 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "invalid msg type "+commonpb.MsgType_name[int32(in.Base.MsgType)]), nil
 	}
 	segID := in.Segment.GetID()
-	log.Debug("SegmentFlushCompleted", zap.String("role", Params.RoleName),
+	log.Debug("SegmentFlushCompleted", zap.String("role", typeutil.RootCoordRole),
 		zap.Int64("collection id", in.Segment.CollectionID), zap.Int64("partition id", in.Segment.PartitionID),
 		zap.Int64("segment id", segID), zap.Int64("msgID", in.Base.MsgID))
 
 	coll, err := c.MetaTable.GetCollectionByID(in.Segment.CollectionID, 0)
 	if err != nil {
-		log.Error("GetCollectionByID failed", zap.String("role", Params.RoleName),
+		log.Error("GetCollectionByID failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "GetCollectionByID failed: "+err.Error()), nil
 	}
 
 	if len(coll.FieldIndexes) == 0 {
-		log.Debug("no index params on collection", zap.String("role", Params.RoleName),
+		log.Debug("no index params on collection", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection_name", coll.Schema.Name), zap.Int64("msgID", in.Base.MsgID))
 	}
 
 	for _, f := range coll.FieldIndexes {
 		fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
 		if err != nil {
-			log.Warn("field schema not found", zap.String("role", Params.RoleName),
+			log.Warn("field schema not found", zap.String("role", typeutil.RootCoordRole),
 				zap.String("collection_name", coll.Schema.Name), zap.Int64("field id", f.FiledID),
 				zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			continue
@@ -1865,7 +1865,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 
 		idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
 		if err != nil {
-			log.Warn("index not found", zap.String("role", Params.RoleName),
+			log.Warn("index not found", zap.String("role", typeutil.RootCoordRole),
 				zap.String("collection_name", coll.Schema.Name), zap.Int64("field id", f.FiledID),
 				zap.Int64("index id", f.IndexID), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			continue
@@ -1883,7 +1883,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 		if err == nil && info.BuildID != 0 {
 			info.EnableIndex = true
 		} else {
-			log.Error("BuildIndex failed", zap.String("role", Params.RoleName),
+			log.Error("BuildIndex failed", zap.String("role", typeutil.RootCoordRole),
 				zap.String("collection_name", coll.Schema.Name), zap.Int64("field id", f.FiledID),
 				zap.Int64("index id", f.IndexID), zap.Int64("build id", info.BuildID),
 				zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
@@ -1891,14 +1891,14 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 		}
 		err = c.MetaTable.AddIndex(&info)
 		if err != nil {
-			log.Error("AddIndex failed", zap.String("role", Params.RoleName),
+			log.Error("AddIndex failed", zap.String("role", typeutil.RootCoordRole),
 				zap.String("collection_name", coll.Schema.Name), zap.Int64("field id", f.FiledID),
 				zap.Int64("index id", f.IndexID), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			continue
 		}
 	}
 
-	log.Debug("SegmentFlushCompleted success", zap.String("role", Params.RoleName),
+	log.Debug("SegmentFlushCompleted success", zap.String("role", typeutil.RootCoordRole),
 		zap.Int64("collection id", in.Segment.CollectionID), zap.Int64("partition id", in.Segment.PartitionID),
 		zap.Int64("segment id", segID), zap.Int64("msgID", in.Base.MsgID))
 	return succStatus(), nil
@@ -1915,7 +1915,7 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 
 	metricType, err := metricsinfo.ParseMetricType(in.Request)
 	if err != nil {
-		log.Error("ParseMetricType failed", zap.String("role", Params.RoleName),
+		log.Error("ParseMetricType failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("node_id", c.session.ServerID), zap.String("req", in.Request), zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
 			Status:   failStatus(commonpb.ErrorCode_UnexpectedError, "ParseMetricType failed: "+err.Error()),
@@ -1923,7 +1923,7 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 		}, nil
 	}
 
-	log.Debug("GetMetrics success", zap.String("role", Params.RoleName),
+	log.Debug("GetMetrics success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("metric_type", metricType), zap.Int64("msgID", in.Base.MsgID))
 
 	if metricType == metricsinfo.SystemInfoMetrics {
@@ -1932,12 +1932,12 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 			return ret, nil
 		}
 
-		log.Warn("GetSystemInfoMetrics from cache failed", zap.String("role", Params.RoleName),
+		log.Warn("GetSystemInfoMetrics from cache failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 
 		systemInfoMetrics, err := c.getSystemInfoMetrics(ctx, in)
 		if err != nil {
-			log.Error("GetSystemInfoMetrics failed", zap.String("role", Params.RoleName),
+			log.Error("GetSystemInfoMetrics failed", zap.String("role", typeutil.RootCoordRole),
 				zap.String("metric_type", metricType), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			return nil, err
 		}
@@ -1946,7 +1946,7 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 		return systemInfoMetrics, err
 	}
 
-	log.Error("GetMetrics failed, metric type not implemented", zap.String("role", Params.RoleName),
+	log.Error("GetMetrics failed, metric type not implemented", zap.String("role", typeutil.RootCoordRole),
 		zap.String("metric_type", metricType), zap.Int64("msgID", in.Base.MsgID))
 
 	return &milvuspb.GetMetricsResponse{
@@ -1961,7 +1961,7 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("CreateAlias", zap.String("role", Params.RoleName),
+	log.Debug("CreateAlias", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &CreateAliasReqTask{
@@ -1973,12 +1973,12 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("CreateAlias failed", zap.String("role", Params.RoleName),
+		log.Error("CreateAlias failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "CreateAlias failed: "+err.Error()), nil
 	}
-	log.Debug("CreateAlias success", zap.String("role", Params.RoleName),
+	log.Debug("CreateAlias success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
 		zap.Int64("msgID", in.Base.MsgID))
 
@@ -1991,7 +1991,7 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("DropAlias", zap.String("role", Params.RoleName),
+	log.Debug("DropAlias", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.Alias), zap.Int64("msgID", in.Base.MsgID))
 	t := &DropAliasReqTask{
 		baseReqTask: baseReqTask{
@@ -2002,11 +2002,11 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("DropAlias failed", zap.String("role", Params.RoleName),
+		log.Error("DropAlias failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("alias", in.Alias), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "DropAlias failed: "+err.Error()), nil
 	}
-	log.Debug("DropAlias success", zap.String("role", Params.RoleName),
+	log.Debug("DropAlias success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.Alias), zap.Int64("msgID", in.Base.MsgID))
 
 	return succStatus(), nil
@@ -2018,7 +2018,7 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Debug("AlterAlias", zap.String("role", Params.RoleName),
+	log.Debug("AlterAlias", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
 		zap.Int64("msgID", in.Base.MsgID))
 	t := &AlterAliasReqTask{
@@ -2030,12 +2030,12 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("AlterAlias failed", zap.String("role", Params.RoleName),
+		log.Error("AlterAlias failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "AlterAlias failed: "+err.Error()), nil
 	}
-	log.Debug("AlterAlias success", zap.String("role", Params.RoleName),
+	log.Debug("AlterAlias success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
 		zap.Int64("msgID", in.Base.MsgID))
 
