@@ -19,6 +19,7 @@ package proxy
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -88,7 +89,7 @@ func TestParamTable_Normal(t *testing.T) {
 	})
 
 	t.Run("RoleName", func(t *testing.T) {
-		t.Logf("RoleName: %s", Params.RoleName)
+		t.Logf("RoleName: %s", typeutil.ProxyRole)
 	})
 
 	t.Run("MaxTaskNum", func(t *testing.T) {
