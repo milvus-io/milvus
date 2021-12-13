@@ -134,6 +134,8 @@ pipeline {
                                             } else {
                                                 error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
                                             }
+                                            def release_name=sh(returnStdout: true, script: './get_release_name.sh')
+                                            sh "helm fullstatus ${release_name} -n milvus-ci"
                                         }
                                     }
                                 }
