@@ -320,6 +320,14 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	defer cancel2()
 	showPartitionResponse, err := lct.rootCoord.ShowPartitions(ctx2, showPartitionRequest)
 	if err != nil {
+		log.Error("loadCollectionTask: showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+		lct.setResultInfo(err)
+		return err
+	}
+
+	if showPartitionResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(showPartitionResponse.Status.Reason)
+		log.Error("loadCollectionTask: showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		lct.setResultInfo(err)
 		return err
 	}
@@ -364,22 +372,14 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	segmentsToLoad := make([]UniqueID, 0)
 	var watchDeltaChannels []*datapb.VchannelInfo
 	for _, partitionID := range toLoadPartitionIDs {
-		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
-			Base:         lct.Base,
-			CollectionID: collectionID,
-			PartitionID:  partitionID,
-		}
-		recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
-			ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-			defer cancel2()
-			return lct.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
-		}()
+		dmChannelInfos, binlogs, err := getRecoveryInfo(lct.ctx, lct.dataCoord, collectionID, partitionID)
 		if err != nil {
+			log.Error("loadCollectionTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 			lct.setResultInfo(err)
 			return err
 		}
 
-		for _, segmentBingLog := range recoveryInfo.Binlogs {
+		for _, segmentBingLog := range binlogs {
 			segmentID := segmentBingLog.SegmentID
 			segmentLoadInfo := &querypb.SegmentLoadInfo{
 				SegmentID:    segmentID,
@@ -415,7 +415,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 		}
 
-		for _, info := range recoveryInfo.Channels {
+		for _, info := range dmChannelInfos {
 			deltaChannel, err := generateWatchDeltaChannelInfo(info)
 			if err != nil {
 				return err
@@ -423,7 +423,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			watchDeltaChannels = append(watchDeltaChannels, deltaChannel)
 		}
 
-		for _, info := range recoveryInfo.Channels {
+		for _, info := range dmChannelInfos {
 			channel := info.ChannelName
 			if !watchPartition {
 				merged := false
@@ -598,9 +598,14 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 		ctx2, cancel2 := context.WithTimeout(rct.ctx, timeoutForRPC)
 		defer cancel2()
 		res, err := rct.rootCoord.ReleaseDQLMessageStream(ctx2, releaseDQLMessageStreamReq)
-		if res.ErrorCode != commonpb.ErrorCode_Success || err != nil {
-			log.Warn("releaseCollectionTask: release collection end, releaseDQLMessageStream occur error", zap.Int64("collectionID", rct.CollectionID))
-			err = errors.New("rootCoord releaseDQLMessageStream failed")
+		if err != nil {
+			log.Error("releaseCollectionTask: release collection end, releaseDQLMessageStream occur error", zap.Int64("collectionID", rct.CollectionID), zap.Error(err))
+			rct.setResultInfo(err)
+			return err
+		}
+		if res.ErrorCode != commonpb.ErrorCode_Success {
+			log.Error("releaseCollectionTask: release collection end, releaseDQLMessageStream occur error", zap.Int64("collectionID", rct.CollectionID), zap.String("error", res.Reason))
+			err = errors.New(res.Reason)
 			rct.setResultInfo(err)
 			return err
 		}
@@ -738,22 +743,14 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 	watchDmReqs := make([]*querypb.WatchDmChannelsRequest, 0)
 	var watchDeltaChannels []*datapb.VchannelInfo
 	for _, partitionID := range partitionIDs {
-		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
-			Base:         lpt.Base,
-			CollectionID: collectionID,
-			PartitionID:  partitionID,
-		}
-		recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
-			ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-			defer cancel2()
-			return lpt.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
-		}()
+		dmChannelInfos, binlogs, err := getRecoveryInfo(lpt.ctx, lpt.dataCoord, collectionID, partitionID)
 		if err != nil {
+			log.Error("loadPartitionTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 			lpt.setResultInfo(err)
 			return err
 		}
 
-		for _, segmentBingLog := range recoveryInfo.Binlogs {
+		for _, segmentBingLog := range binlogs {
 			segmentID := segmentBingLog.SegmentID
 			segmentLoadInfo := &querypb.SegmentLoadInfo{
 				SegmentID:    segmentID,
@@ -788,14 +785,14 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 		}
 
-		for _, info := range recoveryInfo.Channels {
+		for _, info := range dmChannelInfos {
 			deltaChannel, err := generateWatchDeltaChannelInfo(info)
 			if err != nil {
 				return err
 			}
 			watchDeltaChannels = append(watchDeltaChannels, deltaChannel)
 		}
-		for _, info := range recoveryInfo.Channels {
+		for _, info := range dmChannelInfos {
 			// watch dml channels
 			channel := info.ChannelName
 			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
@@ -1552,17 +1549,9 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 		// segment which is compacted to should not exist in query node
 		_, err = ht.meta.getSegmentInfoByID(segmentID)
 		if err != nil {
-			getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
-				Base:         ht.Base,
-				CollectionID: collectionID,
-				PartitionID:  partitionID,
-			}
-			recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
-				ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-				defer cancel2()
-				return ht.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
-			}()
+			dmChannelInfos, binlogs, err := getRecoveryInfo(ht.ctx, ht.dataCoord, collectionID, partitionID)
 			if err != nil {
+				log.Error("handoffTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 				ht.setResultInfo(err)
 				return err
 			}
@@ -1570,7 +1559,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 			findBinlog := false
 			var loadSegmentReq *querypb.LoadSegmentsRequest
 			var watchDeltaChannels []*datapb.VchannelInfo
-			for _, segmentBinlogs := range recoveryInfo.Binlogs {
+			for _, segmentBinlogs := range binlogs {
 				if segmentBinlogs.SegmentID == segmentID {
 					findBinlog = true
 					segmentLoadInfo := &querypb.SegmentLoadInfo{
@@ -1594,7 +1583,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 					}
 				}
 			}
-			for _, info := range recoveryInfo.Channels {
+			for _, info := range dmChannelInfos {
 				deltaChannel, err := generateWatchDeltaChannelInfo(info)
 				if err != nil {
 					return err
@@ -1738,24 +1727,14 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 
 				log.Debug("loadBalanceTask: partitions to recover", zap.Int64s("partitionIDs", partitionIDs))
 				for _, partitionID := range partitionIDs {
-					getRecoveryInfo := &datapb.GetRecoveryInfoRequest{
-						Base: &commonpb.MsgBase{
-							MsgType: commonpb.MsgType_LoadBalanceSegments,
-						},
-						CollectionID: collectionID,
-						PartitionID:  partitionID,
-					}
-					recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
-						ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-						defer cancel2()
-						return lbt.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfo)
-					}()
+					dmChannelInfos, binlogs, err := getRecoveryInfo(lbt.ctx, lbt.dataCoord, collectionID, partitionID)
 					if err != nil {
+						log.Error("loadBalanceTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 						lbt.setResultInfo(err)
 						return err
 					}
 
-					for _, segmentBingLog := range recoveryInfo.Binlogs {
+					for _, segmentBingLog := range binlogs {
 						segmentID := segmentBingLog.SegmentID
 						segmentLoadInfo := &querypb.SegmentLoadInfo{
 							SegmentID:    segmentID,
@@ -1790,7 +1769,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 					}
 
-					for _, info := range recoveryInfo.Channels {
+					for _, info := range dmChannelInfos {
 						deltaChannel, err := generateWatchDeltaChannelInfo(info)
 						if err != nil {
 							return err
@@ -1798,7 +1777,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						watchDeltaChannels = append(watchDeltaChannels, deltaChannel)
 					}
 
-					for _, channelInfo := range recoveryInfo.Channels {
+					for _, channelInfo := range dmChannelInfos {
 						for _, channel := range dmChannels {
 							if channelInfo.ChannelName == channel {
 								if loadType == querypb.LoadType_loadCollection {
@@ -1939,23 +1918,15 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 				return err
 			}
 			for _, partitionID := range partitionIDs {
-				getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
-					Base:         lbt.Base,
-					CollectionID: collectionID,
-					PartitionID:  partitionID,
-				}
-				recoveryInfo, err := func() (*datapb.GetRecoveryInfoResponse, error) {
-					ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-					defer cancel2()
-					return lbt.dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
-				}()
+				dmChannelInfos, binlogs, err := getRecoveryInfo(lbt.ctx, lbt.dataCoord, collectionID, partitionID)
 				if err != nil {
+					log.Error("loadBalanceTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 					lbt.setResultInfo(err)
 					return err
 				}
 
 				segmentID2Binlog := make(map[UniqueID]*datapb.SegmentBinlogs)
-				for _, binlog := range recoveryInfo.Binlogs {
+				for _, binlog := range binlogs {
 					segmentID2Binlog[binlog.SegmentID] = binlog
 				}
 
@@ -1999,7 +1970,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 				}
 
-				for _, info := range recoveryInfo.Channels {
+				for _, info := range dmChannelInfos {
 					deltaChannel, err := generateWatchDeltaChannelInfo(info)
 					if err != nil {
 						return err
@@ -2274,4 +2245,27 @@ func mergeWatchDeltaChannelInfo(infos []*datapb.VchannelInfo) []*datapb.Vchannel
 		zap.Any("merged info length", len(result)),
 	)
 	return result
+}
+
+func getRecoveryInfo(ctx context.Context, dataCoord types.DataCoord, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error) {
+	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel2()
+	getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_GetRecoveryInfo,
+		},
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+	}
+	recoveryInfo, err := dataCoord.GetRecoveryInfo(ctx2, getRecoveryInfoRequest)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if recoveryInfo.Status.ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(recoveryInfo.Status.Reason)
+		return nil, nil, err
+	}
+
+	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
 }

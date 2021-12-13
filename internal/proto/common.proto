@@ -140,6 +140,7 @@ enum MsgType {
     /* DATA SERVICE */
     SegmentInfo = 600;
     SystemInfo = 601;
+    GetRecoveryInfo = 602;
 
     /* SYSTEM CONTROL */
     TimeTick = 1200;

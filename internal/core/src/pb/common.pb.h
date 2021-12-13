@@ -255,6 +255,7 @@ enum MsgType : int {
   WatchDeltaChannels = 513,
   SegmentInfo = 600,
   SystemInfo = 601,
+  GetRecoveryInfo = 602,
   TimeTick = 1200,
   QueryNodeStats = 1201,
   LoadIndex = 1202,
