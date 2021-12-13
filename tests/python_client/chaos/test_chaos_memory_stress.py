@@ -28,15 +28,6 @@ def apply_memory_stress(chaos_yaml):
     log.debug("chaos injected")
 
 
-def construct_from_data(collection_name, h5_path='./testdata/random_data_10000.h5'):
-    import pandas as pd
-    df = pd.read_hdf(h5_path, key='df')
-    collection_w = ApiCollectionWrapper()
-    collection_w.construct_from_dataframe(collection_name, dataframe=df, primary_field=ct.default_int64_field_name)
-    log.debug(collection_w.num_entities)
-    return collection_w
-
-
 class TestChaosData:
 
     @pytest.fixture(scope="function", autouse=True)
