@@ -45,6 +45,7 @@ type serviceTimeMsg struct {
 	timeRange TimeRange
 }
 
+// TimeTick returns timestamp of insertMsg
 func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
 }
