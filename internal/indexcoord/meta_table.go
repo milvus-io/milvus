@@ -389,6 +389,7 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	return metas
 }
 
+// GetUnassignedTasks get the unassigned tasks.
 func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()
