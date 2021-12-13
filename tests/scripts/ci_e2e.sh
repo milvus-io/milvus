@@ -57,7 +57,8 @@ python3 -V
 export CI_LOG_PATH=/tmp/ci_logs/test
 
 if [ ! -d "${CI_LOG_PATH}" ]; then
-mkdir -p ${CI_LOG_PATH}
+  # create dir for ci log path when it does not exist
+  mkdir -p ${CI_LOG_PATH}
 fi
 trace "prepare e2e test"  install_pytest_requirements  
 
