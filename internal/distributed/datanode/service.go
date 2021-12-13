@@ -186,6 +186,7 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// init initializes Datanode's grpc service.
 func (s *Server) init() error {
 	ctx := context.Background()
 	Params.Init()
