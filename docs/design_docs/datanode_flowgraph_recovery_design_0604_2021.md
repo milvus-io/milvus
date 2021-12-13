@@ -10,8 +10,8 @@ A. One message stream to one vchannel, so there are one start position and one e
 B. Only when datanode flushes, datanode will update every segment's position.
 An optimization: update position of
 
-- a. Current flushing segment
-- b. StartPosition of segments has never been flushed.
+1. Current flushing segment
+2. StartPosition of segments has never been flushed.
 
 C. DataNode auto-flush is a valid flush.
 
