@@ -53,7 +53,7 @@ jobs:
         working-directory: build/ci/jenkins/pod
         run: |
           export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
-          sed -i "s#image: .*#image: milvusdb/krte:$TAG#g" krte.yaml
+          sed -i "s#krte:.*#krte:${TAG}#g" ./build/ci/jenkins/pod/rte.yaml
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add krte.yaml
