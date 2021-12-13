@@ -110,7 +110,17 @@ jobs:
 
           pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
-      
+
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          #in this step, verify whether pod has been killed by pod's age
+          kubectl get po -n chaos-testing
+          # export k8s log for chaos mesh and milvus
+          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/chaos-test
+
       - name: Deploy Milvus Again If Previous E2E Test Failed
         timeout-minutes: 15
         if: ${{ failure() }}
@@ -166,7 +176,7 @@ jobs:
           #in this step, verify whether pod has been killed by pod's age
           kubectl get po -n chaos-testing
           # export k8s log for chaos mesh and milvus
-          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }}
+          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/data-consist-test
           bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon
       
       - name: Upload logs
