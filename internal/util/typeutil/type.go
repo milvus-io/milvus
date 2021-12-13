@@ -22,19 +22,19 @@ type UniqueID = int64
 
 const (
 	// RootCoordRole is a constant represent RootCoord
-	RootCoordRole = "RootCoord"
+	RootCoordRole = "rootcoord"
 	// ProxyRole is a constant represent Proxy
-	ProxyRole = "Proxy"
+	ProxyRole = "proxy"
 	// QueryCoordRole is a constant represent QueryCoord
-	QueryCoordRole = "QueryCoord"
+	QueryCoordRole = "querycoord"
 	// QueryNodeRole is a constant represent QueryNode
-	QueryNodeRole = "QueryNode"
+	QueryNodeRole = "querynode"
 	// IndexCoordRole is a constant represent IndexCoord
-	IndexCoordRole = "IndexCoord"
+	IndexCoordRole = "indexcoord"
 	// IndexNodeRole is a constant represent IndexNode
-	IndexNodeRole = "IndexNode"
+	IndexNodeRole = "indexnode"
 	// DataCoordRole is a constant represent DataCoord
-	DataCoordRole = "DataCoord"
+	DataCoordRole = "datacoord"
 	// DataNodeRole is a constant represent DataNode
-	DataNodeRole = "DataNode"
+	DataNodeRole = "datanode"
 )
