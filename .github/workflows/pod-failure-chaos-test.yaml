@@ -95,7 +95,7 @@ jobs:
         timeout-minutes: 5
         if: ${{ always() }}
         shell: bash
-        working-directory: tests/python_client/chaos
+        working-directory: tests/python_client
         run: |
           kubectl get pod -n chaos-testing
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
@@ -109,9 +109,6 @@ jobs:
 
           pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
-          sleep 20s
-          nc -vz 127.0.0.1 19530
-          python scripts/hello_milvus.py
 
       - name: Data Consist Test
         timeout-minutes: 5
