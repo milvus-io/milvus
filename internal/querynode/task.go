@@ -843,8 +843,7 @@ func (r *releaseCollectionTask) releaseReplica(replica ReplicaInterface, replica
 				zap.Any("collectionID", r.req.CollectionID),
 				zap.Any("vChannel", channel),
 			)
-			// no tSafe in tSafeReplica, don't return error
-			_ = r.node.tSafeReplica.removeTSafe(channel)
+			r.node.tSafeReplica.removeTSafe(channel)
 			// queryCollection and Collection would be deleted in releaseCollection,
 			// so we don't need to remove the tSafeWatcher or channel manually.
 		}
@@ -856,8 +855,7 @@ func (r *releaseCollectionTask) releaseReplica(replica ReplicaInterface, replica
 				zap.Any("collectionID", r.req.CollectionID),
 				zap.Any("vDeltaChannel", channel),
 			)
-			// no tSafe in tSafeReplica, don't return error
-			_ = r.node.tSafeReplica.removeTSafe(channel)
+			r.node.tSafeReplica.removeTSafe(channel)
 			// queryCollection and Collection would be deleted in releaseCollection,
 			// so we don't need to remove the tSafeWatcher or channel manually.
 		}
@@ -931,26 +929,22 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 					zap.Any("partitionID", id),
 					zap.Any("vChannel", channel),
 				)
-				// no tSafe in tSafeReplica, don't return error
-				isRemoved := r.node.tSafeReplica.removeTSafe(channel)
-				if isRemoved {
-					// no tSafe or tSafe has been removed,
-					// we need to remove the corresponding tSafeWatcher in queryCollection,
-					// and remove the corresponding channel in collection
-					qc, err := r.node.queryService.getQueryCollection(r.req.CollectionID)
-					if err != nil {
-						return err
-					}
-					err = qc.removeTSafeWatcher(channel)
-					if err != nil {
-						return err
-					}
-					sCol.removeVChannel(channel)
-					hCol.removeVChannel(channel)
+				r.node.tSafeReplica.removeTSafe(channel)
+				// no tSafe or tSafe has been removed,
+				// we need to remove the corresponding tSafeWatcher in queryCollection,
+				// and remove the corresponding channel in collection
+				qc, err := r.node.queryService.getQueryCollection(r.req.CollectionID)
+				if err != nil {
+					return err
 				}
+				err = qc.removeTSafeWatcher(channel)
+				if err != nil {
+					return err
+				}
+				sCol.removeVChannel(channel)
+				hCol.removeVChannel(channel)
 			}
 		}
-
 		// remove partition from streaming and historical
 		hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
 		if hasPartitionInHistorical {
@@ -986,23 +980,20 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 				zap.Any("collectionID", r.req.CollectionID),
 				zap.Any("vChannel", channel),
 			)
-			// no tSafe in tSafeReplica, don't return error
-			isRemoved := r.node.tSafeReplica.removeTSafe(channel)
-			if isRemoved {
-				// no tSafe or tSafe has been removed,
-				// we need to remove the corresponding tSafeWatcher in queryCollection,
-				// and remove the corresponding channel in collection
-				qc, err := r.node.queryService.getQueryCollection(r.req.CollectionID)
-				if err != nil {
-					return err
-				}
-				err = qc.removeTSafeWatcher(channel)
-				if err != nil {
-					return err
-				}
-				sCol.removeVDeltaChannel(channel)
-				hCol.removeVDeltaChannel(channel)
+			r.node.tSafeReplica.removeTSafe(channel)
+			// no tSafe or tSafe has been removed,
+			// we need to remove the corresponding tSafeWatcher in queryCollection,
+			// and remove the corresponding channel in collection
+			qc, err := r.node.queryService.getQueryCollection(r.req.CollectionID)
+			if err != nil {
+				return err
 			}
+			err = qc.removeTSafeWatcher(channel)
+			if err != nil {
+				return err
+			}
+			sCol.removeVDeltaChannel(channel)
+			hCol.removeVDeltaChannel(channel)
 		}
 	}
 

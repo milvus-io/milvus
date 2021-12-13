@@ -45,7 +45,7 @@ import (
 )
 
 func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*queryCollection, error) {
-	tSafe := newTSafeReplica(ctx)
+	tSafe := newTSafeReplica()
 	historical, err := genSimpleHistorical(ctx, tSafe)
 	if err != nil {
 		return nil, err
@@ -110,19 +110,16 @@ func genSimpleSealedSegmentsChangeInfoMsg() *msgstream.SealedSegmentsChangeInfoM
 	}
 }
 
-func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) {
+func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) error {
 	// register
 	queryCollection.tSafeWatchers[defaultVChannel] = newTSafeWatcher()
 	queryCollection.tSafeWatchers[defaultHistoricalVChannel] = newTSafeWatcher()
-	queryCollection.streaming.tSafeReplica.addTSafe(defaultVChannel)
-	queryCollection.streaming.tSafeReplica.registerTSafeWatcher(defaultVChannel, queryCollection.tSafeWatchers[defaultVChannel])
-	queryCollection.historical.tSafeReplica.addTSafe(defaultHistoricalVChannel)
-	queryCollection.historical.tSafeReplica.registerTSafeWatcher(defaultHistoricalVChannel, queryCollection.tSafeWatchers[defaultHistoricalVChannel])
-	queryCollection.addTSafeWatcher(defaultVChannel)
-	queryCollection.addTSafeWatcher(defaultHistoricalVChannel)
 
-	queryCollection.streaming.tSafeReplica.setTSafe(defaultVChannel, defaultCollectionID, timestamp)
-	queryCollection.historical.tSafeReplica.setTSafe(defaultHistoricalVChannel, defaultCollectionID, timestamp)
+	err := queryCollection.streaming.tSafeReplica.setTSafe(defaultVChannel, timestamp)
+	if err != nil {
+		return err
+	}
+	return queryCollection.historical.tSafeReplica.setTSafe(defaultHistoricalVChannel, timestamp)
 }
 
 func TestQueryCollection_withoutVChannel(t *testing.T) {
@@ -139,7 +136,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 
 	schema := genTestCollectionSchema(0, false, 2)
 	historicalReplica := newCollectionReplica(etcdKV)
-	tsReplica := newTSafeReplica(ctx)
+	tsReplica := newTSafeReplica()
 	streamingReplica := newCollectionReplica(etcdKV)
 	historical := newHistorical(context.Background(), historicalReplica, etcdKV, tsReplica)
 
@@ -508,7 +505,8 @@ func TestQueryCollection_waitNewTSafe(t *testing.T) {
 	assert.NoError(t, err)
 
 	timestamp := Timestamp(1000)
-	updateTSafe(queryCollection, timestamp)
+	err = updateTSafe(queryCollection, timestamp)
+	assert.NoError(t, err)
 
 	resTimestamp, err := queryCollection.waitNewTSafe()
 	assert.NoError(t, err)
