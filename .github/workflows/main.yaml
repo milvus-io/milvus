@@ -74,3 +74,5 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info
           name: ubuntu-${{ matrix.ubuntu }}-unittests
+          fail_ci_if_error: true
+
