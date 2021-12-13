@@ -74,19 +74,19 @@ pipeline {
             }
         }
 
-
+    try{
         stage('Install & E2E Test') {
-                matrix {
-                    axes {
-                        axis {
-                            name 'MILVUS_SERVER_TYPE'
-                            values 'standalone', 'distributed'
-                        }
-                        axis {
-                            name 'MILVUS_CLIENT'
-                            values 'pymilvus'
-                        }
+            matrix {
+                axes {
+                    axis {
+                        name 'MILVUS_SERVER_TYPE'
+                        values 'standalone', 'distributed'
                     }
+                    axis {
+                        name 'MILVUS_CLIENT'
+                        values 'pymilvus'
+                    }
+                }
 
                 stages {
                         stage('Install') {
@@ -197,6 +197,16 @@ pipeline {
                 }
             }
         }
+    }catch(FlowInterruptedException interruptEx){
+        container('main') {
+                dir ('tests/scripts') {  
+                    script {
+                        def release_name=sh(returnStdout: true, script: './get_release_name.sh')
+                        sh "./uninstall_milvus.sh --release-name ${release_name}"
+                    }
+                }
+            }
+    }
     }
     post{
                 unsuccessful {
