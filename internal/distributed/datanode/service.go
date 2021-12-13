@@ -282,6 +282,7 @@ func (s *Server) start() error {
 	return nil
 }
 
+// GetComponentStates gets the component states of Datanode
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.datanode.GetComponentStates(ctx)
 }
