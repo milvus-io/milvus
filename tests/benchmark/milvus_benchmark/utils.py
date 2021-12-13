@@ -9,7 +9,6 @@ from yaml.representer import SafeRepresenter
 # from yaml import full_load, dump
 import yaml
 import tableprint as tp
-# from pprint import pprint
 import config
 
 logger = logging.getLogger("milvus_benchmark.utils")
