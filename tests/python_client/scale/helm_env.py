@@ -3,11 +3,19 @@ import os
 from scale import constants
 from utils.util_log import test_log as log
 from common import common_func as cf
-from scale import scale_common as sc
+
+
+def get_milvus_chart_env_var(var=constants.MILVUS_CHART_ENV):
+    """ get log path for testing """
+    try:
+        milvus_helm_chart = os.environ[var]
+        return str(milvus_helm_chart)
+    except Exception as e:
+        log.error(f'Failed to get environment variables {var}, with exception {str(e)}')
 
 
 class HelmEnv:
-    milvus_chart_path = sc.get_milvus_chart_env_var()
+    milvus_chart_path = get_milvus_chart_env_var()
 
     def __init__(self, release_name=None, **kwargs):
         self.release_name = release_name if release_name else cf.gen_unique_str(constants.DEFAULT_RELEASE_PREFIX)
