@@ -3,7 +3,7 @@
 [中文文档](./how-guarantee-ts-works-cn.md)
 
 Users and developers may feel confused by the so many parameters in the search requests, especially for those developers
-who develop SDK client for Milvus.
+who develop the SDK client for Milvus.
 
 This document will explain a special parameter in the search request-"Guarantee Timestamp", hereinafter referred to as
 "GuaranteeTs".
