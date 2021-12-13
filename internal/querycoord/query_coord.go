@@ -601,7 +601,7 @@ func chooseSegmentToBalance(sourceNodeID int64, dstNodeID int64,
 	}
 
 	if memoryInsufficient {
-		return nil, errors.New("all query nodes has insufficient memory")
+		return nil, errors.New("all QueryNode has insufficient memory")
 	}
 
 	return selectedSegmentInfo, nil
