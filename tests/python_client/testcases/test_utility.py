@@ -62,7 +62,7 @@ class TestUtilityParams(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_name_invalid(self, get_invalid_collection_name):
         """
         target: test has_collection with error collection name
@@ -79,7 +79,7 @@ class TestUtilityParams(TestcaseBase):
         # elif not isinstance(c_name, str):
         #     self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: "illegal"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_collection_name_invalid(self, get_invalid_collection_name):
         """
         target: test has_partition with error collection name
@@ -95,7 +95,7 @@ class TestUtilityParams(TestcaseBase):
                 check_task=CheckTasks.err_res,
                 check_items={ct.err_code: 1, ct.err_msg: "Invalid"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_name_invalid(self, get_invalid_partition_name):
         """
         target: test has_partition with error partition name
@@ -112,7 +112,7 @@ class TestUtilityParams(TestcaseBase):
                 check_task=CheckTasks.err_res,
                 check_items={ct.err_code: 1, ct.err_msg: "Invalid"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_name_invalid(self, get_invalid_collection_name):
         self._connect()
         error = f'`collection_name` value {get_invalid_collection_name} is illegal'
@@ -120,7 +120,7 @@ class TestUtilityParams(TestcaseBase):
                                           check_items={ct.err_code: 1, ct.err_msg: error})
 
     # TODO: enable
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_list_collections_using_invalid(self):
         """
         target: test list_collections with invalid using
@@ -163,7 +163,7 @@ class TestUtilityParams(TestcaseBase):
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_wait_index_invalid_name(self, get_invalid_collection_name):
         """
         target: test wait_index
@@ -194,7 +194,7 @@ class TestUtilityParams(TestcaseBase):
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_c_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_loading_progress_invalid_collection_name(self, invalid_c_name):
         """
@@ -210,7 +210,7 @@ class TestUtilityParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(invalid_c_name)}
         self.utility_wrap.loading_progress(invalid_c_name, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_not_existed_collection_name(self):
         """
         target: test loading progress with invalid collection name
@@ -225,7 +225,7 @@ class TestUtilityParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "describe collection failed: can't find collection"}
         self.utility_wrap.loading_progress("not_existed_name", check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tag(CaseLabel.L2)
     @pytest.mark.xfail(reason="pymilvus issue #677")
     def test_loading_progress_invalid_partition_names(self, get_invalid_partition_names):
         """
@@ -240,7 +240,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tag(CaseLabel.L2)
     @pytest.mark.parametrize("partition_names", [[ct.default_tag], [ct.default_partition_name, ct.default_tag]])
     def test_loading_progress_not_existed_partitions(self, partition_names):
         """
@@ -255,7 +255,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_wait_for_loading_collection_not_existed(self):
         """
         target: test wait for loading
@@ -269,7 +269,7 @@ class TestUtilityParams(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_wait_for_loading_partition_not_existed(self):
         """
         target: test wait for loading
@@ -283,6 +283,7 @@ class TestUtilityParams(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={ct.err_code: 1, ct.err_msg: f'partitionID of partitionName:{ct.default_tag} can not be find'})
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_not_existed(self):
         """
         target: test drop an not existed collection
@@ -294,7 +295,7 @@ class TestUtilityParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "describe collection failed: can't find collection:"}
         self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_calc_distance_left_vector_invalid_type(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -310,7 +311,7 @@ class TestUtilityParams(TestcaseBase):
                                                          "err_msg": "vectors_left value {} "
                                                                     "is illegal".format(invalid_vector)})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_calc_distance_left_vector_invalid_value(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -326,7 +327,7 @@ class TestUtilityParams(TestcaseBase):
                                                          "err_msg": "vectors_left value {} "
                                                                     "is illegal".format(invalid_vector)})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_calc_distance_right_vector_invalid_type(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -344,7 +345,7 @@ class TestUtilityParams(TestcaseBase):
                                                          "err_msg": "vectors_right value {} "
                                                                     "is illegal".format(invalid_vector)})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_calc_distance_right_vector_invalid_value(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -445,7 +446,7 @@ class TestUtilityParams(TestcaseBase):
                                         check_items={"err_code": 1,
                                                      "err_msg": "should create connect"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_calc_distance_not_match_dim(self):
         """
         target: test calculated distance with invalid vectors
@@ -546,7 +547,7 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.has_collection(c_name)
         assert res is False
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_has_partition(self):
         """
         target: test has_partition with partition name
@@ -560,7 +561,7 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.has_partition(c_name, p_name)
         assert res is True
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_not_created(self):
         """
         target: test has_partition with partition name
@@ -626,7 +627,7 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.list_collections()
         assert len(res) == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_index_process_collection_not_existed(self):
         """
         target: test building_process
@@ -654,7 +655,7 @@ class TestUtilityBase(TestcaseBase):
         exp_res = {'total_rows': 0, 'indexed_rows': 0}
         assert res == exp_res
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_index_process_collection_insert_no_index(self):
         """
         target: test building_process
@@ -705,7 +706,7 @@ class TestUtilityBase(TestcaseBase):
         assert (0 < res['indexed_rows'] <= nb)
         assert res['total_rows'] == nb
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_wait_index_collection_not_existed(self):
         """
         target: test wait_index
@@ -753,7 +754,7 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.index_building_progress(c_name)
         assert res["indexed_rows"] == nb
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tag(CaseLabel.L2)
     def test_loading_progress_without_loading(self):
         """
         target: test loading progress without loading
@@ -782,8 +783,7 @@ class TestUtilityBase(TestcaseBase):
         assert res[num_total_entities] == nb
         assert res[num_loaded_entities] == nb
 
-    @pytest.mark.tag(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue #702")
+    @pytest.mark.tag(CaseLabel.L2)
     def test_loading_progress_with_async_load(self):
         """
         target: test loading progress with async collection load
@@ -796,9 +796,9 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         collection_w.load(_async=True)
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert (0 < res[num_loaded_entities] <= ct.default_nb)
+        assert (0 <= res[num_loaded_entities] <= ct.default_nb)
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tag(CaseLabel.L2)
     def test_loading_progress_empty_collection(self):
         """
         target: test loading_progress on a empty collection
@@ -870,7 +870,7 @@ class TestUtilityBase(TestcaseBase):
         assert res[num_total_entities] == half
         assert res[num_loaded_entities] == half
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_wait_loading_collection_empty(self):
         """
         target: test wait_for_loading
@@ -885,7 +885,6 @@ class TestUtilityBase(TestcaseBase):
         exp_res = {num_total_entities: 0, num_loaded_entities: 0}
         assert res == exp_res
 
-    @pytest.mark.xfail(reason="pymilvus issue #702")
     @pytest.mark.tag(CaseLabel.L1)
     def test_wait_for_loading_complete(self):
         """
@@ -896,7 +895,7 @@ class TestUtilityBase(TestcaseBase):
         nb = 6000
         collection_w = self.init_collection_wrap()
         df = cf.gen_default_dataframe_data(nb)
-        collection_w.insert(df)
+        collection_w.insert(df, timeout=60)
         assert collection_w.num_entities == nb
         collection_w.load(_async=True)
         self.utility_wrap.wait_for_loading_complete(collection_w.name)
@@ -916,6 +915,7 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.drop_collection(c_name)
         assert not self.utility_wrap.has_collection(c_name)[0]
 
+    @pytest.mark.tag(CaseLabel.L0)
     def test_drop_collection_repeatedly(self):
         """
         target: test drop collection repeatedly
@@ -930,6 +930,7 @@ class TestUtilityBase(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: {"describe collection failed: can't find collection:"}}
         self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tag(CaseLabel.L2)
     def test_drop_collection_create_repeatedly(self):
         """
         target: test repeatedly create and drop same name collection
@@ -1317,6 +1318,7 @@ class TestUtilityAdvanced(TestcaseBase):
         for name in [c_name, c_name_2]:
             assert name in res
 
+    @pytest.mark.tag(CaseLabel.L2)
     def test_drop_multi_collection_concurrent(self):
         """
         target: test concurrent drop collection
@@ -1347,7 +1349,7 @@ class TestUtilityAdvanced(TestcaseBase):
             t.join()
         log.debug(self.utility_wrap.list_collections()[0])
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_get_query_segment_info_empty_collection(self):
         """
         target: test getting query segment info of empty collection
