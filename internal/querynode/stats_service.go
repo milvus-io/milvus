@@ -13,13 +13,13 @@ package querynode
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"go.uber.org/zap"
 )
 
 type statsService struct {
@@ -54,7 +54,7 @@ func (sService *statsService) start() {
 
 	statsStream, _ := sService.msFactory.NewMsgStream(sService.ctx)
 	statsStream.AsProducer(producerChannels)
-	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
+	log.Debug("QueryNode statsService AsProducer succeed", zap.Strings("channels", producerChannels))
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
