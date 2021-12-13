@@ -66,6 +66,7 @@ func (c *ClientBase) SetNewGrpcClientFunc(f func(cc *grpc.ClientConn) interface{
 	c.newGrpcClient = f
 }
 
+// GetGrpcClient returns grpc client
 func (c *ClientBase) GetGrpcClient(ctx context.Context) (interface{}, error) {
 	c.grpcClientMtx.RLock()
 
