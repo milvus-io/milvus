@@ -63,10 +63,9 @@ type insertBufferNode struct {
 	flushingSegCache *Cache
 	flushManager     flushManager
 
-	timeTickStream          msgstream.MsgStream
-	segmentStatisticsStream msgstream.MsgStream
-	ttLogger                timeTickLogger
-	ttMerger                *mergedTimeTickerSender
+	timeTickStream msgstream.MsgStream
+	ttLogger       timeTickLogger
+	ttMerger       *mergedTimeTickerSender
 }
 
 type timeTickLogger struct {
@@ -158,10 +157,6 @@ func (ibNode *insertBufferNode) Close() {
 	if ibNode.timeTickStream != nil {
 		ibNode.timeTickStream.Close()
 	}
-
-	if ibNode.segmentStatisticsStream != nil {
-		ibNode.segmentStatisticsStream.Close()
-	}
 }
 
 func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
@@ -209,14 +204,6 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	if err != nil {
 		log.Warn("update segment states in Replica wrong", zap.Error(err))
 		return []Msg{}
-	}
-
-	if len(seg2Upload) > 0 {
-		log.Debug("flowgraph insert buffer node consumed msgs with end position", zap.String("channel", ibNode.channelName), zap.Any("end position", endPositions[0]))
-		err := ibNode.uploadMemStates2Coord(seg2Upload)
-		if err != nil {
-			log.Error("upload segment statistics to coord error", zap.Error(err))
-		}
 	}
 
 	// insert messages -> buffer
@@ -357,7 +344,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		}
 	}
 
-	if err := ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax); err != nil {
+	if err := ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, seg2Upload); err != nil {
 		log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
 	}
 
@@ -709,58 +696,11 @@ func readBinary(reader io.Reader, receiver interface{}, dataType schemapb.DataTy
 }
 
 // writeHardTimeTick writes timetick once insertBufferNode operates.
-func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
+func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp, segmentIDs []int64) error {
 	ibNode.ttLogger.LogTs(ts)
-	ibNode.ttMerger.bufferTs(ts)
+	ibNode.ttMerger.bufferTs(ts, segmentIDs)
 	return nil
 }
-
-// uploadMemStates2Coord uploads latest changed segments statistics in DataNode memory to DataCoord
-//  through a msgStream channel.
-//
-// Currently, the statistics includes segment ID and its total number of rows in memory.
-func (ibNode *insertBufferNode) uploadMemStates2Coord(segIDs []UniqueID) error {
-	statsUpdates := make([]*internalpb.SegmentStatisticsUpdates, 0, len(segIDs))
-	for _, segID := range segIDs {
-		updates, err := ibNode.replica.getSegmentStatisticsUpdates(segID)
-		if err != nil {
-			log.Error("get segment statistics updates wrong", zap.Int64("segmentID", segID), zap.Error(err))
-			continue
-		}
-
-		log.Debug("Segment Statistics to Update",
-			zap.Int64("segment ID", updates.GetSegmentID()),
-			zap.Int64("collection ID", ibNode.replica.getCollectionID()),
-			zap.String("vchannel name", ibNode.channelName),
-			zap.Int64("numOfRows", updates.GetNumRows()),
-		)
-
-		statsUpdates = append(statsUpdates, updates)
-	}
-
-	segStats := internalpb.SegmentStatistics{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentStatistics,
-			MsgID:     UniqueID(0),  // GOOSE TODO
-			Timestamp: Timestamp(0), // GOOSE TODO
-			SourceID:  Params.NodeID,
-		},
-		SegStats: statsUpdates,
-	}
-
-	var msg msgstream.TsMsg = &msgstream.SegmentStatisticsMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0}, // GOOSE TODO
-		},
-		SegmentStatistics: segStats,
-	}
-
-	var msgPack = msgstream.MsgPack{
-		Msgs: []msgstream.TsMsg{msg},
-	}
-	return ibNode.segmentStatisticsStream.Produce(&msgPack)
-}
-
 func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID UniqueID) (collID, partitionID UniqueID, err error) {
 	return ibNode.replica.getCollectionAndPartitionID(segmentID)
 }
@@ -782,17 +722,16 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 
-	// update statistics channel
-	segS, err := config.msFactory.NewMsgStream(ctx)
-	if err != nil {
-		return nil, err
-	}
-	segS.AsProducer([]string{Params.SegmentStatisticsChannelName})
-	log.Debug("datanode AsProducer", zap.String("SegmentStatisChannelName", Params.SegmentStatisticsChannelName))
-	var segStatisticsMsgStream msgstream.MsgStream = segS
-	segStatisticsMsgStream.Start()
-
-	mt := newMergedTimeTickerSender(func(ts Timestamp) error {
+	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
+		stats := make([]*datapb.SegmentStats, 0, len(segmentIDs))
+		for _, sid := range segmentIDs {
+			stat, err := config.replica.getSegmentStatisticsUpdates(sid)
+			if err != nil {
+				log.Warn("failed to get segment statistics info", zap.Int64("segmentID", sid), zap.Error(err))
+				continue
+			}
+			stats = append(stats, stat)
+		}
 		msgPack := msgstream.MsgPack{}
 		timeTickMsg := msgstream.DataNodeTtMsg{
 			BaseMsg: msgstream.BaseMsg{
@@ -806,8 +745,9 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 					MsgID:     0,
 					Timestamp: ts,
 				},
-				ChannelName: config.vChannelName,
-				Timestamp:   ts,
+				ChannelName:   config.vChannelName,
+				Timestamp:     ts,
+				SegmentsStats: stats,
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
@@ -818,9 +758,7 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 		BaseNode:     baseNode,
 		insertBuffer: sync.Map{},
 
-		timeTickStream:          wTtMsgStream,
-		segmentStatisticsStream: segStatisticsMsgStream,
-
+		timeTickStream:   wTtMsgStream,
 		flushMap:         sync.Map{},
 		flushChan:        flushCh,
 		flushingSegCache: flushingSegCache,

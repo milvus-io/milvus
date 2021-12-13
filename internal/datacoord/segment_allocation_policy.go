@@ -142,5 +142,6 @@ const flushInterval = 2 * time.Second
 func flushPolicyV1(segment *SegmentInfo, t Timestamp) bool {
 	return segment.GetState() == commonpb.SegmentState_Sealed &&
 		segment.GetLastExpireTime() <= t &&
-		time.Since(segment.lastFlushTime) >= flushInterval
+		time.Since(segment.lastFlushTime) >= flushInterval &&
+		segment.currRows != 0
 }

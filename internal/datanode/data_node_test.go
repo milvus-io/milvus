@@ -55,7 +55,6 @@ func TestMain(t *testing.M) {
 	Params.Init()
 	// change to specific channel for test
 	Params.TimeTickChannelName = Params.TimeTickChannelName + strconv.Itoa(rand.Int())
-	Params.SegmentStatisticsChannelName = Params.SegmentStatisticsChannelName + strconv.Itoa(rand.Int())
 	code := t.Run()
 	os.Exit(code)
 }

@@ -204,7 +204,6 @@ func (node *DataNode) Register() error {
 // Init function does nothing now.
 func (node *DataNode) Init() error {
 	log.Debug("DataNode Init",
-		zap.String("SegmentStatisticsChannelName", Params.SegmentStatisticsChannelName),
 		zap.String("TimeTickChannelName", Params.TimeTickChannelName),
 	)
 

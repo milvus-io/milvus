@@ -71,12 +71,6 @@ func TestParamTable(t *testing.T) {
 		log.Println("ClusterChannelPrefix:", Params.ClusterChannelPrefix)
 	})
 
-	t.Run("Test SegmentStatisticsChannelName", func(t *testing.T) {
-		path := Params.SegmentStatisticsChannelName
-		assert.Equal(t, path, "by-dev-datacoord-statistics-channel")
-		log.Println("SegmentStatisticsChannelName:", path)
-	})
-
 	t.Run("Test TimeTickChannelName", func(t *testing.T) {
 		name := Params.TimeTickChannelName
 		assert.Equal(t, name, "by-dev-datacoord-timetick-channel")

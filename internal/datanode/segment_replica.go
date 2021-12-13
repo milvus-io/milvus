@@ -67,7 +67,7 @@ type Replica interface {
 
 	updateStatistics(segID UniqueID, numRows int64)
 	refreshFlushedSegStatistics(segID UniqueID, numRows int64)
-	getSegmentStatisticsUpdates(segID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
+	getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error)
 	segmentFlushed(segID UniqueID)
 }
 
@@ -580,12 +580,10 @@ func (replica *SegmentReplica) updateStatistics(segID UniqueID, numRows int64) {
 }
 
 // getSegmentStatisticsUpdates gives current segment's statistics updates.
-func (replica *SegmentReplica) getSegmentStatisticsUpdates(segID UniqueID) (*internalpb.SegmentStatisticsUpdates, error) {
+func (replica *SegmentReplica) getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error) {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
-	updates := &internalpb.SegmentStatisticsUpdates{
-		SegmentID: segID,
-	}
+	updates := &datapb.SegmentStats{SegmentID: segID}
 
 	if seg, ok := replica.newSegments[segID]; ok {
 		updates.NumRows = seg.numRows

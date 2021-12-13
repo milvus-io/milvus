@@ -29,9 +29,6 @@ func TestParamTable(t *testing.T) {
 	assert.Equal(t, Params.InsertChannelPrefixName, "by-dev-insert-channel-")
 	t.Logf("data coord insert channel = %s", Params.InsertChannelPrefixName)
 
-	assert.Equal(t, Params.StatisticsChannelName, "by-dev-datacoord-statistics-channel")
-	t.Logf("data coord stats channel = %s", Params.StatisticsChannelName)
-
 	assert.Equal(t, Params.TimeTickChannelName, "by-dev-datacoord-timetick-channel")
 	t.Logf("data coord timetick channel = %s", Params.TimeTickChannelName)
 

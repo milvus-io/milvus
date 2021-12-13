@@ -69,7 +69,6 @@ type ParamTable struct {
 	// --- Channels ---
 	ClusterChannelPrefix      string
 	InsertChannelPrefixName   string
-	StatisticsChannelName     string
 	TimeTickChannelName       string
 	SegmentInfoChannelName    string
 	DataCoordSubscriptionName string
@@ -117,7 +116,6 @@ func (p *ParamTable) Init() {
 	// Has to init global msgchannel prefix before other channel names
 	p.initClusterMsgChannelPrefix()
 	p.initInsertChannelPrefixName()
-	p.initStatisticsChannelName()
 	p.initTimeTickChannelName()
 	p.initSegmentInfoChannelName()
 	p.initDataCoordSubscriptionName()
@@ -242,15 +240,6 @@ func (p *ParamTable) initInsertChannelPrefixName() {
 	}
 	s := []string{p.ClusterChannelPrefix, config}
 	p.InsertChannelPrefixName = strings.Join(s, "-")
-}
-
-func (p *ParamTable) initStatisticsChannelName() {
-	config, err := p.Load("msgChannel.chanNamePrefix.dataCoordStatistic")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.StatisticsChannelName = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initTimeTickChannelName() {

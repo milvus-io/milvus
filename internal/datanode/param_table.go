@@ -59,9 +59,6 @@ type ParamTable struct {
 	// Cluster channels
 	ClusterChannelPrefix string
 
-	// Segment statistics channel
-	SegmentStatisticsChannelName string
-
 	// Timetick channel
 	TimeTickChannelName string
 
@@ -116,7 +113,6 @@ func (p *ParamTable) Init() {
 
 	// Must init global msgchannel prefix before other channel names
 	p.initClusterMsgChannelPrefix()
-	p.initSegmentStatisticsChannelName()
 	p.initTimeTickChannelName()
 
 	p.initEtcdEndpoints()
@@ -194,15 +190,6 @@ func (p *ParamTable) initClusterMsgChannelPrefix() {
 		panic(err)
 	}
 	p.ClusterChannelPrefix = name
-}
-
-func (p *ParamTable) initSegmentStatisticsChannelName() {
-	config, err := p.Load("msgChannel.chanNamePrefix.dataCoordStatistic")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.SegmentStatisticsChannelName = strings.Join(s, "-")
 }
 
 func (p *ParamTable) initTimeTickChannelName() {
