@@ -349,17 +349,17 @@ func (node *Proxy) Stop() error {
 
 	if node.idAllocator != nil {
 		node.idAllocator.Close()
-		log.Info("close id allocator", zap.String("role", Params.RoleName))
+		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))
 	}
 
 	if node.segAssigner != nil {
 		node.segAssigner.Close()
-		log.Info("close segment id assigner", zap.String("role", Params.RoleName))
+		log.Info("close segment id assigner", zap.String("role", typeutil.ProxyRole))
 	}
 
 	if node.sched != nil {
 		node.sched.Close()
-		log.Info("close scheduler", zap.String("role", Params.RoleName))
+		log.Info("close scheduler", zap.String("role", typeutil.ProxyRole))
 	}
 
 	if node.chTicker != nil {
@@ -367,7 +367,7 @@ func (node *Proxy) Stop() error {
 		if err != nil {
 			return err
 		}
-		log.Info("close channels time ticker", zap.String("role", Params.RoleName))
+		log.Info("close channels time ticker", zap.String("role", typeutil.ProxyRole))
 	}
 
 	node.wg.Wait()

@@ -4147,7 +4147,7 @@ func (lct *loadCollectionTask) OnEnqueue() error {
 }
 
 func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
-	log.Debug("loadCollectionTask PreExecute", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID))
+	log.Debug("loadCollectionTask PreExecute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
 	lct.Base.MsgType = commonpb.MsgType_LoadCollection
 	lct.Base.SourceID = Params.ProxyID
 
@@ -4161,7 +4161,7 @@ func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
-	log.Debug("loadCollectionTask Execute", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID))
+	log.Debug("loadCollectionTask Execute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
 	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
 	if err != nil {
 		return err
@@ -4182,7 +4182,8 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 		Schema:       collSchema,
 	}
-	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", Params.RoleName), zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
+	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
+		zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
 		zap.Any("schema", request.Schema))
 	lct.result, err = lct.queryCoord.LoadCollection(ctx, request)
 	if err != nil {
@@ -4192,7 +4193,8 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (lct *loadCollectionTask) PostExecute(ctx context.Context) error {
-	log.Debug("loadCollectionTask PostExecute", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID))
+	log.Debug("loadCollectionTask PostExecute", zap.String("role", typeutil.ProxyRole),
+		zap.Int64("msgID", lct.Base.MsgID))
 	return nil
 }
 
