@@ -55,6 +55,7 @@ func (dMsg *deleteMsg) TimeTick() Timestamp {
 	return dMsg.timeRange.timestampMax
 }
 
+// TimeTick returns timestamp of serviceTimeMsg
 func (stMsg *serviceTimeMsg) TimeTick() Timestamp {
 	return stMsg.timeRange.timestampMax
 }
