@@ -79,6 +79,7 @@ pull_request_rules:
       - base=master
       - title~=\[skip ci\]
       - label=kind/improvement
+      - -files~=^(?!.*\.(go|cpp)).*$
     actions:
       label:
         add:
@@ -96,7 +97,6 @@ pull_request_rules:
   - name: Remove ci-passed when unittest failed
     conditions:
       - base=master
-      - -title~=\[skip ci\]
       - "check-failure=Build and test AMD64 Ubuntu 18.04"
     actions:
       label:
