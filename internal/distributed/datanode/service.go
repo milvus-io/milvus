@@ -94,6 +94,7 @@ func (s *Server) startGrpc() error {
 	return err
 }
 
+// startGrpcLoop starts the grep loop of datanode component.
 func (s *Server) startGrpcLoop(listener net.Listener) {
 	defer s.wg.Done()
 	var kaep = keepalive.EnforcementPolicy{
