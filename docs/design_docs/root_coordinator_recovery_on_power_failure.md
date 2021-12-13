@@ -70,7 +70,7 @@
 
 ### Add processing of time synchronization signals from proxy node
 
-1. A virtual channel can be inserted by multiple proxies, so the timestamp in the virtual channel is not increase monotonically.
+1. A virtual channel can be inserted by multiple proxies, so the timestamp in the virtual channel does not increase monotonically.
 2. All proxies report the timestamp of all the virtual channels to the `RC` periodically.
 3. The `RC` collects the timestamps from the proxies on each virtual channel and gets the minimum one as the timestamp of that virtual channel, and then inserts the timestamp into the virtual channel.
 4. The proxy reports the timestamp to the `RC` via grpc.
