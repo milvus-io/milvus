@@ -25,9 +25,9 @@ $ chmod +x minio
 $ ./minio server /minio
 ```
 
-## Start Milvus standalone service
+## Start Milvus standalone
 
-To start Milvus service, you need a Milvus binary file. Currently you can get the latest version of Milvus binary file through the Milvus docker image. (We will upload Milvus binary files in the future)
+To start Milvus standalone, you need a Milvus binary file. Currently you can get the latest version of Milvus binary file through the Milvus docker image. (We will upload Milvus binary files in the future)
 
 ```shell
 $ docker run -d --name milvus milvusdb/milvus:v2.0.0-rc8-20211104-d1f4106 /bin/bash
