@@ -20,18 +20,15 @@ import (
 	"net/http"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"go.uber.org/zap"
 )
 
 const (
-	milvusNamespace    = "milvus"
-	subSystemRootCoord = "rootcoord"
-	subSystemDataCoord = "dataCoord"
-	subSystemDataNode  = "dataNode"
-	subSystemProxy     = "proxy"
+	milvusNamespace = "milvus"
 )
 
 var (
@@ -39,7 +36,7 @@ var (
 	RootCoordProxyLister = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "list_of_proxy",
 			Help:      "List of proxy nodes which have registered with etcd",
 		}, []string{"client_id"})
@@ -51,7 +48,7 @@ var (
 	RootCoordCreateCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "create_collection_total",
 			Help:      "Counter of create collection",
 		}, []string{"client_id", "type"})
@@ -60,7 +57,7 @@ var (
 	RootCoordDropCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "drop_collection_total",
 			Help:      "Counter of drop collection",
 		}, []string{"client_id", "type"})
@@ -69,7 +66,7 @@ var (
 	RootCoordHasCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "has_collection_total",
 			Help:      "Counter of has collection",
 		}, []string{"client_id", "type"})
@@ -78,7 +75,7 @@ var (
 	RootCoordDescribeCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "describe_collection_total",
 			Help:      "Counter of describe collection",
 		}, []string{"client_id", "type"})
@@ -87,7 +84,7 @@ var (
 	RootCoordShowCollectionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "show_collections_total",
 			Help:      "Counter of show collections",
 		}, []string{"client_id", "type"})
@@ -96,7 +93,7 @@ var (
 	RootCoordCreatePartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "create_partition_total",
 			Help:      "Counter of create partition",
 		}, []string{"client_id", "type"})
@@ -105,7 +102,7 @@ var (
 	RootCoordDropPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "drop_partition_total",
 			Help:      "Counter of drop partition",
 		}, []string{"client_id", "type"})
@@ -114,7 +111,7 @@ var (
 	RootCoordHasPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "has_partition_total",
 			Help:      "Counter of has partition",
 		}, []string{"client_id", "type"})
@@ -123,7 +120,7 @@ var (
 	RootCoordShowPartitionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "show_partitions_total",
 			Help:      "Counter of show partitions",
 		}, []string{"client_id", "type"})
@@ -132,7 +129,7 @@ var (
 	RootCoordCreateIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "create_index_total",
 			Help:      "Counter of create index",
 		}, []string{"client_id", "type"})
@@ -141,7 +138,7 @@ var (
 	RootCoordDropIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "drop_index_total",
 			Help:      "Counter of drop index",
 		}, []string{"client_id", "type"})
@@ -150,7 +147,7 @@ var (
 	RootCoordDescribeIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "describe_index_total",
 			Help:      "Counter of describe index",
 		}, []string{"client_id", "type"})
@@ -159,7 +156,7 @@ var (
 	RootCoordDescribeSegmentCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "describe_segment_total",
 			Help:      "Counter of describe segment",
 		}, []string{"client_id", "type"})
@@ -168,7 +165,7 @@ var (
 	RootCoordShowSegmentsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "show_segments_total",
 			Help:      "Counter of show segments",
 		}, []string{"client_id", "type"})
@@ -180,7 +177,7 @@ var (
 	RootCoordInsertChannelTimeTick = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "insert_channel_time_tick",
 			Help:      "Time tick of insert Channel in 24H",
 		}, []string{"vchannel"})
@@ -189,7 +186,7 @@ var (
 	RootCoordDDChannelTimeTick = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemRootCoord,
+			Subsystem: typeutil.RootCoordRole,
 			Name:      "dd_channel_time_tick",
 			Help:      "Time tick of dd Channel in 24H",
 		})
@@ -226,7 +223,7 @@ var (
 	ProxyCreateCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "create_collection_total",
 			Help:      "Counter of create collection",
 		}, []string{"status"})
@@ -235,7 +232,7 @@ var (
 	ProxyDropCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "drop_collection_total",
 			Help:      "Counter of drop collection",
 		}, []string{"status"})
@@ -244,7 +241,7 @@ var (
 	ProxyHasCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "has_collection_total",
 			Help:      "Counter of has collection",
 		}, []string{"status"})
@@ -253,7 +250,7 @@ var (
 	ProxyLoadCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "load_collection_total",
 			Help:      "Counter of load collection",
 		}, []string{"status"})
@@ -262,7 +259,7 @@ var (
 	ProxyReleaseCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "release_collection_total",
 			Help:      "Counter of release collection",
 		}, []string{"status"})
@@ -271,7 +268,7 @@ var (
 	ProxyDescribeCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "describe_collection_total",
 			Help:      "Counter of describe collection",
 		}, []string{"status"})
@@ -280,7 +277,7 @@ var (
 	ProxyGetCollectionStatisticsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_collection_statistics_total",
 			Help:      "Counter of get collection statistics",
 		}, []string{"status"})
@@ -289,7 +286,7 @@ var (
 	ProxyShowCollectionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "show_collections_total",
 			Help:      "Counter of show collections",
 		}, []string{"status"})
@@ -298,7 +295,7 @@ var (
 	ProxyCreatePartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "create_partition_total",
 			Help:      "Counter of create partition",
 		}, []string{"status"})
@@ -307,7 +304,7 @@ var (
 	ProxyDropPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "drop_partition_total",
 			Help:      "Counter of drop partition",
 		}, []string{"status"})
@@ -316,7 +313,7 @@ var (
 	ProxyHasPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "has_partition_total",
 			Help:      "Counter of has partition",
 		}, []string{"status"})
@@ -325,7 +322,7 @@ var (
 	ProxyLoadPartitionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "load_partitions_total",
 			Help:      "Counter of load partitions",
 		}, []string{"status"})
@@ -334,7 +331,7 @@ var (
 	ProxyReleasePartitionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "release_partitions_total",
 			Help:      "Counter of release partitions",
 		}, []string{"status"})
@@ -343,7 +340,7 @@ var (
 	ProxyGetPartitionStatisticsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_partition_statistics_total",
 			Help:      "Counter of get partition statistics",
 		}, []string{"status"})
@@ -352,7 +349,7 @@ var (
 	ProxyShowPartitionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "show_partitions_total",
 			Help:      "Counter of show partitions",
 		}, []string{"status"})
@@ -361,7 +358,7 @@ var (
 	ProxyCreateIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "create_index_counter",
 			Help:      "Counter of create index",
 		}, []string{"status"})
@@ -370,7 +367,7 @@ var (
 	ProxyDescribeIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "describe_index_counter",
 			Help:      "Counter of describe index",
 		}, []string{"status"})
@@ -379,7 +376,7 @@ var (
 	ProxyGetIndexStateCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_index_state_counter",
 			Help:      "Counter of get index state",
 		}, []string{"status"})
@@ -388,7 +385,7 @@ var (
 	ProxyGetIndexBuildProgressCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_index_build_progress_total",
 			Help:      "Counter of get index build progress",
 		}, []string{"status"})
@@ -397,7 +394,7 @@ var (
 	ProxyDropIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "drop_index_total",
 			Help:      "Counter of drop index",
 		}, []string{"status"})
@@ -406,7 +403,7 @@ var (
 	ProxyInsertCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "insert_total",
 			Help:      "Counter of insert",
 		}, []string{"status"})
@@ -415,7 +412,7 @@ var (
 	ProxySearchCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "search_total",
 			Help:      "Counter of search",
 		}, []string{"status"})
@@ -424,7 +421,7 @@ var (
 	ProxyRetrieveCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "retrieve_total",
 			Help:      "Counter of retrieve",
 		}, []string{"status"})
@@ -433,7 +430,7 @@ var (
 	ProxyFlushCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "flush_total",
 			Help:      "Counter of flush",
 		}, []string{"status"})
@@ -442,7 +439,7 @@ var (
 	ProxyQueryCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "query_total",
 			Help:      "Counter of query",
 		}, []string{"status"})
@@ -451,7 +448,7 @@ var (
 	ProxyGetPersistentSegmentInfoCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_persistent_segment_info_total",
 			Help:      "Counter of get persistent segment info",
 		}, []string{"status"})
@@ -460,7 +457,7 @@ var (
 	ProxyGetQuerySegmentInfoCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_query_segment_info_total",
 			Help:      "Counter of get query segment info",
 		}, []string{"status"})
@@ -469,7 +466,7 @@ var (
 	ProxyDummyCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "dummy_total",
 			Help:      "Counter of dummy",
 		}, []string{"status"})
@@ -478,7 +475,7 @@ var (
 	ProxyRegisterLinkCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "register_link_total",
 			Help:      "Counter of register link",
 		}, []string{"status"})
@@ -487,7 +484,7 @@ var (
 	ProxyGetComponentStatesCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_component_states_total",
 			Help:      "Counter of get component states",
 		}, []string{"status"})
@@ -496,7 +493,7 @@ var (
 	ProxyGetStatisticsChannelCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_statistics_channel_total",
 			Help:      "Counter of get statistics channel",
 		}, []string{"status"})
@@ -505,7 +502,7 @@ var (
 	ProxyInvalidateCollectionMetaCacheCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "invalidate_collection_meta_cache_total",
 			Help:      "Counter of invalidate collection meta cache",
 		}, []string{"status"})
@@ -514,7 +511,7 @@ var (
 	ProxyGetDdChannelCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "get_dd_channel_total",
 			Help:      "Counter of get dd channel",
 		}, []string{"status"})
@@ -523,7 +520,7 @@ var (
 	ProxyReleaseDQLMessageStreamCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "release_dql_message_stream_total",
 			Help:      "Counter of release dql message stream",
 		}, []string{"status"})
@@ -532,7 +529,7 @@ var (
 	ProxyDmlChannelTimeTick = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemProxy,
+			Subsystem: typeutil.ProxyRole,
 			Name:      "dml_channels_time_tick",
 			Help:      "Time tick of dml channels",
 		}, []string{"pchan"})
@@ -602,7 +599,7 @@ var (
 	DataCoordDataNodeList = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemDataCoord,
+			Subsystem: typeutil.DataCoordRole,
 			Name:      "list_of_data_node",
 			Help:      "List of data nodes registered within etcd",
 		}, []string{"status"},
@@ -619,7 +616,7 @@ var (
 	DataNodeFlushSegmentsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemDataNode,
+			Subsystem: typeutil.DataNodeRole,
 			Name:      "flush_segments_total",
 			Help:      "Counter of flush segments",
 		}, []string{"type"})
@@ -628,7 +625,7 @@ var (
 	DataNodeWatchDmChannelsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemDataNode,
+			Subsystem: typeutil.DataNodeRole,
 			Name:      "watch_dm_channels_total",
 			Help:      "Counter of watch dm channel",
 		}, []string{"type"})
