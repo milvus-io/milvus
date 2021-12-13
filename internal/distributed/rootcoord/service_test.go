@@ -103,7 +103,7 @@ func TestGrpcService(t *testing.T) {
 	err = core.Register()
 	assert.Nil(t, err)
 
-	err = svr.startGrpc()
+	err = svr.startGrpc(Params.Port)
 	assert.Nil(t, err)
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
