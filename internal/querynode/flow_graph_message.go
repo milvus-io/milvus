@@ -50,6 +50,7 @@ func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
 }
 
+// TimeTick returns timestamp of deleteMsg
 func (dMsg *deleteMsg) TimeTick() Timestamp {
 	return dMsg.timeRange.timestampMax
 }
