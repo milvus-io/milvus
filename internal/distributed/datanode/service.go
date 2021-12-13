@@ -305,6 +305,7 @@ func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 	return s.datanode.FlushSegments(ctx, req)
 }
 
+// GetMetrics gets the metrics info of Datanode.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.datanode.GetMetrics(ctx, request)
 }
