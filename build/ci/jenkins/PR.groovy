@@ -15,7 +15,7 @@ pipeline {
     }
     agent {
             kubernetes {
-                label 'milvus-e2e-test-pr' 
+                label 'milvus-e2e-test-pr'
                 inheritFrom 'default'
                 defaultContainer 'main'
                 yamlFile 'build/ci/jenkins/pod/rte.yaml'
@@ -25,7 +25,7 @@ pipeline {
             }
     }
     environment {
-        PROJECT_NAME = "milvus"
+        PROJECT_NAME = 'milvus'
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         IMAGE_REPO = 'dockerhub-mirror-sh.zilliz.cc/milvusdb'
         DOCKER_BUILDKIT = 1
