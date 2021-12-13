@@ -267,7 +267,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		return nil, nil, fmt.Errorf("data doesn't contains timestamp field")
 	}
 	if timeFieldData.RowNum() <= 0 {
-		return nil, nil, fmt.Errorf("There's no data in InsertData")
+		return nil, nil, fmt.Errorf("there's no data in InsertData")
 	}
 
 	ts := timeFieldData.(*Int64FieldData).Data
