@@ -39,7 +39,7 @@ func BytesToFloat32(bytes []byte) float32 {
 // BytesToInt64 converts a byte slice to uint64.
 func BytesToInt64(b []byte) (int64, error) {
 	if len(b) != 8 {
-		return 0, fmt.Errorf("Failed to convert []byte to int64: invalid data, must 8 bytes, but %d", len(b))
+		return 0, fmt.Errorf("failed to convert []byte to int64: invalid data, must 8 bytes, but %d", len(b))
 	}
 
 	return int64(common.Endian.Uint64(b)), nil
