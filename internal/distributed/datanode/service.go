@@ -137,6 +137,7 @@ func (s *Server) SetDataCoordInterface(ds types.DataCoord) error {
 	return s.datanode.SetDataCoord(ds)
 }
 
+// Run initializes and starts Datanode's grpc service.
 func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
