@@ -42,7 +42,7 @@ jobs:
           pip install --upgrade protobuf 
       
       - name: Run deploy test
-        timeout-minutes: 30
+        timeout-minutes: 60
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
@@ -136,7 +136,7 @@ jobs:
           helm uninstall deploy-testing
       
       - name: Seconde Milvus Deployment
-        timeout-minutes: 20
+        timeout-minutes: 60
         shell: bash
         working-directory: tests/python_client/deploy     
         run: |
