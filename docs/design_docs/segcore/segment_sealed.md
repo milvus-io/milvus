@@ -14,7 +14,7 @@ Search is executable as long as all the columns involved in the search are loade
 
 # SegmentSealedImpl internal data definition
 1. `row_count_opt_`:
-   1. Fill row count when load the first entity
+   1. Fill row count when loading the first entity
    2. All the other columns loaded must match the same row count
 3. `xxx_ready_bitset_` & `system_ready_count_`
    1. Used to record whether the corresponding column is loaded. Bitset corresponds to FieldOffset
