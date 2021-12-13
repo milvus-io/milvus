@@ -1,10 +1,10 @@
-import docker
+# import docker
 
 from utils import *
 
 connections.connect()
 
-list_containers()
+# list_containers()
 
 get_collections()
 
