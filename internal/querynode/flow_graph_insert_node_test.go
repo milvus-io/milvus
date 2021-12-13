@@ -80,7 +80,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -101,7 +101,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -132,7 +132,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
 		assert.NoError(t, err)
@@ -152,7 +152,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -178,7 +178,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -198,7 +198,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -230,7 +230,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -267,7 +267,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -293,7 +293,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -319,7 +319,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -344,7 +344,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 		err = streaming.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)

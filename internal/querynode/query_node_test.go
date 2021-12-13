@@ -197,7 +197,7 @@ func newQueryNodeMock() *QueryNode {
 		panic(err)
 	}
 	svr := NewQueryNode(ctx, msFactory)
-	tsReplica := newTSafeReplica(ctx)
+	tsReplica := newTSafeReplica()
 	streamingReplica := newCollectionReplica(etcdKV)
 	historicalReplica := newCollectionReplica(etcdKV)
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, historicalReplica, etcdKV, tsReplica)

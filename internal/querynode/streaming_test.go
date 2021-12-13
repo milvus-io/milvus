@@ -22,7 +22,7 @@ func TestStreaming_streaming(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tSafe := newTSafeReplica(ctx)
+	tSafe := newTSafeReplica()
 	streaming, err := genSimpleStreaming(ctx, tSafe)
 	assert.NoError(t, err)
 	defer streaming.close()
@@ -35,7 +35,7 @@ func TestStreaming_search(t *testing.T) {
 	defer cancel()
 
 	t.Run("test search", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		streaming, err := genSimpleStreaming(ctx, tSafe)
 		assert.NoError(t, err)
 		defer streaming.close()
@@ -46,7 +46,7 @@ func TestStreaming_search(t *testing.T) {
 		res, _, _, err := streaming.search(searchReqs,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
-			defaultVChannel,
+			defaultDMLChannel,
 			plan,
 			Timestamp(0))
 		assert.NoError(t, err)
@@ -54,7 +54,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test run empty partition", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		streaming, err := genSimpleStreaming(ctx, tSafe)
 		assert.NoError(t, err)
 		defer streaming.close()
@@ -65,7 +65,7 @@ func TestStreaming_search(t *testing.T) {
 		res, _, _, err := streaming.search(searchReqs,
 			defaultCollectionID,
 			[]UniqueID{},
-			defaultVChannel,
+			defaultDMLChannel,
 			plan,
 			Timestamp(0))
 		assert.NoError(t, err)
@@ -73,7 +73,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test run empty partition and loadCollection", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		streaming, err := genSimpleStreaming(ctx, tSafe)
 		assert.NoError(t, err)
 		defer streaming.close()
@@ -91,7 +91,7 @@ func TestStreaming_search(t *testing.T) {
 		res, _, _, err := streaming.search(searchReqs,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
-			defaultVChannel,
+			defaultDMLChannel,
 			plan,
 			Timestamp(0))
 		assert.NoError(t, err)
@@ -99,7 +99,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test run empty partition and loadPartition", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		streaming, err := genSimpleStreaming(ctx, tSafe)
 		assert.NoError(t, err)
 		defer streaming.close()
@@ -117,14 +117,14 @@ func TestStreaming_search(t *testing.T) {
 		_, _, _, err = streaming.search(searchReqs,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
-			defaultVChannel,
+			defaultDMLChannel,
 			plan,
 			Timestamp(0))
 		assert.Error(t, err)
 	})
 
 	t.Run("test no partitions in collection", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		streaming, err := genSimpleStreaming(ctx, tSafe)
 		assert.NoError(t, err)
 		defer streaming.close()
@@ -138,7 +138,7 @@ func TestStreaming_search(t *testing.T) {
 		res, _, _, err := streaming.search(searchReqs,
 			defaultCollectionID,
 			[]UniqueID{},
-			defaultVChannel,
+			defaultDMLChannel,
 			plan,
 			Timestamp(0))
 		assert.NoError(t, err)
@@ -146,7 +146,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test search failed", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		streaming, err := genSimpleStreaming(ctx, tSafe)
 		assert.NoError(t, err)
 		defer streaming.close()
@@ -162,7 +162,7 @@ func TestStreaming_search(t *testing.T) {
 		_, _, _, err = streaming.search(searchReqs,
 			defaultCollectionID,
 			[]UniqueID{},
-			defaultVChannel,
+			defaultDMLChannel,
 			plan,
 			Timestamp(0))
 		assert.Error(t, err)
@@ -173,7 +173,7 @@ func TestStreaming_retrieve(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tSafe := newTSafeReplica(ctx)
+	tSafe := newTSafeReplica()
 	streaming, err := genSimpleStreaming(ctx, tSafe)
 	assert.NoError(t, err)
 	defer streaming.close()

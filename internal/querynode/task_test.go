@@ -260,7 +260,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		task.req.Infos = []*datapb.VchannelInfo{
 			{
 				CollectionID: defaultCollectionID,
-				ChannelName:  defaultVChannel,
+				ChannelName:  defaultDMLChannel,
 			},
 		}
 		task.req.PartitionID = 0
@@ -279,7 +279,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		task.req.Infos = []*datapb.VchannelInfo{
 			{
 				CollectionID: defaultCollectionID,
-				ChannelName:  defaultVChannel,
+				ChannelName:  defaultDMLChannel,
 			},
 		}
 		err = task.Execute(ctx)
@@ -297,7 +297,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		task.req.Infos = []*datapb.VchannelInfo{
 			{
 				CollectionID: defaultCollectionID,
-				ChannelName:  defaultVChannel,
+				ChannelName:  defaultDMLChannel,
 			},
 		}
 		task.req.CollectionID++
@@ -318,9 +318,9 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	//	task.req.Infos = []*datapb.VchannelInfo{
 	//		{
 	//			CollectionID: defaultCollectionID,
-	//			ChannelName:  defaultVChannel,
+	//			ChannelName:  defaultDMLChannel,
 	//			SeekPosition: &msgstream.MsgPosition{
-	//				ChannelName: defaultVChannel,
+	//				ChannelName: defaultDMLChannel,
 	//				MsgID:       []byte{1, 2, 3},
 	//				MsgGroup:    defaultSubName,
 	//				Timestamp:   0,
@@ -340,11 +340,11 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			req:  genWatchDMChannelsRequest(),
 			node: node,
 		}
-		tmpChannel := defaultVChannel + "_1"
+		tmpChannel := defaultDMLChannel + "_1"
 		task.req.Infos = []*datapb.VchannelInfo{
 			{
 				CollectionID: defaultCollectionID,
-				ChannelName:  defaultVChannel,
+				ChannelName:  defaultDMLChannel,
 				SeekPosition: &msgstream.MsgPosition{
 					ChannelName: tmpChannel,
 					Timestamp:   0,
@@ -361,7 +361,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			},
 		}
 		err = task.Execute(ctx)
-		assert.NoError(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("test add excluded segment for dropped segment", func(t *testing.T) {
@@ -372,11 +372,11 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			req:  genWatchDMChannelsRequest(),
 			node: node,
 		}
-		tmpChannel := defaultVChannel + "_1"
+		tmpChannel := defaultDMLChannel + "_1"
 		task.req.Infos = []*datapb.VchannelInfo{
 			{
 				CollectionID: defaultCollectionID,
-				ChannelName:  defaultVChannel,
+				ChannelName:  defaultDMLChannel,
 				SeekPosition: &msgstream.MsgPosition{
 					ChannelName: tmpChannel,
 					Timestamp:   0,
@@ -393,7 +393,95 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			},
 		}
 		err = task.Execute(ctx)
+		assert.Error(t, err)
+	})
+}
+
+func TestTask_watchDeltaChannelsTask(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	genWatchDeltaChannelsRequest := func() *querypb.WatchDeltaChannelsRequest {
+		req := &querypb.WatchDeltaChannelsRequest{
+			Base:         genCommonMsgBase(commonpb.MsgType_WatchDeltaChannels),
+			CollectionID: defaultCollectionID,
+		}
+		return req
+	}
+
+	t.Run("test timestamp", func(t *testing.T) {
+		task := watchDeltaChannelsTask{
+			req: genWatchDeltaChannelsRequest(),
+		}
+		timestamp := Timestamp(1000)
+		task.req.Base.Timestamp = timestamp
+		resT := task.Timestamp()
+		assert.Equal(t, timestamp, resT)
+		task.req.Base = nil
+		resT = task.Timestamp()
+		assert.Equal(t, Timestamp(0), resT)
+	})
+
+	t.Run("test OnEnqueue", func(t *testing.T) {
+		task := watchDeltaChannelsTask{
+			req: genWatchDeltaChannelsRequest(),
+		}
+		err := task.OnEnqueue()
 		assert.NoError(t, err)
+		task.req.Base = nil
+		err = task.OnEnqueue()
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDeltaChannelsTask{
+			req:  genWatchDeltaChannelsRequest(),
+			node: node,
+		}
+		task.ctx = ctx
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID: defaultCollectionID,
+				ChannelName:  defaultDeltaChannel,
+				SeekPosition: &internalpb.MsgPosition{
+					ChannelName: defaultDeltaChannel,
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    defaultSubName,
+					Timestamp:   0,
+				},
+			},
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute without init collection", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDeltaChannelsTask{
+			req:  genWatchDeltaChannelsRequest(),
+			node: node,
+		}
+		task.ctx = ctx
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID: defaultCollectionID,
+				ChannelName:  defaultDeltaChannel,
+				SeekPosition: &internalpb.MsgPosition{
+					ChannelName: defaultDeltaChannel,
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    defaultSubName,
+					Timestamp:   0,
+				},
+			},
+		}
+		task.req.CollectionID++
+		err = task.Execute(ctx)
+		assert.Error(t, err)
 	})
 }
 
@@ -612,7 +700,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 
 		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
-		col.addVDeltaChannels([]Channel{defaultHistoricalVChannel})
+		col.addVDeltaChannels([]Channel{defaultDeltaChannel})
 
 		task := releaseCollectionTask{
 			req:  genReleaseCollectionRequest(),
@@ -671,9 +759,10 @@ func TestTask_releasePartitionTask(t *testing.T) {
 			req:  genReleasePartitionsRequest(),
 			node: node,
 		}
-		task.node.dataSyncService.addPartitionFlowGraph(defaultCollectionID,
+		task.node.dataSyncService.addDMLFlowGraphs(defaultCollectionID,
 			defaultPartitionID,
-			[]Channel{defaultVChannel})
+			loadTypePartition,
+			[]Channel{defaultDMLChannel})
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 	})
@@ -706,7 +795,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		err = node.historical.replica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		col.addVDeltaChannels([]Channel{defaultHistoricalVChannel})
+		col.addVDeltaChannels([]Channel{defaultDeltaChannel})
 		col.setLoadType(loadTypePartition)
 
 		err = node.queryService.addQueryCollection(defaultCollectionID)
@@ -716,9 +805,10 @@ func TestTask_releasePartitionTask(t *testing.T) {
 			req:  genReleasePartitionsRequest(),
 			node: node,
 		}
-		task.node.dataSyncService.addPartitionFlowGraph(defaultCollectionID,
+		task.node.dataSyncService.addDMLFlowGraphs(defaultCollectionID,
 			defaultPartitionID,
-			[]Channel{defaultVChannel})
+			loadTypePartition,
+			[]Channel{defaultDMLChannel})
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 	})

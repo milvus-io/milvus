@@ -30,7 +30,6 @@ import (
 type filterDeleteNode struct {
 	baseNode
 	collectionID UniqueID
-	partitionID  UniqueID
 	replica      ReplicaInterface
 }
 
@@ -114,9 +113,7 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 }
 
 // newFilteredDeleteNode returns a new filterDeleteNode
-func newFilteredDeleteNode(replica ReplicaInterface,
-	collectionID UniqueID,
-	partitionID UniqueID) *filterDeleteNode {
+func newFilteredDeleteNode(replica ReplicaInterface, collectionID UniqueID) *filterDeleteNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -128,7 +125,6 @@ func newFilteredDeleteNode(replica ReplicaInterface,
 	return &filterDeleteNode{
 		baseNode:     baseNode,
 		collectionID: collectionID,
-		partitionID:  partitionID,
 		replica:      replica,
 	}
 }

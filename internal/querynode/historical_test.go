@@ -100,7 +100,7 @@ func TestHistorical_Search(t *testing.T) {
 	defer cancel()
 
 	t.Run("test search", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
@@ -112,7 +112,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test no collection - search partitions", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
@@ -127,7 +127,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test no collection - search all collection", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
@@ -142,7 +142,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test load partition and partition has been released", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
@@ -161,7 +161,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test no partition in collection", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
@@ -178,7 +178,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test load collection partition released in collection", func(t *testing.T) {
-		tSafe := newTSafeReplica(ctx)
+		tSafe := newTSafeReplica()
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 

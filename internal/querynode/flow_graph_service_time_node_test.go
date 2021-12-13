@@ -30,8 +30,8 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 	defer cancel()
 
 	genServiceTimeNode := func() *serviceTimeNode {
-		tSafe := newTSafeReplica(ctx)
-		tSafe.addTSafe(defaultVChannel)
+		tSafe := newTSafeReplica()
+		tSafe.addTSafe(defaultDMLChannel)
 
 		fac, err := genFactory()
 		assert.NoError(t, err)
@@ -39,9 +39,7 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 		node := newServiceTimeNode(ctx,
 			tSafe,
 			loadTypeCollection,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			fac)
 		return node
 	}
@@ -85,8 +83,7 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 
 	t.Run("test no tSafe", func(t *testing.T) {
 		node := genServiceTimeNode()
-		isRemoved := node.tSafeReplica.removeTSafe(defaultVChannel)
-		assert.True(t, isRemoved)
+		node.tSafeReplica.removeTSafe(defaultDMLChannel)
 		msg := &serviceTimeMsg{
 			timeRange: TimeRange{
 				timestampMin: 0,

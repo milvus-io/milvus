@@ -29,7 +29,7 @@ func TestQueryNodeFlowGraph_consumerFlowGraph(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tSafe := newTSafeReplica(ctx)
+	tSafe := newTSafeReplica()
 
 	streamingReplica, err := genSimpleReplica()
 	assert.NoError(t, err)
@@ -43,10 +43,10 @@ func TestQueryNodeFlowGraph_consumerFlowGraph(t *testing.T) {
 		defaultPartitionID,
 		streamingReplica,
 		tSafe,
-		defaultVChannel,
+		defaultDMLChannel,
 		fac)
 
-	err = fg.consumerFlowGraph(defaultVChannel, defaultSubName)
+	err = fg.consumerFlowGraph(defaultDMLChannel, defaultSubName)
 	assert.NoError(t, err)
 
 	fg.close()
@@ -62,7 +62,7 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 	fac, err := genFactory()
 	assert.NoError(t, err)
 
-	tSafe := newTSafeReplica(ctx)
+	tSafe := newTSafeReplica()
 
 	fg := newQueryNodeFlowGraph(ctx,
 		loadTypeCollection,
@@ -70,11 +70,11 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 		defaultPartitionID,
 		streamingReplica,
 		tSafe,
-		defaultVChannel,
+		defaultDMLChannel,
 		fac)
 
 	position := &internalpb.MsgPosition{
-		ChannelName: defaultVChannel,
+		ChannelName: defaultDMLChannel,
 		MsgID:       []byte{},
 		MsgGroup:    defaultSubName,
 		Timestamp:   0,

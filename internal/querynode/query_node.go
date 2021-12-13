@@ -196,7 +196,7 @@ func (node *QueryNode) Init() error {
 			zap.Any("EtcdEndpoints", Params.EtcdEndpoints),
 			zap.Any("MetaRootPath", Params.MetaRootPath),
 		)
-		node.tSafeReplica = newTSafeReplica(node.queryNodeLoopCtx)
+		node.tSafeReplica = newTSafeReplica()
 
 		streamingReplica := newCollectionReplica(node.etcdKV)
 		historicalReplica := newCollectionReplica(node.etcdKV)
