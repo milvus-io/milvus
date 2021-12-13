@@ -48,7 +48,7 @@ func InitRocksMQ() error {
 	once.Do(func() {
 		params.Init()
 		rocksdbName, _ := params.Load("_RocksmqPath")
-		log.Debug("RocksmqPath=" + rocksdbName)
+		log.Debug("initializing global rmq", zap.String("path", rocksdbName))
 		var fi os.FileInfo
 		fi, finalErr = os.Stat(rocksdbName)
 		if os.IsNotExist(finalErr) {
