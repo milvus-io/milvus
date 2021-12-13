@@ -70,7 +70,7 @@ type createIndexTask struct {
        }
    ```
 
-   - `PostExecute`, `CreateIndexTask` does nothing at this phase, and return directly.
+   - `PostExecute`, `CreateIndexTask` does nothing at this phase, and returns directly.
 
 4. `RootCoord` would wrap the `CreateIndex` request into `CreateIndexReqTask`, and then call function `executeTask`. `executeTask` would return until the `context` is done or `CreateIndexReqTask.Execute` returned.
 
@@ -90,7 +90,7 @@ type CreateIndexReqTask struct {
 
 5. According to the index type and index parameters, `RootCoord` lists all the `Segments` that need to be indexed on this `Collection`. `RootCoord` would only check those `Segments` which have been flushed at this stage. We will describe how to deal with those newly added segments and growing segments later.
 
-6. For each `Segment`, `RootCoord` would start a `Grpc` request to `DataCoord` to get `Binlog` paths of that `Segment`, the `proto` is defined as following
+6. For each `Segment`, `RootCoord` would start a `Grpc` request to `DataCoord` to get `Binlog` paths of that `Segment`, the `proto` is defined as following:
 
 ```proto
 service DataCoord {
@@ -115,8 +115,7 @@ message GetInsertBinlogPathsResponse {
 
 ```
 
-7. After getting the `Segment`'s `Binlog` paths, `RootCoord` would send a `Grpc` request to `IndexCoord`, 
-   ask `IndexCoord` to build index on this `Segment`, the `proto` is defined as the follow:
+7. After getting the `Segment`'s `Binlog` paths, `RootCoord` would send a `Grpc` request to `IndexCoord`, ask `IndexCoord` to build index on this `Segment`, the `proto` is defined as the follow:
 
 ```proto
 service IndexCoord {
