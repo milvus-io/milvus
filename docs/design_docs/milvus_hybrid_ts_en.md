@@ -6,15 +6,15 @@ implemented, you can look into the official documentation of TiKV.
 
 This chapter will only introduce two points:
 
-- 1, the organization of hybrid TSO in Milvus;
-- 2, how should we parse the hybrid TSO;
+1. the organization of hybrid TSO in Milvus;
+2. how should we parse the hybrid TSO;
 
 ## The Organization of TSO
 
 The type of TSO is `uint64`. As shown in the figure below, TSO was organized by two parts:
 
-- 1, physical part;
-- 2, logical part;
+1. physical part;
+2. logical part;
 
 The front 46 bits is of physical part, and the last 18 bits is of logical part.
 
