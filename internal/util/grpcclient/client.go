@@ -228,6 +228,7 @@ func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{})
 	return ret, err
 }
 
+// Close close the client connection
 func (c *ClientBase) Close() error {
 	c.grpcClientMtx.Lock()
 	defer c.grpcClientMtx.Unlock()
