@@ -83,7 +83,7 @@ After syntax analysis, the following rules will be applied:
 5. Integer columns can only match integer operands. While float columns can match both integer and float operands.
 6. In BinaryOp, the `and`/`&&` operator has higher priority than the `or`/`||` operator.
 
-example：
+Example：
 
 ```python
 A > 3 && A < 4 && (C > 5 || D < 6)
