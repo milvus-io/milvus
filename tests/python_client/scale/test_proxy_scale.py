@@ -1,9 +1,11 @@
+import multiprocessing
 import pytest
-
+from customize.milvus_operator import MilvusOperator
 from scale.helm_env import HelmEnv
 from common import common_func as cf
 from common.common_type import CaseLabel
-from scale import scale_common as sc
+from scale import scale_common as sc, constants
+from utils.util_log import test_log as log
 
 prefix = "proxy_scale"
 
@@ -22,17 +24,47 @@ class TestProxyScale:
         """
         # deploy all nodes one pod cluster milvus with helm
         release_name = "scale-proxy"
-        env = HelmEnv(release_name=release_name)
-        host = env.helm_install_cluster_milvus()
+        image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
+        data_config = {
+            'metadata.namespace': constants.NAMESPACE,
+            'metadata.name': release_name,
+            'spec.components.image': image,
+            'spec.components.proxy.serviceType': 'LoadBalancer',
+            'spec.components.proxy.replicas': 1,
+            'spec.components.dataNode.replicas': 2,
+            'spec.config.dataCoord.enableCompaction': True,
+            'spec.config.dataCoord.enableGarbageCollection': True
+        }
+        mic = MilvusOperator()
+        mic.install(data_config)
+        healthy = mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200)
+        log.info(f"milvus healthy: {healthy}")
+        host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+        # host = "10.98.0.7"
 
         c_name = cf.gen_unique_str(prefix)
-        sc.e2e_milvus(host, c_name)
+        process_list = []
+        for i in range(5):
+            p = multiprocessing.Process(target=sc.e2e_milvus, args=(host, c_name))
+            p.start()
+            process_list.append(p)
 
-        # scale proxy
-        env.helm_upgrade_cluster_milvus(proxy=2)
+        for p in process_list:
+            p.join()
 
-        # c_name_2 = cf.gen_unique_str(prefix)
-        sc.e2e_milvus(host, c_name, collection_exist=True)
+        log.info('Milvus test before scale up')
+
+        mic.upgrade(release_name, {'spec.components.proxy.replicas': 5}, constants.NAMESPACE)
+
+        for i in range(5):
+            p = multiprocessing.Process(target=sc.e2e_milvus, args=(host, c_name))
+            p.start()
+            process_list.append(p)
+
+        for p in process_list:
+            p.join()
+
+        log.info('Milvus test after scale up')
 
     def test_shrink_proxy(self):
         """
