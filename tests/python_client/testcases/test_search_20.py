@@ -39,8 +39,6 @@ raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
 
 
-
-
 class TestCollectionSearchInvalid(TestcaseBase):
     """ Test case of search interface """
 
@@ -782,6 +780,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": f"`round_decimal` value {round_decimal} is illegal"})
 
+
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
 
@@ -871,7 +870,7 @@ class TestCollectionSearch(TestcaseBase):
             assert hits.distances[0] == 0.0
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dup_times", [1,2,3])
+    @pytest.mark.parametrize("dup_times", [1, 2, 3])
     def test_search_with_dup_primary_key(self, dim, auto_id, _async, dup_times):
         """
         target: test search with duplicate primary key
