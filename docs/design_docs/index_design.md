@@ -15,7 +15,7 @@ The following figure shows the design of the indexCoord component:
 IndexCoord, like the other Milvus components, relies on etcd to implement
 service discovery. IndexCoord relies on the lease mechanism of etcd to sense the online and offline news of IndexNode.
 
-In addition to service discovery, Milvus also uses etcd as a reliable meta storage, and writes all
+In addition to service discovery, Milvus also uses etcd as a reliable meta storage and writes all
 persistent status information to etcd. The purpose is to restore a certain Milvus component to its original
 state after power off and restart.
 
@@ -29,7 +29,7 @@ return the IndexBuildID of the existing task. Otherwise, it would assign a globa
 record the task in the MetaTable, write the MetaTable to etcd, and then return the IndexBuildID to RootCoord.
 RootCoord confirms that the index building is generated successfully by the IndexBuildID. At this time, the index construction
 is not completed yet. IndexCoord starts a background process to find all the index tasks that need to be
-allocated periodically, and then allocates them to IndexNode for actual execution.
+allocated periodically and then allocates them to IndexNode for actual execution.
 
 When IndexCoord receives a request to delete an index from RootCoord, IndexCoord traverses the MetaTable,
 marks the corresponding index task as deleted, and returns. It is not really deleted from the MetaTable at this time.
