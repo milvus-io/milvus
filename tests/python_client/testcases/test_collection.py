@@ -931,7 +931,6 @@ class TestCollectionParams(TestcaseBase):
                                              check_task=CheckTasks.err_res,
                                              check_items=error)
 
-    @pytest.mark.xfail(reason="Issue 13321")
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_collection_maximum_fields(self):
         """
@@ -953,7 +952,6 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
-    @pytest.mark.xfail(reason="Issue 13321")
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_over_maximum_fields(self):
         """
