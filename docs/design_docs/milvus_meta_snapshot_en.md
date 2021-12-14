@@ -67,7 +67,7 @@ The output of above test program should look like this:
 --- PASS: TestMVCC (0.01s)
 ```
 
-In `etcd`, each write operation would add `1` to `Revision`. So if we specify the `Revision` value at query, we can get the historical value under that `Revision`.
+In `etcd`, each writes operation would add `1` to `Revision`. So if we specify the `Revision` value at query, we can get the historical value under that `Revision`.
 
 `metaSnapShot` is based on this feature of `etcd`. We will write an extra `Timestamp` on each write operation. `etcd`'s `Txn` makes sure that the `Timestamp` would have the same `Revision` with user data.
 
