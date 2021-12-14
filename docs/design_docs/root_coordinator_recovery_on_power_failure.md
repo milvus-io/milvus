@@ -52,7 +52,7 @@
 ### 2.5 Flushed segment from `data node`
 
 1. Each time the `data node` finishes flushing a segment, it sends the segment id to the `RC` via msgstream.
-2. `RC` needs to fetch binlog from `DC` by id and send a request to `IC` to create index on this segment.
+2. `RC` needs to fetch binlog from `DC` by id and send a request to `IC` to create an index on this segment.
 3. When the `IC` is called successfully, it will return a build id, and then `RC` will update the build id to the `collection meta` and record the position of the msgstream in etcd.
 4. Step 3 is transactional and the operation will be successful only if the `collection meta` in etcd is updated.
 5. So the `RC` only needs to restore the msgstream to the position when recovering from a power failure.
