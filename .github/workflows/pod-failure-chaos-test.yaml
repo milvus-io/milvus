@@ -122,7 +122,7 @@ jobs:
         timeout-minutes: 5
         if: ${{ always() }}
         shell: bash
-        working-directory: tests/python_client/chaos
+        working-directory: tests/python_client
         run: |
           kubectl get pod -n chaos-testing
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
