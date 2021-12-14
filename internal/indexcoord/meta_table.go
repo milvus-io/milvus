@@ -514,6 +514,7 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 	return true
 }
 
+// GetNodeTaskStats get task stats of IndexNode.
 func (mt *metaTable) GetNodeTaskStats() map[UniqueID]int {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()
