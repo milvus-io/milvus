@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1639388792474,
+  "iteration": 1639447677744,
   "links": [],
   "panels": [
     {
@@ -3568,7 +3568,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Rate of mallocs",
+      "description": "Rate of go memory mallocs.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -3610,7 +3610,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(go_memstats_mallocs_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m])",
+          "expr": "rate(go_memstats_mallocs_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[2m])",
           "interval": "",
           "intervalFactor": 2,
           "legendFormat": "{{pod}}",
@@ -3622,7 +3622,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Malloc Rate",
+      "title": "Go Memory mallocs rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -3911,7 +3911,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "default",
           "value": "default"
         },
@@ -3943,7 +3943,7 @@
         "allValue": null,
         "current": {
           "isNone": true,
-          "selected": false,
+          "selected": true,
           "text": "None",
           "value": ""
         },
@@ -4006,13 +4006,10 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": [
-            "None"
-          ],
-          "value": [
-            ""
-          ]
+          "isNone": true,
+          "selected": false,
+          "text": "None",
+          "value": ""
         },
         "datasource": "${datasource}",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , app_kubernetes_io_component)",
@@ -4041,7 +4038,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
@@ -4074,5 +4071,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 198
+  "version": 201
 }
