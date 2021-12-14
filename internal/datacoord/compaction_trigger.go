@@ -238,7 +238,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 	if t.compactionHandler.isFull() {
 		return
 	}
-	segments := t.meta.segments.GetSegments()
+	// only flushed or flushing(flushed but not notified) segments
+	segments := t.meta.SelectSegments(isFlush)
 	singleCompactionPlans := t.globalSingleCompaction(segments, false, signal)
 	if len(singleCompactionPlans) != 0 {
 		log.Debug("global single compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("plans", getPlanIDs(singleCompactionPlans)))
