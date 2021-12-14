@@ -109,6 +109,7 @@ func ReadDescriptorEvent(buffer io.Reader) (*descriptorEvent, error) {
 	}, nil
 }
 
+// EventWriter abstracts event writer
 type EventWriter interface {
 	PayloadWriterInterface
 	// Finish set meta in header and no data can be added to event writer
