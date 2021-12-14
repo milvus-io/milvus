@@ -332,16 +332,15 @@ func (s *Server) LoadCollection(ctx context.Context, request *milvuspb.LoadColle
 	return s.proxy.LoadCollection(ctx, request)
 }
 
+// ReleaseCollection notifies Proxy to release a collection's data
 func (s *Server) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.ReleaseCollection(ctx, request)
 }
 
-// ReleaseCollection notifies Proxy to release a collection's data
 func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.proxy.DescribeCollection(ctx, request)
 }
 
-// ReleaseCollection notifies Proxy to release a collection's data
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	return s.proxy.GetCollectionStatistics(ctx, request)
 }
