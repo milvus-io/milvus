@@ -160,6 +160,7 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 							},
 						},
 					},
+					StartTime:        3,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
 					Type:             datapb.CompactionType_MergeCompaction,
 					Timetravel:       200,
@@ -219,6 +220,7 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 							},
 						},
 					},
+					StartTime:        3,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
 					Type:             datapb.CompactionType_InnerCompaction,
 					Timetravel:       200,
@@ -364,13 +366,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 							},
 						},
 					},
+					StartTime:        3,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
 					Type:             datapb.CompactionType_InnerCompaction,
 					Timetravel:       200,
 					Channel:          "ch1",
 				},
 				{
-					PlanID: 3,
+					PlanID: 4,
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 						{
 							SegmentID: 2,
@@ -391,6 +394,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 							},
 						},
 					},
+					StartTime:        5,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
 					Type:             datapb.CompactionType_MergeCompaction,
 					Timetravel:       200,
@@ -474,6 +478,94 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 			},
 			false,
 			[]*datapb.CompactionPlan{},
+		},
+		{
+			"test merge flushing segment",
+			fields{
+				&meta{
+					segments: &SegmentsInfo{
+						map[int64]*SegmentInfo{
+							2: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:             2,
+									CollectionID:   2,
+									PartitionID:    1,
+									LastExpireTime: 100,
+									NumOfRows:      300,
+									MaxRowNum:      1000,
+									InsertChannel:  "ch2",
+									State:          commonpb.SegmentState_Flushing,
+									Binlogs: []*datapb.FieldBinlog{
+										{FieldID: 1, Binlogs: []string{"binlog2"}},
+									},
+									Deltalogs: []*datapb.DeltaLogInfo{
+										{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+									},
+								},
+							},
+							3: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:             3,
+									CollectionID:   2,
+									PartitionID:    1,
+									LastExpireTime: 100,
+									NumOfRows:      300,
+									MaxRowNum:      1000,
+									InsertChannel:  "ch2",
+									State:          commonpb.SegmentState_Flushing,
+									Binlogs: []*datapb.FieldBinlog{
+										{FieldID: 1, Binlogs: []string{"binlog3"}},
+									},
+									Deltalogs: []*datapb.DeltaLogInfo{
+										{RecordEntries: 5, DeltaLogPath: "deltalog3"},
+									},
+								},
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				make(chan *compactionSignal, 1),
+				(singleCompactionFunc)(chooseAllBinlogs),
+				(mergeCompactionFunc)(greedyMergeCompaction),
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 2)},
+				2,
+				true,
+			},
+			args{
+				&timetravel{200},
+			},
+			false,
+			[]*datapb.CompactionPlan{
+				{
+					PlanID: 2,
+					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+						{
+							SegmentID: 2,
+							FieldBinlogs: []*datapb.FieldBinlog{
+								{FieldID: 1, Binlogs: []string{"binlog2"}},
+							},
+							Deltalogs: []*datapb.DeltaLogInfo{
+								{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+							},
+						},
+						{
+							SegmentID: 3,
+							FieldBinlogs: []*datapb.FieldBinlog{
+								{FieldID: 1, Binlogs: []string{"binlog3"}},
+							},
+							Deltalogs: []*datapb.DeltaLogInfo{
+								{RecordEntries: 5, DeltaLogPath: "deltalog3"},
+							},
+						},
+					},
+					StartTime:        3,
+					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
+					Type:             datapb.CompactionType_MergeCompaction,
+					Timetravel:       200,
+					Channel:          "ch2",
+				},
+			},
 		},
 	}
 

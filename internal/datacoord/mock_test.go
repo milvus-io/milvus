@@ -51,9 +51,7 @@ type MockAllocator struct {
 
 func (m *MockAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
 	val := atomic.AddInt64(&m.cnt, 1)
-	phy := time.Now().UnixNano() / int64(time.Millisecond)
-	ts := tsoutil.ComposeTS(phy, val)
-	return ts, nil
+	return Timestamp(val), nil
 }
 
 func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
