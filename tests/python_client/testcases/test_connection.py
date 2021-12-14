@@ -709,8 +709,6 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr, check_items={ct.list_content: list_content})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
-    # @pytest.mark.parametrize("collection_name, schema", [(cf.gen_unique_str('connection_test_'),
-    #                                                       cf.gen_default_collection_schema())])
     def test_connection_init_collection_invalid_connection(self):
         """
         target: create collection with invalid connection
@@ -727,8 +725,6 @@ class TestConnectionOperation(TestcaseBase):
                                              _using=ct.Not_Exist)
 
     @pytest.mark.tags(ct.CaseLabel.L1)
-    # @pytest.mark.parametrize("collection_name, schema", [(cf.gen_unique_str('connection_test_'),
-    #                                                       cf.gen_default_collection_schema())])
     def test_connection_init_collection_connection(self, host, port):
         """
         target: create collection then disconnection
