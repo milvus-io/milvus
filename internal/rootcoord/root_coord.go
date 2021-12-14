@@ -1055,7 +1055,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 
 	var invalidateCache bool
 	var ts typeutil.Timestamp
-	var dbName, collName string
+	var collName string
 
 	switch ddOp.Type {
 	// TODO remove create collection resend
@@ -1079,7 +1079,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 			return err
 		}
 		ts = ddReq.Base.Timestamp
-		dbName, collName = ddReq.DbName, ddReq.CollectionName
+		collName = ddReq.CollectionName
 		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
 		if err != nil {
 			return err
@@ -1094,7 +1094,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 			return err
 		}
 		ts = ddReq.Base.Timestamp
-		dbName, collName = ddReq.DbName, ddReq.CollectionName
+		collName = ddReq.CollectionName
 		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
 		if err != nil {
 			return err
@@ -1112,7 +1112,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 			return err
 		}
 		ts = ddReq.Base.Timestamp
-		dbName, collName = ddReq.DbName, ddReq.CollectionName
+		collName = ddReq.CollectionName
 		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
 		if err != nil {
 			return err
@@ -1129,17 +1129,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	}
 
 	if invalidateCache {
-		req := proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO, msg type
-				MsgID:     0, //TODO, msg id
-				Timestamp: ts,
-				SourceID:  c.session.ServerID,
-			},
-			DbName:         dbName,
-			CollectionName: collName,
-		}
-		c.proxyClientManager.InvalidateCollectionMetaCache(c.ctx, &req)
+		c.ExpireMetaCache(ctx, []string{collName}, ts)
 	}
 
 	// Update DDOperation in etcd
