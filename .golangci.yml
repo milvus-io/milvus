@@ -11,14 +11,6 @@ linters-settings:
   misspell:
     locale: US
 
-  revive:
-    ignore-generated-header: true
-    severity: warning
-    confidence: 0.8
-    rules:
-      - name: context-as-argument
-        severity: warning
-
 linters:
   disable-all: true
   enable:

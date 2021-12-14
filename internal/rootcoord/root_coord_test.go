@@ -612,7 +612,7 @@ func TestRootCoord(t *testing.T) {
 	err = core.Init()
 	assert.Nil(t, err)
 
-	var localTSO uint64 = 0
+	var localTSO uint64
 	localTSOLock := sync.RWMutex{}
 	core.TSOAllocator = func(c uint32) (uint64, error) {
 		localTSOLock.Lock()

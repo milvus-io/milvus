@@ -342,12 +342,12 @@ func TestBytesReader(t *testing.T) {
 	// Bytes Reader is able to recording the position
 	rawDataReader := bytes.NewReader(rawData)
 
-	var fvector []float32 = make([]float32, 2)
+	var fvector = make([]float32, 2)
 	err := binary.Read(rawDataReader, common.Endian, &fvector)
 	assert.Nil(t, err)
 	assert.ElementsMatch(t, fvector, []float32{1, 2})
 
-	var bvector []byte = make([]byte, 4)
+	var bvector = make([]byte, 4)
 	err = binary.Read(rawDataReader, common.Endian, &bvector)
 	assert.Nil(t, err)
 	assert.ElementsMatch(t, bvector, []byte{255, 255, 255, 0})

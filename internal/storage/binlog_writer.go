@@ -95,7 +95,7 @@ func (writer *baseBinlogWriter) Finish() error {
 		return fmt.Errorf("invalid start/end timestamp")
 	}
 
-	var offset int32 = 0
+	var offset int32
 	writer.buffer = new(bytes.Buffer)
 	if err := binary.Write(writer.buffer, common.Endian, int32(MagicNumber)); err != nil {
 		return err

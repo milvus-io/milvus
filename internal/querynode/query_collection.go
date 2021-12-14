@@ -1087,7 +1087,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 
 	numSegment := int64(len(searchResults))
-	var marshaledHits *MarshaledHits = nil
+	var marshaledHits *MarshaledHits
 	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
 	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
 	if err != nil {
@@ -1106,7 +1106,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 	tr.Record(fmt.Sprintf("reduce result done, msgID = %d", searchMsg.ID()))
 
-	var offset int64 = 0
+	var offset int64
 	for index := range searchRequests {
 		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
 		if err != nil {
@@ -1309,7 +1309,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 
 func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
 	var ret *segcorepb.RetrieveResults
-	var skipDupCnt int64 = 0
+	var skipDupCnt int64
 	var idSet = make(map[int64]struct{})
 
 	// merge results and remove duplicates

@@ -144,7 +144,7 @@ func getNowTs(idAllocator allocator.GIDAllocator) (int64, error) {
 	return nowTs.Unix(), err
 }
 
-var topicMu sync.Map = sync.Map{}
+var topicMu = sync.Map{}
 
 type rocksmq struct {
 	store       *gorocksdb.DB

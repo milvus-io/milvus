@@ -238,7 +238,7 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 		triggerTasks[taskID].setState(state)
 	}
 
-	var doneTriggerTask task = nil
+	var doneTriggerTask task
 	for _, t := range triggerTasks {
 		if t.getState() == taskDone {
 			doneTriggerTask = t

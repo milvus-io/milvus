@@ -170,7 +170,7 @@ func (replica *SegmentReplica) segmentFlushed(segID UniqueID) {
 }
 
 func (replica *SegmentReplica) new2NormalSegment(segID UniqueID) {
-	var seg Segment = *replica.newSegments[segID]
+	var seg = *replica.newSegments[segID]
 
 	seg.isNew.Store(false)
 	replica.normalSegments[segID] = &seg
@@ -179,7 +179,7 @@ func (replica *SegmentReplica) new2NormalSegment(segID UniqueID) {
 }
 
 func (replica *SegmentReplica) new2FlushedSegment(segID UniqueID) {
-	var seg Segment = *replica.newSegments[segID]
+	var seg = *replica.newSegments[segID]
 
 	seg.isNew.Store(false)
 	seg.isFlushed.Store(true)
@@ -191,7 +191,7 @@ func (replica *SegmentReplica) new2FlushedSegment(segID UniqueID) {
 // normal2FlushedSegment transfers a segment from *normal* to *flushed* by changing *isFlushed*
 //  flag into true, and mv the segment from normalSegments map to flushedSegments map.
 func (replica *SegmentReplica) normal2FlushedSegment(segID UniqueID) {
-	var seg Segment = *replica.normalSegments[segID]
+	var seg = *replica.normalSegments[segID]
 
 	seg.isFlushed.Store(true)
 	replica.flushedSegments[segID] = &seg

@@ -923,7 +923,7 @@ func (c *Core) Register() error {
 
 // Init initialize routine
 func (c *Core) Init() error {
-	var initError error = nil
+	var initError error
 	if c.kvBaseCreate == nil {
 		c.kvBaseCreate = func(root string) (kv.TxnKV, error) {
 			return etcdkv.NewEtcdKV(Params.EtcdEndpoints, root)

@@ -915,7 +915,7 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
 // return true only when all channels reach same timetick
 func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqclient.Consumer]bool) (Timestamp, bool) {
 	tsMap := make(map[Timestamp]int)
-	var maxTime Timestamp = 0
+	var maxTime Timestamp
 	for _, t := range ms.chanTtMsgTime {
 		tsMap[t]++
 		if t > maxTime {

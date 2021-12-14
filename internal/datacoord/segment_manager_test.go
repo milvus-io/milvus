@@ -468,7 +468,7 @@ func TestAllocationPool(t *testing.T) {
 	})
 
 	t.Run("put nil", func(t *testing.T) {
-		var allo *Allocation = nil
+		var allo *Allocation
 		allocPool = sync.Pool{
 			New: func() interface{} {
 				return &Allocation{}

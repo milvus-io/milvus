@@ -540,7 +540,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.NoError(t, err)
 
-	var placeHolderOffset int64 = 0
+	var placeHolderOffset int64
 	for index := range placeholderGroups {
 		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
 		assert.NoError(t, err)

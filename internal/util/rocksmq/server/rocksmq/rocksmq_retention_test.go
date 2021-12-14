@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 )
 
-var retentionPath string = "/tmp/rmq_retention/"
+var retentionPath = "/tmp/rmq_retention/"
 
 func TestMain(m *testing.M) {
 	err := os.MkdirAll(retentionPath, os.ModePerm)

@@ -32,10 +32,10 @@ import (
 )
 
 var Params paramtable.BaseTable
-var rmqPath string = "/tmp/rocksmq"
-var kvPathSuffix string = "_kv"
-var dbPathSuffix string = "_db"
-var metaPathSuffix string = "_meta"
+var rmqPath = "/tmp/rocksmq"
+var kvPathSuffix = "_kv"
+var dbPathSuffix = "_db"
+var metaPathSuffix = "_meta"
 
 func InitIDAllocator(kvPath string) *allocator.GlobalIDAllocator {
 	rocksdbKV, err := rocksdbkv.NewRocksdbKV(kvPath)

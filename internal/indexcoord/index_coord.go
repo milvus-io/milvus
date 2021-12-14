@@ -131,7 +131,7 @@ func (i *IndexCoord) Register() error {
 
 // Init initializes the IndexCoord component.
 func (i *IndexCoord) Init() error {
-	var initErr error = nil
+	var initErr error
 	Params.InitOnce()
 	i.initOnce.Do(func() {
 		log.Debug("IndexCoord", zap.Strings("etcd endpoints", Params.EtcdEndpoints))
@@ -233,7 +233,7 @@ func (i *IndexCoord) Init() error {
 
 // Start starts the IndexCoord component.
 func (i *IndexCoord) Start() error {
-	var startErr error = nil
+	var startErr error
 	i.startOnce.Do(func() {
 		i.loopWg.Add(1)
 		go i.tsLoop()
@@ -532,7 +532,7 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	log.Debug("IndexCoord GetIndexFilePaths", zap.Int64s("IndexBuildIds", req.IndexBuildIDs))
 	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
 	defer sp.Finish()
-	var indexPaths []*indexpb.IndexFilePathInfo = nil
+	var indexPaths []*indexpb.IndexFilePathInfo
 
 	for _, indexID := range req.IndexBuildIDs {
 		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(indexID)

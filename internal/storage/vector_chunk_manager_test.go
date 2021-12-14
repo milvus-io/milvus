@@ -155,7 +155,7 @@ func buildVectorChunkManager(t *testing.T, localPath string, localCacheEnable bo
 }
 
 var Params paramtable.BaseTable
-var localPath string = "/tmp/milvus/test_data"
+var localPath = "/tmp/milvus/test_data"
 
 func TestMain(m *testing.M) {
 	Params.Init()

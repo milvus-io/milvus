@@ -97,7 +97,7 @@ func (pq *PriorityQueue) CheckExist(nodeID UniqueID) bool {
 }
 
 func (pq *PriorityQueue) getItemByKey(key UniqueID) interface{} {
-	var ret interface{} = nil
+	var ret interface{}
 	for _, item := range pq.items {
 		if item.key == key {
 			ret = item
