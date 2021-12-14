@@ -27,6 +27,7 @@ type indexInfo struct {
 	readyLoad   bool
 }
 
+// newIndexInfo returns a new indexInfo
 func newIndexInfo() *indexInfo {
 	return &indexInfo{
 		indexPaths:  make([]string, 0),
