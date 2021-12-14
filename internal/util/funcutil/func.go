@@ -88,8 +88,10 @@ func WaitForComponentStates(ctx context.Context, service types.Component, servic
 			}
 		}
 		if !meet {
-			msg := fmt.Sprintf("WaitForComponentStates, not meet, %s current state:%d", serviceName, resp.State.StateCode)
-			return errors.New(msg)
+			return fmt.Errorf(
+				"WaitForComponentStates, not meet, %s current state: %s",
+				serviceName,
+				resp.State.StateCode.String())
 		}
 		return nil
 	}
