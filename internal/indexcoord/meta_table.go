@@ -419,6 +419,7 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	return metas
 }
 
+// HasSameReq determine whether there are same indexing tasks.
 func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
